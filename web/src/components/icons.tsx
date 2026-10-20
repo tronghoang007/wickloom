@@ -256,3 +256,27 @@ export const StarI = ({ on, size = 16 }: { on: boolean; size?: number }) => (
     <path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />
   </svg>
 );
+// Context menu chart (giống TradingView)
+export const ResetViewI = () => (
+  <Svg size={18}>
+    <path d="M5.5 8.5A7.5 7.5 0 1 1 4.5 12" />
+    <path d="M5 4v4.5h4.5" />
+  </Svg>
+);
+export const SellI = () => (
+  <Svg size={18}>
+    <path d="M6 9l6 5 6-5M6 13l6 5 6-5" />
+  </Svg>
+);
+export const BuyI = () => (
+  <Svg size={18}>
+    <path d="M6 15l6-5 6 5M6 11l6-5 6 5" />
+  </Svg>
+);
+export const AddOrderI = () => (
+  <Svg size={18}>
+    <path d="M4 4h12M4 4v16h16V10" />
+    <path d="M7 16l4-4 3 2 4-5" />
+    <path d="M19 2v6M16 5h6" />
+  </Svg>
+);

@@ -1,7 +1,7 @@
 "use client";
 
 import { DrawingManager } from "@/drawings/manager";
-import { SkipToLatest } from "../icons";
+import { AddOrderI, AlertI, BuyI, ResetViewI, SellI, SettingsI, SkipToLatest } from "../icons";
 import { useDrawingStore } from "@/drawings/store";
 import { IndicatorManager } from "@/indicators/manager";
 import { byId } from "@/indicators/registry";
@@ -31,6 +31,7 @@ import {
   useState,
   type MouseEvent as RMouseEvent,
 } from "react";
+import ChartContextMenu, { type MenuItem } from "./ChartContextMenu";
 import DrawingSettings from "./DrawingSettings";
 import FavoritesBar from "./FavoritesBar";
 import ReplayBar from "./ReplayBar";
@@ -177,6 +178,13 @@ const olderUsable = (
   (firstT - older[older.length - 1].t <= gapLimit(tf) ||
     (req?.t === firstT && req.done));
 
+// "Reset chart view" (⌥R): về đúng góc nhìn lúc mới tải - 150 nến cuối, auto-scale giá.
+function resetChartView(chart: IChartApi | null, n: number) {
+  if (!chart || !n) return;
+  chart.priceScale("right").setAutoScale(true);
+  chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 150), to: n - 1 + 8 });
+}
+
 function setTabTitle(title: string) {
   if (document.title !== title) document.title = title;
 }
@@ -203,6 +211,8 @@ export default function Chart() {
   const exhaustedRef = useRef(false);
   const backfillRef = useRef<{ t: number; at: number; done: boolean } | null>(null);
   const prevCloseRef = useRef<number | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const drawingCount = useDrawingStore((s) => s.drawings.length);
   const indRef = useRef<IndicatorManager | null>(null);
   const drawRef = useRef<DrawingManager | null>(null);
   const indicators = useIndicatorStore((s) => s.list);
@@ -732,6 +742,20 @@ export default function Chart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interval]);
 
+  // ⌥R = Reset chart view (e.code: trên macOS Option+R ra ký tự "®")
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return;
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.code === "KeyR") {
+        e.preventDefault();
+        resetChartView(chartRef.current, barsRef.current.length);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Esc cancels bar selection
   useEffect(() => {
     if (!selecting) return;
@@ -985,10 +1009,76 @@ export default function Chart() {
     </button>
   );
 
+  const resetView = () => resetChartView(chartRef.current, barsRef.current.length);
+
+  const onChartContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const chart = chartRef.current;
+    const box = boxRef.current;
+    if (!chart || !box) return;
+    const r = box.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    if (x > chart.timeScale().width() || y > r.height - chart.timeScale().height()) return; // trục giá/thời gian
+    setCtxMenu({ x: e.clientX, y: e.clientY, items: menuItems(seriesRef.current?.coordinateToPrice(y) ?? null) });
+  };
+
+  const menuItems = (price: number | null): MenuItem[] => {
+    const p =
+      price === null
+        ? ""
+        : price.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    const last = barsRef.current[barsRef.current.length - 1]?.c;
+    const above = price !== null && last !== undefined && price >= last;
+    const items: MenuItem[] = [
+      { label: "Reset chart view", icon: <ResetViewI />, shortcut: "⌥ R", onSelect: resetView },
+      "sep",
+      {
+        label: `Copy price ${p}`,
+        disabled: price === null,
+        onSelect: () => navigator.clipboard?.writeText(p.replace(/,/g, "")).catch(() => {}),
+      },
+      { label: "Paste", shortcut: "⌘ V", disabled: true },
+      "sep",
+      { label: `Add alert on ${symbol} at ${p}`, icon: <AlertI />, shortcut: "⌥ A", disabled: true },
+      { label: `${above ? "Sell" : "Buy"} 1 ${symbol} @ ${p} limit`, icon: above ? <SellI /> : <BuyI />, shortcut: "⌥ ⇧ S", disabled: true },
+      { label: `${above ? "Buy" : "Sell"} 1 ${symbol} @ ${p} stop`, icon: above ? <BuyI /> : <SellI />, disabled: true },
+      { label: `Add order on ${symbol} at ${p}`, icon: <AddOrderI />, shortcut: "⇧ T", disabled: true },
+      "sep",
+      { label: "Lock vertical cursor line by time", disabled: true },
+      "sep",
+      { label: "Table view", disabled: true },
+      { label: "Object tree", disabled: true },
+      { label: "Chart template", submenu: true, disabled: true },
+    ];
+    const removals: MenuItem[] = [];
+    if (drawingCount > 0)
+      removals.push({
+        label: `Remove ${drawingCount} drawing${drawingCount > 1 ? "s" : ""}`,
+        onSelect: () => drawRef.current?.clearAll(), // ⌘Z để hoàn tác
+      });
+    if (indicators.length > 0)
+      removals.push({
+        label: `Remove ${indicators.length} indicator${indicators.length > 1 ? "s" : ""}`,
+        onSelect: () => useIndicatorStore.setState({ list: [] }),
+      });
+    if (removals.length) items.push("sep", ...removals);
+    items.push("sep", { label: "Settings…", icon: <SettingsI />, disabled: true });
+    return items;
+  };
+
   return (
     <div className="flex h-full w-full flex-col">
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
+        {ctxMenu && (
+          <ChartContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            items={ctxMenu.items}
+            onClose={() => setCtxMenu(null)}
+          />
+        )}
         {showLatestButton && (
           <button
             type="button"
