@@ -85,7 +85,7 @@ export default function FavoritesBar() {
             onClick={() => api?.setTool(tool === id ? null : id)}
             className={`flex h-8 w-8 shrink-0 items-center justify-center rounded ${tool === id ? "bg-[var(--hover)] text-[var(--accent)]" : "hover:bg-[var(--hover)]"}`}
           >
-            <ToolIcon id={id} size={20} />
+            <ToolIcon id={id} />
           </button>
         ))}
     </div>

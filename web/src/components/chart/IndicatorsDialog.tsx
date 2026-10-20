@@ -3,7 +3,7 @@
 import { INDICATORS, byId } from "@/indicators/registry";
 import { useIndicatorStore } from "@/indicators/store";
 import { useState, type ReactNode } from "react";
-import { Close, Search, StarI, Svg } from "../icons";
+import { Close, Search, StarI, Svg24 as Svg } from "../icons";
 
 const TITLES: Record<string, string> = {
   sma: "Simple moving average",
@@ -41,7 +41,7 @@ const EMPTY: Partial<Record<Tab, string>> = {
 };
 
 function Ico({ children }: { children: ReactNode }) {
-  return <Svg size={20}>{children}</Svg>;
+  return <Svg>{children}</Svg>;
 }
 
 const NAV: {

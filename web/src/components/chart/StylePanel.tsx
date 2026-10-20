@@ -3,10 +3,13 @@
 import { useDrawingStore } from "@/drawings/store";
 import { POS_DEFAULTS, SPEC } from "@/drawings/tools";
 import { useRef, useState, type ReactNode } from "react";
-import { Svg } from "../icons";
+import { Svg24 } from "../icons";
+
+// Icon 24px: chừa chỗ cho vạch màu dưới icon trong nút 36px (thanh nổi kiểu TradingView).
+const Svg = ({ children }: { children: ReactNode }) => <Svg24 size={24}>{children}</Svg24>;
 
 const btn =
-  "relative flex h-8 w-8 items-center justify-center rounded hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
+  "relative flex h-9 w-9 items-center justify-center rounded hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
 
 const Grip = () => (
   <svg

@@ -4,7 +4,7 @@ import { TF_SECONDS } from "@/lib/api";
 import { SPEEDS, exitReplay, useReplayStore } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
 import { useState } from "react";
-import { Svg as I } from "../icons";
+import { Svg24 as I } from "../icons";
 
 const TF_LABEL: Record<string, string> = {
   M1: "1m",

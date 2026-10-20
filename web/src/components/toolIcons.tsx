@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
-import { Dot, Svg } from "./icons";
+import { Svg24 } from "./icons";
+
+// Icon công cụ vẽ: lưới 24, hiển thị 28px như TradingView, nét 1px (Svg24). Chấm điều
+// khiển là vòng tròn rỗng như TV.
+function Dot({ x, y }: { x: number; y: number }) {
+  return <circle cx={x} cy={y} r={1.6} />;
+}
 
 const dot = (x: number, y: number) => <Dot key={`${x}-${y}`} x={x} y={y} />;
 const zig = (pts: [number, number][]) => (
@@ -13,9 +19,9 @@ const ICONS: Record<string, ReactNode> = {
   // lines
   trendline: (
     <>
-      <path d="M5 19L19 5" />
-      {dot(5, 19)}
-      {dot(19, 5)}
+      <path d="M6.6 17.4L17.4 6.6" />
+      {dot(5.5, 18.5)}
+      {dot(18.5, 5.5)}
     </>
   ),
   ray: (
@@ -119,8 +125,9 @@ const ICONS: Record<string, ReactNode> = {
   // fib & gann
   fib: (
     <>
-      <path d="M4 5h16M4 10h16M4 14h16M4 19h16" />
-      <path d="M7 19L17 5" strokeDasharray="2 2" />
+      <path d="M3.5 5.5h14.4M3.5 9.5h17M3.5 13.5h17M6.1 18.5h14.4" />
+      {dot(19.5, 5.5)}
+      {dot(4.5, 18.5)}
     </>
   ),
   fibext: (
@@ -433,7 +440,7 @@ const ICONS: Record<string, ReactNode> = {
     </>
   ),
   // text
-  text: <path d="M5 6h14M12 6v13M9 19h6" />,
+  text: <path d="M6 7V5.5h12V7M12 5.5v13M9.5 18.5h5" />,
   note: (
     <>
       <rect x="4" y="3" width="16" height="12" />
@@ -503,7 +510,7 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M9 21h11" />
     </>
   ),
-  cross: <path d="M12 3v7M12 14v7M3 12h7M14 12h7" />,
+  cross: <path d="M12 4v6M12 14v6M4 12h6M14 12h6" />,
   dotc: (
     <>
       <circle cx="12" cy="12" r="1.500" fill="currentColor" />
@@ -512,6 +519,6 @@ const ICONS: Record<string, ReactNode> = {
   arrowc: <path d="M5 3l14 8-6 2-2 6z" />,
 };
 
-export function ToolIcon({ id, size = 22 }: { id: string; size?: number }) {
-  return <Svg size={size}>{ICONS[id] ?? <circle cx="12" cy="12" r="6" />}</Svg>;
+export function ToolIcon({ id, size = 28 }: { id: string; size?: number }) {
+  return <Svg24 size={size}>{ICONS[id] ?? <circle cx="12" cy="12" r="6" />}</Svg24>;
 }

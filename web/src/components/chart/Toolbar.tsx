@@ -55,9 +55,9 @@ const CHART_TYPES: { v: ChartType; label: string; icon: ReactNode }[] = [
 ];
 
 const btn =
-  "flex h-9 items-center gap-1.5 rounded px-2 text-sm hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
+  "flex h-[38px] items-center gap-1.5 rounded px-2 text-sm hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
 const iconBtn =
-  "flex h-9 w-9 items-center justify-center rounded hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
+  "flex h-[38px] w-[38px] items-center justify-center rounded hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
 const sep = <div className="mx-1.5 h-6 w-px bg-[var(--border)]" />;
 
 function Menu({
@@ -130,7 +130,7 @@ export default function Toolbar() {
       : document.documentElement.requestFullscreen();
 
   return (
-    <div className="flex h-12 items-center border-b border-[var(--border)] px-2">
+    <div className="flex h-[38px] items-center border-b border-[var(--border)] px-1">
       <SymbolSearch />
       <button
         className={`${iconBtn} ml-1`}

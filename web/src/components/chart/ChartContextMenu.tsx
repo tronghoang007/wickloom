@@ -84,7 +84,7 @@ export default function ChartContextMenu({
               }}
               className="flex h-8 w-full items-center gap-2 px-3 text-left enabled:hover:bg-[var(--hover)] disabled:opacity-40"
             >
-              <span className="flex w-5 shrink-0 justify-center text-[var(--muted)]">{it.icon}</span>
+              <span className="-ml-1.5 flex w-7 shrink-0 justify-center text-[var(--muted)]">{it.icon}</span>
               <span className="min-w-0 flex-1 truncate">{it.label}</span>
               {it.shortcut && <span className="shrink-0 pl-4 text-xs text-[var(--muted)]">{it.shortcut}</span>}
               {it.submenu && (

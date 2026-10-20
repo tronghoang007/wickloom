@@ -7,7 +7,7 @@ import WatchlistPanel from "./WatchlistPanel";
 
 type PanelId = "watchlist" | "calendar";
 
-const base = "relative flex h-10 w-10 items-center justify-center rounded";
+const base = "relative flex h-[38px] w-[38px] items-center justify-center rounded";
 const cls = (active: boolean) =>
   `${base} ${active ? "bg-[var(--hover)] text-[var(--accent)]" : "text-[var(--fg)] hover:bg-[var(--hover)]"}`;
 

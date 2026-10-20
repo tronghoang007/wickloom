@@ -1,17 +1,20 @@
 import type { ReactNode } from "react";
 
-// Chuẩn icon dùng chung toàn app: viewBox 24, stroke 1.5, dot-marker 1.6 - khớp "trọng
-// lượng" của icon TradingView. Mọi icon mới (generic hay tool) nên đi qua đây, không tự
-// vẽ wrapper <svg> riêng ở từng component.
-export function Svg({ children, size = 20 }: { children: ReactNode; size?: number }) {
+// Chuẩn icon toàn app theo TradingView: vẽ trên lưới 28, hiển thị 28px, nét 1px.
+// viewBox cắt 2 đơn vị viền mỗi bên (VIEW) để hình chiếm khung nhiều như icon TV (đo
+// getBBox: TV ~18-24px trong khung 28); strokeWidth = VIEW/size nên ở cỡ nào cũng đúng 1px.
+// Icon mới nên đi qua đây, không tự vẽ wrapper <svg> riêng ở từng component.
+const VIEW = 24;
+export function Svg({ children, size = 28 }: { children: ReactNode; size?: number }) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox={`2 2 ${VIEW} ${VIEW}`}
+      overflow="visible"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth={VIEW / size}
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -20,287 +23,290 @@ export function Svg({ children, size = 20 }: { children: ReactNode; size?: numbe
   );
 }
 
-export const DOT_R = 1.6;
-export function Dot({ x, y }: { x: number; y: number }) {
-  return <circle cx={x} cy={y} r={DOT_R} />;
+/** Như `Svg` nhưng cho path vẽ trên lưới 24 (icon công cụ vẽ, panel cũ): hiển thị 28px,
+ *  nét 1px, cắt viền 2 đơn vị để hình to ngang icon TV. */
+export function Svg24({ children, size = 28 }: { children: ReactNode; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="2 2 20 20"
+      overflow="visible"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={20 / size}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {children}
+    </svg>
+  );
 }
 
-export const Trend = () => (
-  <Svg>
-    <path d="M5 19L19 5" />
-    <Dot x={5} y={19} />
-    <Dot x={19} y={5} />
-  </Svg>
-);
-export const Ray = () => (
-  <Svg>
-    <path d="M5 17L21 5" />
-    <Dot x={5} y={17} />
-  </Svg>
-);
-export const Arrow = () => (
-  <Svg>
-    <path d="M5 19L19 5M10 5h9v9" />
-  </Svg>
-);
-export const Fib = () => (
-  <Svg>
-    <path d="M4 5h16M4 10h16M4 14h16M4 19h16" />
-    <path d="M7 19L17 5" strokeDasharray="2 2" />
-  </Svg>
-);
 export const Magnet = () => (
   <Svg>
-    <path d="M6 4v8a6 6 0 0012 0V4h-4v8a2 2 0 01-4 0V4z" />
-    <path d="M6 8h4M14 8h4" />
+    <path d="M8.5 6.5h3.5v8a2 2 0 0 0 4 0v-8h3.5v8a5.5 5.5 0 0 1-11 0z" />
+    <path d="M8.5 10.5h3.5M16 10.5h3.5" />
+    <path d="M10.5 22.5l-1 2h2l-1 2M17.5 22.5l-1 2h2l-1 2" />
   </Svg>
 );
 export const Trash = () => (
   <Svg>
-    <path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13" />
+    <path d="M6.5 8.5h15M11.5 8.5v-2h5v2" />
+    <path d="M8.5 8.5l1 14h9l1-14" />
   </Svg>
 );
-export const Undo = () => (
-  <Svg size={20}>
-    <path d="M9 14L4 9l5-5" />
-    <path d="M4 9h10a6 6 0 010 12h-3" />
+export const Undo = ({ size = 28 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M10.5 8.5L6.5 12.5l4 4" />
+    <path d="M6.5 12.5h10a5 5 0 0 1 0 10h-2" />
   </Svg>
 );
-export const Redo = () => (
-  <Svg size={20}>
-    <path d="M15 14l5-5-5-5" />
-    <path d="M20 9H10a6 6 0 000 12h3" />
+export const Redo = ({ size = 28 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M17.5 8.5l4 4-4 4" />
+    <path d="M21.5 12.5h-10a5 5 0 0 0 0 10h2" />
   </Svg>
 );
-export const Search = () => (
-  <Svg size={18}>
-    <circle cx="11" cy="11" r="6" />
-    <path d="M16 16l5 5" />
+export const Search = ({ size = 28 }: { size?: number }) => (
+  <Svg size={size}>
+    <circle cx="12.5" cy="12.5" r="6.5" />
+    <path d="M17.5 17.5l5 5" />
   </Svg>
 );
-export const Close = () => (
-  <Svg size={20}>
-    <path d="M6 6l12 12M18 6L6 18" />
+export const Close = ({ size = 28 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M8.5 8.5l11 11M19.5 8.5l-11 11" />
   </Svg>
 );
-export const ClearX = () => (
-  <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor">
-    <circle cx="12" cy="12" r="9" opacity=".5" />
-    <path d="M9 9l6 6M15 9l-6 6" stroke="var(--bg)" strokeWidth="2" strokeLinecap="round" />
+export const ClearX = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 28 28" fill="currentColor">
+    <circle cx="14" cy="14" r="10" opacity=".5" />
+    <path d="M10.5 10.5l7 7M17.5 10.5l-7 7" stroke="var(--bg)" strokeWidth="2" strokeLinecap="round" />
   </svg>
 );
-export const Chevron = () => (
-  <Svg size={14}>
-    <path d="M6 9l6 6 6-6" />
+export const Chevron = ({ size = 16 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M8 11.5l6 6 6-6" />
   </Svg>
 );
-export const Plus = () => (
-  <Svg size={18}>
-    <path d="M12 5v14M5 12h14" />
+export const Plus = ({ size = 28 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M14 6.5v15M6.5 14h15" />
   </Svg>
 );
 export const PlusCircle = () => (
-  <Svg size={22}>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M12 8v8M8 12h8" />
+  <Svg>
+    <circle cx="14" cy="14" r="8.5" />
+    <path d="M14 9.5v9M9.5 14h9" />
   </Svg>
 );
 export const Replay = () => (
-  <Svg size={20}>
-    <path d="M11 6l-7 6 7 6zM20 6l-7 6 7 6z" />
+  <Svg>
+    <path d="M13.5 8.5L6.5 14l7 5.5zM21.5 8.5L14.5 14l7 5.5z" />
   </Svg>
 );
+// Kiểu chart
 export const Candles = () => (
   <Svg>
-    <path d="M8 4v3M8 15v4M16 7v3M16 18v3" />
-    <rect x="6" y="7" width="4" height="8" />
-    <rect x="14" y="10" width="4" height="8" />
+    <path d="M10.5 5.5v3M10.5 19.5v3M17.5 8.5v3M17.5 21.5v1.5" />
+    <rect x="8.5" y="8.5" width="4" height="11" rx="1" />
+    <rect x="15.5" y="11.5" width="4" height="10" rx="1" />
   </Svg>
 );
 export const BarsIcon = () => (
   <Svg>
-    <path d="M8 4v16M5 8h3M16 4v16M16 15h3" />
+    <path d="M10.5 5.5v17M7.5 9.5h3M10.5 18.5h3M17.5 5.5v17M14.5 15.5h3M17.5 9.5h3" />
   </Svg>
 );
 export const LineIcon = () => (
   <Svg>
-    <path d="M3 17l5-6 4 4 8-9" />
+    <path d="M4.5 19.5l6-7 4 4 8.5-9.5" />
   </Svg>
 );
 export const AreaIcon = () => (
   <Svg>
-    <path d="M3 17l5-6 4 4 8-9v13H3z" />
+    <path d="M4.5 19.5l6-7 4 4 8.5-9.5V22.5h-18.5z" />
   </Svg>
 );
 export const Heikin = () => (
   <Svg>
-    <path d="M8 3v4M8 17v4M16 5v3M16 16v4" />
-    <rect x="6" y="7" width="4" height="10" />
-    <rect x="14" y="8" width="4" height="8" />
+    <path d="M10.5 4.5v4M10.5 19.5v4M17.5 6.5v4M17.5 18.5v4" />
+    <rect x="8.5" y="8.5" width="4" height="11" />
+    <rect x="15.5" y="10.5" width="4" height="8" />
   </Svg>
 );
 
-// --- icon dùng trong Toolbar/DrawingToolbar/IndicatorsDialog, trước đây mỗi nơi tự vẽ
-// 1 wrapper riêng (strokeWidth lệch nhau) - gộp về đây, dùng chung Svg chuẩn ở trên.
-export const CompareI = () => (
-  <Svg size={22}>
-    <path d="M8 4v3M8 17v3M16 8v3M16 18v2" />
-    <rect x="6" y="7" width="4" height="10" />
-    <rect x="14" y="11" width="4" height="7" />
-  </Svg>
-);
+// --- toolbar trên ------------------------------------------------------------
+export const CompareI = PlusCircle;
 export const IndicatorsI = () => (
-  <Svg size={22}>
-    <path d="M3 20h18M4 15l4-5 4 3 5-7" />
-    <path d="M16 4h4v4" />
+  <Svg>
+    <path d="M6.5 22.5v-4M11.5 22.5v-6M16.5 22.5v-3M21.5 22.5v-7" />
+    <path d="M5.5 13.5l5-5 5 4 7-7" />
   </Svg>
 );
 export const TemplatesI = () => (
-  <Svg size={22}>
-    <rect x="4" y="4" width="6" height="6" />
-    <rect x="14" y="4" width="6" height="6" />
-    <rect x="4" y="14" width="6" height="6" />
-    <path d="M17 14v6M14 17h6" />
+  <Svg>
+    <rect x="6.5" y="6.5" width="6" height="6" rx="1.5" />
+    <rect x="15.5" y="6.5" width="6" height="6" rx="1.5" />
+    <rect x="6.5" y="15.5" width="6" height="6" rx="1.5" />
+    <rect x="15.5" y="15.5" width="6" height="6" rx="1.5" />
   </Svg>
 );
 export const AlertI = () => (
-  <Svg size={22}>
-    <circle cx="12" cy="13" r="7" />
-    <path d="M12 9v4l3 2M5 4L3 6M19 4l2 2" />
+  <Svg>
+    <circle cx="13" cy="15" r="7.5" />
+    <path d="M13 11v4.5h3M6.5 5.5l-2.5 2.5M19.5 5.5l2.5 2.5" />
+    <path d="M22.5 19.5v6M19.5 22.5h6" />
   </Svg>
 );
 export const LayoutI = () => (
-  <Svg size={22}>
-    <rect x="4" y="4" width="16" height="16" rx="2" />
+  <Svg>
+    <rect x="6.5" y="6.5" width="15" height="15" rx="2" />
   </Svg>
 );
 export const QuickSearchI = () => (
-  <Svg size={22}>
-    <circle cx="10" cy="10" r="6" />
-    <path d="M15 15l5 5M9 7l-1 4h3l-1 3" />
+  <Svg>
+    <circle cx="12.5" cy="12.5" r="6.5" />
+    <path d="M17.5 17.5l5 5M13.5 8.5l-2.5 4.5h3l-2.5 4.5" />
   </Svg>
 );
 export const SettingsI = () => (
-  <Svg size={22}>
-    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
-    <circle cx="12" cy="12" r="3" />
+  <Svg>
+    <path d="M4.5 14l4.75-8.25h9.5L23.5 14l-4.75 8.25h-9.5z" />
+    <circle cx="14" cy="14" r="3.5" />
   </Svg>
 );
 export const FullscreenI = () => (
-  <Svg size={22}>
-    <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />
+  <Svg>
+    <path d="M6.5 11.5v-5h5M16.5 6.5h5v5M21.5 16.5v5h-5M11.5 21.5h-5v-5" />
   </Svg>
 );
 export const CameraI = () => (
-  <Svg size={22}>
-    <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
-    <circle cx="12" cy="13" r="3.5" />
+  <Svg>
+    <path d="M5.5 10.5a2 2 0 0 1 2-2h2.5l1.5-2.5h5l1.5 2.5h2.5a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+    <circle cx="14" cy="15" r="3.5" />
   </Svg>
 );
 export const IdeaI = () => (
-  <Svg size={22}>
-    <path d="M9 18h6M10 21h4M12 3a6 6 0 00-3 11c.5.5 1 1.5 1 2h4c0-.5.5-1.5 1-2a6 6 0 00-3-11z" />
+  <Svg>
+    <path d="M14 4.5a7 7 0 0 0-4 12.75V20.5h8v-3.25A7 7 0 0 0 14 4.5z" />
+    <path d="M10.5 23.5h7M14 8.5v6M11 11.5h6" />
   </Svg>
 );
 export const SunI = () => (
-  <Svg size={22}>
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M5.5 18.5l1.4-1.4M17.1 6.9l1.4-1.4" />
+  <Svg>
+    <circle cx="14" cy="14" r="4.5" />
+    <path d="M14 4.5v2M14 21.5v2M4.5 14h2M21.5 14h2M7.3 7.3l1.4 1.4M19.3 19.3l1.4 1.4M7.3 20.7l1.4-1.4M19.3 8.7l1.4-1.4" />
   </Svg>
 );
 export const MoonI = () => (
-  <Svg size={22}>
-    <path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" />
+  <Svg>
+    <path d="M21.5 16.5A8.5 8.5 0 0 1 11.5 6.5a8.5 8.5 0 1 0 10 10z" />
   </Svg>
 );
 
+// --- toolbar trái ----------------------------------------------------------------
+/** Mũi tên mở flyout ở mép phải nút nhóm công cụ (vùng 11px như TV), chỉ sang phải. */
+export const FlyoutArrowI = () => (
+  <svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1.5 1.5L5 5 1.5 8.5" />
+  </svg>
+);
 export const Stay = () => (
-  <Svg size={22}>
-    <path d="M4 18l1-4L15 4l4 4L9 18z" />
-    <rect x="14" y="14" width="7" height="6" rx="1" />
-    <path d="M15.5 14v-1.5a2 2 0 014 0V14" />
+  <Svg>
+    <path d="M6.5 21.5l1-4.5 10-10 3.5 3.5-10 10z" />
+    <path d="M15 9.5l3.5 3.5" />
+    <rect x="17.5" y="19.5" width="6" height="5" rx="1" />
+    <path d="M18.75 19.5V18a1.75 1.75 0 0 1 3.5 0v1.5" />
   </Svg>
 );
 export const Lock = ({ open }: { open: boolean }) => (
-  <Svg size={22}>
-    <rect x="5" y="11" width="14" height="9" rx="1" />
-    <path d={open ? "M8 11V8a4 4 0 017.5-2" : "M8 11V8a4 4 0 018 0v3"} />
+  <Svg>
+    <rect x="8.5" y="13.5" width="11" height="9" rx="1.5" />
+    <path d={open ? "M10.5 13.5v-3a3.5 3.5 0 0 1 6.8-1.2" : "M10.5 13.5v-3a3.5 3.5 0 0 1 7 0v3"} />
+    <path d="M14 17v2" />
   </Svg>
 );
 export const Eye = ({ off }: { off: boolean }) => (
-  <Svg size={22}>
-    <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" />
-    <circle cx="12" cy="12" r="3" />
-    {off && <path d="M4 20L20 4" />}
+  <Svg>
+    <path d="M4.5 14s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
+    <circle cx="14" cy="14" r="3" />
+    {off && <path d="M6.5 21.5l15-15" />}
   </Svg>
 );
+export const StarI = ({ on, size = 28 }: { on: boolean; size?: number }) => (
+  <svg width={size} height={size} viewBox={`2 2 ${VIEW} ${VIEW}`} overflow="visible" fill={on ? "currentColor" : "none"} stroke="currentColor" strokeWidth={VIEW / size} strokeLinejoin="round">
+    <path d="M14 4.5l2.53 6.02 6.51.54-4.95 4.27 1.49 6.36L14 18.3l-5.58 3.39 1.49-6.36-4.95-4.27 6.51-.54z" />
+  </svg>
+);
+
+// --- rail phải + linh tinh ----------------------------------------------------
+// Rail phải: hình lớn như TV (~20x23px hiển thị)
 export const WatchlistI = () => (
-  <Svg size={22}>
-    <path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10" />
+  <Svg>
+    <path d="M5.5 4.5h17v20l-8.5-5-8.5 5z" />
+    <path d="M9.5 10h9M9.5 14h9" />
   </Svg>
 );
 export const CalendarI = () => (
-  <Svg size={22}>
-    <rect x="4" y="5" width="16" height="15" rx="1" />
-    <path d="M4 9h16M8 3v4M16 3v4" />
-    <path d="M8 13h2M12 13h2M16 13h2M8 17h2M12 17h2" />
+  <Svg>
+    <rect x="4.5" y="6.5" width="19" height="17" rx="2.5" />
+    <path d="M4.5 11.5h19M9.5 4.5v4M18.5 4.5v4" />
   </Svg>
 );
-export const SkipToLatest = () => (
-  <Svg size={18}>
-    <path d="m5 6 6 6-6 6M13 6l6 6-6 6" />
+export const SkipToLatest = ({ size = 28 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M8.5 8.5l5.5 5.5-5.5 5.5M14.5 8.5l5.5 5.5-5.5 5.5" />
   </Svg>
 );
-export const StarI = ({ on, size = 16 }: { on: boolean; size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={on ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
-    <path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />
-  </svg>
-);
-// Context menu chart (giống TradingView)
+
+// --- context menu chart ------------------------------------------------------
 export const ResetViewI = () => (
-  <Svg size={18}>
-    <path d="M5.5 8.5A7.5 7.5 0 1 1 4.5 12" />
-    <path d="M5 4v4.5h4.5" />
+  <Svg>
+    <path d="M7.5 10.5a8 8 0 1 1-1 4" />
+    <path d="M6.5 6.5v4.5H11" />
   </Svg>
 );
 export const SellI = () => (
-  <Svg size={18}>
-    <path d="M6 9l6 5 6-5M6 13l6 5 6-5" />
+  <Svg>
+    <path d="M8.5 10.5l5.5 4.5 5.5-4.5M8.5 15l5.5 4.5 5.5-4.5" />
   </Svg>
 );
 export const BuyI = () => (
-  <Svg size={18}>
-    <path d="M6 15l6-5 6 5M6 11l6-5 6 5" />
+  <Svg>
+    <path d="M8.5 17.5l5.5-4.5 5.5 4.5M8.5 13l5.5-4.5 5.5 4.5" />
   </Svg>
 );
 export const AddOrderI = () => (
-  <Svg size={18}>
-    <path d="M4 4h12M4 4v16h16V10" />
-    <path d="M7 16l4-4 3 2 4-5" />
-    <path d="M19 2v6M16 5h6" />
+  <Svg>
+    <path d="M17.5 5.5h-11v17h17v-11" />
+    <path d="M9.5 18.5l4-4 3 2 4-5" />
+    <path d="M21.5 3.5v6M18.5 6.5h6" />
   </Svg>
 );
-// Settings dialog (tab trái)
+
+// --- tab trái dialog Settings -------------------------------------------------
 export const StatusLineI = () => (
-  <Svg size={18}>
-    <path d="M4 6h16M4 11h10M4 16h13" />
+  <Svg>
+    <path d="M6.5 8.5h15M6.5 13.5h10M6.5 18.5h13" />
   </Svg>
 );
 export const ScalesI = () => (
-  <Svg size={18}>
-    <path d="M5 3v16h16" />
-    <path d="M3 5l2-2 2 2M19 17l2 2-2 2" />
+  <Svg>
+    <path d="M7.5 5.5v15h15" />
+    <path d="M5.5 7.5l2-2 2 2M20.5 18.5l2 2-2 2" />
   </Svg>
 );
 export const CanvasI = () => (
-  <Svg size={18}>
-    <path d="M14.5 5.5l4 4L9 19H5v-4z" />
-    <path d="M12.5 7.5l4 4" />
+  <Svg>
+    <path d="M17.5 6.5l4 4-11 11h-4v-4z" />
+    <path d="M15 9l4 4" />
   </Svg>
 );
 export const TradingI = () => (
-  <Svg size={18}>
-    <path d="M3 17l5-5 4 3 8-8" />
-    <path d="M3 21l5-5 4 3 8-8" opacity=".5" />
+  <Svg>
+    <path d="M5.5 17.5l5-5 4 3 8-8" />
+    <path d="M5.5 22.5l5-5 4 3 8-8" opacity=".5" />
   </Svg>
 );

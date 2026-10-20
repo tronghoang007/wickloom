@@ -8,10 +8,17 @@ import {
 import { GROUPS, SPEC, type Group } from "@/drawings/tools";
 import { useIndicatorStore } from "@/indicators/store";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Eye, Lock, Magnet, StarI, Stay, Trash } from "../icons";
+import { Eye, FlyoutArrowI, Lock, Magnet, StarI, Stay, Trash } from "../icons";
 import { ToolIcon } from "../toolIcons";
 
-const base = "relative flex h-10 w-10 items-center justify-center rounded";
+const base = "relative flex h-[38px] w-[38px] items-center justify-center rounded";
+// Nút nhóm kiểu TradingView: icon 38px giữa cột 52px + vùng mũi tên 11px ở mép phải
+// (mũi tên hiện khi hover hoặc khi flyout đang mở).
+const wrap = "group relative flex w-[52px] justify-center";
+const arrowBtn = (open: boolean) =>
+  `absolute right-0 top-1/2 flex h-[34px] w-[11px] -translate-y-1/2 items-center justify-center rounded-sm text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] ${
+    open ? "visible bg-[var(--hover)] text-[var(--fg)]" : "invisible group-hover:visible"
+  }`;
 const cls = (active: boolean) =>
   `${base} ${active ? "bg-[var(--hover)] text-[var(--accent)]" : "text-[var(--fg)] hover:bg-[var(--hover)]"}`;
 
@@ -55,7 +62,7 @@ function ToolItem({
       onClick={() => !spec.disabled && onPick(id)}
       title={spec.disabled ? "Sắp có" : undefined}
     >
-      <ToolIcon id={id} size={22} />
+      <ToolIcon id={id} />
       <span className="flex-1 truncate">{spec.label}</span>
       {!spec.disabled && (
         <button
@@ -85,7 +92,7 @@ function GroupButton({ group }: { group: Group }) {
   const active = !!tool && ids.includes(tool);
 
   return (
-    <div ref={ref} className="group relative">
+    <div ref={ref} className={wrap}>
       <button
         className={cls(active)}
         title={group.label}
@@ -94,11 +101,11 @@ function GroupButton({ group }: { group: Group }) {
         <ToolIcon id={current} />
       </button>
       <button
-        className="absolute -right-0.5 top-1/2 hidden h-6 w-3 -translate-y-1/2 items-center justify-center rounded-sm bg-[var(--hover)] text-[10px] group-hover:flex"
+        className={arrowBtn(!!rect)}
         onClick={() => setRect(ref.current!.getBoundingClientRect())}
         title={group.label}
       >
-        ‹
+        <FlyoutArrowI />
       </button>
       {rect && (
         <Flyout rect={rect} onClose={() => setRect(null)}>
@@ -146,7 +153,7 @@ function CursorButton() {
   };
 
   return (
-    <div ref={ref} className="group relative">
+    <div ref={ref} className={wrap}>
       <button
         className={cls(tool === null || tool === "eraser")}
         title="Cursors"
@@ -155,10 +162,11 @@ function CursorButton() {
         <ToolIcon id={cur.icon} />
       </button>
       <button
-        className="absolute -right-0.5 top-1/2 hidden h-6 w-3 -translate-y-1/2 items-center justify-center rounded-sm bg-[var(--hover)] text-[10px] group-hover:flex"
+        className={arrowBtn(!!rect)}
         onClick={() => setRect(ref.current!.getBoundingClientRect())}
+        title="Cursors"
       >
-        ‹
+        <FlyoutArrowI />
       </button>
       {rect && (
         <Flyout rect={rect} onClose={() => setRect(null)} width={200}>
@@ -323,7 +331,7 @@ export default function DrawingToolbar() {
   return (
     <div
       ref={toolbarRef}
-      className="flex w-12 shrink-0 flex-col items-center gap-0.5 overflow-y-auto overflow-x-visible border-r border-[var(--border)] py-2"
+      className="flex w-[52px] shrink-0 flex-col items-center overflow-y-auto overflow-x-visible border-r border-[var(--border)] py-2"
     >
       <CursorButton />
       {divider}
