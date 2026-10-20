@@ -2,6 +2,7 @@
 
 import { useDrawingStore } from "@/drawings/store";
 import { TIMEFRAMES, fetchSymbols } from "@/lib/api";
+import { useSettingsStore } from "@/store/settings";
 import { toggleReplay, useReplayStore } from "@/replay/store";
 import { useChartStore, type ChartType } from "@/store/chart";
 import { useEffect, useState, type ReactNode } from "react";
@@ -234,7 +235,7 @@ export default function Toolbar() {
       <button className={iconBtn} disabled title="Quick search (sắp có)">
         <QuickSearchI />
       </button>
-      <button className={iconBtn} disabled title="Settings (sắp có)">
+      <button className={iconBtn} title="Settings" onClick={() => useSettingsStore.setState({ open: true })}>
         <SettingsI />
       </button>
       <button className={iconBtn} title="Fullscreen" onClick={fullscreen}>

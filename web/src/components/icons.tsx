@@ -280,3 +280,27 @@ export const AddOrderI = () => (
     <path d="M19 2v6M16 5h6" />
   </Svg>
 );
+// Settings dialog (tab trái)
+export const StatusLineI = () => (
+  <Svg size={18}>
+    <path d="M4 6h16M4 11h10M4 16h13" />
+  </Svg>
+);
+export const ScalesI = () => (
+  <Svg size={18}>
+    <path d="M5 3v16h16" />
+    <path d="M3 5l2-2 2 2M19 17l2 2-2 2" />
+  </Svg>
+);
+export const CanvasI = () => (
+  <Svg size={18}>
+    <path d="M14.5 5.5l4 4L9 19H5v-4z" />
+    <path d="M12.5 7.5l4 4" />
+  </Svg>
+);
+export const TradingI = () => (
+  <Svg size={18}>
+    <path d="M3 17l5-5 4 3 8-8" />
+    <path d="M3 21l5-5 4 3 8-8" opacity=".5" />
+  </Svg>
+);

@@ -9,6 +9,8 @@ import { useIndicatorStore } from "@/indicators/store";
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay, useReplayStore } from "@/replay/store";
 import { useChartStore, type ChartType, type ScaleMode } from "@/store/chart";
+import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
+import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
 import {
   AreaSeries,
   BarSeries,
@@ -21,6 +23,7 @@ import {
   PriceScaleMode,
   createChart,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type SeriesType,
   type UTCTimestamp,
@@ -36,17 +39,33 @@ import DrawingSettings from "./DrawingSettings";
 import FavoritesBar from "./FavoritesBar";
 import ReplayBar from "./ReplayBar";
 import StylePanel from "./StylePanel";
+import SettingsDialog from "./SettingsDialog";
 import { heikinAshi } from "./transform";
 
-const THEMES = {
-  dark: { bg: "#0f0f0f", text: "#b2b5be", grid: "#242424", label: "#363a45" },
-  light: { bg: "#ffffff", text: "#131722", grid: "#f0f3fa", label: "#131722" },
-};
-
-const UP = "#089981";
-const DOWN = "#f23645";
 
 type Fmt = { precision: number };
+
+// Màu nến/bar + nhãn giá cuối theo Settings (Symbol / Scales and lines).
+function seriesStyle(cs: ChartSettings, type: ChartType) {
+  const label = {
+    lastValueVisible: cs.symbolLabel === "value_line" || cs.symbolLabel === "value",
+    priceLineVisible: cs.symbolLabel === "value_line" || cs.symbolLabel === "line",
+  };
+  if (type === "bars") return { ...label, upColor: cs.bodyUp, downColor: cs.bodyDown };
+  if (type === "line" || type === "area") return label;
+  const clear = "rgba(0,0,0,0)";
+  return {
+    ...label,
+    upColor: cs.body ? cs.bodyUp : clear,
+    downColor: cs.body ? cs.bodyDown : clear,
+    borderVisible: cs.borders,
+    borderUpColor: cs.borderUp,
+    borderDownColor: cs.borderDown,
+    wickVisible: cs.wick,
+    wickUpColor: cs.wickUp,
+    wickDownColor: cs.wickDown,
+  };
+}
 
 function createSeries(
   chart: IChartApi,
@@ -58,50 +77,61 @@ function createSeries(
     precision: f.precision,
     minMove: 10 ** -f.precision,
   };
+  const style = seriesStyle(useSettingsStore.getState().s, type);
   switch (type) {
     case "bars":
-      return chart.addSeries(BarSeries, {
-        upColor: UP,
-        downColor: DOWN,
-        priceFormat,
-      });
+      return chart.addSeries(BarSeries, { ...style, priceFormat });
     case "line":
       return chart.addSeries(LineSeries, {
+        ...style,
         color: "#2962ff",
         lineWidth: 2,
         priceFormat,
       });
     case "area":
       return chart.addSeries(AreaSeries, {
+        ...style,
         lineColor: "#2962ff",
         topColor: "rgba(41,98,255,0.4)",
         bottomColor: "rgba(41,98,255,0)",
         priceFormat,
       });
     default:
-      return chart.addSeries(CandlestickSeries, {
-        upColor: UP,
-        downColor: DOWN,
-        borderUpColor: UP,
-        borderDownColor: DOWN,
-        wickUpColor: UP,
-        wickDownColor: DOWN,
-        priceFormat,
-      });
+      return chart.addSeries(CandlestickSeries, { ...style, priceFormat });
   }
 }
 
-function toPoint(b: Bar, type: ChartType) {
-  const time = b.t as UTCTimestamp;
-  if (type === "line" || type === "area") return { time, value: b.c };
-  return { time, open: b.o, high: b.h, low: b.l, close: b.c };
+/** Nến tăng/giảm: so với giá mở (mặc định) hoặc giá đóng nến trước ("Color bars based on
+ *  previous close"). */
+function isUp(b: Bar, prevC: number | undefined, cs: ChartSettings) {
+  return cs.colorByPrevClose && prevC !== undefined ? b.c >= prevC : b.c >= b.o;
 }
 
-const volPoint = (b: Bar) => ({
-  time: b.t as UTCTimestamp,
-  value: b.v,
-  color: b.c >= b.o ? `${UP}66` : `${DOWN}66`,
-});
+function toPoint(b: Bar, type: ChartType, prevC?: number) {
+  const time = b.t as UTCTimestamp;
+  if (type === "line" || type === "area") return { time, value: b.c };
+  const point = { time, open: b.o, high: b.h, low: b.l, close: b.c };
+  const cs = useSettingsStore.getState().s;
+  if (!cs.colorByPrevClose || prevC === undefined) return point;
+  const up = isUp(b, prevC, cs);
+  if (type === "bars") return { ...point, color: up ? cs.bodyUp : cs.bodyDown };
+  const clear = "rgba(0,0,0,0)";
+  return {
+    ...point,
+    color: cs.body ? (up ? cs.bodyUp : cs.bodyDown) : clear,
+    borderColor: up ? cs.borderUp : cs.borderDown,
+    wickColor: up ? cs.wickUp : cs.wickDown,
+  };
+}
+
+const volPoint = (b: Bar, prevC?: number) => {
+  const cs = useSettingsStore.getState().s;
+  return {
+    time: b.t as UTCTimestamp,
+    value: b.v,
+    color: `${isUp(b, prevC, cs) ? cs.bodyUp : cs.bodyDown}66`,
+  };
+};
 
 function fmtCountdown(sec: number) {
   const h = Math.floor(sec / 3600),
@@ -115,38 +145,6 @@ function fmtVol(v: number) {
   if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
   if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
   return String(v);
-}
-
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const p2 = (n: number) => String(n).padStart(2, "0");
-
-// Hiển thị theo giờ máy người dùng
-function crosshairTime(t: number) {
-  const d = new Date(t * 1000);
-  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} '${String(d.getFullYear()).slice(2)}  ${p2(d.getHours())}:${p2(d.getMinutes())}`;
-}
-
-// TickMarkType: 0 Year, 1 Month, 2 DayOfMonth, 3 Time, 4 TimeWithSeconds
-function tickLabel(t: number, type: number) {
-  const d = new Date(t * 1000);
-  if (type === 0) return String(d.getFullYear());
-  if (type === 1) return MONTHS[d.getMonth()];
-  if (type === 2) return String(d.getDate());
-  return `${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
 const RANGES: { label: string; secs: number | "ytd" | "all" }[] = [
@@ -182,7 +180,8 @@ const olderUsable = (
 function resetChartView(chart: IChartApi | null, n: number) {
   if (!chart || !n) return;
   chart.priceScale("right").setAutoScale(true);
-  chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 150), to: n - 1 + 8 });
+  const right = useSettingsStore.getState().s.rightOffset;
+  chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 150), to: n - 1 + right });
 }
 
 function setTabTitle(title: string) {
@@ -197,9 +196,14 @@ function mergeBars(cur: Bar[], add: Bar[]) {
 
 export default function Chart() {
   const { symbol, tf, chartType, scaleMode, theme, set } = useChartStore();
-  const digits = useChartStore(
+  const symDigits = useChartStore(
     (s) => s.symbols.find((x) => x.name === s.symbol)?.digits ?? 5,
   );
+  const cs = useSettingsStore((s) => s.s);
+  const symbolDesc = useChartStore(
+    (s) => s.symbols.find((x) => x.name === s.symbol)?.description ?? "",
+  );
+  const digits = cs.precision ?? symDigits;
   const boxRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
@@ -211,6 +215,8 @@ export default function Chart() {
   const exhaustedRef = useRef(false);
   const backfillRef = useRef<{ t: number; at: number; done: boolean } | null>(null);
   const prevCloseRef = useRef<number | null>(null);
+  const linesRef = useRef<Partial<Record<"prev" | "hi" | "lo" | "bid" | "ask", IPriceLine>>>({});
+  const tickRef = useRef<{ bid: number; ask: number } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const drawingCount = useDrawingStore((s) => s.drawings.length);
   const indRef = useRef<IndicatorManager | null>(null);
@@ -256,9 +262,9 @@ export default function Chart() {
       barsRef.current = [...byTime.values()].sort((a, b) => a.t - b.t);
     }
     seriesRef.current?.setData(
-      display().map((b) => toPoint(b, typeRef.current)) as never,
+      display().map((b, i, a) => toPoint(b, typeRef.current, a[i - 1]?.c)) as never,
     );
-    volRef.current?.setData(barsRef.current.map(volPoint));
+    volRef.current?.setData(barsRef.current.map((b, i, a) => volPoint(b, a[i - 1]?.c)));
     updateTitle();
   };
 
@@ -278,6 +284,44 @@ export default function Chart() {
       }
     }
     setTabTitle(title);
+  };
+
+  // Đường giá phụ (Settings › Scales and lines): đóng cửa phiên trước, cao/thấp vùng đang
+  // xem, bid/ask. Chỉ đọc ref + store -> gọi được từ handler/subscription bất kỳ.
+  const updateLines = () => {
+    const series = seriesRef.current;
+    const chart = chartRef.current;
+    if (!series || !chart) return;
+    const st = useSettingsStore.getState().s;
+    const line = (key: keyof typeof linesRef.current, price: number | null, color: string, title: string) => {
+      const cur = linesRef.current[key];
+      if (price === null || !Number.isFinite(price)) {
+        if (cur) series.removePriceLine(cur);
+        delete linesRef.current[key];
+        return;
+      }
+      const opts = { price, color, title, lineWidth: 1 as const, lineStyle: LineStyle.Dashed, axisLabelVisible: true };
+      if (cur) cur.applyOptions(opts);
+      else linesRef.current[key] = series.createPriceLine(opts);
+    };
+    line("prev", st.prevDayClose === "value_line" ? prevCloseRef.current : null, st.prevDayCloseColor, "");
+    let hi: number | null = null;
+    let lo: number | null = null;
+    const bars = barsRef.current;
+    const r = chart.timeScale().getVisibleLogicalRange();
+    if (st.highLow === "value_line" && r && bars.length) {
+      const a = Math.max(0, Math.floor(r.from));
+      const b = Math.min(bars.length - 1, Math.ceil(r.to));
+      for (let i = a; i <= b; i++) {
+        hi = hi === null ? bars[i].h : Math.max(hi, bars[i].h);
+        lo = lo === null ? bars[i].l : Math.min(lo, bars[i].l);
+      }
+    }
+    line("hi", hi, st.highLowColor, "H");
+    line("lo", lo, st.highLowColor, "L");
+    const tick = st.bidAsk === "value_line" ? tickRef.current : null;
+    line("bid", tick?.bid || null, st.bidColor, "Bid");
+    line("ask", tick?.ask || null, st.askColor, "Ask");
   };
 
   const refreshExtras = () => {
@@ -301,7 +345,7 @@ export default function Chart() {
     );
     chart
       .timeScale()
-      .setVisibleLogicalRange({ from: idx, to: bars.length - 1 + 8 });
+      .setVisibleLogicalRange({ from: idx, to: bars.length - 1 + useSettingsStore.getState().s.rightOffset });
   };
 
   // --- replay ---
@@ -341,8 +385,8 @@ export default function Chart() {
       vis[old.length - 1]?.t === old[old.length - 1].t;
     if (incremental) {
       for (let i = old.length - 1; i < vis.length; i++) {
-        seriesRef.current?.update(toPoint(vis[i], typeRef.current) as never);
-        volRef.current?.update(volPoint(vis[i]));
+        seriesRef.current?.update(toPoint(vis[i], typeRef.current, vis[i - 1]?.c) as never);
+        volRef.current?.update(volPoint(vis[i], vis[i - 1]?.c));
       }
     } else render();
     refreshExtras();
@@ -408,7 +452,7 @@ export default function Chart() {
       x,
       y: e.clientY - r.top,
       idx,
-      label: `Re: ${crosshairTime(bars[idx].t)}`,
+      label: `Re: ${crosshairLabel(bars[idx].t)}`,
     });
   };
 
@@ -426,7 +470,7 @@ export default function Chart() {
         horzLine: { style: LineStyle.Dashed, width: 1 },
       },
       rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.25 } },
-      localization: { timeFormatter: (t: number) => crosshairTime(t) },
+      localization: { timeFormatter: (t: number) => crosshairLabel(t) },
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
@@ -546,6 +590,7 @@ export default function Chart() {
     });
 
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      updateLines();
       const bars = barsRef.current;
       const awayFromLatest =
         !!range && bars.length > 0 && range.to < bars.length - 1;
@@ -626,26 +671,50 @@ export default function Chart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // theme
+  // theme + Canvas/Scales settings
   useEffect(() => {
-    const t = THEMES[theme];
+    const t = CHART_THEMES[theme];
+    const grid = cs.gridColor ?? t.grid;
+    const cross = cs.crosshairColor ?? t.crosshair;
+    const border = cs.scaleLineColor ?? t.grid;
     chartRef.current?.applyOptions({
       layout: {
-        background: { type: ColorType.Solid, color: t.bg },
-        textColor: t.text,
+        background:
+          cs.bgType === "gradient"
+            ? { type: ColorType.VerticalGradient, topColor: cs.bg ?? t.bg, bottomColor: cs.bg2 ?? t.bg }
+            : { type: ColorType.Solid, color: cs.bg ?? t.bg },
+        textColor: cs.scaleTextColor ?? t.text,
+        fontSize: cs.fontSize,
       },
       grid: {
-        vertLines: { color: t.grid, style: LineStyle.Dotted },
-        horzLines: { color: t.grid, style: LineStyle.Dotted },
+        vertLines: { visible: cs.vertGrid, color: grid, style: LineStyle.Dotted },
+        horzLines: { visible: cs.horzGrid, color: grid, style: LineStyle.Dotted },
       },
-      rightPriceScale: { borderColor: t.grid },
-      timeScale: { borderColor: t.grid },
+      rightPriceScale: {
+        borderColor: border,
+        scaleMargins: { top: cs.marginTop / 100, bottom: cs.marginBottom / 100 },
+      },
+      timeScale: {
+        borderColor: border,
+        rightOffset: cs.rightOffset,
+        // hàm mới mỗi lần -> chart vẽ lại nhãn khi đổi timezone/date format
+        tickMarkFormatter: (time: number, type: number) => tickLabel(time, type),
+      },
+      localization: { timeFormatter: (time: number) => crosshairLabel(time) },
       crosshair: {
-        vertLine: { color: "#758696", labelBackgroundColor: t.label },
-        horzLine: { color: "#758696", labelBackgroundColor: t.label },
+        vertLine: { color: cross, labelBackgroundColor: t.label },
+        horzLine: { color: cross, labelBackgroundColor: t.label },
       },
     });
-  }, [theme]);
+  }, [theme, cs]);
+
+  // Symbol settings: màu nến, nhãn/đường giá cuối, các đường giá phụ
+  useEffect(() => {
+    seriesRef.current?.applyOptions(seriesStyle(cs, chartType));
+    render();
+    updateLines();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cs, chartType]);
 
   // cursor mode + screenshot
   const cursor = useDrawingStore((s) => s.cursor);
@@ -688,6 +757,7 @@ export default function Chart() {
     digitsRef.current = digits;
     const chart = chartRef.current!;
     if (seriesRef.current) chart.removeSeries(seriesRef.current);
+    linesRef.current = {}; // price line thuộc series cũ đã bị xoá cùng series
     typeRef.current = chartType;
     seriesRef.current = createSeries(chart, chartType, {
       precision: digitsRef.current,
@@ -699,6 +769,7 @@ export default function Chart() {
 
   // price precision
   useEffect(() => {
+    digitsRef.current = digits;
     seriesRef.current?.applyOptions({
       priceFormat: { type: "price", precision: digits, minMove: 10 ** -digits },
     });
@@ -770,6 +841,7 @@ export default function Chart() {
   useEffect(() => {
     let alive = true;
     prevCloseRef.current = null;
+    updateLines();
     const loadPrev = () =>
       fetchBars(symbol, "D1", undefined, 2)
         .then((d) => {
@@ -777,6 +849,7 @@ export default function Chart() {
           const hasToday = d[d.length - 1].t + 86400 > Date.now() / 1000;
           prevCloseRef.current = hasToday ? (d[d.length - 2]?.c ?? null) : d[d.length - 1].c;
           updateTitle();
+          updateLines();
         })
         .catch(() => {});
     loadPrev();
@@ -797,6 +870,7 @@ export default function Chart() {
     barsRef.current = [];
     exhaustedRef.current = false;
     backfillRef.current = null;
+    tickRef.current = null;
     render();
     drawRef.current?.setSymbol(symbol);
     refreshExtras();
@@ -839,7 +913,7 @@ export default function Chart() {
       if (bars.length) {
         chartRef.current?.timeScale().setVisibleLogicalRange({
           from: Math.max(0, bars.length - 150),
-          to: bars.length - 1 + 8,
+          to: bars.length - 1 + useSettingsStore.getState().s.rightOffset,
         });
       } else {
         clearTimeout(pollTimer);
@@ -855,8 +929,9 @@ export default function Chart() {
       else if (!last || last.t < b.t) arr.push(b);
       else return;
       if (typeRef.current === "heikin") render();
-      else seriesRef.current?.update(toPoint(b, typeRef.current) as never);
-      volRef.current?.update(volPoint(b));
+      else seriesRef.current?.update(toPoint(b, typeRef.current, arr[arr.length - 2]?.c) as never);
+      volRef.current?.update(volPoint(b, arr[arr.length - 2]?.c));
+      updateLines();
       refreshExtras();
       updateTitle();
       setLegend((cur) =>
@@ -940,6 +1015,7 @@ export default function Chart() {
           if (barsRef.current.length === 0) setStatus("");
           upsert(m.bar);
         } else if (m.type === "tick" && m.symbol === symbol) {
+          tickRef.current = { bid: m.bid, ask: m.ask };
           const price = m.bid || m.last;
           if (price > 0 && barsRef.current.length > 0) {
             const last = barsRef.current[barsRef.current.length - 1];
@@ -985,18 +1061,14 @@ export default function Chart() {
         const left = last.t + TF_SECONDS[tf] - Math.floor(now / 1000);
         setCountdown(left > 0 ? fmtCountdown(left) : "");
       }
-      const off = -new Date().getTimezoneOffset() / 60;
-      const d = new Date(now);
-      setClock(
-        `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())} UTC${off >= 0 ? "+" : ""}${off}`,
-      );
+      setClock(clockLabel(now));
     }, 1000);
     return () => clearInterval(id);
   }, [tf]);
 
   const L = legend?.bar;
-  const up = L ? L.c >= L.o : true;
-  const color = up ? UP : DOWN;
+  const up = L ? isUp(L, legend.prev ?? undefined, cs) : true;
+  const color = up ? cs.bodyUp : cs.bodyDown;
   const chg = L && legend.prev !== null ? L.c - legend.prev : null;
   const d = digits;
   const scaleBtn = (m: ScaleMode, label: string) => (
@@ -1063,7 +1135,11 @@ export default function Chart() {
         onSelect: () => useIndicatorStore.setState({ list: [] }),
       });
     if (removals.length) items.push("sep", ...removals);
-    items.push("sep", { label: "Settings…", icon: <SettingsI />, disabled: true });
+    items.push("sep", {
+      label: "Settings…",
+      icon: <SettingsI />,
+      onSelect: () => useSettingsStore.setState({ open: true }),
+    });
     return items;
   };
 
@@ -1071,6 +1147,7 @@ export default function Chart() {
     <div className="flex h-full w-full flex-col">
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
+        <SettingsDialog />
         {ctxMenu && (
           <ChartContextMenu
             x={ctxMenu.x}
@@ -1095,14 +1172,22 @@ export default function Chart() {
         )}
         <div className="pointer-events-none absolute left-3 top-2 z-10 text-xs">
           <div className="flex items-center gap-2 text-[13px]">
-            <span className="font-semibold">{symbol}</span>
-            <span className="text-[var(--muted)]">· {tf} ·</span>
-            {countdown && (
+            {cs.showTitle && (
+              <>
+                <span className="font-semibold">
+                  {cs.titleMode === "description" ? symbolDesc || symbol : symbol}
+                </span>
+                <span className="text-[var(--muted)]">· {tf} ·</span>
+              </>
+            )}
+            {cs.countdown && countdown && (
               <span className="text-[var(--muted)]">{countdown}</span>
             )}
           </div>
-          {L && (
+          {L && (cs.showChartValues || cs.showBarChange) && (
             <div className="mt-0.5 flex gap-2 font-mono" style={{ color }}>
+              {cs.showChartValues && (
+                <>
               <span>
                 O<b className="ml-1 font-normal">{L.o.toFixed(d)}</b>
               </span>
@@ -1115,7 +1200,9 @@ export default function Chart() {
               <span>
                 C<b className="ml-1 font-normal">{L.c.toFixed(d)}</b>
               </span>
-              {chg !== null && legend.prev && (
+                </>
+              )}
+              {cs.showBarChange && chg !== null && legend.prev && (
                 <span>
                   {chg >= 0 ? "+" : ""}
                   {chg.toFixed(d)} ({((chg / legend.prev) * 100).toFixed(2)}%)
@@ -1123,13 +1210,13 @@ export default function Chart() {
               )}
             </div>
           )}
-          {L && (
+          {L && cs.showVolume && (
             <div className="mt-0.5 flex gap-1.5 font-mono">
               <span className="text-[var(--muted)]">Vol</span>
               <span style={{ color }}>{fmtVol(L.v)}</span>
             </div>
           )}
-          {indicators.map((inst) => {
+          {cs.showIndicatorTitles && indicators.map((inst) => {
             const def = byId(inst.id);
             const params = def.inputs.map((i) => inst.inputs[i.key]).join(" ");
             return (
@@ -1138,7 +1225,7 @@ export default function Chart() {
                 className="mt-0.5 flex items-center gap-1.5 text-[var(--muted)]"
               >
                 <span style={{ color: inst.colors[0] }}>{def.name}</span>
-                <span>{params}</span>
+                {cs.showIndicatorInputs && <span>{params}</span>}
                 <button
                   onClick={() => removeIndicator(inst.uid)}
                   className="pointer-events-auto px-1 hover:text-[var(--fg)]"
