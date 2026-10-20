@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TVBridge.mq5 - đẩy symbol/tick/bar sang backend qua TCP socket   |
-//| VERSION: 2.04 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
+//| VERSION: 2.06 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
 //| EnsureConnected() để biết bản đang chạy có phải bản mới nhất)    |
 //| - 2.00: chuyển từ WebRequest sang TCP socket                     |
 //| - 2.01: fix SendLine coi SocketSend=0 (buffer đầy) là lỗi fatal  |
@@ -13,14 +13,19 @@
 //|   lỗi tạm thời (GetLastError 5273) ngay sau connect, KHÔNG phải |
 //|   server đóng - bỏ việc tự CloseSocket() khi đọc lỗi, chỉ coi    |
 //|   kết nối chết thật khi SendLine gửi thất bại (-1)               |
+//| - 2.05: nguyên nhân THẬT của 5273 = SocketRead(…, 4096, 10) chờ   |
+//|   đủ 4096 byte -> timeout. Đọc đúng SocketIsReadable() byte; lỗi |
+//|   đọc thật thì đóng + reconnect; ping 5s để phát hiện socket chết |
+//| - 2.06: JsonInt bỏ qua space sau ':' (json.dumps mặc định có     |
+//|   space -> count/pos/before bị đọc ra 0, backfill trả 0 bar)     |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.04"
+#property version "2.06"
 
-#define EA_VERSION "2.04"
+#define EA_VERSION "2.06"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -32,6 +37,7 @@ input int MaxTicksPerCall = 2000;
 int g_sock = INVALID_HANDLE;
 string g_rx = "";
 ulong g_lastConnectTryMs = 0;
+ulong g_lastPingMs = 0;
 
 string g_subs[];
 ulong g_lastMsc[];
@@ -186,6 +192,8 @@ long JsonInt(string obj, string key)
   if (p < 0)
     return 0;
   p = StringFind(obj, ":", p) + 1;
+  while (p < StringLen(obj) && StringGetCharacter(obj, p) == ' ') // json.dumps mac dinh co space sau ':'
+    p++;
   int e = p;
   while (e < StringLen(obj))
   {
@@ -430,16 +438,18 @@ void PumpRx()
 {
   if (g_sock == INVALID_HANDLE)
     return;
-  while (SocketIsReadable(g_sock) > 0)
+  uint avail;
+  while ((avail = SocketIsReadable(g_sock)) > 0)
   {
+    // Doc DUNG so byte dang co: SocketRead cho du `maxlen` byte toi khi het timeout roi
+    // bao loi 5273 (nguyen nhan that cua loi "doc ngay sau connect" o 2.03/2.04).
     uchar buf[];
-    int n = SocketRead(g_sock, buf, 4096, 10);
+    int n = SocketRead(g_sock, buf, avail, 500);
     if (n <= 0)
     {
-      // Thuc te: loi doc o day co the chi la tam thoi (vd doc ngay sau khi connect,
-      // du lieu chua kip toi) - KHONG coi la mat ket noi. Nguon tin cay de biet ket noi
-      // chet thuc su la SendLine gui that bai (-1), khong phai doc loi o day.
-      break;
+      PrintFormat("TVBridge: [PumpRx] SocketRead loi %d (co %u byte), dong socket de reconnect", GetLastError(), avail);
+      CloseSocket();
+      return;
     }
     g_rx += CharArrayToString(buf, 0, n, CP_UTF8);
   }
@@ -477,4 +487,12 @@ void OnTimer()
     return;
   PumpRx();
   PumpTicks();
+  // Heartbeat: chua subscribe symbol nao thi khong co gi de gui -> khong bao gio phat
+  // hien socket da chet. Ping dinh ky de SendLine that bai -> tu reconnect.
+  ulong now = GetTickCount64();
+  if (g_sock != INVALID_HANDLE && now - g_lastPingMs >= 5000)
+  {
+    g_lastPingMs = now;
+    SendLine("{\"type\":\"ping\"}");
+  }
 }

@@ -46,7 +46,7 @@ def _handle_bars(body: BarsIn) -> None:
 
 
 async def _write(writer: asyncio.StreamWriter, msg: Dict[str, Any]) -> None:
-    writer.write((json.dumps(msg) + "\n").encode("utf-8"))
+    writer.write((json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8"))
     await writer.drain()
 
 

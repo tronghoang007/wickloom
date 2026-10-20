@@ -6,7 +6,7 @@ import { useDrawingStore } from "@/drawings/store";
 import { IndicatorManager } from "@/indicators/manager";
 import { byId } from "@/indicators/registry";
 import { useIndicatorStore } from "@/indicators/store";
-import { TF_SECONDS, WS_URL, fetchBars, triggerBackfill, triggerBackfillAt, type Bar } from "@/lib/api";
+import { TF_SECONDS, WS_URL, fetchBars, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay, useReplayStore } from "@/replay/store";
 import { useChartStore, type ChartType, type ScaleMode } from "@/store/chart";
 import {
@@ -175,6 +175,7 @@ export default function Chart() {
   const digitsRef = useRef(digits);
   const loadingRef = useRef(false);
   const exhaustedRef = useRef(false);
+  const backfillRef = useRef<{ t: number; at: number } | null>(null);
   const indRef = useRef<IndicatorManager | null>(null);
   const drawRef = useRef<DrawingManager | null>(null);
   const indicators = useIndicatorStore((s) => s.list);
@@ -529,9 +530,15 @@ export default function Chart() {
                 to: vis.to + older.length,
               });
           } else {
-            // Không còn trong database backend -> gọi MT5 backfill tiếp
+            // Không còn trong database backend -> gọi MT5 backfill tiếp, neo theo thời gian
+            // của nến cũ nhất (không theo index: cache có thể hở so với nến mới nhất của
+            // MT5 nên `pos` bị lệch). Mỗi mốc chỉ xin 1 lần rồi chờ "bars_loaded" (EA
+            // offline thì backend xếp hàng, gửi khi EA kết nối lại).
+            const pending = backfillRef.current;
+            if (pending && pending.t === first.t && Date.now() - pending.at < 30000) return;
+            backfillRef.current = { t: first.t, at: Date.now() };
             try {
-              const res = await triggerBackfill(curSym, curTf, 500, barsRef.current.length);
+              const res = await triggerBackfillAt(curSym, curTf, 500, first.t);
               if (!res.ok) {
                 exhaustedRef.current = true;
               }
@@ -693,6 +700,7 @@ export default function Chart() {
     let pollTimer: ReturnType<typeof setTimeout>;
     barsRef.current = [];
     exhaustedRef.current = false;
+    backfillRef.current = null;
     render();
     drawRef.current?.setSymbol(symbol);
     refreshExtras();

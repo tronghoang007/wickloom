@@ -62,7 +62,7 @@ class EaHub:
 
     async def _send(self, writer: Any, msg: Dict[str, Any]) -> None:
         try:
-            writer.write((json.dumps(msg) + "\n").encode("utf-8"))
+            writer.write((json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8"))
             await writer.drain()
         except Exception:
             self.writers.discard(writer)
