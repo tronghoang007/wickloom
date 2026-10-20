@@ -1,10 +1,16 @@
 import asyncio
 import json
+import time
 from typing import Any, Dict
 
 from . import state
-from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN, is_stale
+from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN
 from .models import BarsIn, SymbolsIn, TicksIn
+
+# Tick chỉ dùng cho realtime: tick cũ hơn mức này (EA gửi lại lịch sử tick, vd
+# CopyTicks từ msc=0 khi mới subscribe) bị bỏ - quá khứ do backfill bar của EA lo. Gom
+# tick cũ thành nến sẽ ghi đè bar chuẩn của MT5.
+MAX_TICK_AGE_MS = 5 * 60 * 1000
 
 # Batch backfill/ticks có thể vượt mặc định 64KB của StreamReader.readline().
 STREAM_LIMIT = 4 * 1024 * 1024
@@ -23,14 +29,16 @@ def _handle_symbols(body: SymbolsIn) -> None:
 def _handle_ticks(body: TicksIn) -> None:
     offset = body.broker_utc_offset
     state.broker_offset["value"] = offset
-    for t in body.ticks:
+    floor = time.time() * 1000 - MAX_TICK_AGE_MS
+    fresh = [t for t in body.ticks if t.t_msc - offset * 1000 >= floor]
+    for t in fresh:
         price = t.bid or t.last
         if price <= 0:
             continue
         t_utc_msc = t.t_msc - offset * 1000
         state.aggregator.tick(body.symbol, t_utc_msc, price, t.vol, offset)
-    if body.ticks:
-        last = body.ticks[-1]
+    if fresh:
+        last = fresh[-1]
         t_utc_msc = last.t_msc - offset * 1000
         state.hub.publish(body.symbol, "", {
             "type": "tick", "symbol": body.symbol, "t_msc": t_utc_msc,
@@ -83,9 +91,7 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
             await _write(writer, cmd)
 
         for sym, tf in state.hub.subscribed_pairs():
-            last = state.bars.last(sym, tf)
-            if is_stale(last["t"] if last else None, tf):
-                state.request_backfill(sym, tf)
+            state.request_catchup(sym, tf)
 
         while True:
             line = await reader.readline()

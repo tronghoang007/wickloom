@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TVBridge.mq5 - đẩy symbol/tick/bar sang backend qua TCP socket   |
-//| VERSION: 2.06 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
+//| VERSION: 2.08 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
 //| EnsureConnected() để biết bản đang chạy có phải bản mới nhất)    |
 //| - 2.00: chuyển từ WebRequest sang TCP socket                     |
 //| - 2.01: fix SendLine coi SocketSend=0 (buffer đầy) là lỗi fatal  |
@@ -18,14 +18,21 @@
 //|   đọc thật thì đóng + reconnect; ping 5s để phát hiện socket chết |
 //| - 2.06: JsonInt bỏ qua space sau ':' (json.dumps mặc định có     |
 //|   space -> count/pos/before bị đọc ra 0, backfill trả 0 bar)     |
+//| - 2.07: Backfill thử lại CopyRates ~3s khi lịch sử cũ chưa dựng  |
+//|   xong (trước đây coi -1 là hết dữ liệu -> dừng ở 2020 dù MT5 có |
+//|   từ 2014); log mã lỗi + SERIES_TERMINAL/SERVER_FIRSTDATE        |
+//| - 2.08: backfill `before` neo theo iBarShift + index thay vì cửa  |
+//|   sổ thời gian cố định (M1 rơi vào gap lễ dài -> 0 bar, dừng sớm) |
+//|   subscribe symbol mới chỉ stream tick từ hiện tại (msc=0 làm    |
+//|   CopyTicks trả cả lịch sử tick -> backend treo, ghi đè bar)     |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.06"
+#property version "2.08"
 
-#define EA_VERSION "2.06"
+#define EA_VERSION "2.08"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -309,7 +316,10 @@ void ApplySubscribe(string arr)
     else
     {
       SymbolSelect(next[i], true);
-      msc[i] = 0;
+      // Chi stream tick tu bay gio: msc=0 -> CopyTicks(from=1) tra tu DAU lich su tick
+      // (hang nam) 2000 tick/lan, backend gom thanh nen va ghi de bar chuan cua MT5.
+      MqlTick cur;
+      msc[i] = SymbolInfoTick(next[i], cur) ? (ulong)cur.time_msc : 0;
     }
   }
   ArrayCopy(g_subs, next);
@@ -359,33 +369,38 @@ void Backfill(string symbol, string tfs, int count, int start_pos = 0, long befo
   int offset = BrokerOffset();
   int pos = start_pos, total = 0;
   datetime cursor_utc = (datetime)before; // chỉ dùng khi before > 0, giảm dần mỗi chunk
-  int step = PeriodSeconds(tf);
-  if (step <= 0)
-    step = 60;
-
   while (total < count)
   {
     int want = MathMin(BackfillChunk, count - total);
     MqlRates rates[];
-    int n;
-    if (before > 0)
+    int n = 0, err = 0;
+    datetime stop_t = (datetime)((long)cursor_utc + offset);
+    // Lich su cu chua dung xong cho tf nay -> CopyRates/iBarShift tra -1 (vd 4401) va
+    // terminal tai ngam; thu lai ~3s thay vi coi nhu het du lieu.
+    for (int attempt = 0; attempt < 10; attempt++)
     {
-      datetime stop_t = (datetime)((long)cursor_utc + offset);
-      datetime start_t = (datetime)((long)stop_t - (long)want * step * 3 - 86400); // đệm rộng cho gap cuối tuần/nghỉ lễ
-      n = CopyRates(symbol, tf, start_t, stop_t, rates);
-      if (n > want)
+      ResetLastError();
+      if (before > 0)
       {
-        ArrayCopy(rates, rates, 0, n - want, want); // chỉ giữ `want` nến gần stop_t nhất
-        ArrayResize(rates, want);
-        n = want;
+        // Neo theo index cua nen gan nhat <= stop_t (khong theo cua so thoi gian co dinh:
+        // cua so roi tron vao 1 gap le/cuoi tuan dai thi tra 0 bar du phia truoc van con).
+        int shift = iBarShift(symbol, tf, stop_t, false);
+        n = (shift < 0) ? -1 : CopyRates(symbol, tf, shift, want, rates);
       }
-    }
-    else
-    {
-      n = CopyRates(symbol, tf, pos, want, rates);
+      else
+        n = CopyRates(symbol, tf, pos, want, rates);
+      if (n > 0)
+        break;
+      err = GetLastError();
+      Sleep(300);
     }
     if (n <= 0)
+    {
+      PrintFormat("Backfill %s %s: CopyRates khong co bar (loi %d, firstdate terminal %s, server %s)", symbol, tfs, err,
+                  TimeToString((datetime)SeriesInfoInteger(symbol, tf, SERIES_TERMINAL_FIRSTDATE)),
+                  TimeToString((datetime)SeriesInfoInteger(symbol, tf, SERIES_SERVER_FIRSTDATE)));
       break;
+    }
 
     string js = "{\"type\":\"bars\",\"broker_utc_offset\":" + IntegerToString(offset) + ",\"symbol\":\"" + Esc(symbol) + "\",\"tf\":\"" + tfs + "\",\"bars\":[";
     for (int i = 0; i < n; i++)

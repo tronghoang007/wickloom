@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .aggregator import Aggregator
-from .config import BARS_DIR
+from .config import BARS_DB, BARS_DIR, TF_SECONDS, is_stale
 from .store import BarStore, MetaStore
 from .ws import Hub
 
@@ -90,6 +90,25 @@ def request_backfill(symbol: str, tf: str, count: int = 500, pos: int = 0, befor
     pending_backfill.append(cmd)
 
 
+# MT5 mặc định "Max bars in chart" = 100000 - xin nhiều hơn cũng không có thêm.
+MAX_CATCHUP_BARS = 100000
+
+
+def request_catchup(symbol: str, tf: str) -> None:
+    """Cache rỗng hoặc bar cuối đã cũ -> xin EA đủ số bar (tính từ nến mới nhất) để nối
+    liền với bar cuối đang có. Chỉ xin 500 bar như trước sẽ để lại 1 lỗ ở giữa khi
+    EA/backend tắt lâu hơn 500 nến (vd M1 qua 1 ngày)."""
+    last = bars.last(symbol, tf)
+    last_t = last["t"] if last else None
+    if not is_stale(last_t, tf):
+        return
+    count = 500
+    if last_t is not None:
+        gap = int((time.time() - last_t) / TF_SECONDS[tf]) + 10
+        count = max(count, min(MAX_CATCHUP_BARS, gap))
+    request_backfill(symbol, tf, count)
+
+
 def check_broker_switch(name: str) -> bool:
     """So broker hiện tại (lưu trong bảng settings) với `name` EA vừa báo qua hello.
     Trả True nếu đây là một broker KHÁC lần trước (cần resync); False nếu giống hoặc
@@ -109,10 +128,9 @@ def resync_after_broker_switch() -> Optional[Path]:
     symbols đã biết, clear bar đang gom dở. need_symbols/backfill tự chạy lại sau đó
     qua các cơ chế đã có sẵn (EA luôn gửi symbols sau hello; /ws subscribe tự backfill
     khi thiếu/stale)."""
-    archive_path: Optional[Path] = None
-    if BARS_DIR.exists() and any(BARS_DIR.iterdir()):
-        archive_path = BARS_DIR.parent / f"bars_archive_{int(time.time())}"
-        shutil.move(str(BARS_DIR), str(archive_path))
+    archive_path = bars.archive(BARS_DB.parent / f"bars_archive_{int(time.time())}.sqlite")
+    if BARS_DIR.exists() and any(BARS_DIR.iterdir()):  # cache parquet cũ còn sót
+        shutil.move(str(BARS_DIR), str(BARS_DIR.parent / f"bars_parquet_archive_{int(time.time())}"))
     meta.clear("symbols")
     symbols.clear()
     aggregator.cur.clear()

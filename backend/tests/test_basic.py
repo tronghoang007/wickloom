@@ -72,13 +72,32 @@ def test_ingest_and_query():
 
 
 def test_ticks_aggregate_and_meta():
+    m = (int(time.time()) // 60 - 2) * 60  # tick phải "mới" (< MAX_TICK_AGE_MS) mới được gom
     send_ea([{"type": "ticks", "symbol": "XAUUSD", "ticks": [
-        {"t_msc": 60_000, "bid": 10}, {"t_msc": 70_000, "bid": 12}, {"t_msc": 130_000, "bid": 11}]}])
+        {"t_msc": m * 1000, "bid": 10}, {"t_msc": (m + 10) * 1000, "bid": 12},
+        {"t_msc": (m + 70) * 1000, "bid": 11}]}])
     c = TestClient(app)
     rows = c.get("/bars", params={"symbol": "XAUUSD", "tf": "M1"}).json()
-    assert rows == [{"t": 60, "o": 10, "h": 12, "l": 10, "c": 12, "v": 2}]
+    assert rows == [{"t": m, "o": 10, "h": 12, "l": 10, "c": 12, "v": 2}]
     c.put("/layouts/a", params={"scope": "x"}, json={"k": 1})
     assert c.get("/layouts/a").json()["data"] == {"k": 1}
+
+
+def test_stale_ticks_dropped():
+    # EA gửi lại lịch sử tick (vd CopyTicks từ msc=0) -> không được gom thành nến
+    send_ea([{"type": "ticks", "symbol": "OLDTICK", "ticks": [
+        {"t_msc": 60_000, "bid": 10}, {"t_msc": 130_000, "bid": 11}]}])
+    assert state.bars.last("OLDTICK", "M1") is None
+
+
+def test_bar_store_upsert_query():
+    state.bars.upsert("Q", "H1", [{"t": t, "o": 1, "h": 2, "l": 0, "c": 1, "v": 5} for t in (3600, 7200, 10800)])
+    state.bars.upsert("Q", "H1", [{"t": 7200, "o": 9, "h": 9, "l": 9, "c": 9, "v": 9}])  # ghi đè
+    assert [b["t"] for b in state.bars.query("Q", "H1")] == [3600, 7200, 10800]
+    assert state.bars.query("Q", "H1", to=10800, limit=1)[0]["o"] == 9
+    assert [b["t"] for b in state.bars.query("Q", "H1", frm=7200)] == [7200, 10800]
+    assert state.bars.last("Q", "H1")["t"] == 10800
+    assert state.bars.query("Q", "M1") == []
 
 
 def test_is_stale():

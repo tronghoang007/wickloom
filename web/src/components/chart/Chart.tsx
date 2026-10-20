@@ -161,6 +161,28 @@ const RANGES: { label: string; secs: number | "ytd" | "all" }[] = [
 
 type Legend = { bar: Bar; prev: number | null };
 
+// Khoảng cách giữa 2 nến liền kề lớn hơn mức này = cache backend có lỗ (không phải
+// cuối tuần/nghỉ lễ) -> phải hỏi EA trước khi vẽ đoạn cũ hơn.
+const gapLimit = (tf: string) => Math.max(5 * 86400, 3 * TF_SECONDS[tf]);
+
+// Bar cũ hơn `firstT` lấy từ DB dùng được nếu nối liền với `firstT`, hoặc EA đã trả lời
+// backfill neo đúng mốc này (khoảng trống là thật trên MT5).
+const olderUsable = (
+  older: Bar[],
+  firstT: number,
+  tf: string,
+  req: { t: number; done: boolean } | null,
+) =>
+  older.length > 0 &&
+  (firstT - older[older.length - 1].t <= gapLimit(tf) ||
+    (req?.t === firstT && req.done));
+
+function mergeBars(cur: Bar[], add: Bar[]) {
+  const m = new Map(cur.map((b) => [b.t, b]));
+  for (const b of add) if (!m.has(b.t)) m.set(b.t, b);
+  return [...m.values()].sort((a, b) => a.t - b.t);
+}
+
 export default function Chart() {
   const { symbol, tf, chartType, scaleMode, theme, set } = useChartStore();
   const digits = useChartStore(
@@ -175,7 +197,7 @@ export default function Chart() {
   const digitsRef = useRef(digits);
   const loadingRef = useRef(false);
   const exhaustedRef = useRef(false);
-  const backfillRef = useRef<{ t: number; at: number } | null>(null);
+  const backfillRef = useRef<{ t: number; at: number; done: boolean } | null>(null);
   const indRef = useRef<IndicatorManager | null>(null);
   const drawRef = useRef<DrawingManager | null>(null);
   const indicators = useIndicatorStore((s) => s.list);
@@ -516,10 +538,11 @@ export default function Chart() {
         .then(async (older) => {
           if (
             key !==
-            `${useChartStore.getState().symbol}|${useChartStore.getState().tf}`
+              `${useChartStore.getState().symbol}|${useChartStore.getState().tf}` ||
+            barsRef.current[0] !== first // "bars_loaded" đã ghép đoạn này trước
           )
             return;
-          if (older.length > 0) {
+          if (olderUsable(older, first.t, curTf, backfillRef.current)) {
             const vis = chart.timeScale().getVisibleLogicalRange();
             barsRef.current = [...older, ...barsRef.current];
             render();
@@ -530,13 +553,13 @@ export default function Chart() {
                 to: vis.to + older.length,
               });
           } else {
-            // Không còn trong database backend -> gọi MT5 backfill tiếp, neo theo thời gian
-            // của nến cũ nhất (không theo index: cache có thể hở so với nến mới nhất của
-            // MT5 nên `pos` bị lệch). Mỗi mốc chỉ xin 1 lần rồi chờ "bars_loaded" (EA
-            // offline thì backend xếp hàng, gửi khi EA kết nối lại).
+            // Database backend hết (hoặc có lỗ ngay trước `first`) -> gọi MT5 backfill
+            // tiếp, neo theo thời gian của nến cũ nhất (không theo index: cache có thể hở
+            // so với nến mới nhất của MT5 nên `pos` bị lệch). Mỗi mốc chỉ xin 1 lần rồi chờ
+            // "bars_loaded" (EA offline thì backend xếp hàng, gửi khi EA kết nối lại).
             const pending = backfillRef.current;
             if (pending && pending.t === first.t && Date.now() - pending.at < 30000) return;
-            backfillRef.current = { t: first.t, at: Date.now() };
+            backfillRef.current = { t: first.t, at: Date.now(), done: false };
             try {
               const res = await triggerBackfillAt(curSym, curTf, 500, first.t);
               if (!res.ok) {
@@ -777,21 +800,35 @@ export default function Chart() {
             load();
           } else {
             const first = barsRef.current[0];
-            if (first) {
-              fetchBars(symbol, tf, first.t, 500).then((older) => {
-                if (!alive || older.length === 0) return;
-                const vis = chartRef.current?.timeScale().getVisibleLogicalRange();
-                barsRef.current = [...older, ...barsRef.current];
-                render();
-                refreshExtras();
-                if (vis && chartRef.current) {
-                  chartRef.current.timeScale().setVisibleLogicalRange({
-                    from: vis.from + older.length,
-                    to: vis.to + older.length,
-                  });
-                }
-              });
-            }
+            const last = barsRef.current[barsRef.current.length - 1];
+            const req = backfillRef.current;
+            if (req && req.t === first.t) req.done = true;
+            // EA vừa nạp: có thể là đoạn cũ hơn (scroll-back) hoặc đoạn mới hơn (catch-up
+            // sau khi EA/backend tắt) -> lấy cả 2 phía.
+            Promise.all([
+              fetchBars(symbol, tf, undefined, 50000, last.t),
+              fetchBars(symbol, tf, first.t, 500),
+            ]).then(([newer, older]) => {
+              if (!alive || barsRef.current[0] !== first) return;
+              if (newer.length >= 50000) {
+                load(); // catch-up quá dài để ghép -> tải lại từ mới nhất
+                return;
+              }
+              const useOlder = olderUsable(older, first.t, tf, backfillRef.current);
+              const added = newer.some((b) => b.t > last.t);
+              if (!useOlder && !added) return;
+              const vis = chartRef.current?.timeScale().getVisibleLogicalRange();
+              const merged = mergeBars(barsRef.current, newer);
+              barsRef.current = useOlder ? [...older, ...merged] : merged;
+              render();
+              refreshExtras();
+              if (useOlder && vis && chartRef.current) {
+                chartRef.current.timeScale().setVisibleLogicalRange({
+                  from: vis.from + older.length,
+                  to: vis.to + older.length,
+                });
+              }
+            });
           }
         }
         else if (useReplayStore.getState().active) {

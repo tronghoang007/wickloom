@@ -5,7 +5,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import state, tcp_server
-from .config import TF_SECONDS, is_stale
+from .config import TF_SECONDS
 from .state import request_backfill
 from .store import TABLES
 
@@ -104,9 +104,7 @@ async def ws_endpoint(ws: WebSocket):
             if msg.get("action") == "subscribe" and pair[1] in TF_SECONDS:
                 state.hub.clients[ws].add(pair)
                 state.aggregator.watch(*pair)
-                last = state.bars.last(*pair)
-                if is_stale(last["t"] if last else None, pair[1]):
-                    request_backfill(*pair)
+                state.request_catchup(*pair)
                 _push_subscribe()
             elif msg.get("action") == "unsubscribe":
                 state.hub.clients[ws].discard(pair)

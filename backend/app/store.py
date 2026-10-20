@@ -1,72 +1,66 @@
 import json
 import sqlite3
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote
 
-import duckdb
-import pyarrow as pa
-import pyarrow.parquet as pq
+from .config import BARS_DB, SQLITE_PATH
 
-from .config import BARS_DIR, SQLITE_PATH
-
-_SCHEMA = pa.schema([
-    ("t", pa.int64()), ("o", pa.float64()), ("h", pa.float64()),
-    ("l", pa.float64()), ("c", pa.float64()), ("v", pa.float64()),
-])
+_COLS = ("t", "o", "h", "l", "c", "v")
 
 
 class BarStore:
-    """Parquet phân vùng symbol/tf/year, đọc bằng DuckDB."""
+    """SQLite: 1 bảng bars, khoá (symbol, tf, t) -> upsert/đọc theo index, không phải ghi
+    lại cả file như parquet theo năm (ghi 1 bar vào file 50k bar mất ~100ms, chặn cả
+    event loop)."""
 
-    def __init__(self, root: Path = BARS_DIR):
-        self.root = root
+    def __init__(self, path: Path = BARS_DB):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
         self._lock = threading.Lock()
-
-    def _dir(self, symbol: str, tf: str) -> Path:
-        return self.root / quote(symbol, safe="") / tf
+        self.db = sqlite3.connect(path, check_same_thread=False)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS bars (symbol TEXT NOT NULL, tf TEXT NOT NULL, t INTEGER NOT NULL, "
+            "o REAL NOT NULL, h REAL NOT NULL, l REAL NOT NULL, c REAL NOT NULL, v REAL NOT NULL, "
+            "PRIMARY KEY (symbol, tf, t)) WITHOUT ROWID"
+        )
+        self.db.commit()
 
     def upsert(self, symbol: str, tf: str, bars: List[Dict[str, Any]]) -> None:
-        by_year: Dict[int, List[Dict[str, Any]]] = {}
-        for b in bars:
-            year = datetime.fromtimestamp(b["t"], tz=timezone.utc).year
-            by_year.setdefault(year, []).append(b)
-        d = self._dir(symbol, tf)
+        rows = [(symbol, tf, int(b["t"]), b["o"], b["h"], b["l"], b["c"], b["v"]) for b in bars]
         with self._lock:
-            d.mkdir(parents=True, exist_ok=True)
-            for year, items in by_year.items():
-                path = d / f"{year}.parquet"
-                merged = {r["t"]: r for r in pq.read_table(path).to_pylist()} if path.exists() else {}
-                for b in items:
-                    merged[b["t"]] = {k: b[k] for k in ("t", "o", "h", "l", "c", "v")}
-                rows = [merged[k] for k in sorted(merged)]
-                table = pa.Table.from_pylist(rows, schema=_SCHEMA)
-                tmp = path.with_suffix(".tmp")
-                pq.write_table(table, tmp)
-                tmp.replace(path)
+            self.db.executemany("INSERT OR REPLACE INTO bars VALUES (?,?,?,?,?,?,?,?)", rows)
+            self.db.commit()
 
     def query(self, symbol: str, tf: str, frm: Optional[int] = None,
               to: Optional[int] = None, limit: int = 5000) -> List[Dict[str, Any]]:
         """Trả về tối đa `limit` bar mới nhất trong [frm, to), tăng dần theo t."""
-        d = self._dir(symbol, tf)
-        if not d.exists() or not any(d.glob("*.parquet")):
-            return []
-        where, params = [], []
+        where, params = ["symbol=?", "tf=?"], [symbol, tf]
         if frm is not None:
             where.append("t >= ?"); params.append(frm)
         if to is not None:
             where.append("t < ?"); params.append(to)
-        clause = ("WHERE " + " AND ".join(where)) if where else ""
-        sql = f"SELECT t,o,h,l,c,v FROM read_parquet(?) {clause} ORDER BY t DESC LIMIT ?"
+        sql = f"SELECT t,o,h,l,c,v FROM bars WHERE {' AND '.join(where)} ORDER BY t DESC LIMIT ?"
         with self._lock:
-            rows = duckdb.connect().execute(sql, [str(d / "*.parquet")] + params + [limit]).fetchall()
-        return [dict(t=r[0], o=r[1], h=r[2], l=r[3], c=r[4], v=r[5]) for r in reversed(rows)]
+            rows = self.db.execute(sql, params + [limit]).fetchall()
+        return [dict(zip(_COLS, r)) for r in reversed(rows)]
 
     def last(self, symbol: str, tf: str) -> Optional[Dict[str, Any]]:
         rows = self.query(symbol, tf, limit=1)
         return rows[0] if rows else None
+
+    def archive(self, dest: Path) -> Optional[Path]:
+        """Chụp toàn bộ bar ra file `dest` (VACUUM INTO) rồi xoá sạch - dùng khi đổi broker.
+        Trả None nếu không có bar nào."""
+        with self._lock:
+            if self.db.execute("SELECT 1 FROM bars LIMIT 1").fetchone() is None:
+                return None
+            self.db.execute("VACUUM INTO ?", (str(dest),))
+            self.db.execute("DELETE FROM bars")
+            self.db.commit()
+        return dest
 
 
 TABLES = ("layouts", "drawings", "scripts", "watchlists", "settings", "symbols")
