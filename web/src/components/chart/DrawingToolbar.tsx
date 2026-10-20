@@ -17,7 +17,8 @@ const base = "relative flex h-[38px] w-[38px] items-center justify-center rounde
 const wrap = "group relative flex w-[52px] justify-center";
 const arrowBtn = (open: boolean) =>
   `absolute right-0 top-1/2 flex h-[34px] w-[11px] -translate-y-1/2 items-center justify-center rounded-sm text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] ${
-    open ? "visible bg-[var(--hover)] text-[var(--fg)]" : "invisible group-hover:visible"
+    // ẩn bằng opacity (không dùng visibility) để vẫn click/focus được
+    open ? "bg-[var(--hover)] text-[var(--fg)]" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
   }`;
 const cls = (active: boolean) =>
   `${base} ${active ? "bg-[var(--hover)] text-[var(--accent)]" : "text-[var(--fg)] hover:bg-[var(--hover)]"}`;
@@ -26,20 +27,22 @@ function Flyout({
   rect,
   onClose,
   children,
-  width = 300,
+  width = 330, // đủ cho nhãn dài nhất ("Elliott triple combo wave (W·X·Y·X·Z)") + ngôi sao
 }: {
   rect: DOMRect;
   onClose: () => void;
   children: ReactNode;
   width?: number;
 }) {
-  const top = Math.max(8, Math.min(rect.top, window.innerHeight - 440));
+  // Như TV: flyout dính sát cột toolbar, canh theo nút rồi đẩy lên cho vừa màn hình;
+  // danh sách dài thì cao tối đa cả cửa sổ.
+  const top = Math.max(0, Math.min(rect.top, window.innerHeight - 440));
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
-        className="drawing-flyout fixed z-50 max-h-[80vh] overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl"
-        style={{ left: rect.right + 6, top, width }}
+        className="drawing-flyout fixed z-50 max-h-screen overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl"
+        style={{ left: rect.right, top, width }}
       >
         {children}
       </div>
@@ -58,7 +61,9 @@ function ToolItem({
   const fav = useDrawingStore((s) => s.favorites.includes(id));
   return (
     <div
-      className={`group flex items-center gap-3 px-3 py-1.5 text-sm ${spec.disabled ? "opacity-40" : "cursor-pointer hover:bg-[var(--hover)]"}`}
+      // group/item: flyout nằm trong nút nhóm (cũng là "group") - tên riêng để hover 1 hàng
+      // chỉ hiện ngôi sao của hàng đó
+      className={`group/item flex h-10 items-center gap-2 px-2.5 text-sm ${spec.disabled ? "opacity-40" : "cursor-pointer hover:bg-[var(--hover)]"}`}
       onClick={() => !spec.disabled && onPick(id)}
       title={spec.disabled ? "Sắp có" : undefined}
     >
@@ -66,7 +71,7 @@ function ToolItem({
       <span className="flex-1 truncate">{spec.label}</span>
       {!spec.disabled && (
         <button
-          className={`${fav ? "text-[var(--fg)]" : "text-transparent group-hover:text-[var(--muted)]"} hover:!text-[var(--fg)]`}
+          className={`${fav ? "text-[var(--fg)]" : "text-transparent group-hover/item:text-[var(--muted)]"} hover:!text-[var(--fg)]`}
           onClick={(e) => {
             e.stopPropagation();
             toggleFavorite(id);
@@ -140,6 +145,11 @@ const CURSORS: { v: CursorMode; label: string; icon: string }[] = [
   { v: "arrow", label: "Arrow", icon: "arrowc" },
   { v: "eraser", label: "Eraser", icon: "eraser" },
 ];
+// Có trên TV nhưng chưa làm - hiện disabled để danh sách giống TV
+const CURSOR_SOON = [
+  { label: "Demonstration", icon: "demo", soon: true },
+  { label: "Magic", icon: "magic", soon: true },
+];
 
 function CursorButton() {
   const { tool, cursor, api } = useDrawingStore();
@@ -173,15 +183,24 @@ function CursorButton() {
           <div className="px-3 pb-1 pt-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
             CURSORS
           </div>
-          {CURSORS.map((c) => (
-            <div
-              key={c.v}
-              className="flex cursor-pointer items-center gap-3 px-3 py-1.5 text-sm hover:bg-[var(--hover)]"
-              onClick={() => choose(c.v)}
-            >
-              <ToolIcon id={c.icon} /> {c.label}
-            </div>
-          ))}
+          {/* thứ tự như TV: con trỏ, (Demonstration, Magic chưa có), vạch ngăn, Eraser */}
+          {[...CURSORS.slice(0, 3), ...CURSOR_SOON, null, CURSORS[3]].map((c, i) =>
+            c === null ? (
+              <div key={`sep${i}`} className="my-1 h-px bg-[var(--border)]" />
+            ) : "soon" in c ? (
+              <div key={c.icon} className="flex h-10 items-center gap-2 px-2.5 text-sm opacity-40" title="Sắp có">
+                <ToolIcon id={c.icon} /> {c.label}
+              </div>
+            ) : (
+              <div
+                key={c.v}
+                className={`flex h-10 cursor-pointer items-center gap-2 px-2.5 text-sm hover:bg-[var(--hover)] ${cursor === c.v ? "text-[var(--accent)]" : ""}`}
+                onClick={() => choose(c.v)}
+              >
+                <ToolIcon id={c.icon} /> {c.label}
+              </div>
+            ),
+          )}
         </Flyout>
       )}
     </div>

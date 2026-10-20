@@ -25,6 +25,17 @@ body {
   /* cùng font + cỡ chữ với TradingView */
   font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
   font-size: 14px;
+  /* như TradingView: kéo/click trên header, toolbar, chart... không bôi đen chữ */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ô nhập liệu vẫn chọn/copy chữ được bình thường */
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 [data-theme="dark"] {
@@ -34,6 +45,7 @@ body {
   --border: #2a2e39;
   --hover: #2a2e39;
   --accent: #2962ff;
+  --panel: #1f1f1f; /* thanh nổi (favorites, style drawing) - đo từ TradingView */
 }
 
 [data-theme="light"] {
@@ -43,4 +55,5 @@ body {
   --border: #e0e3eb;
   --hover: #f0f3fa;
   --accent: #2962ff;
+  --panel: #ffffff;
 }

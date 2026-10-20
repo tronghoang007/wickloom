@@ -100,12 +100,13 @@ export default function StylePanel() {
 
   return (
     <div
-      className="absolute left-1/2 top-12 z-20 flex items-center gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-1.5 py-1 text-[var(--fg)] shadow-lg"
+      className="absolute left-1/2 top-12 z-20 flex h-[38px] select-none items-center gap-0.5 rounded-md bg-[var(--panel)] px-1 text-[var(--fg)] shadow-[0_2px_4px_rgba(0,0,0,0.4)]"
       style={{ transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)` }}
     >
       <div
-        className="mr-1 flex h-8 w-4 cursor-grab items-center justify-center touch-none"
+        className="mr-1 flex h-9 w-4 cursor-grab items-center justify-center touch-none active:cursor-grabbing"
         onPointerDown={(e) => {
+          e.preventDefault(); // kéo thanh không bôi đen (select) chữ trên trang
           e.currentTarget.setPointerCapture(e.pointerId);
           dragRef.current = {
             sx: e.clientX,

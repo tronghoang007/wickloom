@@ -332,7 +332,12 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       if (!a) return;
       if (!this.draft) {
         this.draft = this.newDraft(tool);
-        if (spec.oneClick) return this.finish(spec.oneClick(a, TF_SECONDS[this.o.getTf()] ?? 60));
+        if (spec.oneClick) {
+          const top = this.series?.coordinateToPrice(0);
+          const bot = this.series?.coordinateToPrice(this.o.container.clientHeight);
+          const span = top != null && bot != null ? Math.abs(top - bot) : 0;
+          return this.finish(spec.oneClick(a, TF_SECONDS[this.o.getTf()] ?? 60, span));
+        }
         this.draft.points = [a];
         this.placed = 1;
         if (spec.n === 1) return this.finish([a]);

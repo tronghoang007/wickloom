@@ -22,7 +22,7 @@ export type ToolSpec = {
   id: string;
   label: string;
   n: number; // số điểm; 0 = nhiều điểm (double-click/Enter để kết thúc), -1 = vẽ tay
-  oneClick?: (a: Anchor, step: number) => Anchor[]; // 1 click tạo đủ điểm mặc định
+  oneClick?: (a: Anchor, step: number, span: number) => Anchor[]; // 1 click tạo đủ điểm mặc định; span = khoảng giá đang hiển thị
   build: (c: Ctx) => Shape[];
   handles?: (c: Ctx) => Pt[];
   style?: Partial<Pick<Drawing, "color" | "width" | "dash">>;
@@ -340,7 +340,8 @@ function position(c: Ctx): Shape[] {
     out.push(
       txt({ x: cx, y: t.y + (t.y < e.y ? -14 : 14) }, `Target: ${c.fp(dT)} (${((dT / pe.price) * 100).toFixed(3)}%) ${(dT / tick).toLocaleString(undefined, { maximumFractionDigits: 1 })}, Amount: ${money(qty * o.lot * dT)}`, { align: "center", bg: o.profit, color: tc, size: 12 }),
       txt({ x: cx, y: s.y + (s.y > e.y ? 14 : -14) }, `Stop: ${c.fp(dS)} (${((dS / pe.price) * 100).toFixed(3)}%) ${(dS / tick).toLocaleString(undefined, { maximumFractionDigits: 1 })}, Amount: ${money(riskAmt)}`, { align: "center", bg: o.stop, color: tc, size: 12 }),
-      txt({ x: cx, y: e.y + (long ? -26 : 26) }, `${closed ? "Closed" : "Open"} PnL: ${money(pnl)}, Qty: ${qty}\nRisk/reward ratio: ${(dT / dS).toFixed(2)}`, { align: "center", bg: pnl >= 0 ? o.profit : o.stop, border: "#ffffff", color: tc, size: 12 }),
+      // như TV: nhãn PnL nằm giữa, ngay trên đường entry, không viền
+      txt({ x: cx, y: e.y }, `${closed ? "Closed" : "Open"} P&L: ${money(pnl)}, Qty: ${qty}\nRisk/Reward Ratio: ${(dT / dS).toFixed(2)}`, { align: "center", bg: pnl >= 0 ? o.profit : o.stop, color: tc, size: 12 }),
     );
   }
   return out;
@@ -354,12 +355,17 @@ const posConstrain = (p: Anchor[], i: number) => {
   else if (i === 2) p[2].price = p[0].price;
 };
 
-const posAt = (a: Anchor, s: number, tgt: number, stop: number): Anchor[] => [
-  a,
-  { time: a.time, price: a.price * tgt },
-  { time: a.time + s * 8, price: a.price },
-  { time: a.time, price: a.price * stop },
-];
+// Như TV: 1 click tạo khối vừa mắt theo khung đang xem - target/stop cách entry ~8% khoảng
+// giá hiển thị, rộng 20 nến (trước: ±0.1% giá, 8 nến -> khối vài px, nhãn đè nhau).
+const posAt = (a: Anchor, s: number, dir: 1 | -1, span: number): Anchor[] => {
+  const d = span > 0 ? span * 0.08 : a.price * 0.002;
+  return [
+    a,
+    { time: a.time, price: a.price + dir * d },
+    { time: a.time + s * 20, price: a.price },
+    { time: a.time, price: a.price - dir * d },
+  ];
+};
 
 const noteShapes = (c: Ctx, text: string): Shape[] => {
   const [a, b] = c.p;
@@ -663,8 +669,8 @@ export const TOOLS: ToolSpec[] = [
   },
 
   // Forecasting
-  { id: "longpos", label: "Long position", n: 4, panel: "position", constrain: posConstrain, oneClick: (a, s) => posAt(a, s, 1.001, 0.999), build: position },
-  { id: "shortpos", label: "Short position", n: 4, panel: "position", constrain: posConstrain, oneClick: (a, s) => posAt(a, s, 0.999, 1.001), build: position },
+  { id: "longpos", label: "Long position", n: 4, panel: "position", constrain: posConstrain, oneClick: (a, s, span) => posAt(a, s, 1, span), build: position },
+  { id: "shortpos", label: "Short position", n: 4, panel: "position", constrain: posConstrain, oneClick: (a, s, span) => posAt(a, s, -1, span), build: position },
   { id: "forecast", label: "Position forecast", n: 2, build: () => [], disabled: true },
   { id: "barspattern", label: "Bars pattern", n: 2, build: () => [], disabled: true },
   { id: "ghost", label: "Ghost feed", n: 2, build: () => [], disabled: true },
@@ -874,7 +880,7 @@ export type Group = { id: string; label: string; icon: string; sections: Section
 
 export const GROUPS: Group[] = [
   {
-    id: "lines", label: "Trend line tools", icon: "trendline",
+    id: "lines", label: "Trend tools", icon: "trendline",
     sections: [
       { title: "LINES", ids: ["trendline", "ray", "infoline", "extended", "trendangle", "hline", "hray", "vline", "crossline"] },
       { title: "CHANNELS", ids: ["channel", "regression", "flat", "disjoint"] },
@@ -884,7 +890,7 @@ export const GROUPS: Group[] = [
   {
     id: "fib", label: "Gann and Fibonacci tools", icon: "fib",
     sections: [
-      { ids: ["fib", "fibext", "fibchannel", "fibtimezone", "fibfan", "fibtimeext", "fibcircles", "fibspiral", "fibarcs", "fibwedge", "pitchfan"] },
+      { title: "FIBONACCI", ids: ["fib", "fibext", "fibchannel", "fibtimezone", "fibfan", "fibtimeext", "fibcircles", "fibspiral", "fibarcs", "fibwedge", "pitchfan"] },
       { title: "GANN", ids: ["gannbox", "gannsqfixed", "gannsquare", "gannfan"] },
     ],
   },
@@ -899,7 +905,7 @@ export const GROUPS: Group[] = [
   {
     id: "forecast", label: "Forecasting and measurement tools", icon: "longpos",
     sections: [
-      { ids: ["longpos", "shortpos", "forecast", "barspattern", "ghost", "sector"] },
+      { title: "FORECASTING", ids: ["longpos", "shortpos", "forecast", "barspattern", "ghost", "sector"] },
       { title: "VOLUME-BASED", ids: ["avwap", "frvp", "avp"] },
       { title: "MEASURERS", ids: ["pricerange", "daterange", "daterangeprice"] },
     ],
@@ -913,7 +919,7 @@ export const GROUPS: Group[] = [
     ],
   },
   {
-    id: "text", label: "Text and notes", icon: "text",
+    id: "text", label: "Annotation tools", icon: "text",
     sections: [
       { title: "TEXT AND NOTES", ids: ["text", "note", "pricenote", "pin", "table", "callout", "comment", "pricelabel", "signpost", "flag"] },
       { title: "CONTENT", ids: ["image", "post", "idea"] },

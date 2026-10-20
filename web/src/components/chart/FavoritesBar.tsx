@@ -33,12 +33,13 @@ export default function FavoritesBar() {
   return (
     <div
       ref={barRef}
-      className="absolute left-1/2 top-2 z-20 flex max-w-[calc(100%-16px)] items-center gap-0.5 overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--bg)] px-1.5 py-1 shadow-lg [scrollbar-width:none]"
+      className="absolute left-1/2 top-2 z-20 flex h-[38px] max-w-[calc(100%-16px)] select-none items-center overflow-x-auto rounded-md bg-[var(--panel)] px-1 shadow-[0_2px_4px_rgba(0,0,0,0.4)] [scrollbar-width:none]"
       style={{ transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)` }}
     >
       <div
-        className="mr-1 flex h-8 w-4 shrink-0 cursor-grab touch-none items-center justify-center text-[var(--muted)]"
+        className="mr-1 flex h-9 w-4 shrink-0 cursor-grab touch-none items-center justify-center text-[var(--muted)] active:cursor-grabbing"
         onPointerDown={(e) => {
+          e.preventDefault(); // không để kéo thanh thành bôi đen (select) chữ trên trang
           e.currentTarget.setPointerCapture(e.pointerId);
           dragRef.current = {
             sx: e.clientX,
@@ -83,7 +84,7 @@ export default function FavoritesBar() {
             key={id}
             title={SPEC[id].label}
             onClick={() => api?.setTool(tool === id ? null : id)}
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded ${tool === id ? "bg-[var(--hover)] text-[var(--accent)]" : "hover:bg-[var(--hover)]"}`}
+            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded ${tool === id ? "bg-[var(--hover)] text-[var(--accent)]" : "hover:bg-[var(--hover)]"}`}
           >
             <ToolIcon id={id} />
           </button>
