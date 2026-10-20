@@ -177,6 +177,10 @@ const olderUsable = (
   (firstT - older[older.length - 1].t <= gapLimit(tf) ||
     (req?.t === firstT && req.done));
 
+function setTabTitle(title: string) {
+  if (document.title !== title) document.title = title;
+}
+
 function mergeBars(cur: Bar[], add: Bar[]) {
   const m = new Map(cur.map((b) => [b.t, b]));
   for (const b of add) if (!m.has(b.t)) m.set(b.t, b);
@@ -198,6 +202,7 @@ export default function Chart() {
   const loadingRef = useRef(false);
   const exhaustedRef = useRef(false);
   const backfillRef = useRef<{ t: number; at: number; done: boolean } | null>(null);
+  const prevCloseRef = useRef<number | null>(null);
   const indRef = useRef<IndicatorManager | null>(null);
   const drawRef = useRef<DrawingManager | null>(null);
   const indicators = useIndicatorStore((s) => s.list);
@@ -244,6 +249,25 @@ export default function Chart() {
       display().map((b) => toPoint(b, typeRef.current)) as never,
     );
     volRef.current?.setData(barsRef.current.map(volPoint));
+    updateTitle();
+  };
+
+  // Tiêu đề tab kiểu TradingView: "XAUUSDm 4,122.741 ▼ −0.05%" (% so với giá đóng cửa
+  // phiên D1 trước).
+  const updateTitle = () => {
+    const st = useChartStore.getState();
+    const last = barsRef.current[barsRef.current.length - 1];
+    let title = "Invest Charts";
+    if (last) {
+      const d = st.symbols.find((x) => x.name === st.symbol)?.digits ?? digitsRef.current;
+      title = `${st.symbol} ${last.c.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+      const prev = prevCloseRef.current;
+      if (prev) {
+        const pct = ((last.c - prev) / prev) * 100;
+        title += ` ${pct >= 0 ? "▲ +" : "▼ −"}${Math.abs(pct).toFixed(2)}%`;
+      }
+    }
+    setTabTitle(title);
   };
 
   const refreshExtras = () => {
@@ -382,7 +406,10 @@ export default function Chart() {
   useEffect(() => {
     const chart = createChart(boxRef.current!, {
       autoSize: true,
-      layout: { fontSize: 12, attributionLogo: true },
+      // Logo TradingView trên chart tắt; link bắt buộc theo giấy phép lightweight-charts
+      // nằm ở thanh dưới ("Charts by TradingView"). Attribution notice:
+      // TradingView Lightweight Charts™ Copyright (c) TradingView, Inc. https://www.tradingview.com/
+      layout: { fontSize: 12, attributionLogo: false },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: { style: LineStyle.Dashed, width: 1 },
@@ -715,6 +742,28 @@ export default function Chart() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selecting]);
 
+  // giá đóng cửa phiên D1 trước cho % thay đổi trên tiêu đề tab
+  useEffect(() => {
+    let alive = true;
+    prevCloseRef.current = null;
+    const loadPrev = () =>
+      fetchBars(symbol, "D1", undefined, 2)
+        .then((d) => {
+          if (!alive || d.length === 0) return;
+          const hasToday = d[d.length - 1].t + 86400 > Date.now() / 1000;
+          prevCloseRef.current = hasToday ? (d[d.length - 2]?.c ?? null) : d[d.length - 1].c;
+          updateTitle();
+        })
+        .catch(() => {});
+    loadPrev();
+    const id = setInterval(loadPrev, 10 * 60 * 1000); // qua ngày mới
+    return () => {
+      alive = false;
+      clearInterval(id);
+      setTabTitle("Invest Charts");
+    };
+  }, [symbol]);
+
   // data + realtime
   useEffect(() => {
     let alive = true;
@@ -785,6 +834,7 @@ export default function Chart() {
       else seriesRef.current?.update(toPoint(b, typeRef.current) as never);
       volRef.current?.update(volPoint(b));
       refreshExtras();
+      updateTitle();
       setLegend((cur) =>
         cur && cur.bar.t !== b.t && cur.bar !== last
           ? cur
@@ -1068,6 +1118,14 @@ export default function Chart() {
           ))}
         </div>
         <div className="flex items-center gap-2">
+          <a
+            href="https://www.tradingview.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--muted)] hover:underline"
+          >
+            Charts by TradingView
+          </a>
           <span className="text-[var(--muted)]">{clock}</span>
           {scaleBtn("percent", "%")}
           {scaleBtn("log", "log")}
