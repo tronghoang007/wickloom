@@ -1,0 +1,112 @@
+import asyncio
+import json
+import os
+import tempfile
+import time
+
+os.environ["TV_DATA_DIR"] = tempfile.mkdtemp()
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import state, tcp_server  # noqa: E402
+from app.aggregator import bar_open  # noqa: E402
+from app.config import EA_TOKEN, is_stale  # noqa: E402
+from app.main import app  # noqa: E402
+
+
+def test_bar_open():
+    assert bar_open(125, "M1", 0) == 120
+    assert bar_open(3661, "H1", 0) == 3600
+    assert bar_open(3661, "H1", 7200) == 3600  # offset chẵn giờ
+
+
+def test_week_starts_sunday():
+    # 1970-01-01 là thứ Năm; Chủ nhật trước đó = -4 ngày
+    assert bar_open(0, "W1", 0) == -4 * 86400
+
+
+async def _run_ea(lines, token=EA_TOKEN):
+    """Giả làm TVBridge: mở TCP tới 1 server test riêng, gửi hello + các dòng NDJSON,
+    rồi đợi server xử lý hết và tự đóng connection (EOF) trước khi thoát."""
+    server = await tcp_server.start_server(host="127.0.0.1", port=0)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write((json.dumps({"type": "hello", "token": token}) + "\n").encode("utf-8"))
+    for line in lines:
+        writer.write((json.dumps(line) + "\n").encode("utf-8"))
+    writer.write_eof()
+    await writer.drain()
+    await reader.read()  # chờ tới khi server xử lý xong và đóng kết nối (EOF)
+    writer.close()
+    server.close()
+    await server.wait_closed()
+
+
+def send_ea(lines, token=EA_TOKEN):
+    asyncio.run(_run_ea(lines, token))
+
+
+def test_bad_token_rejected():
+    send_ea(
+        [{"type": "bars", "symbol": "REJECT", "tf": "M1",
+          "bars": [{"t": 60, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}]}],
+        token="wrong-token",
+    )
+    c = TestClient(app)
+    assert c.get("/bars", params={"symbol": "REJECT", "tf": "M1"}).json() == []
+
+
+def test_ingest_and_query():
+    send_ea([
+        {"type": "bars", "symbol": "EURUSD", "tf": "M1", "bars": [
+            {"t": 60, "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 3},
+            {"t": 120, "o": 1.5, "h": 2, "l": 1, "c": 1.8, "v": 4}]},
+        {"type": "bars", "symbol": "EURUSD", "tf": "M1", "bars": [
+            {"t": 120, "o": 1.5, "h": 3, "l": 1, "c": 2.0, "v": 5}]},
+    ])
+    c = TestClient(app)
+    rows = c.get("/bars", params={"symbol": "EURUSD", "tf": "M1"}).json()
+    assert [r["t"] for r in rows] == [60, 120] and rows[1]["h"] == 3
+    rows = c.get("/bars", params={"symbol": "EURUSD", "tf": "M1", "to": 120}).json()
+    assert [r["t"] for r in rows] == [60]
+
+
+def test_ticks_aggregate_and_meta():
+    send_ea([{"type": "ticks", "symbol": "XAUUSD", "ticks": [
+        {"t_msc": 60_000, "bid": 10}, {"t_msc": 70_000, "bid": 12}, {"t_msc": 130_000, "bid": 11}]}])
+    c = TestClient(app)
+    rows = c.get("/bars", params={"symbol": "XAUUSD", "tf": "M1"}).json()
+    assert rows == [{"t": 60, "o": 10, "h": 12, "l": 10, "c": 12, "v": 2}]
+    c.put("/layouts/a", params={"scope": "x"}, json={"k": 1})
+    assert c.get("/layouts/a").json()["data"] == {"k": 1}
+
+
+def test_is_stale():
+    assert is_stale(None, "M1") is True
+    assert is_stale(int(time.time()), "M1") is False
+    assert is_stale(int(time.time()) - 10_000, "M1") is True
+
+
+def test_request_backfill_queues_when_no_ea_connected():
+    state.pending_backfill.clear()
+    state.request_backfill("FOO", "M1", count=10, pos=5)
+    assert any(c["symbol"] == "FOO" and c.get("pos") == 5 for c in state.pending_backfill)
+    state.pending_backfill.clear()
+    state.request_backfill("FOO", "M1", count=10, before=12345)
+    assert any(c["symbol"] == "FOO" and c.get("before") == 12345 for c in state.pending_backfill)
+
+
+def test_broker_switch_archives_bars_and_clears_symbols():
+    assert state.check_broker_switch("") is False
+    first = state.meta.get("settings", "broker") is None
+    name_a = "BrokerA" if first else "BrokerA-again"
+    assert state.check_broker_switch(name_a) is (not first)
+
+    state.bars.upsert("ANY", "M1", [{"t": 60, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}])
+    state.symbols["ANY"] = {"name": "ANY"}
+
+    assert state.check_broker_switch("BrokerB") is True
+    archive = state.resync_after_broker_switch()
+    assert archive is not None and archive.exists()
+    assert state.symbols == {}
+    assert state.bars.last("ANY", "M1") is None
