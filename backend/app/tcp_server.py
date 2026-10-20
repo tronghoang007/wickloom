@@ -17,13 +17,15 @@ STREAM_LIMIT = 4 * 1024 * 1024
 
 
 def _handle_symbols(body: SymbolsIn) -> None:
+    """EA luôn gửi TOÀN BỘ symbol của account -> thay hẳn danh sách cũ (đổi account/loại
+    account thì symbol không còn giao dịch được phải biến mất khỏi ô tìm kiếm)."""
     state.broker_offset["value"] = body.broker_utc_offset
-    items = []
-    for s in body.symbols:
-        d = s.model_dump()
-        state.symbols[s.name] = d
-        items.append((s.name, s.type, d))
-    state.meta.put_many("symbols", items)
+    fresh = {s.name: s.model_dump() for s in body.symbols}
+    for name in [n for n in state.symbols if n not in fresh]:
+        del state.symbols[name]
+    state.symbols.update(fresh)
+    state.meta.clear("symbols")
+    state.meta.put_many("symbols", [(n, d["type"], d) for n, d in fresh.items()])
 
 
 def _handle_ticks(body: TicksIn) -> None:
@@ -58,6 +60,17 @@ async def _write(writer: asyncio.StreamWriter, msg: Dict[str, Any]) -> None:
     await writer.drain()
 
 
+async def _reject(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, message: str) -> None:
+    """Gửi lỗi rồi half-close và đọc bỏ phần EA đã gửi tiếp (symbols ngay sau hello):
+    đóng thẳng khi còn dữ liệu chưa đọc -> RST, EA có thể mất luôn message lỗi."""
+    await _write(writer, {"type": "error", "message": message})
+    try:
+        writer.write_eof()
+        await asyncio.wait_for(reader.read(), 2)
+    except (asyncio.TimeoutError, ConnectionError, asyncio.LimitOverrunError):
+        pass
+
+
 async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     peer = writer.get_extra_info("peername")
     registered = False
@@ -70,14 +83,25 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
         except ValueError:
             return
         if hello.get("type") != "hello" or hello.get("token") != EA_TOKEN:
-            await _write(writer, {"type": "error", "message": "bad token"})
+            await _reject(reader, writer, "bad token")
             return
 
-        if state.check_broker_switch(hello.get("broker", "")):
-            archive = state.resync_after_broker_switch()
-            print(f"TVBridge {peer}: doi broker -> archive bar cache vao {archive}")
+        company, server = hello.get("broker", ""), hello.get("server", "")
+        ident = server or company
+        active = state.ea_hub.active_ident()
+        if active and ident and active != ident:
+            # Chỉ 1 nguồn dữ liệu 1 lúc: 2 EA khác server cùng chạy sẽ làm backend resync
+            # qua lại liên tục và trộn bar của 2 server.
+            msg = f"backend dang nhan du lieu tu {active}, tu choi {ident} - tat EA kia truoc"
+            print(f"TVBridge {peer}: {msg}")
+            await _reject(reader, writer, msg)
+            return
 
-        state.ea_hub.add(writer)
+        if state.check_broker_switch(company, server):
+            archive = state.resync_after_broker_switch()
+            print(f"TVBridge {peer}: doi broker/server -> {ident}, archive bar cache vao {archive}")
+
+        state.ea_hub.add(writer, ident)
         registered = True
         print(f"TVBridge connected: {peer}")
 
@@ -90,8 +114,10 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
         for cmd in pending:
             await _write(writer, cmd)
 
+        queued = {(c["symbol"], c["tf"]) for c in pending}
         for sym, tf in state.hub.subscribed_pairs():
-            state.request_catchup(sym, tf)
+            if (sym, tf) not in queued:  # đã có lệnh xếp hàng lúc EA offline vừa gửi ở trên
+                state.request_catchup(sym, tf)
 
         while True:
             line = await reader.readline()

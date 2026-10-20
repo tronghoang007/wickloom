@@ -6,7 +6,7 @@ import { useDrawingStore } from "@/drawings/store";
 import { IndicatorManager } from "@/indicators/manager";
 import { byId } from "@/indicators/registry";
 import { useIndicatorStore } from "@/indicators/store";
-import { TF_SECONDS, WS_URL, fetchBars, triggerBackfillAt, type Bar } from "@/lib/api";
+import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay, useReplayStore } from "@/replay/store";
 import { useChartStore, type ChartType, type ScaleMode } from "@/store/chart";
 import {
@@ -749,7 +749,17 @@ export default function Chart() {
       }
       barsRef.current = bars;
       setLegend(legendAt(bars.length - 1));
-      setStatus(bars.length ? "" : "Đang chờ dữ liệu từ MT5…");
+      // Đổi account/loại account (vd Standard "XAUUSDm" -> Pro "XAUUSD"): symbol không còn
+      // trong danh sách EA gửi -> báo rõ thay vì chờ mãi.
+      const known = useChartStore.getState().symbols;
+      const missing = !bars.length && known.length > 0 && !known.some((s) => s.name === symbol);
+      setStatus(
+        bars.length
+          ? ""
+          : missing
+            ? `${symbol} không có trên account MT5 hiện tại - chọn symbol khác`
+            : "Đang chờ dữ liệu từ MT5…",
+      );
       render();
       refreshExtras();
       chartRef.current?.priceScale("right").setAutoScale(true);
@@ -760,7 +770,7 @@ export default function Chart() {
         });
       } else {
         clearTimeout(pollTimer);
-        pollTimer = setTimeout(load, 800);
+        pollTimer = setTimeout(load, missing ? 5000 : 800);
       }
     };
     load();
@@ -788,6 +798,20 @@ export default function Chart() {
         ws!.send(JSON.stringify({ action: "subscribe", symbol, tf }));
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
+        if (m.type === "reset") {
+          // Backend đổi sang broker/server MT5 khác: bar trong bộ nhớ là của nguồn cũ ->
+          // bỏ hết, tải lại từ đầu (không ghép với dữ liệu của nguồn mới).
+          barsRef.current = [];
+          exhaustedRef.current = false;
+          backfillRef.current = null;
+          render();
+          refreshExtras();
+          fetchSymbols()
+            .then((symbols) => useChartStore.getState().set({ symbols }))
+            .catch(() => {});
+          load();
+          return;
+        }
         if (m.symbol !== symbol) return;
         if (m.type === "bars_loaded" && m.tf === tf) {
           if (useReplayStore.getState().active) {

@@ -25,13 +25,13 @@ def test_week_starts_sunday():
     assert bar_open(0, "W1", 0) == -4 * 86400
 
 
-async def _run_ea(lines, token=EA_TOKEN):
+async def _run_ea(lines, token=EA_TOKEN, hello=None):
     """Giả làm TVBridge: mở TCP tới 1 server test riêng, gửi hello + các dòng NDJSON,
     rồi đợi server xử lý hết và tự đóng connection (EOF) trước khi thoát."""
     server = await tcp_server.start_server(host="127.0.0.1", port=0)
     port = server.sockets[0].getsockname()[1]
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    writer.write((json.dumps({"type": "hello", "token": token}) + "\n").encode("utf-8"))
+    writer.write((json.dumps({"type": "hello", "token": token, **(hello or {})}) + "\n").encode("utf-8"))
     for line in lines:
         writer.write((json.dumps(line) + "\n").encode("utf-8"))
     writer.write_eof()
@@ -42,8 +42,8 @@ async def _run_ea(lines, token=EA_TOKEN):
     await server.wait_closed()
 
 
-def send_ea(lines, token=EA_TOKEN):
-    asyncio.run(_run_ea(lines, token))
+def send_ea(lines, token=EA_TOKEN, hello=None):
+    asyncio.run(_run_ea(lines, token, hello))
 
 
 def test_bad_token_rejected():
@@ -115,17 +115,61 @@ def test_request_backfill_queues_when_no_ea_connected():
     assert any(c["symbol"] == "FOO" and c.get("before") == 12345 for c in state.pending_backfill)
 
 
-def test_broker_switch_archives_bars_and_clears_symbols():
-    assert state.check_broker_switch("") is False
-    first = state.meta.get("settings", "broker") is None
-    name_a = "BrokerA" if first else "BrokerA-again"
-    assert state.check_broker_switch(name_a) is (not first)
+def _set_broker(data):
+    state.meta.delete("settings", "broker")
+    if data is not None:
+        state.meta.put("settings", "broker", "", data)
 
+
+def test_broker_switch_by_server():
+    _set_broker(None)
+    assert state.check_broker_switch("", "") is False
+    assert state.check_broker_switch("Exness", "Exness-Trial17") is False  # lần đầu: chỉ ghi nhớ
+    assert state.check_broker_switch("Exness", "Exness-Trial17") is False  # khác login, cùng server
+    assert state.check_broker_switch("Exness", "Exness-Real8") is True  # cùng công ty, khác server
+    assert state.check_broker_switch("XM", "XMGlobal-MT5 7") is True  # khác broker
+
+
+def test_broker_switch_legacy_records():
+    _set_broker({"name": "Exness"})  # bản lưu từ EA < v2.09 (chỉ tên công ty)
+    assert state.check_broker_switch("Exness", "Exness-Trial17") is False  # nâng cấp EA: không xoá cache
+    assert state.meta.get("settings", "broker")["data"]["server"] == "Exness-Trial17"
+    assert state.check_broker_switch("Exness", "") is False  # EA cũ chạy lại, cùng công ty
+    assert state.check_broker_switch("XM", "") is True
+
+
+def test_broker_switch_archives_bars_and_clears_symbols():
     state.bars.upsert("ANY", "M1", [{"t": 60, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}])
     state.symbols["ANY"] = {"name": "ANY"}
+    state.pending_backfill.append({"type": "backfill", "symbol": "ANY", "tf": "M1", "count": 1, "before": 60})
 
-    assert state.check_broker_switch("BrokerB") is True
     archive = state.resync_after_broker_switch()
     assert archive is not None and archive.exists()
     assert state.symbols == {}
     assert state.bars.last("ANY", "M1") is None
+    assert state.pending_backfill == []
+
+
+def test_second_ea_from_other_server_rejected():
+    fake = object()
+    state.ea_hub.add(fake, "SRV-A")
+    try:
+        send_ea([{"type": "bars", "symbol": "OTHERSRV", "tf": "M1",
+                  "bars": [{"t": 60, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}]}],
+                hello={"broker": "B", "server": "SRV-B"})
+        assert state.bars.last("OTHERSRV", "M1") is None
+        send_ea([{"type": "bars", "symbol": "SAMESRV", "tf": "M1",
+                  "bars": [{"t": 60, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}]}],
+                hello={"broker": "A", "server": "SRV-A"})
+        assert state.bars.last("SAMESRV", "M1") is not None
+    finally:
+        state.ea_hub.remove(fake)
+
+
+def test_symbols_replaced_not_merged():
+    sym = lambda n: {"name": n, "digits": 2, "tick_size": 0.01, "type": "metal"}
+    send_ea([{"type": "symbols", "symbols": [sym("XAUUSDm"), sym("EURUSDm")]}])
+    send_ea([{"type": "symbols", "symbols": [sym("XAUUSD")]}])  # đổi sang account Pro
+    names = [s["name"] for s in TestClient(app).get("/symbols").json()]
+    assert names == ["XAUUSD"]
+    assert [r["id"] for r in state.meta.list("symbols")] == ["XAUUSD"]

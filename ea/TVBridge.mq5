@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TVBridge.mq5 - đẩy symbol/tick/bar sang backend qua TCP socket   |
-//| VERSION: 2.08 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
+//| VERSION: 2.09 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
 //| EnsureConnected() để biết bản đang chạy có phải bản mới nhất)    |
 //| - 2.00: chuyển từ WebRequest sang TCP socket                     |
 //| - 2.01: fix SendLine coi SocketSend=0 (buffer đầy) là lỗi fatal  |
@@ -25,14 +25,16 @@
 //|   sổ thời gian cố định (M1 rơi vào gap lễ dài -> 0 bar, dừng sớm) |
 //|   subscribe symbol mới chỉ stream tick từ hiện tại (msc=0 làm    |
 //|   CopyTicks trả cả lịch sử tick -> backend treo, ghi đè bar)     |
+//| - 2.09: hello gửi thêm ACCOUNT_SERVER (backend nhận diện nguồn    |
+//|   theo server); bị server từ chối thì chờ 30s mới kết nối lại     |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.08"
+#property version "2.09"
 
-#define EA_VERSION "2.08"
+#define EA_VERSION "2.09"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -45,6 +47,7 @@ int g_sock = INVALID_HANDLE;
 string g_rx = "";
 ulong g_lastConnectTryMs = 0;
 ulong g_lastPingMs = 0;
+ulong g_backoffUntilMs = 0; // server tu choi (token sai / dang nhan EA khac) -> cho lau hon
 
 string g_subs[];
 ulong g_lastMsc[];
@@ -120,7 +123,7 @@ bool EnsureConnected()
   if (g_sock != INVALID_HANDLE)
     return true;
   ulong now = GetTickCount64();
-  if (now - g_lastConnectTryMs < 2000) // throttle reconnect, tránh spam
+  if (now - g_lastConnectTryMs < 2000 || now < g_backoffUntilMs) // throttle reconnect, tránh spam
     return false;
   g_lastConnectTryMs = now;
 
@@ -138,7 +141,8 @@ bool EnsureConnected()
     return false;
   }
 
-  string hello = "{\"type\":\"hello\",\"token\":\"" + Esc(Token) + "\",\"broker\":\"" + Esc(AccountInfoString(ACCOUNT_COMPANY)) + "\"}";
+  // server = nguon du lieu (backend resync khi doi server; cung server khac login thi giu cache)
+  string hello = "{\"type\":\"hello\",\"token\":\"" + Esc(Token) + "\",\"broker\":\"" + Esc(AccountInfoString(ACCOUNT_COMPANY)) + "\",\"server\":\"" + Esc(AccountInfoString(ACCOUNT_SERVER)) + "\"}";
   if (!SendLine(hello))
     return false;
   PostSymbols(); // luôn gửi lại symbols mỗi lần (re)connect - không chờ server hỏi need_symbols
@@ -444,8 +448,9 @@ void HandleCommand(string line)
   }
   else if (type == "error")
   {
-    PrintFormat("TVBridge: server bao loi: %s", JsonStr(line, "message"));
-    CloseSocket(); // token sai hoặc lỗi khác - đóng, không tự retry liên tục với token sai
+    PrintFormat("TVBridge: server bao loi: %s (thu lai sau 30s)", JsonStr(line, "message"));
+    CloseSocket(); // token sai / backend đang nhận EA của server khác - đóng, không retry mỗi 2s
+    g_backoffUntilMs = GetTickCount64() + 30000;
   }
 }
 

@@ -29,6 +29,14 @@ class Hub:
                     # Already on the event loop thread
                     asyncio.ensure_future(self._send(ws, msg))
 
+    def broadcast(self, msg: Dict[str, Any]) -> None:
+        """Gửi tới mọi client (vd "reset" khi đổi broker/server)."""
+        for ws in list(self.clients):
+            if self._loop is not None and self._loop.is_running():
+                asyncio.run_coroutine_threadsafe(self._send(ws, msg), self._loop)
+            else:
+                asyncio.ensure_future(self._send(ws, msg))
+
     async def _send(self, ws: WebSocket, msg: Dict[str, Any]) -> None:
         try:
             await ws.send_json(msg)
