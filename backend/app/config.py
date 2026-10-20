@@ -5,7 +5,7 @@ from typing import Optional
 
 DATA_DIR = Path(os.environ.get("TV_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 EA_TOKEN = os.environ.get("TV_TOKEN", "dev-token")
-BARS_DIR = DATA_DIR / "bars"  # cache parquet cũ (trước khi chuyển sang SQLite) - chỉ để migrate
+BARS_DIR = DATA_DIR / "bars"  # cache parquet cũ (trước khi chuyển sang SQLite) - dời đi khi đổi broker
 BARS_DB = DATA_DIR / "bars.sqlite"
 SQLITE_PATH = DATA_DIR / "meta.sqlite"
 

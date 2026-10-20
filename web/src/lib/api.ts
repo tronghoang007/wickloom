@@ -17,16 +17,8 @@ export async function fetchBars(symbol: string, tf: string, to?: number, limit =
   return r.ok ? r.json() : [];
 }
 
-export async function triggerBackfill(symbol: string, tf: string, count = 500, pos = 0): Promise<{ ok: boolean }> {
-  const r = await fetch(`${API}/backfill?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&count=${count}&pos=${pos}`, {
-    method: "POST",
-  });
-  return r.ok ? r.json() : { ok: false };
-}
-
-// Backfill neo theo mốc thời gian cụ thể (epoch UTC giây) - dùng khi nhảy thẳng tới 1
-// thời điểm trên 1 tf chưa từng tải (đổi timeframe lúc đang replay), khác với
-// `triggerBackfill` (theo index, dùng cho scroll-back tuần tự từ mới nhất).
+// Xin EA nạp `count` bar cũ hơn mốc `before` (epoch UTC giây): scroll-back và nhảy tới
+// 1 thời điểm chưa từng tải (đổi timeframe lúc đang replay).
 export async function triggerBackfillAt(symbol: string, tf: string, count = 500, before = 0): Promise<{ ok: boolean }> {
   const r = await fetch(`${API}/backfill?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&count=${count}&before=${before}`, {
     method: "POST",

@@ -25,28 +25,11 @@ export function Dot({ x, y }: { x: number; y: number }) {
   return <circle cx={x} cy={y} r={DOT_R} />;
 }
 
-export const Cursor = () => (
-  <Svg>
-    <path d="M5 3l14 8-6 2-2 6z" />
-  </Svg>
-);
 export const Trend = () => (
   <Svg>
     <path d="M5 19L19 5" />
     <Dot x={5} y={19} />
     <Dot x={19} y={5} />
-  </Svg>
-);
-export const HLine = () => (
-  <Svg>
-    <path d="M3 12h18" />
-    <Dot x={12} y={12} />
-  </Svg>
-);
-export const VLine = () => (
-  <Svg>
-    <path d="M12 3v18" />
-    <Dot x={12} y={12} />
   </Svg>
 );
 export const Ray = () => (
@@ -60,20 +43,10 @@ export const Arrow = () => (
     <path d="M5 19L19 5M10 5h9v9" />
   </Svg>
 );
-export const Rect = () => (
-  <Svg>
-    <rect x="5" y="6" width="14" height="12" />
-  </Svg>
-);
 export const Fib = () => (
   <Svg>
     <path d="M4 5h16M4 10h16M4 14h16M4 19h16" />
     <path d="M7 19L17 5" strokeDasharray="2 2" />
-  </Svg>
-);
-export const TextIcon = () => (
-  <Svg>
-    <path d="M5 6h14M12 6v13M9 19h6" />
   </Svg>
 );
 export const Magnet = () => (
@@ -130,11 +103,6 @@ export const PlusCircle = () => (
   <Svg size={22}>
     <circle cx="12" cy="12" r="8.5" />
     <path d="M12 8v8M8 12h8" />
-  </Svg>
-);
-export const Bell = () => (
-  <Svg size={20}>
-    <path d="M6 16v-5a6 6 0 0112 0v5l2 2H4zM10 21h4" />
   </Svg>
 );
 export const Replay = () => (
