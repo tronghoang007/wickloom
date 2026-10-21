@@ -720,3 +720,22 @@ describe("annotation (đo trên TV)", () => {
     expect(SPEC.callout.style?.color).toBe("#0097a7");
   });
 });
+
+describe("Price label, Flag (đo trên TV)", () => {
+  const mk = (type: string): Ctx => ({
+    d: { id: "x", type, points: [{ time: 100, price: 4140 }], color: "#2962ff", width: 1, locked: false, hidden: false },
+    p: [{ x: 100, y: 500 }], w: 1000, h: 1000, bars: [], tickSize: 0.001, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0, X: (t) => t, Y: () => 500, fp: (v) => v.toFixed(3), digits: 3,
+  });
+  it("Price label: giá chữ trắng đậm cỡ 14 phía trên-phải, góc nhọn chạm điểm", () => {
+    const [tail, label] = SPEC.pricelabel.build(mk("pricelabel"));
+    expect((tail as Extract<Shape, { k: "poly" }>).pts[0]).toEqual({ x: 100, y: 500 });
+    expect(label).toMatchObject({ k: "text", text: "4140.000", bold: true, size: 14, color: "#ffffff" });
+    expect((label as Extract<Shape, { k: "text" }>).at.y).toBeLessThan(500);
+  });
+  it("Flag: cán xám ngắn + lá cờ nhỏ", () => {
+    const [pole, flag] = SPEC.flag.build(mk("flag"));
+    expect(pole).toMatchObject({ k: "line", color: "#b2b5be", a: { x: 100, y: 500 }, b: { x: 100, y: 482 } });
+    expect(Math.max(...(flag as Extract<Shape, { k: "poly" }>).pts.map((q) => q.x)) - 100).toBe(12);
+  });
+});

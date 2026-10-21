@@ -1534,10 +1534,14 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
+    // TV: ô màu đường, giá chữ trắng đậm cỡ 14 ở phía trên-phải, góc dưới-trái nhọn chạm điểm
     id: "pricelabel", label: "Price label", n: 1,
     build: (c) => {
       const { x, y } = c.p[0];
-      return [poly([{ x, y }, { x: x + 8, y: y - 5 }, { x: x + 8, y: y + 5 }], { closed: true, fill: 1 }), txt({ x: x + 8, y }, c.fp(c.d.points[0].price), { align: "left", bg: c.d.color, size: 12 })];
+      return [
+        poly([{ x, y }, { x: x + 5, y: y - 14 }, { x: x + 15, y: y - 14 }], { closed: true, fill: 1 }),
+        txt({ x: x + 11, y: y - 24 }, c.fp(c.d.points[0].price), { align: "left", bg: c.d.color, color: "#ffffff", bold: true, size: 14 }),
+      ];
     },
   },
   {
@@ -1549,10 +1553,14 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
+    // TV: lá cờ nhỏ màu đường trên cán xám ngắn
     id: "flag", label: "Flag mark", n: 1,
     build: (c) => {
       const { x, y } = c.p[0];
-      return [seg({ x, y }, { x, y: y - 34 }), poly([{ x, y: y - 34 }, { x: x + 24, y: y - 27 }, { x, y: y - 20 }], { closed: true, fill: 1 })];
+      return [
+        seg({ x, y }, { x, y: y - 18 }, { w: 1.5, color: "#b2b5be" }),
+        poly([{ x, y: y - 18 }, { x: x + 12, y: y - 18 }, { x: x + 9, y: y - 14.5 }, { x: x + 12, y: y - 11 }, { x, y: y - 11 }], { closed: true, fill: 1 }),
+      ];
     },
   },
   { id: "image", label: "Image", n: 1, build: () => [], disabled: true },

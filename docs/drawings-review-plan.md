@@ -275,3 +275,10 @@ Lần này TV tải được các tool (đo chi tiết trong tài liệu tham ch
 - Màu mặc định: Text cỡ 14, Arrow down #cc2f3c, Arrow marker #1e53e5, Circle cam.
 - Kiểm trên app: Callout, Signpost, Pin (cả hover) như TV; xóa từng hình test, giữ Short position của user.
 - Chưa đo được: Price label, Flag mark (TV API lỗi "Value is undefined"), Table, Anchored text/note.
+
+## 20. Price label, Flag; kẹp Position khi bấm Ok (2026-10-21)
+
+- Price label: chữ trắng đậm cỡ 14, ô phía trên-phải, góc nhọn chạm điểm (app cũ: ô nằm ngang bên phải, mũi nhỏ).
+- Flag: cán xám 18px + cờ 12×8px (app cũ: cán 34px cùng màu, cờ 24px).
+- Settings → Ok cho Position: kẹp target/stop về đúng phía entry + làm tròn tick (lúc gõ vẫn không kẹp) — đóng lỗi còn ghi ở mục 8.
+- Đã so với TV gần như mọi tool. Còn: Double curve (TV tạo qua API ra điểm điều khiển lạ), Table, Anchored text/note, số liệu FRVP (TV không xuất dữ liệu nến), ô sửa text đi theo khi cuộn, nhãn Target đè nhãn P&L khi target sát entry.

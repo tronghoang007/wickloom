@@ -204,3 +204,5 @@ Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), se
 - **signpost**: ô tối viền xám chữ sáng cỡ 12, cột xám từ ô xuống điểm neo.
 - **arrow_up** #089981, **arrow_down** #CC2F3C (cỡ chữ 14); **arrow_marker** #1E53E5 (chữ 16); **circle** #FF9800 nền.
 - `price_label`, `flag` tạo qua API báo "Value is undefined" — chưa đo được.
+- **price_label** (tạo được khi không truyền `text`): `color #ffffff, backgroundColor #2962FF, borderColor #2962FF, fontWeight bold, fontsize 14`; ô giá phía trên-phải điểm, góc dưới-trái nhọn chạm điểm.
+- **flag**: `flagColor #2962FF`; lá cờ nhỏ (~12×8px) trên cán xám ngắn (~18px).

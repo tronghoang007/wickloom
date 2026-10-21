@@ -776,6 +776,14 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
 
   replaceSelected(next: Drawing) {
     if (!this.drawings.some((x) => x.id === next.id)) return;
+    // Position: lúc gõ trong Settings không kẹp; bấm Ok mới kẹp target/stop về đúng phía + tròn tick
+    const spec = SPEC[next.type];
+    if (spec?.panel === "position" && spec.constrain) {
+      const pts = next.points.map((q) => ({ ...q }));
+      spec.constrain(pts, 1, this.tick());
+      spec.constrain(pts, 3, this.tick());
+      next = { ...next, points: pts };
+    }
     this.pushUndo();
     this.put(next);
     this.commit();
