@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import type { Shape } from "./shapes";
-import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, gannGrid, posConstrain, positionStats, SPEC, type Ctx } from "./tools";
+import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, gannGrid, posConstrain, positionStats, regression, SPEC, type Ctx } from "./tools";
 import type { Anchor } from "./types";
 
 const T = 1_000_000;
@@ -231,8 +231,8 @@ describe("tùy chọn từng tool (mục 6)", () => {
   const lines = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line");
   const texts = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text");
 
-  it("mức Fib mã hóa / đọc lại được, mặc định 8 mức bật", () => {
-    expect(fibLevelsOf({ type: "fib" } as never).filter((l) => l.on).map((l) => l.coeff)).toEqual([0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618]);
+  it("mức Fib mã hóa / đọc lại được, mặc định 11 mức bật như TV", () => {
+    expect(fibLevelsOf({ type: "fib" } as never).filter((l) => l.on).map((l) => l.coeff)).toEqual([0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618, 3.618, 4.236]);
     const lv = [{ coeff: 0, color: "#ff9800", on: true }, { coeff: 0.705, color: "#2962ff", on: false }];
     expect(fibLevelsOf({ type: "fib", opts: { levels: encodeFibLevels(lv) } } as never)).toEqual(lv);
   });
@@ -460,5 +460,98 @@ describe("Gann Box / Gann Fan / Pitchfork (đo trên TV)", () => {
     const dir = { x: m.b.x - m.a.x, y: m.b.y - m.a.y };
     const want = { x: 200 - 50, y: Y(40) - Y(50) };
     expect(dir.y / dir.x).toBeCloseTo(want.y / want.x, 9);
+  });
+});
+
+describe("kênh và các tool Fib (đo trên TV)", () => {
+  const Y = (price: number) => 1000 - price;
+  const mk = (type: string, points: Anchor[], bars: Bar[] = []): Ctx => ({
+    d: { id: "x", type, points, color: "#2962ff", width: 1, locked: false, hidden: false },
+    p: points.map((a) => ({ x: a.time, y: Y(a.price) })),
+    w: 1000, h: 800, bars, tickSize: 0.01, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0,
+    X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2,
+  });
+  const lines = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line");
+  const polys = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly");
+  const texts = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text");
+
+  it("Disjoint channel: đường 2 dốc ngược, kết thúc ở (x điểm 2, giá p3); handle 3 ở đó", () => {
+    const pts = [{ time: 100, price: 130 }, { time: 300, price: 150 }, { time: 200, price: 122 }];
+    const ls = lines(SPEC.disjoint.build(mk("disjoint", pts)));
+    expect(ls[1].a).toEqual({ x: 100, y: Y(142) });
+    expect(ls[1].b).toEqual({ x: 300, y: Y(122) });
+    expect(SPEC.disjoint.handles!(mk("disjoint", pts))[2]).toEqual({ x: 300, y: Y(122) });
+    expect(SPEC.disjoint.moveHandle!(pts, 2, { time: 999, price: 120 })[2]).toEqual({ time: 300, price: 120 });
+  });
+
+  it("Parallel channel: 2 cạnh + giữa nét đứt, nền 20%", () => {
+    const sh = SPEC.channel.build(mk("channel", [{ time: 100, price: 100 }, { time: 300, price: 120 }, { time: 200, price: 90 }]));
+    expect(lines(sh)).toHaveLength(3);
+    expect(lines(sh)[2].dash).toBe(1);
+    expect(polys(sh)[0].fill).toBe(0.2);
+  });
+
+  it("Regression: Pearson R, dải trên xanh / dưới đỏ", () => {
+    const r = regression([1, 2, 3, 4, 5]);
+    expect(r.slope).toBeCloseTo(1, 9);
+    expect(r.pearson).toBeCloseTo(1, 9);
+    const bars = [10, 12, 11, 14, 13, 15].map((c, i) => ({ t: 100 + i * 10, o: c, h: c, l: c, c, v: 1 }));
+    const sh = SPEC.regression.build(mk("regression", [{ time: 100, price: 10 }, { time: 150, price: 15 }], bars));
+    expect(polys(sh).map((p) => p.color)).toEqual(["#2962ff", "#f23645"]);
+    expect(Number(texts(sh)[0].text)).toBeCloseTo(regression(bars.map((b) => b.c)).pearson, 9);
+  });
+
+  it("Fib channel: đoạn song song p1–p2, mức 1 đi qua p3, nhãn hệ số (giá) ở đầu trái", () => {
+    const sh = SPEC.fibchannel.build(mk("fibchannel", [{ time: 100, price: 100 }, { time: 300, price: 120 }, { time: 200, price: 90 }]));
+    const one = lines(sh).find((l) => l.color === "#787b86" && l.a.y !== Y(100))!;
+    expect(one.a).toEqual({ x: 100, y: Y(80) }); // lệch −20 (p3 = 90, đường tại t=200 là 110)
+    expect(one.ext ?? "none").toBe("none");
+    expect(texts(sh).map((t) => t.text)).toContain("1 (80.00)");
+  });
+
+  it("Fib time zone: mốc 0,1,2,3,5,8… theo khoảng thời gian 2 điểm, 0 xám còn lại xanh", () => {
+    const ls = lines(SPEC.fibtimezone.build(mk("fibtimezone", [{ time: 100, price: 100 }, { time: 110, price: 100 }]))).filter((l) => l.a.x === l.b.x);
+    expect(ls.slice(0, 6).map((l) => l.a.x)).toEqual([100, 110, 120, 130, 150, 180]);
+    expect(ls[0].color).toBe("#787b86");
+    expect(ls[1].color).toBe("#2962ff");
+  });
+
+  it("Fib circles: elip tâm trung điểm, mức 1 nội tiếp hộp 2 điểm", () => {
+    const sh = SPEC.fibcircles.build(mk("fibcircles", [{ time: 100, price: 100 }, { time: 180, price: 160 }]));
+    const one = polys(sh).find((p) => p.color === "#787b86" && !p.noStroke)!;
+    const xs = one.pts.map((q) => q.x), ys = one.pts.map((q) => q.y);
+    expect(Math.min(...xs)).toBeCloseTo(100, 6);
+    expect(Math.max(...xs)).toBeCloseTo(180, 6);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(60, 6);
+  });
+
+  it("Fib speed resistance arcs: tâm điểm 1, mức 1 qua điểm 2, nửa vòng phía điểm 2", () => {
+    const sh = SPEC.fibarcs.build(mk("fibarcs", [{ time: 100, price: 100 }, { time: 160, price: 180 }]));
+    const one = polys(sh).find((p) => p.color === "#787b86" && !p.noStroke)!;
+    for (const q of one.pts) expect(Math.hypot(q.x - 100, q.y - Y(100))).toBeCloseTo(100, 6);
+    expect(Math.max(...one.pts.map((q) => q.y))).toBeLessThanOrEqual(Y(100) + 1e-6);
+  });
+
+  it("Fib wedge: mức tới 1, có nền", () => {
+    const sh = SPEC.fibwedge.build(mk("fibwedge", [{ time: 100, price: 100 }, { time: 200, price: 150 }, { time: 200, price: 100 }]));
+    expect(texts(sh).map((t) => t.text)).toEqual(["0.236", "0.382", "0.5", "0.618", "0.786", "1"]);
+    expect(polys(sh).filter((p) => p.noStroke)).toHaveLength(6);
+  });
+
+  it("Pitchfan: median từ p0 qua trung điểm p1–p2, tia mức 1 qua p1 và p2", () => {
+    const sh = SPEC.pitchfan.build(mk("pitchfan", [{ time: 0, price: 0 }, { time: 100, price: 100 }, { time: 200, price: 40 }]));
+    const ls = lines(sh);
+    expect(ls.filter((l) => l.color === "#2962ff").map((l) => l.b)).toEqual([{ x: 100, y: Y(100) }, { x: 200, y: Y(40) }]);
+    expect(ls.find((l) => !l.color && l.ext === "right")!.b).toEqual({ x: 150, y: Y(70) });
+  });
+
+  it("Fib speed resistance fan: tia tới mép phải theo giá và mép trên theo thời gian, mức tính từ điểm 2", () => {
+    const sh = SPEC.fibfan.build(mk("fibfan", [{ time: 100, price: 100 }, { time: 300, price: 200 }]));
+    const ends = lines(sh).filter((l) => l.ext === "right").map((l) => l.b);
+    expect(ends).toContainEqual({ x: 300, y: Y(175) }); // giá: 0.25 từ điểm 2
+    expect(ends).toContainEqual({ x: 250, y: Y(200) }); // thời gian: 0.25 từ điểm 2
+    expect(ends).toContainEqual({ x: 300, y: Y(100) }); // 1 = ngang
+    expect(ends).toContainEqual({ x: 100, y: Y(200) }); // 1 = dọc
   });
 });

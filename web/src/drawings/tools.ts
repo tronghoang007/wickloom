@@ -51,6 +51,7 @@ export type ToolSpec = {
   options?: ToolOption[]; // tùy chọn riêng của tool (lưu trong d.opts), hiện ở tab Style của Settings
   text?: TextSpec; // có tab Text (d.text + opts fontSize, bold, italic, vAlign, hAlign)
   init?: (d: Drawing, c: Ctx) => Drawing; // chốt thông số theo khung đang xem lúc vẽ xong (Gann Square)
+  levels?: FibLevel[]; // bộ mức mặc định (sửa được trong Settings, lưu opts.levels)
 };
 
 // Tùy chọn dạng bật/tắt hoặc chọn 1 trong danh sách, đặt tên theo thuộc tính của TV
@@ -166,7 +167,6 @@ const head = (from: Pt, to: Pt, size: number, o: O = {}) => {
   return poly([to, add(base, mul(n, size * 0.45)), sub(base, mul(n, size * 0.45))], { closed: true, fill: 1, ...o });
 };
 
-const FC = ["#787b86", "#f23645", "#ff9800", "#4caf50", "#089981", "#00bcd4", "#787b86", "#2962ff", "#9c27b0"];
 const pctStr = (a: number, b: number) => `${(((b - a) / a) * 100).toFixed(2)}%`;
 const pt = (c: Ctx, i: number) => c.d.points[i];
 
@@ -183,18 +183,31 @@ const priceAt = (pa: number, pb: number, t: number) => pa + (pb - pa) * t;
 
 export type FibLevel = { coeff: number; color: string; on: boolean };
 
-// Bộ mức như TV: 0…1.618 bật, các mức mở rộng có sẵn nhưng tắt (bật trong Settings)
+const lv = (on: boolean, list: [number, string][]): FibLevel[] => list.map(([coeff, color]) => ({ coeff, color, on }));
+
+// Default gốc của TV (đọc từ Trend-based fib extension / Fib channel chưa chỉnh): 11 mức 0…4.236 bật,
+// 13 mức mở rộng có sẵn nhưng tắt. Fib retracement dùng cùng bộ.
 export const FIB_LEVELS: FibLevel[] = [
-  ...[0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618].map((coeff, i) => ({ coeff, color: FC[i], on: true })),
-  ...([[2.618, "#f23645"], [3.618, "#9c27b0"], [4.236, "#e91e63"], [1.272, "#ff9800"], [1.414, "#f23645"], [2, "#089981"], [2.272, "#ff9800"], [2.414, "#4caf50"], [3, "#00bcd4"], [3.272, "#787b86"], [3.414, "#2962ff"], [4, "#f23645"], [4.272, "#9c27b0"], [4.414, "#e91e63"], [4.618, "#ff9800"], [4.764, "#089981"]] as [number, string][])
-    .map(([coeff, color]) => ({ coeff, color, on: false })),
+  ...lv(true, [[0, "#787b86"], [0.236, "#f23645"], [0.382, "#ff9800"], [0.5, "#4caf50"], [0.618, "#089981"], [0.786, "#00bcd4"], [1, "#787b86"], [1.618, "#2962ff"], [2.618, "#f23645"], [3.618, "#9c27b0"], [4.236, "#e91e63"]]),
+  ...lv(false, [[1.272, "#ff9800"], [1.414, "#f23645"], [2, "#089981"], [2.272, "#ff9800"], [2.414, "#4caf50"], [3, "#00bcd4"], [3.272, "#787b86"], [3.414, "#2962ff"], [4, "#f23645"], [4.272, "#9c27b0"], [4.414, "#e91e63"], [4.618, "#ff9800"], [4.764, "#089981"]]),
 ];
+// Trend-based fib time (TV: 0.5 tắt)
+const FIB_TIME_LEVELS: FibLevel[] = [
+  ...lv(true, [[0, "#787b86"], [0.382, "#f23645"]]), ...lv(false, [[0.5, "#81c784"]]),
+  ...lv(true, [[0.618, "#4caf50"], [1, "#089981"], [1.382, "#00bcd4"], [1.618, "#787b86"], [2, "#2962ff"], [2.382, "#e91e63"], [2.618, "#9c27b0"], [3, "#673ab7"]]),
+];
+const FIB_TIMEZONE_LEVELS: FibLevel[] = lv(true, [[0, "#787b86"], ...[1, 2, 3, 5, 8, 13, 21, 34, 55, 89].map((n): [number, string] => [n, "#2962ff"])]);
+// Fib circles và Fib speed resistance arcs
+const FIB_ARC_LEVELS: FibLevel[] = lv(true, [[0.236, "#f23645"], [0.382, "#ff9800"], [0.5, "#089981"], [0.618, "#4caf50"], [0.786, "#00bcd4"], [1, "#787b86"], [1.618, "#2962ff"], [2.618, "#e91e63"], [3.618, "#2962ff"], [4.236, "#e91e63"], [4.618, "#f23645"]]);
+const FIB_WEDGE_LEVELS: FibLevel[] = lv(true, [[0.236, "#f23645"], [0.382, "#ff9800"], [0.5, "#4caf50"], [0.618, "#089981"], [0.786, "#00bcd4"], [1, "#787b86"]]);
+// Fib speed resistance fan: mức theo giá và theo thời gian tính từ điểm 2 (giống bộ của Gann Box)
+const FIB_FAN_LEVELS: FibLevel[] = lv(true, [[0, "#787b86"], [0.25, "#ff9800"], [0.382, "#00bcd4"], [0.5, "#4caf50"], [0.618, "#089981"], [0.75, "#2962ff"], [1, "#787b86"]]);
 
 // d.opts chỉ chứa giá trị đơn: mức lưu thành chuỗi "coeff|màu|1;..."
 export const encodeFibLevels = (lv: FibLevel[]) => lv.map((l) => `${l.coeff}|${l.color}|${l.on ? 1 : 0}`).join(";");
 export function fibLevelsOf(d: Drawing): FibLevel[] {
   const raw = d.opts?.levels;
-  if (typeof raw !== "string" || !raw) return FIB_LEVELS;
+  if (typeof raw !== "string" || !raw) return SPEC[d.type]?.levels ?? FIB_LEVELS;
   return raw.split(";").map((x) => {
     const [coeff, color, on] = x.split("|");
     return { coeff: Number(coeff), color, on: on === "1" };
@@ -203,34 +216,81 @@ export function fibLevelsOf(d: Drawing): FibLevel[] {
 
 // Mức tính theo giá rồi mới ra pixel: đúng cả khi trục giá log (nội suy pixel thì đường lệch
 // khỏi giá ghi trên nhãn). Tùy chọn như TV: extend, reverse, hiện hệ số / giá, nhãn trái/phải, nền.
-function fibRetracement(c: Ctx): Shape[] {
-  const [a, b] = c.p;
+// Các mức ngang theo giá (Fib retracement, Trend-based fib extension). Tùy chọn như TV: extend,
+// hiện hệ số / giá, nhãn trái/phải, nền (transparency 80).
+function priceLevels(c: Ctx, priceOf: (coeff: number) => number, x0: number, x1: number): Shape[] {
   const d = c.d;
-  let [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
-  if (optOf(d, "reverse")) [pa, pb] = [pb, pa];
   const ext = String(optOf(d, "extend"));
-  const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
   const left = ext === "left" || ext === "both" ? 0 : x0, right = ext === "right" || ext === "both" ? c.w : x1;
   const labelsRight = optOf(d, "labels") === "right";
   const coeffs = optOf(d, "showCoeffs"), prices = optOf(d, "showPrices"), bg = optOf(d, "background");
-  const levels = fibLevelsOf(d).filter((l) => l.on).sort((p, q) => p.coeff - q.coeff);
   const out: Shape[] = [];
   let prev: number | null = null;
-  for (const lvl of levels) {
-    const price = fibPrice(pa, pb, lvl.coeff);
+  for (const lvl of fibLevelsOf(d).filter((l) => l.on).sort((p, q) => p.coeff - q.coeff)) {
+    const price = priceOf(lvl.coeff);
     const y = c.Y(price);
     if (y === null) continue;
     const color = lvl.color;
-    if (bg && prev !== null) out.push(poly([{ x: left, y: prev }, { x: right, y: prev }, { x: right, y }, { x: left, y }], { closed: true, fill: 0.07, noStroke: true, color }));
+    if (bg && prev !== null) out.push(poly([{ x: left, y: prev }, { x: right, y: prev }, { x: right, y }, { x: left, y }], { closed: true, fill: 0.2, noStroke: true, color }));
     out.push(seg({ x: left, y }, { x: right, y }, { color, w: c.d.width }));
     const text = [coeffs ? String(lvl.coeff) : "", prices ? `(${c.fp(price)})` : ""].filter(Boolean).join(" ");
     // như TV: nhãn ngoài đầu đường mức, canh giữa dọc
     if (text) out.push(txt({ x: labelsRight ? right + 4 : left - 4, y }, text, { size: 11, color, align: labelsRight ? "left" : "right" }));
     prev = y;
   }
-  out.push(seg(a, b, { dash: 1, w: 1, color: "#787b86" }));
   return out;
 }
+
+function fibRetracement(c: Ctx): Shape[] {
+  const [a, b] = c.p;
+  let [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
+  if (optOf(c.d, "reverse")) [pa, pb] = [pb, pa];
+  return [...priceLevels(c, (k) => fibPrice(pa, pb, k), Math.min(a.x, b.x), Math.max(a.x, b.x)), seg(a, b, { dash: 1, w: 1, color: "#787b86" })];
+}
+
+const FIB_OPTIONS: ToolOption[] = [
+  { key: "extend", label: "Extend lines", def: "none", choices: EXTEND },
+  { key: "showCoeffs", label: "Levels", def: true },
+  { key: "showPrices", label: "Prices", def: true },
+  { key: "labels", label: "Labels", def: "left", choices: [["left", "Left"], ["right", "Right"]] },
+  { key: "background", label: "Background", def: true },
+];
+const BG: ToolOption = { key: "background", label: "Background", def: true };
+const TREND = { dash: 1 as const, w: 1, color: "#787b86" }; // đường nối các điểm (TV: xám nét đứt)
+
+// Đường dọc theo các mức thời gian, tô dải giữa 2 mức, nhãn ở đáy (Trend-based fib time, Fib time zone)
+function timeLevels(c: Ctx, xOf: (coeff: number) => number, fill: boolean): Shape[] {
+  const out: Shape[] = [];
+  let prev: number | null = null;
+  for (const lvl of fibLevelsOf(c.d).filter((l) => l.on).sort((p, q) => p.coeff - q.coeff)) {
+    const x = xOf(lvl.coeff);
+    if (fill && optOf(c.d, "background") && prev !== null) {
+      out.push(poly([{ x: prev, y: 0 }, { x, y: 0 }, { x, y: c.h }, { x: prev, y: c.h }], { closed: true, fill: 0.2, noStroke: true, color: lvl.color }));
+    }
+    prev = x;
+    if (x < -50 || x > c.w + 50) continue;
+    out.push(seg({ x, y: 0 }, { x, y: c.h }, { color: lvl.color, w: c.d.width }));
+    if (optOf(c.d, "showCoeffs") !== false) out.push(txt({ x: x + 4, y: c.h - 10 }, String(lvl.coeff), { size: 11, color: lvl.color }));
+  }
+  return out;
+}
+
+// Vòng elip/tròn đồng tâm theo mức, tô vành giữa 2 mức (Fib circles, arcs, wedge).
+// ring(r) = các điểm của vòng mức r (đã nhân bán kính)
+function rings(c: Ctx, ring: (coeff: number) => Pt[], label: (coeff: number) => Pt | null, closed: boolean): Shape[] {
+  const fills: Shape[] = [], lines: Shape[] = [];
+  let prev: Pt[] | null = null;
+  for (const lvl of fibLevelsOf(c.d).filter((l) => l.on).sort((p, q) => p.coeff - q.coeff)) {
+    const pts = ring(lvl.coeff);
+    if (optOf(c.d, "background")) fills.push(poly(prev ? [...pts, ...[...prev].reverse()] : pts, { closed: true, fill: 0.2, noStroke: true, color: lvl.color }));
+    lines.push(poly(pts, { closed, color: lvl.color, w: c.d.width }));
+    const at = label(lvl.coeff);
+    if (at && optOf(c.d, "showCoeffs") !== false) lines.push(txt(at, String(lvl.coeff), { size: 11, color: lvl.color, align: "center" }));
+    prev = pts;
+  }
+  return [...fills, ...lines];
+}
+
 
 function channelOffset(a: Pt, b: Pt, c: Pt) {
   const slope = b.x === a.x ? 0 : (b.y - a.y) / (b.x - a.x);
@@ -651,6 +711,47 @@ function rectangle(c: Ctx): Shape[] {
   return out;
 }
 
+// Hồi quy tuyến tính giá theo chỉ số nến: hệ số, độ lệch chuẩn phần dư, hệ số tương quan Pearson
+export function regression(ys: number[]) {
+  const n = ys.length, mx = (n - 1) / 2, my = ys.reduce((s, v) => s + v, 0) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  ys.forEach((y, i) => { sxy += (i - mx) * (y - my); sxx += (i - mx) ** 2; syy += (y - my) ** 2; });
+  const slope = sxx ? sxy / sxx : 0, icp = my - slope * mx;
+  const sd = Math.sqrt(ys.reduce((s, y, i) => s + (y - (icp + slope * i)) ** 2, 0) / n);
+  return { slope, icp, sd, pearson: sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0 };
+}
+
+function fibSpeedFan(c: Ctx): Shape[] {
+  const [a, b] = c.p;
+  const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
+  const levels = fibLevelsOf(c.d).filter((l) => l.on).sort((p, q) => p.coeff - q.coeff);
+  // mức theo giá (mép phải) và theo thời gian (mép trên), tính từ điểm 2
+  const priceSide = levels.flatMap((l) => { const y = c.Y(pb - (pb - pa) * l.coeff); return y === null ? [] : [{ l, q: { x: b.x, y } }]; });
+  const timeSide = levels.map((l) => ({ l, q: { x: b.x - (b.x - a.x) * l.coeff, y: b.y } }));
+  const far = (q: Pt) => add(a, mul(unit(sub(q, a)), 20000));
+  const out: Shape[] = [];
+  if (optOf(c.d, "background")) {
+    // đi từ tia dọc (thời gian = 1) qua điểm 2 tới tia ngang (giá = 1)
+    const seq = [...[...timeSide].reverse(), ...priceSide.slice(1)];
+    for (let i = 0; i + 1 < seq.length; i++) out.push(poly([a, far(seq[i].q), far(seq[i + 1].q)], { closed: true, fill: 0.2, noStroke: true, color: seq[i + 1].l.color }));
+  }
+  if (optOf(c.d, "grid")) {
+    for (const { q } of priceSide) out.push(seg({ x: a.x, y: q.y }, q, { w: 1, color: "rgba(21, 56, 153, 0.8)" }));
+    for (const { q } of timeSide) out.push(seg({ x: q.x, y: a.y }, q, { w: 1, color: "rgba(21, 56, 153, 0.8)" }));
+  }
+  for (const { l, q } of [...priceSide, ...timeSide.slice(1)]) out.push(ray(a, q, { color: l.color }));
+  if (optOf(c.d, "showLabels")) {
+    const [x0, x1, y0, y1] = [Math.min(a.x, b.x), Math.max(a.x, b.x), Math.min(a.y, b.y), Math.max(a.y, b.y)];
+    for (const { l, q } of priceSide) {
+      out.push(txt({ x: x0 - 4, y: q.y }, String(l.coeff), { size: 11, color: l.color, align: "right" }), txt({ x: x1 + 4, y: q.y }, String(l.coeff), { size: 11, color: l.color, align: "left" }));
+    }
+    for (const { l, q } of timeSide) {
+      out.push(txt({ x: q.x, y: y0 - 9 }, String(l.coeff), { size: 11, color: l.color, align: "center" }), txt({ x: q.x, y: y1 + 9 }, String(l.coeff), { size: 11, color: l.color, align: "center" }));
+    }
+  }
+  return out;
+}
+
 // ---------- Gann Square / Gann Square Fixed (đo trên TV, xem docs/tv-drawing-settings-reference.md) ----------
 // Lưới 5×5 ô tính từ điểm 1; mức 0…5; fan line a×b từ điểm 1 tới mép hộp; cung tâm điểm 1 bán kính
 // = khoảng cách tới điểm lưới (x, y); nền giữa 2 cung liền nhau tô màu cung ngoài 20%.
@@ -823,54 +924,73 @@ export const TOOLS: ToolSpec[] = [
   },
   // Channels
   {
+    // TV: mức 0 và 1 (2 cạnh) + 0.5 nét đứt, nền 20%
     id: "channel", label: "Parallel channel", n: 3,
+    options: [{ key: "extend", label: "Extend", def: "none", choices: EXTEND }, { key: "middleLine", label: "Middle line", def: true }, BG],
     build: (c) => {
       const [a, b, p] = c.p;
       const o = { x: 0, y: channelOffset(a, b, p) };
       const a2 = add(a, o), b2 = add(b, o);
-      return [poly([a, b, b2, a2], { closed: true, fill: 0.1, noStroke: true }), seg(a, b), seg(a2, b2), seg(lerp(a, a2, 0.5), lerp(b, b2, 0.5), { dash: 1, w: 1 })];
+      const line = (u: Pt, v: Pt, extra: O = {}): Shape => ({ k: "line", ...lineExt(c, [u, v]), ...extra }) as Shape;
+      const out: Shape[] = [];
+      if (optOf(c.d, "background")) out.push(poly([a, b, b2, a2], { closed: true, fill: 0.2, noStroke: true }));
+      out.push(line(a, b), line(a2, b2));
+      if (optOf(c.d, "middleLine")) out.push(line(lerp(a, a2, 0.5), lerp(b, b2, 0.5), { dash: 1, w: 1 }));
+      return out;
     },
   },
   {
+    // TV: ±2 độ lệch chuẩn quanh hồi quy giá đóng cửa; dải trên xanh, dải dưới đỏ, đường gốc đỏ nét đứt,
+    // hệ số Pearson R dưới đầu trái
     id: "regression", label: "Regression trend", n: 2,
+    options: [{ key: "showPearsons", label: "Pearson's R", def: true }, BG],
     build: (c) => {
       const { t0, t1 } = span(c);
       const bars = c.bars.filter((b) => b.t >= t0 && b.t <= t1);
       if (bars.length < 3) return [];
-      const n = bars.length, xs = bars.map((_, i) => i), ys = bars.map((b) => b.c);
-      const mx = (n - 1) / 2, my = ys.reduce((s, v) => s + v, 0) / n;
-      const slope = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0) / xs.reduce((s, x) => s + (x - mx) ** 2, 0);
-      const icp = my - slope * mx;
-      const sd = Math.sqrt(ys.reduce((s, y, i) => s + (y - (icp + slope * i)) ** 2, 0) / n);
+      const r = regression(bars.map((b) => b.c));
+      const n = bars.length;
       const xa = c.X(bars[0].t), xb = c.X(bars[n - 1].t);
-      const line = (off: number) => [c.Y(icp + off), c.Y(icp + slope * (n - 1) + off)];
       if (xa === null || xb === null) return [];
-      const [m0, m1] = line(0), [u0, u1] = line(2 * sd), [l0, l1] = line(-2 * sd);
-      if ([m0, m1, u0, u1, l0, l1].some((v) => v === null)) return [];
-      const P = (x: number, y: number | null) => ({ x, y: y as number });
-      return [
-        poly([P(xa, u0), P(xb, u1), P(xb, l1), P(xa, l0)], { closed: true, fill: 0.1, noStroke: true }),
-        seg(P(xa, m0), P(xb, m1)),
-        seg(P(xa, u0), P(xb, u1), { w: 1 }),
-        seg(P(xa, l0), P(xb, l1), { w: 1 }),
-      ];
+      const ys = [0, 2 * r.sd, -2 * r.sd].map((off) => [c.Y(r.icp + off), c.Y(r.icp + r.slope * (n - 1) + off)]);
+      if (ys.flat().some((v) => v === null)) return [];
+      const [[m0, m1], [u0, u1], [l0, l1]] = ys as number[][];
+      const P = (x: number, y: number) => ({ x, y });
+      const out: Shape[] = [];
+      if (optOf(c.d, "background")) {
+        out.push(
+          poly([P(xa, u0), P(xb, u1), P(xb, m1), P(xa, m0)], { closed: true, fill: 0.3, noStroke: true, color: "#2962ff" }),
+          poly([P(xa, m0), P(xb, m1), P(xb, l1), P(xa, l0)], { closed: true, fill: 0.3, noStroke: true, color: "#f23645" }),
+        );
+      }
+      out.push(
+        seg(P(xa, m0), P(xb, m1), { dash: 1, w: 1, color: "rgba(242, 54, 69, 0.6)" }),
+        seg(P(xa, u0), P(xb, u1), { color: "rgba(41, 98, 255, 0.6)" }),
+        seg(P(xa, l0), P(xb, l1), { color: "rgba(41, 98, 255, 0.6)" }),
+      );
+      if (optOf(c.d, "showPearsons")) out.push(txt({ x: xa, y: Math.max(l0, u0) + 14 }, String(r.pearson), { align: "center", size: 12, color: "#2962ff" }));
+      return out;
     },
   },
   {
-    id: "flat", label: "Flat top/bottom", n: 3,
+    id: "flat", label: "Flat top/bottom", n: 3, style: { color: "#ff9800" }, options: [BG],
     build: (c) => {
       const [a, b, p] = c.p;
       const f1 = { x: a.x, y: p.y }, f2 = { x: b.x, y: p.y };
-      return [poly([a, b, f2, f1], { closed: true, fill: 0.1, noStroke: true }), seg(a, b), seg(f1, f2)];
+      return [...(optOf(c.d, "background") ? [poly([a, b, f2, f1], { closed: true, fill: 0.2, noStroke: true })] : []), seg(a, b), seg(f1, f2)];
     },
   },
   {
-    id: "disjoint", label: "Disjoint channel", n: 3,
+    // TV: đường 2 dốc ngược đường 1, đi từ (x điểm 1, giá p3 + Δ) tới (x điểm 2, giá p3); thời gian p3
+    // không dùng, handle 3 nằm ở đầu phải đường 2; tô hình nơ giữa 2 đường
+    id: "disjoint", label: "Disjoint channel", n: 3, style: { color: "#089981" }, options: [BG],
     build: (c) => {
       const [a, b, p] = c.p;
-      const q = add(p, sub(b, a));
-      return [poly([a, b, q, p], { closed: true, fill: 0.1, noStroke: true }), seg(a, b), seg(p, q)];
+      const end = { x: b.x, y: p.y }, start = { x: a.x, y: p.y + (b.y - a.y) };
+      return [...(optOf(c.d, "background") ? [poly([a, b, end, start], { closed: true, fill: 0.2, noStroke: true })] : []), seg(a, b), seg(start, end)];
     },
+    handles: (c) => [c.p[0], c.p[1], { x: c.p[1].x, y: c.p[2].y }],
+    moveHandle: (pts, i, q) => (i < 2 ? pts.map((x, j) => (j === i ? q : { ...x })) : [{ ...pts[0] }, { ...pts[1] }, { time: pts[1].time, price: q.price }]),
   },
   // Pitchforks
   ...([["pitchfork", "Pitchfork", "standard"], ["schiff", "Schiff pitchfork", "schiff"], ["mschiff", "Modified Schiff pitchfork", "modified"], ["insidefork", "Inside pitchfork", "inside"]] as [string, string, ForkKind][])
@@ -881,96 +1001,81 @@ export const TOOLS: ToolSpec[] = [
 
   // Fib
   {
-    id: "fib", label: "Fib retracement", n: 2, build: fibRetracement, style: { width: 1 },
-    options: [
-      { key: "extend", label: "Extend lines", def: "none", choices: EXTEND },
-      { key: "reverse", label: "Reverse", def: false },
-      { key: "showCoeffs", label: "Levels", def: true },
-      { key: "showPrices", label: "Prices", def: true },
-      { key: "labels", label: "Labels", def: "left", choices: [["left", "Left"], ["right", "Right"]] },
-      { key: "background", label: "Background", def: true },
-    ],
+    id: "fib", label: "Fib retracement", n: 2, build: fibRetracement, style: { width: 1 }, levels: FIB_LEVELS,
+    options: [FIB_OPTIONS[0], { key: "reverse", label: "Reverse", def: false }, ...FIB_OPTIONS.slice(1)],
   },
   {
-    id: "fibext", label: "Trend-based fib extension", n: 3, style: { width: 1 },
+    // mức = p3 + (p2 − p1) × hệ số
+    id: "fibext", label: "Trend-based fib extension", n: 3, style: { width: 1 }, levels: FIB_LEVELS, options: FIB_OPTIONS,
     build: (c) => {
       const [a, b, p] = c.p;
       const [pa, pb, pc] = c.d.points;
-      const left = Math.min(a.x, b.x, p.x), right = Math.max(a.x, b.x, p.x);
-      const out: Shape[] = [seg(a, b, { dash: 1, w: 1 }), seg(b, p, { dash: 1, w: 1 })];
-      [0, 0.382, 0.618, 1, 1.618, 2.618].forEach((lvl, i) => {
-        const price = pc.price + (pb.price - pa.price) * lvl;
-        const y = c.Y(price);
-        if (y === null) return;
-        const color = FC[i % FC.length];
-        out.push(seg({ x: left, y }, { x: right, y }, { color, w: 1 }));
-        out.push(txt({ x: left - 4, y }, `${lvl} (${c.fp(price)})`, { size: 11, color, align: "right" })); // như TV: ngoài đầu trái, giữa dọc
-      });
-      return out;
+      const x0 = Math.min(a.x, b.x, p.x), x1 = Math.max(a.x, b.x, p.x);
+      return [...priceLevels(c, (k) => pc.price + (pb.price - pa.price) * k, x0, x1), seg(a, b, TREND), seg(b, p, TREND)];
     },
   },
   {
-    id: "fibchannel", label: "Fib channel", n: 3, style: { width: 1 },
+    // TV: các đoạn song song p1–p2 (không kéo dài), lệch về phía p3 theo hệ số; nhãn "hệ số (giá)" ở đầu trái
+    id: "fibchannel", label: "Fib channel", n: 3, style: { width: 1 }, levels: FIB_LEVELS, options: [FIB_OPTIONS[1], FIB_OPTIONS[2], BG],
     build: (c) => {
       const [a, b, p] = c.p;
-      const off = channelOffset(a, b, p);
-      return [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1].flatMap((lvl, i) =>
-        [ray({ x: a.x, y: a.y + off * lvl }, { x: b.x, y: b.y + off * lvl }, { color: FC[i], w: 1 }), txt({ x: b.x + 4, y: b.y + off * lvl }, String(lvl), { size: 10, color: FC[i] })],
-      ).concat(seg(a, b, { dash: 1, w: 1 }));
-    },
-  },
-  {
-    id: "fibtimezone", label: "Fib time zone", n: 2, style: { width: 1 },
-    build: (c) => {
-      const [a, b] = c.p;
-      const dx = b.x - a.x || 1;
-      const out: Shape[] = [seg(a, { x: b.x, y: a.y }, { dash: 1, w: 1 })];
-      for (const f of [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89]) {
-        const x = a.x + dx * f;
-        if (x > c.w + 50 || x < -50) continue;
-        out.push(seg({ x, y: 0 }, { x, y: c.h }, { w: 1, color: "#787b86" }), txt({ x: x + 3, y: 10 }, String(f), { size: 10 }));
-      }
-      return out;
-    },
-  },
-  {
-    id: "fibfan", label: "Fib speed resistance fan", n: 2, style: { width: 1 },
-    build: (c) => {
-      const [a, b] = c.p;
       const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
-      return [
-        seg({ x: b.x, y: a.y }, b, { dash: 1, w: 1 }),
-        seg(a, { x: b.x, y: a.y }, { dash: 1, w: 1 }),
-        ...[0.25, 0.382, 0.5, 0.618, 0.75, 1].flatMap((l, i) => {
-          const y = c.Y(priceAt(pa, pb, l));
-          return y === null ? [] : [ray(a, { x: b.x, y }, { color: FC[(i + 1) % FC.length], w: 1 })];
-        }),
-      ];
+      const frac = b.x === a.x ? 0 : (p.x - a.x) / (b.x - a.x);
+      const off = pt(c, 2).price - (pa + (pb - pa) * frac); // lệch giá của p3 so với đường p1–p2
+      const out: Shape[] = [], fills: Shape[] = [];
+      let prev: [Pt, Pt] | null = null;
+      for (const lvl of fibLevelsOf(c.d).filter((l) => l.on).sort((x, y) => x.coeff - y.coeff)) {
+        const ya = c.Y(pa + off * lvl.coeff), yb = c.Y(pb + off * lvl.coeff);
+        if (ya === null || yb === null) continue;
+        const u = { x: a.x, y: ya }, v = { x: b.x, y: yb };
+        if (prev && optOf(c.d, "background")) fills.push(poly([prev[0], prev[1], v, u], { closed: true, fill: 0.2, noStroke: true, color: lvl.color }));
+        out.push(seg(u, v, { color: lvl.color }));
+        const text = [optOf(c.d, "showCoeffs") ? String(lvl.coeff) : "", optOf(c.d, "showPrices") ? `(${c.fp(pa + off * lvl.coeff)})` : ""].filter(Boolean).join(" ");
+        if (text) out.push(txt({ x: Math.min(u.x, v.x) - 4, y: a.x <= b.x ? u.y : v.y }, text, { size: 11, color: lvl.color, align: "right" }));
+        prev = [u, v];
+      }
+      return [...fills, ...out];
     },
   },
   {
-    id: "fibtimeext", label: "Trend-based fib time", n: 3, style: { width: 1 },
-    build: (c) => {
-      const [a, b, p] = c.p;
-      const dx = b.x - a.x;
-      const out: Shape[] = [seg(a, b, { dash: 1, w: 1 }), seg(b, p, { dash: 1, w: 1 })];
-      [0, 0.382, 0.5, 0.618, 1, 1.382, 1.618, 2, 2.618].forEach((l, i) => {
-        const x = p.x + dx * l;
-        out.push(seg({ x, y: 0 }, { x, y: c.h }, { w: 1, color: FC[i % FC.length] }), txt({ x: x + 3, y: 10 }, String(l), { size: 10 }));
-      });
-      return out;
-    },
-  },
-  {
-    id: "fibcircles", label: "Fib circles", n: 2, style: { width: 1 },
+    // TV: mốc p1 + n × (p2 − p1) theo thời gian, n = 0, 1, 2, 3, 5, 8 … 89; không tô; nhãn ở đáy
+    id: "fibtimezone", label: "Fib time zone", n: 2, style: { width: 1 }, levels: FIB_TIMEZONE_LEVELS,
+    options: [{ key: "showCoeffs", label: "Labels", def: true }],
     build: (c) => {
       const [a, b] = c.p;
-      const m = mid(a, b), r = dist(a, b) / 2;
-      return [seg(a, b, { dash: 1, w: 1 }), ...[0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618].map((l, i) => poly(circle(m, r * l), { closed: true, fill: 0.03, color: FC[(i + 1) % FC.length], w: 1 }))];
+      return [...timeLevels(c, (k) => a.x + (b.x - a.x) * k, false), seg(a, b, TREND)];
     },
   },
   {
-    id: "fibspiral", label: "Fib spiral", n: 2,
+    // TV: hộp từ điểm 1 tới điểm 2 có lưới; mức tính từ điểm 2: tia từ điểm 1 tới mép phải (theo giá)
+    // và mép trên (theo thời gian); tô giữa các tia; nhãn hệ số 4 cạnh
+    id: "fibfan", label: "Fib speed resistance fan", n: 2, style: { width: 1 }, levels: FIB_FAN_LEVELS,
+    options: [{ key: "showLabels", label: "Labels", def: true }, { key: "grid", label: "Grid", def: true }, BG],
+    build: fibSpeedFan,
+  },
+  {
+    // TV: đường dọc tại p3 + hệ số × (p2 − p1) theo thời gian, tô dải, nhãn ở đáy
+    id: "fibtimeext", label: "Trend-based fib time", n: 3, style: { width: 1 }, levels: FIB_TIME_LEVELS,
+    options: [{ key: "showCoeffs", label: "Labels", def: true }, BG],
+    build: (c) => {
+      const [a, b, p] = c.p;
+      return [...timeLevels(c, (k) => p.x + (b.x - a.x) * k, true), seg(a, b, TREND), seg(b, p, TREND)];
+    },
+  },
+  {
+    // TV: elip tâm trung điểm 2 điểm, bán trục = hệ số × |Δx|/2 và × |Δy|/2 (mức 1 nội tiếp hộp 2 điểm)
+    id: "fibcircles", label: "Fib circles", n: 2, style: { width: 1 }, levels: FIB_ARC_LEVELS,
+    options: [{ key: "showCoeffs", label: "Levels", def: true }, BG],
+    build: (c) => {
+      const [a, b] = c.p;
+      const m = mid(a, b), rx = Math.abs(b.x - a.x) / 2, ry = Math.abs(b.y - a.y) / 2;
+      const ring = (k: number) => circle({ x: 0, y: 0 }, 1, 96).map((q) => ({ x: m.x + q.x * rx * k, y: m.y + q.y * ry * k }));
+      return [...rings(c, ring, (k) => ({ x: m.x, y: m.y + ry * k }), true), seg(a, b, TREND)];
+    },
+  },
+  {
+    // TV mặc định màu #00bcd4, chiều kim đồng hồ
+    id: "fibspiral", label: "Fib spiral", n: 2, style: { color: "#00bcd4" },
     build: (c) => {
       const [a, b] = c.p;
       const R = dist(a, b), t0 = Math.atan2(b.y - a.y, b.x - a.x), k = Math.log(1.618) / (Math.PI / 2);
@@ -979,30 +1084,51 @@ export const TOOLS: ToolSpec[] = [
         const r = R * Math.exp(k * (th - t0));
         return { x: a.x + r * Math.cos(th), y: a.y + r * Math.sin(th) };
       });
-      return [seg(a, b, { dash: 1, w: 1 }), poly(pts)];
+      return [seg(a, b, TREND), poly(pts)];
     },
   },
   {
-    id: "fibarcs", label: "Fib speed resistance arcs", n: 2, style: { width: 1 },
+    // TV: nửa đường tròn tâm điểm 1, bán kính = hệ số × khoảng cách tới điểm 2, ở phía điểm 2
+    id: "fibarcs", label: "Fib speed resistance arcs", n: 2, style: { width: 1 }, levels: FIB_ARC_LEVELS,
+    options: [{ key: "showCoeffs", label: "Levels", def: true }, BG],
     build: (c) => {
       const [a, b] = c.p;
-      const R = dist(a, b), ang = Math.atan2(a.y - b.y, a.x - b.x);
-      return [seg(a, b, { dash: 1, w: 1 }), ...[0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618].map((l, i) => poly(arcPts(b, R * l, ang - Math.PI / 2, ang + Math.PI / 2), { color: FC[(i + 1) % FC.length], w: 1 }))];
+      const R = dist(a, b), up = b.y <= a.y ? -1 : 1;
+      const ring = (k: number) => arcPts(a, R * k, up < 0 ? Math.PI : 0, up < 0 ? Math.PI * 2 : Math.PI, 64);
+      return [...rings(c, ring, (k) => ({ x: a.x, y: a.y + up * R * k - up * 8 }), false), seg(a, b, TREND)];
     },
   },
   {
-    id: "fibwedge", label: "Fib wedge", n: 3, style: { width: 1 },
+    // TV: cung tâm điểm 1 giữa 2 cạnh, bán kính = hệ số × |điểm 1 → điểm 2|, mức tới 1, tô giữa các cung
+    id: "fibwedge", label: "Fib wedge", n: 3, style: { width: 1 }, levels: FIB_WEDGE_LEVELS,
+    options: [{ key: "showCoeffs", label: "Levels", def: true }, BG],
     build: (c) => {
       const [a, b, p] = c.p;
       const R = dist(a, b), a0 = Math.atan2(b.y - a.y, b.x - a.x), a1 = shortSweep(a0, Math.atan2(p.y - a.y, p.x - a.x));
-      return [seg(a, b), seg(a, p), ...[0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618].map((l, i) => poly(arcPts(a, R * l, a0, a1), { color: FC[(i + 1) % FC.length], w: 1 }))];
+      const am = (a0 + a1) / 2;
+      const ring = (k: number) => [a, ...arcPts(a, R * k, a0, a1)];
+      const label = (k: number) => ({ x: a.x + R * k * Math.cos(am) + 10, y: a.y + R * k * Math.sin(am) });
+      return [...rings(c, ring, label, true), seg(a, b, { color: "#787b86" }), seg(a, p, { color: "#787b86" })];
     },
   },
   {
-    id: "pitchfan", label: "Pitchfan", n: 3, style: { width: 1 },
+    // TV: tia từ p0 qua trung điểm p1–p2 (median, màu đường) và qua các mức 0.5 / 1 trên đoạn p1–p2
+    id: "pitchfan", label: "Pitchfan", n: 3, style: { color: "#f23645" }, options: [BG],
     build: (c) => {
-      const [a, b, p] = c.p;
-      return [seg(b, p, { dash: 1, w: 1 }), ...[0, 0.236, 0.382, 0.5, 0.618, 0.786, 1].map((t, i) => ray(a, lerp(b, p, t), { color: FC[i % FC.length], w: 1 }))];
+      const [p0, p1, p2] = c.p;
+      const m = mid(p1, p2), half = sub(p1, m);
+      const far = (q: Pt) => add(p0, mul(unit(sub(q, p0)), 20000));
+      const fills: Shape[] = [], lines: Shape[] = [];
+      let prev = 0;
+      for (const [k, color] of [[0.5, "#00bcd4"], [1, "#2962ff"]] as [number, string][]) {
+        for (const side of [1, -1]) {
+          const q0 = add(m, mul(half, prev * side)), q1 = add(m, mul(half, k * side));
+          if (optOf(c.d, "background")) fills.push(poly([p0, far(q0), far(q1)], { closed: true, fill: 0.2, noStroke: true, color }));
+          lines.push(ray(p0, q1, { color }));
+        }
+        prev = k;
+      }
+      return [...fills, ...lines, ray(p0, m), seg(p1, p2)];
     },
   },
   // Gann

@@ -447,7 +447,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                 </Row>
                 </div>
               ))}
-              {d.type === "fib" && <FibLevels levels={fibLevelsOf(d)} onChange={(lv) => setOpt("levels", encodeFibLevels(lv))} />}
+              {spec.levels && <FibLevels levels={fibLevelsOf(d)} onChange={(lv) => setOpt("levels", encodeFibLevels(lv))} />}
             </>
           )}
 

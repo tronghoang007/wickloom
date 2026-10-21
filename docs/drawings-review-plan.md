@@ -221,3 +221,26 @@ Lần này TV tải được các tool (đo chi tiết trong tài liệu tham ch
 - Sửa thêm: flyout của toolbar trái cao tối đa tới đáy cửa sổ (trước tràn ra ngoài, không cuộn tới "Gann fan").
 - Sửa lỗi nhẹ mục 1: Clone giữ đúng chỗ (bỏ ×0.999); magnet hút về giá Heikin Ashi khi chart đang ở HA.
 - Layout TV: phát hiện 1 Gann Square Fixed test còn sót từ lượt trước (đóng tab trước khi TV lưu) — đã xóa, chờ 8s, reload xác nhận 0 hình.
+
+## 16. Kênh + các tool Fib còn lại theo TV (2026-10-21)
+
+| Tool | Sửa |
+|---|---|
+| Parallel channel | nền 20%, tùy chọn Extend / Middle line / Background |
+| Regression trend | dải trên xanh, dải dưới đỏ, đường gốc đỏ nét đứt, số Pearson R; `regression()` tách hàm thuần |
+| Flat top/bottom, Disjoint channel | màu mặc định cam / teal, nền 20%; **Disjoint** sửa hình học (đường 2 dốc ngược, handle 3 ở đầu phải) |
+| Fib retracement | default 11 mức như TV (bật thêm 2.618, 3.618, 4.236), nền 20% |
+| Trend-based fib extension | cùng bộ mức + tùy chọn + bảng sửa mức như Fib retracement |
+| Fib channel | đoạn không kéo dài, 11 mức, nền, nhãn "hệ số (giá)" ở đầu trái |
+| Fib time zone | mốc 0 xám, còn lại xanh, nhãn ở đáy |
+| Trend-based fib time | màu từng mức, tô dải, nhãn ở đáy |
+| Fib speed resistance fan | hộp lưới, tia 2 phía (giá + thời gian) tính từ điểm 2, nền, nhãn 4 cạnh |
+| Fib circles | **elip** tâm trung điểm, mức 1 nội tiếp hộp 2 điểm (app cũ: đường tròn) |
+| Fib speed resistance arcs | **tâm điểm 1** (app cũ: điểm 2), nửa vòng phía điểm 2, nhãn trên đỉnh |
+| Fib wedge | mức tới 1, nền, nhãn |
+| Fib spiral | màu #00bcd4 |
+| Pitchfan | median đỏ + mức 0.5 / 1 với nền (app cũ: 7 tia màu lung tung) |
+
+- Mỗi tool có bộ mức mặc định riêng (`spec.levels`) và dùng chung bảng sửa mức trong Settings.
+- Kiểm trên app: Disjoint, Regression, Fib circles, Speed fan trông như TV. Chỉ xóa đúng hình test (chart XAUUSDm có 1 Short position của user — giữ nguyên).
+- Còn: Fib extension — vị trí x của các đường mức chưa đo; chưa so: patterns, Elliott, cycles, measurers, shapes, annotation.

@@ -159,3 +159,19 @@ Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), se
 ### Gann (lần 1)
 - `gannbox_square` (**Gann Square**): có `scaleRatio` (giá/nến) — điểm 2 bị ép theo tỉ lệ: 30 nến → 4120 → 4157.34 (1.2446/nến). Props: `reverse, showLabels, labelsStyle, arcsBackground, levels, fanlines, arcs, scaleRatio`.
 - `gannbox_fixed` (**Gann Square Fixed**): giữ đúng 2 điểm nhập; props `reverse, arcsBackground{fill, transparency 80}, levels (6 mức, màu #808080 #FF9800 #00bcd4 #4caf50 #089981 #808080), fanlines (11: 8x1 5x1 4x1 3x1 2x1 1x1 1x2 1x3 1x4 1x5 1x8; bật mặc định 2x1 1x1 1x2), arcs (11 cung 1:0, 1:1, 1.5:0, 2:0, 2:1, 3:0, 3:1, 4:0, 4:1, 5:0, 5:1)`. Trên chart điểm 2 là handle **giữa** lưới chứ không phải góc; lưới + cung lớn hơn nhiều so với 2 điểm.
+
+### Kênh (đo lần 3, 2026-10-21)
+- **parallel_channel**: `level1..7` −0.25, 0, 0.25, 0.5 (nét đứt), 0.75, 1, 1.25 (màu #2962FF; 0 và 1 dày 2) — trên chart chỉ thấy 0, 0.5, 1; nền rgba(41,98,255,.2); `extendLeft/Right false`; nhãn tắt. TV chuẩn hóa điểm 3 về thời gian điểm 1 (giữ khoảng lệch giá).
+- **regression_trend**: `inputs {upper/lower deviation ±2, source close}`; `upLine/downLine rgba(41,98,255,.3) width 2`, `baseLine rgba(242,54,69,.3) dashed`; nền transparency 70 — dải trên xanh, dải dưới đỏ; `showPearsons` (số Pearson R đầy đủ chữ số dưới đầu trái); `showLabelsOnPriceScale`.
+- **flat_bottom**: màu #FF9800, nền .2. **disjoint_angle**: màu #089981, nền .2; đường 2 **dốc ngược**: từ (x điểm 1, giá p3 + Δ) tới (x điểm 2, giá p3), thời gian p3 không dùng; tô hình nơ.
+
+### Fib còn lại (đo lần 3)
+- **Default gốc TV** (fib_trend_ext, fib_channel chưa chỉnh): 11 mức bật 0 #808080, .236 #F23645, .382 #FF9800, .5 #4caf50, .618 #089981, .786 #00bcd4, 1 #808080, 1.618 #2962FF, 2.618 #F23645, 3.618 #9c27b0, 4.236 #e91e63; 13 mức mở rộng tắt.
+- **fib_channel**: đoạn song song p1–p2 (không kéo dài) lệch về phía p3; nền .2; nhãn "hệ số (giá)" ở đầu trái (`horzLabelsAlign left, middle`), cỡ 12.
+- **fib_timezone**: mốc 0 #808080, 1 2 3 5 8 13 21 34 55 89 #2962FF; không nền; nhãn phải/đáy; trendline xám nét đứt.
+- **fib_trend_time**: 0 #808080, .382 #F23645, (.5 tắt), .618 #4caf50, 1 #089981, 1.382 #00bcd4, 1.618 #808080, 2 #2962FF, 2.382 #e91e63, 2.618 #9c27b0, 3 #673ab7; nền .2 giữa các đường dọc; nhãn đáy.
+- **fib_speed_resist_fan**: h/v level 0, .25, .382, .5, .618, .75, 1 (màu như Gann Box) tính từ **điểm 2**; tia từ điểm 1 tới mép phải (giá) và mép trên (thời gian); `grid rgba(21,56,153,.8)`; nền .2; nhãn 4 cạnh.
+- **fib_circles**: .236 #F23645, .382 #FF9800, .5 #089981, .618 #4caf50, .786 #00bcd4, 1 #808080, 1.618 #2962FF, 2.618 #e91e63, 3.618 #2962FF, 4.236 #e91e63, 4.618 #F23645; **elip** tâm trung điểm, bán trục = hệ số × |Δx|/2, |Δy|/2; nền .2; nhãn ở đáy elip.
+- **fib_speed_resist_arcs**: cùng bộ mức; **nửa đường tròn tâm điểm 1**, bán kính = hệ số × |điểm 1→2|, phía điểm 2 (`fullCircles false`); nhãn trên đỉnh cung.
+- **fib_wedge**: .236 #F23645, .382 #FF9800, .5 #4caf50, .618 #089981, .786 #00bcd4, 1 #808080; cạnh xám liền; nền .2.
+- **fib_spiral**: #00bcd4, chiều kim đồng hồ. **pitchfan**: median #F23645, mức .5 #00bcd4, 1 #2962FF, nền .2 (tia từ p0).
