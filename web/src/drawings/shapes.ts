@@ -19,6 +19,7 @@ export type Shape =
   | { k: "text"; at: Pt; text: string; size?: number; color?: string; bg?: string; border?: string; align?: "left" | "center" | "right" };
 
 const HIT = 6;
+const TEXT_PAD = 3; // dung sai click quanh hộp chữ
 const BIG = 20000;
 
 const dashArr = (d?: number) => (d === 1 ? [8, 6] : d === 2 ? [2, 4] : []);
@@ -32,16 +33,26 @@ function lineEnds(s: Extract<Shape, { k: "line" }>): [Pt, Pt] {
   return [a, b];
 }
 
-function textBox(ctx: CanvasRenderingContext2D, s: Extract<Shape, { k: "text" }>) {
+// Canvas riêng chỉ để đo chữ: vẽ và hit-test dùng chung 1 hộp (emoji, tiếng Việt đo đúng).
+// Không có DOM (test) thì ước theo số ký tự.
+let measurer: CanvasRenderingContext2D | null | undefined;
+function textWidth(text: string, font: string, size: number) {
+  if (measurer === undefined) measurer = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+  if (!measurer) return text.length * size * 0.6;
+  measurer.font = font;
+  return measurer.measureText(text).width;
+}
+
+export function textBox(s: Extract<Shape, { k: "text" }>) {
   const size = s.size ?? 12;
-  ctx.font = `${size}px sans-serif`;
+  const font = `${size}px sans-serif`;
   const lines = s.text.split("\n");
   const lh = size * 1.3;
-  const w = Math.max(...lines.map((l) => ctx.measureText(l).width));
+  const w = Math.max(...lines.map((l) => textWidth(l, font, size)));
   const pad = s.bg || s.border ? 5 : 0;
   const h = lines.length * lh;
   const x0 = s.align === "center" ? s.at.x - w / 2 : s.align === "right" ? s.at.x - w : s.at.x;
-  return { x: x0 - pad, y: s.at.y - h / 2 - pad, w: w + pad * 2, h: h + pad * 2, tx: x0, tw: w, lines, lh, top: s.at.y - h / 2 };
+  return { x: x0 - pad, y: s.at.y - h / 2 - pad, w: w + pad * 2, h: h + pad * 2, tx: x0, tw: w, lines, lh, top: s.at.y - h / 2, font };
 }
 
 export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], d: Drawing) {
@@ -77,7 +88,8 @@ export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], d: Dr
         ctx.stroke();
       }
     } else if (s.k === "text") {
-      const b = textBox(ctx, s);
+      const b = textBox(s);
+      ctx.font = b.font;
       if (s.bg) {
         ctx.fillStyle = s.bg;
         ctx.beginPath();
@@ -131,11 +143,8 @@ export function hitShapes(shapes: Shape[], p: Pt): boolean {
       }
       if (s.fill && s.closed && inPoly(p, s.pts)) return true;
     } else if (s.k === "text") {
-      const lines = s.text.split("\n");
-      const w = Math.max(...lines.map((l) => l.length)) * (s.size ?? 12) * 0.6;
-      const size = (s.size ?? 12) * 1.3 * lines.length;
-      const x0 = s.align === "center" ? s.at.x - w / 2 : s.align === "right" ? s.at.x - w : s.at.x;
-      if (p.x >= x0 - 4 && p.x <= x0 + w + 4 && Math.abs(p.y - s.at.y) <= size / 2 + 4) return true;
+      const b = textBox(s);
+      if (p.x >= b.x - TEXT_PAD && p.x <= b.x + b.w + TEXT_PAD && p.y >= b.y - TEXT_PAD && p.y <= b.y + b.h + TEXT_PAD) return true;
     }
   }
   return false;

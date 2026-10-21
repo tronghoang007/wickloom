@@ -11,7 +11,9 @@ export type Ctx = {
   profileBars?: Bar[];
   tickSize: number;
   hovered: boolean;
+  selected: boolean;
   step: number; // giây mỗi bar
+  barsBetween: (t0: number, t1: number) => number; // số nến theo chỉ số nến, bỏ qua nghỉ phiên
   X: (t: number) => number | null;
   Y: (price: number) => number | null;
   fp: (price: number) => string;
@@ -29,7 +31,7 @@ export type ToolSpec = {
   prompt?: string; // hỏi text khi tạo
   ephemeral?: boolean;
   panel?: "position" | "volume";
-  constrain?: (pts: Anchor[], moved: number) => void;
+  constrain?: (pts: Anchor[], moved: number, tick?: number) => void; // tick: kẹp giá khi kéo trên chart
   action?: "zoom";
   disabled?: boolean;
 };
@@ -187,16 +189,13 @@ const axisText = (hex: string) => {
   return l > 0.7 ? "#000000" : "#ffffff";
 };
 
-function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[] {
-  const o = { ...(VP_BY[c.d.type] ?? VP_DEFAULTS), ...c.d.opts } as typeof VP_DEFAULTS;
-  const source = c.d.type === "frvp" && c.profileBars?.length ? c.profileBars : c.bars;
-  const bars = source.filter((b) => b.t >= t0 && b.t <= t1);
-  if (bars.length === 0) return [];
+// Volume theo từng row giá + POC + Value Area (va = % tổng volume) của các nến đã lọc.
+export function computeProfile(bars: Bar[], tick: number, rows: number, va: number) {
+  if (bars.length === 0) return null;
   const priceLow = Math.min(...bars.map((b) => b.l)), priceHigh = Math.max(...bars.map((b) => b.h));
-  const tick = c.tickSize > 0 ? c.tickSize : 10 ** -c.digits;
   const lowTick = Math.floor(priceLow / tick), highTick = Math.ceil(priceHigh / tick);
   const totalTicks = Math.max(1, highTick - lowTick);
-  const requestedRows = Math.max(2, Math.min(500, Math.round(o.rows)));
+  const requestedRows = Math.max(2, Math.min(500, Math.round(rows)));
   const rowCandidates = [...new Set([
     Math.max(1, Math.floor(totalTicks / requestedRows)),
     Math.max(1, Math.ceil(totalTicks / requestedRows)),
@@ -222,11 +221,11 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
   }
   const total: number[] = up.map((v, i) => v + dn[i]);
   const mv = Math.max(...total), sum = total.reduce((s, v) => s + v, 0);
-  if (!(sum > 0)) return [];
+  if (!(sum > 0)) return null;
   const poc = total.indexOf(mv);
 
   let vl = poc, vh = poc, acc = total[poc];
-  const target = (sum * Math.max(0, Math.min(100, o.va))) / 100;
+  const target = (sum * Math.max(0, Math.min(100, va))) / 100;
   while (acc < target && (vl > 0 || vh < N - 1)) {
     const canUp = vh < N - 1, canDn = vl > 0;
     const above = canUp ? total[vh + 1] : -1;
@@ -241,6 +240,16 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
     if (takeAbove) vh++;
     else vl--;
   }
+  return { lo, hi, size, N, up, dn, total, mv, poc, vl, vh };
+}
+
+function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[] {
+  const o = { ...(VP_BY[c.d.type] ?? VP_DEFAULTS), ...c.d.opts } as typeof VP_DEFAULTS;
+  const source = c.d.type === "frvp" && c.profileBars?.length ? c.profileBars : c.bars;
+  const tick = c.tickSize > 0 ? c.tickSize : 10 ** -c.digits;
+  const vp = computeProfile(source.filter((b) => b.t >= t0 && b.t <= t1), tick, o.rows, o.va);
+  if (!vp) return [];
+  const { lo, hi, size, N, up, dn, total, mv, poc, vl, vh } = vp;
 
   const x0 = c.X(t0), x1 = anchored ? c.w : c.X(t1);
   if (x0 === null || x1 === null) return [];
@@ -284,7 +293,7 @@ function measure(c: Ctx): Shape[] {
   const [pa, pb] = [pt(c, 0), pt(c, 1)];
   const up = pb.price >= pa.price;
   const color = up ? "#2962ff" : "#f23645";
-  const bars = Math.round((pb.time - pa.time) / c.step);
+  const bars = c.barsBetween(pa.time, pb.time);
   const label = `${c.fp(pb.price - pa.price)} (${pctStr(pa.price, pb.price)})  ${bars} bars, ${fmtDur(pb.time - pa.time)}`;
   const m = mid(a, b);
   return [
@@ -299,23 +308,18 @@ function measure(c: Ctx): Shape[] {
 
 export const POS_DEFAULTS = { account: 1000, lot: 1, risk: 2, profit: "#089981", stop: "#f23645", alpha: 0.25 };
 
-// points: [entry, target, right-edge, stop]
-function position(c: Ctx): Shape[] {
-  const o = { ...POS_DEFAULTS, ...c.d.opts } as typeof POS_DEFAULTS;
-  const [e, t, r, s] = c.p;
-  const [pe, pT, pR, pS] = c.d.points;
-  const long = pT.price > pe.price;
-  const x0 = Math.min(e.x, r.x), x1 = Math.max(e.x, r.x);
+// Khối lượng theo % rủi ro và kết quả lệnh: đi từng nến sau entry tới mép phải, chạm stop
+// trước (cùng nến thì tính stop) hay target trước; chưa chạm thì P&L theo giá đóng cửa.
+export function positionStats(bars: Bar[], points: Anchor[], long: boolean, o: Pick<typeof POS_DEFAULTS, "account" | "lot" | "risk">) {
+  const [pe, pT, pR, pS] = points;
   const dT = Math.abs(pT.price - pe.price), dS = Math.abs(pS.price - pe.price) || 1e-9;
   const riskAmt = (o.account * o.risk) / 100;
   const qtyRaw = riskAmt / (dS * o.lot);
   const qty = qtyRaw >= 10 ? Math.round(qtyRaw) : +qtyRaw.toFixed(2);
-  const tick = 10 ** -c.digits;
-  const money = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
   let closed = false, exitPrice = pe.price, exitT: number | null = null;
   const tEnd = Math.max(pe.time, pR.time);
-  for (const b of c.bars) {
+  for (const b of bars) {
     if (b.t <= pe.time) continue;
     if (b.t > tEnd) break;
     const hitS = long ? b.l <= pS.price : b.h >= pS.price;
@@ -326,6 +330,19 @@ function position(c: Ctx): Shape[] {
     exitPrice = b.c;
   }
   const pnl = (long ? exitPrice - pe.price : pe.price - exitPrice) * qty * o.lot;
+  return { dT, dS, riskAmt, qty, closed, exitPrice, exitT, pnl };
+}
+
+// points: [entry, target, right-edge, stop]
+function position(c: Ctx): Shape[] {
+  const o = { ...POS_DEFAULTS, ...c.d.opts } as typeof POS_DEFAULTS;
+  const [e, t, r, s] = c.p;
+  const pe = c.d.points[0];
+  const long = c.d.type !== "shortpos"; // như TV: theo loại tool, không suy từ vị trí target
+  const x0 = Math.min(e.x, r.x), x1 = Math.max(e.x, r.x);
+  const { dT, dS, riskAmt, qty, closed, exitPrice, exitT, pnl } = positionStats(c.bars, c.d.points, long, o);
+  const tick = 10 ** -c.digits;
+  const money = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
   const rect = (y0: number, y1: number, color: string) =>
     poly([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }], { closed: true, fill: o.alpha, noStroke: true, color });
@@ -336,7 +353,7 @@ function position(c: Ctx): Shape[] {
   const ex = exitT === null ? null : c.X(exitT), ey = exitT === null ? null : c.Y(exitPrice);
   if (ex !== null && ey !== null) out.push(seg({ x: x0, y: e.y }, { x: ex, y: ey }, { dash: 1, w: 1, color: "#b2b5be" }));
 
-  if (c.hovered) {
+  if (c.hovered || c.selected) {
     out.push(
       txt({ x: cx, y: t.y + (t.y < e.y ? -14 : 14) }, `Target: ${c.fp(dT)} (${((dT / pe.price) * 100).toFixed(3)}%) ${(dT / tick).toLocaleString(undefined, { maximumFractionDigits: 1 })}, Amount: ${money(qty * o.lot * dT)}`, { align: "center", bg: o.profit, color: tc, size: 12 }),
       txt({ x: cx, y: s.y + (s.y > e.y ? 14 : -14) }, `Stop: ${c.fp(dS)} (${((dS / pe.price) * 100).toFixed(3)}%) ${(dS / tick).toLocaleString(undefined, { maximumFractionDigits: 1 })}, Amount: ${money(riskAmt)}`, { align: "center", bg: o.stop, color: tc, size: 12 }),
@@ -347,12 +364,27 @@ function position(c: Ctx): Shape[] {
   return out;
 }
 
-const posConstrain = (p: Anchor[], i: number) => {
+// points: [entry, target, right-edge, stop]. Như TV: target luôn ở phía lời, stop ở phía lỗ,
+// cách entry ít nhất 1 tick - kéo quá entry thì bị kẹp lại chứ không tự đổi Long <-> Short.
+// Không có tick (ô nhập giá trong Settings, đang gõ dở) thì không kẹp.
+export const posConstrain = (dir: 1 | -1) => (p: Anchor[], i: number, tick?: number) => {
+  const [e, t, , s] = p;
+  if (tick !== undefined) {
+    if (i === 0) {
+      const lo = dir === 1 ? s.price + tick : t.price + tick;
+      const hi = dir === 1 ? t.price - tick : s.price - tick;
+      if (lo <= hi) e.price = Math.min(hi, Math.max(lo, e.price));
+    } else if (i === 1) {
+      t.price = dir === 1 ? Math.max(t.price, e.price + tick) : Math.min(t.price, e.price - tick);
+    } else if (i === 3) {
+      s.price = dir === 1 ? Math.min(s.price, e.price - tick) : Math.max(s.price, e.price + tick);
+    }
+  }
   if (i === 0) {
-    p[1].time = p[3].time = p[0].time;
-    p[2].price = p[0].price;
-  } else if (i === 1 || i === 3) p[i].time = p[0].time;
-  else if (i === 2) p[2].price = p[0].price;
+    t.time = s.time = e.time;
+    p[2].price = e.price;
+  } else if (i === 1 || i === 3) p[i].time = e.time;
+  else if (i === 2) p[2].price = e.price;
 };
 
 // Như TV: 1 click tạo khối vừa mắt theo khung đang xem - target/stop cách entry ~8% khoảng
@@ -385,7 +417,7 @@ export const TOOLS: ToolSpec[] = [
     id: "infoline", label: "Info line", n: 2,
     build: (c) => {
       const [pa, pb] = c.d.points;
-      const bars = Math.round((pb.time - pa.time) / c.step);
+      const bars = c.barsBetween(pa.time, pb.time);
       return [seg(c.p[0], c.p[1]), txt(mid(c.p[0], c.p[1]), `${c.fp(pb.price - pa.price)} (${pctStr(pa.price, pb.price)}) ${bars} bars`, { align: "center", bg: c.d.color, size: 11 })];
     },
   },
@@ -669,8 +701,8 @@ export const TOOLS: ToolSpec[] = [
   },
 
   // Forecasting
-  { id: "longpos", label: "Long position", n: 4, panel: "position", constrain: posConstrain, oneClick: (a, s, span) => posAt(a, s, 1, span), build: position },
-  { id: "shortpos", label: "Short position", n: 4, panel: "position", constrain: posConstrain, oneClick: (a, s, span) => posAt(a, s, -1, span), build: position },
+  { id: "longpos", label: "Long position", n: 4, panel: "position", constrain: posConstrain(1), oneClick: (a, s, span) => posAt(a, s, 1, span), build: position },
+  { id: "shortpos", label: "Short position", n: 4, panel: "position", constrain: posConstrain(-1), oneClick: (a, s, span) => posAt(a, s, -1, span), build: position },
   { id: "forecast", label: "Position forecast", n: 2, build: () => [], disabled: true },
   { id: "barspattern", label: "Bars pattern", n: 2, build: () => [], disabled: true },
   { id: "ghost", label: "Ghost feed", n: 2, build: () => [], disabled: true },
@@ -729,7 +761,7 @@ export const TOOLS: ToolSpec[] = [
         seg({ x: b.x, y: Math.min(a.y, b.y) - 30 }, { x: b.x, y: Math.max(a.y, b.y) + 30 }, { dash: 1, w: 1 }),
         seg({ x: a.x, y }, { x: b.x, y }),
         head({ x: a.x, y }, { x: b.x, y }, 8),
-        txt({ x: (a.x + b.x) / 2, y: y - 14 }, `${Math.round((pb.time - pa.time) / c.step)} bars, ${fmtDur(pb.time - pa.time)}`, { align: "center", bg: c.d.color, size: 11 }),
+        txt({ x: (a.x + b.x) / 2, y: y - 14 }, `${c.barsBetween(pa.time, pb.time)} bars, ${fmtDur(pb.time - pa.time)}`, { align: "center", bg: c.d.color, size: 11 }),
       ];
     },
   },

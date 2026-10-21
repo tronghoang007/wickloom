@@ -10,8 +10,10 @@ import type {
     SeriesType,
     Time,
 } from "lightweight-charts";
+import { barsBetween, logicalToTime, shiftAnchors, timeToLogical } from "./coords";
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
 import { useDrawingStore } from "./store";
+import { DrawingSync } from "./sync";
 import { GROUPS, SPEC, type Ctx } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
 
@@ -25,7 +27,8 @@ type Opts = {
 };
 
 type Hit = { kind: "point"; index: number } | { kind: "body" };
-type Drag = { id: string; hit: Hit; start: Pt; orig: Anchor[] };
+// before: ảnh chụp để undo, chỉ đưa vào undo khi thật sự có kéo (click chọn thì không)
+type Drag = { id: string; hit: Hit; start: Pt; orig: Anchor[]; before: string; moved: boolean };
 
 const HANDLE_R = 8;
 
@@ -33,6 +36,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private series: ISeriesApi<SeriesType> | null = null;
   private redraw: (() => void) | null = null;
   private drawings: Drawing[] = [];
+  private kept: unknown[] = []; // item trên server có type app không biết: giữ nguyên khi lưu
   private profileBars = new Map<string, Bar[]>();
   private profileKeys = new Map<string, string>();
   private hoveredId: string | null = null;
@@ -44,8 +48,11 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private symbol = "";
   private undoStack: string[] = [];
   private redoStack: string[] = [];
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  private loadSeq = 0;
+  private sync = new DrawingSync({
+    url: (symbol) => `${API}/drawings/${encodeURIComponent(symbol)}__default`,
+    items: () => [...this.kept, ...this.drawings.filter((d) => !SPEC[d.type]?.ephemeral)],
+    onLoad: (items) => this.onLoaded(items),
+  });
   private unsub: () => void;
 
   constructor(private o: Opts) {
@@ -67,7 +74,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     window.removeEventListener("pointerup", this.onUp);
     window.removeEventListener("keydown", this.onKey);
     this.unsub();
-    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.sync.close();
     useDrawingStore.setState({ api: null, drawings: [], selectedId: null });
   }
 
@@ -131,30 +138,14 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   }
 
   // --- tọa độ ---
+  private step() { return TF_SECONDS[this.o.getTf()] ?? 60; }
+
   private timeToLogical(t: number): number | null {
-    const bars = this.o.getBars();
-    const n = bars.length;
-    if (n === 0) return null;
-    const step = TF_SECONDS[this.o.getTf()] ?? 60;
-    if (t <= bars[0].t) return -(bars[0].t - t) / step;
-    if (t >= bars[n - 1].t) return n - 1 + (t - bars[n - 1].t) / step;
-    let lo = 0, hi = n - 1;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      if (bars[mid].t <= t) lo = mid; else hi = mid;
-    }
-    return lo + (t - bars[lo].t) / (bars[hi].t - bars[lo].t);
+    return timeToLogical(this.o.getBars(), this.step(), t);
   }
 
   private logicalToTime(l: number): number | null {
-    const bars = this.o.getBars();
-    const n = bars.length;
-    if (n === 0) return null;
-    const step = TF_SECONDS[this.o.getTf()] ?? 60;
-    const i = Math.round(l);
-    if (i < 0) return bars[0].t + i * step;
-    if (i >= n) return bars[n - 1].t + (i - n + 1) * step;
-    return bars[i].t;
+    return logicalToTime(this.o.getBars(), this.step(), l);
   }
 
   private timeToX(t: number): number | null {
@@ -211,16 +202,20 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     }
     const series = this.series;
     const digits = this.o.getDigits();
+    const bars = this.o.getBars();
+    const step = this.step();
     return {
       d: pad && d.points.length < need ? { ...d, points: [...d.points, ...Array(need - d.points.length).fill(d.points[d.points.length - 1])] } : d,
       p,
       w,
       h,
-      bars: this.o.getBars(),
+      bars,
       profileBars: this.profileBars.get(d.id),
       tickSize: this.o.getTickSize(),
       hovered: d.id === this.hoveredId,
-      step: TF_SECONDS[this.o.getTf()] ?? 60,
+      selected: d.id === useDrawingStore.getState().selectedId,
+      step,
+      barsBetween: (t0, t1) => barsBetween(bars, step, t0, t1),
       X: (t) => this.timeToX(t),
       Y: (price) => (series.priceToCoordinate(price) as number | null) ?? null,
       fp: (v) => v.toFixed(Math.abs(v) >= 100 ? Math.min(digits, 2) : digits),
@@ -336,7 +331,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
           const top = this.series?.coordinateToPrice(0);
           const bot = this.series?.coordinateToPrice(this.o.container.clientHeight);
           const span = top != null && bot != null ? Math.abs(top - bot) : 0;
-          return this.finish(spec.oneClick(a, TF_SECONDS[this.o.getTf()] ?? 60, span));
+          return this.finish(spec.oneClick(a, this.step(), span));
         }
         this.draft.points = [a];
         this.placed = 1;
@@ -358,8 +353,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.select(found?.d.id ?? null);
     if (found && !found.d.locked) {
       this.consume(e);
-      this.pushUndo();
-      this.drag = { id: found.d.id, hit: found.hit, start: p, orig: found.d.points.map((q) => ({ ...q })) };
+      this.drag = { id: found.d.id, hit: found.hit, start: p, orig: found.d.points.map((q) => ({ ...q })), before: this.snapshot(), moved: false };
     }
   };
 
@@ -412,7 +406,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       }
       d.text = t;
     }
-    this.pushUndo();
+    if (!spec.ephemeral) this.pushUndo(); // Measure không vào undo
     this.drawings.push(d);
     this.prefetchProfileBars(d);
     if (!st.stay) useDrawingStore.setState({ tool: null });
@@ -439,19 +433,24 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       const d = this.drawings.find((x) => x.id === this.drag!.id);
       if (!d) return;
       const { hit, start, orig } = this.drag;
+      const prev = JSON.stringify(d.points);
       if (hit.kind === "point") {
         const a = this.fromPx(p);
         if (a) {
           d.points[hit.index] = a;
-          SPEC[d.type].constrain?.(d.points, hit.index);
+          SPEC[d.type].constrain?.(d.points, hit.index, this.tick());
         }
       } else {
-        const moved = orig.map((o) => {
-          const px = this.toPx(o);
-          return px ? this.fromPx({ x: px.x + p.x - start.x, y: px.y + p.y - start.y }) : null;
-        });
-        if (moved.every(Boolean)) d.points = moved as Anchor[];
+        // Như TV: cả hình dịch cùng 1 delta (số nến, giá), không cho magnet hút từng điểm
+        const ts = this.o.chart.timeScale();
+        const l0 = ts.coordinateToLogical(start.x), l1 = ts.coordinateToLogical(p.x);
+        const p0 = this.series?.coordinateToPrice(start.y), p1 = this.series?.coordinateToPrice(p.y);
+        if (l0 !== null && l1 !== null && p0 != null && p1 != null) {
+          const moved = shiftAnchors(this.o.getBars(), this.step(), orig, Math.round(l1 - l0), p1 - p0);
+          if (moved) d.points = moved;
+        }
       }
+      if (JSON.stringify(d.points) !== prev) this.drag.moved = true;
       this.refresh();
       return;
     }
@@ -477,9 +476,12 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       return pts.length >= 2 ? this.finish(pts) : this.cancelDraft();
     }
     if (!this.drag) return;
-    const d = this.drawings.find((x) => x.id === this.drag!.id);
+    const { id, before, moved } = this.drag;
     this.drag = null;
+    if (!moved) return; // chỉ click chọn: không undo, không lưu
+    const d = this.drawings.find((x) => x.id === id);
     if (d) this.prefetchProfileBars(d);
+    this.pushUndo(before);
     this.commit();
   };
 
@@ -606,8 +608,18 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   }
 
   // --- undo / redo ---
-  private pushUndo() {
-    this.undoStack.push(JSON.stringify(this.drawings));
+  private tick() {
+    const t = this.o.getTickSize();
+    return t > 0 ? t : 10 ** -this.o.getDigits();
+  }
+
+  // Measure (ephemeral) không thuộc lịch sử undo
+  private snapshot() {
+    return JSON.stringify(this.drawings.filter((d) => !SPEC[d.type]?.ephemeral));
+  }
+
+  private pushUndo(snap = this.snapshot()) {
+    this.undoStack.push(snap);
     if (this.undoStack.length > 100) this.undoStack.shift();
     this.redoStack = [];
   }
@@ -619,13 +631,13 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   undo() {
     const s = this.undoStack.pop();
     if (s === undefined) return;
-    this.redoStack.push(JSON.stringify(this.drawings));
+    this.redoStack.push(this.snapshot());
     this.restore(s);
   }
   redo() {
     const s = this.redoStack.pop();
     if (s === undefined) return;
-    this.undoStack.push(JSON.stringify(this.drawings));
+    this.undoStack.push(this.snapshot());
     this.restore(s);
   }
 
@@ -633,23 +645,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private commit() {
     useDrawingStore.setState({ drawings: [...this.drawings] });
     this.refresh();
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    const symbol = this.symbol;
-    this.saveTimer = setTimeout(() => this.save(symbol), 500);
-  }
-
-  private url(symbol: string) {
-    return `${API}/drawings/${encodeURIComponent(symbol)}__default`;
-  }
-
-  private save(symbol: string) {
-    if (!symbol) return;
-    const items = this.drawings.filter((d) => !SPEC[d.type]?.ephemeral);
-    fetch(`${this.url(symbol)}?scope=${encodeURIComponent(symbol)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
-    }).catch(() => {});
+    this.sync.schedule();
   }
 
   private prefetchProfileBars(d: Drawing) {
@@ -676,30 +672,39 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     });
   }
 
-  async setSymbol(symbol: string) {
+  setSymbol(symbol: string) {
     // Đổi timeframe vẫn cùng symbol: giữ nguyên drawings, chỉ vẽ lại.
     if (symbol === this.symbol) { this.refresh(); return; }
-    if (this.saveTimer) { clearTimeout(this.saveTimer); this.save(this.symbol); this.saveTimer = null; }
+    this.sync.open(symbol); // lưu nốt symbol cũ rồi mới load symbol mới
     this.symbol = symbol;
     this.drawings = [];
+    this.kept = [];
     this.profileBars.clear();
     this.profileKeys.clear();
     this.draft = null;
+    this.drag = null;
     this.undoStack = [];
     this.redoStack = [];
     useDrawingStore.setState({ drawings: [], selectedId: null });
     this.refresh();
-    const seq = ++this.loadSeq;
-    try {
-      const r = await fetch(this.url(symbol));
-      if (!r.ok || seq !== this.loadSeq) return;
-      const row = await r.json();
-      const items: Drawing[] = row.data?.items ?? [];
-      // Bỏ drawing cũ có type không còn tồn tại
-      this.drawings = items.filter((d) => SPEC[d.type] && d.points.length >= SPEC[d.type].n);
-      for (const d of this.drawings) this.prefetchProfileBars(d);
-      useDrawingStore.setState({ drawings: [...this.drawings] });
-      this.refresh();
-    } catch { /* backend chưa chạy */ }
+  }
+
+  // Bản trên server về: đặt dưới các hình đã vẽ trong lúc chờ load
+  private onLoaded(items: unknown[]) {
+    const known: Drawing[] = [];
+    this.kept = [];
+    for (const it of items) {
+      const d = it as Drawing;
+      const spec = d && SPEC[d.type];
+      if (spec && Array.isArray(d.points) && d.points.length >= spec.n) known.push(d);
+      else this.kept.push(it);
+    }
+    this.drawings = [...known, ...this.drawings];
+    // ảnh chụp undo cũ chưa có bản server: undo về đó sẽ xóa mất drawings
+    this.undoStack = [];
+    this.redoStack = [];
+    for (const d of known) this.prefetchProfileBars(d);
+    useDrawingStore.setState({ drawings: [...this.drawings] });
+    this.refresh();
   }
 }
