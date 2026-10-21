@@ -815,8 +815,18 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     }
   }
 
-  replaceSelected(next: Drawing) {
+  // Xem trước từ Settings: chart đổi ngay nhưng không vào undo, không lưu; Ok chốt (replaceSelected), đóng thì trả lại bản gốc
+  preview(next: Drawing) {
     if (!this.drawings.some((x) => x.id === next.id)) return;
+    this.put(next);
+    useDrawingStore.setState({ drawings: [...this.drawings] });
+    this.refresh();
+  }
+
+  /** `orig`: bản trước khi mở Settings; trả về trước khi ghi undo để Ctrl+Z quay về đúng bản đó, không phải bản xem trước. */
+  replaceSelected(next: Drawing, orig?: Drawing) {
+    if (!this.drawings.some((x) => x.id === next.id)) return;
+    if (orig) this.put(orig);
     // Position: lúc gõ trong Settings không kẹp; bấm Ok mới kẹp target/stop về đúng phía + tròn tick
     const spec = SPEC[next.type];
     if (spec?.panel === "position" && spec.constrain) {

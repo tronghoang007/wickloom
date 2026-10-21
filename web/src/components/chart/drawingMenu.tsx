@@ -6,7 +6,7 @@ import { presetVisibility, type VisPreset } from "@/drawings/visibility";
 import { AlertI, Lock, SettingsI, Trash } from "../icons";
 import type { MenuItem } from "./ChartContextMenu";
 
-const VISIBILITY: [VisPreset, string][] = [
+export const VISIBILITY: [VisPreset, string][] = [
   ["above", "Current interval and above"],
   ["below", "Current interval and below"],
   ["only", "Current interval only"],

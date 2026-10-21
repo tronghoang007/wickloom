@@ -30,6 +30,35 @@ const COLORS: Record<string, string> = {
   other: "#787b86",
 };
 
+const isGold = (name: string) => /^(XAU|GOLD)/i.test(name);
+
+// Thỏi vàng như logo vàng của TV: nền vàng #D69A00, 3 thỏi trắng hình thang xếp chồng
+function Bar({ x, y }: { x: number; y: number }) {
+  return <path d={`M${x + 1.3} ${y}h5.4l1.3 5.3H${x}z`} fill="#fff" />;
+}
+
+/** Icon symbol dùng chung (dialog tìm kiếm + watchlist): vòng tròn màu theo loại, 2 chữ đầu của tên;
+ *  vàng (XAU…) là 3 thỏi vàng xếp chồng. */
+export function SymbolBadge({ name, type, size = 24 }: { name: string; type?: string; size?: number }) {
+  if (isGold(name))
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" className="shrink-0" aria-hidden>
+        <circle cx="12" cy="12" r="12" fill="#d69a00" />
+        <Bar x={3.5} y={12.4} />
+        <Bar x={12.5} y={12.4} />
+        <Bar x={8} y={6.6} />
+      </svg>
+    );
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-full font-bold text-white"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.42), background: COLORS[type ?? "other"] ?? COLORS.other }}
+    >
+      {name.slice(0, 2)}
+    </span>
+  );
+}
+
 function Highlight({ text, q }: { text: string; q: string }) {
   const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
   if (i < 0) return <>{text}</>;
@@ -198,12 +227,7 @@ export default function SymbolSearchDialog({
               onMouseMove={() => setSel(i)}
               className={`mx-1 my-0.5 flex cursor-pointer items-center gap-3 rounded px-4 py-2 ${i === sel ? "outline outline-2 -outline-offset-2 outline-white/90" : ""} ${s.name === symbol ? "bg-[var(--hover)]" : ""}`}
             >
-              <span
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
-                style={{ background: COLORS[s.type] ?? COLORS.other }}
-              >
-                {s.name.slice(0, 2)}
-              </span>
+              <SymbolBadge name={s.name} type={s.type} />
               <span className="w-24 shrink-0 font-medium text-[var(--accent)]">
                 <Highlight text={s.name} q={q.trim()} />
               </span>

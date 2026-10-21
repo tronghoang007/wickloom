@@ -1,10 +1,11 @@
 "use client";
 
 import { useDrawingStore } from "@/drawings/store";
+import ColorPicker from "./ColorPicker";
 import { encodeFibLevels, fibLevelsOf, optOf, POS_DEFAULTS, SPEC, VP_BY, VP_DEFAULTS, type FibLevel } from "@/drawings/tools";
 import type { Drawing } from "@/drawings/types";
 import { UNITS, type Unit } from "@/drawings/visibility";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Close } from "../icons";
 
 const input =
@@ -34,7 +35,7 @@ function FibLevels({ levels, onChange }: { levels: FibLevel[]; onChange: (lv: Fi
             value={l.coeff}
             onChange={(e) => e.target.value !== "" && Number.isFinite(Number(e.target.value)) && set(i, { coeff: Number(e.target.value) })}
           />
-          <input type="color" value={l.color} onChange={(e) => set(i, { color: e.target.value })} className="h-7 w-9 cursor-pointer bg-transparent" />
+          <ColorPicker value={l.color} onChange={(c) => set(i, { color: c })} className="h-7 w-9 p-1" />
         </div>
       ))}
     </div>
@@ -53,6 +54,18 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
   const isPos = spec.panel === "position";
   const isVol = spec.panel === "volume";
   const [d, setD] = useState<Drawing>(() => structuredClone(init));
+  // Chỉnh là áp ngay lên chart (xem trước); không bấm Ok mà đóng (Cancel/X/Esc/bỏ chọn) thì trả về bản lúc mở
+  const orig = useRef<Drawing>(structuredClone(init));
+  const accepted = useRef(false);
+  useEffect(() => {
+    useDrawingStore.getState().api?.preview(d);
+  }, [d]);
+  useEffect(
+    () => () => {
+      if (!accepted.current) useDrawingStore.getState().api?.preview(orig.current);
+    },
+    [],
+  );
   const [tab, setTab] = useState<"inputs" | "style" | "text" | "coords" | "visibility">(
     isPos || isVol ? "inputs" : "style",
   );
@@ -93,12 +106,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
     <Row label={label}>
       <span className="flex items-center gap-3">
         {color && (
-          <input
-            type="color"
-            value={String(v[color as keyof typeof v])}
-            onChange={(e) => setOpt(color, e.target.value)}
-            className="h-8 w-12 cursor-pointer bg-transparent"
-          />
+          <ColorPicker value={String(v[color as keyof typeof v])} onChange={(c) => setOpt(color, c)} className="h-8 w-12 p-1" />
         )}
         <input
           type="checkbox"
@@ -111,12 +119,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
   );
   const colorRow = (label: string, key: string) => (
     <Row label={label}>
-      <input
-        type="color"
-        value={String(v[key as keyof typeof v])}
-        onChange={(e) => setOpt(key, e.target.value)}
-        className="h-8 w-14 cursor-pointer bg-transparent"
-      />
+      <ColorPicker value={String(v[key as keyof typeof v])} onChange={(c) => setOpt(key, c)} className="h-8 w-12 p-1" />
     </Row>
   );
 
@@ -128,12 +131,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   )}
                 <Row label={o.label}>
                   {"color" in o ? (
-                    <input
-                      type="color"
-                      value={String(optOf(d, o.key) || d.color).slice(0, 7)}
-                      onChange={(e) => setOpt(o.key, e.target.value)}
-                      className="h-8 w-14 cursor-pointer bg-transparent"
-                    />
+                    <ColorPicker value={String(optOf(d, o.key) || d.color)} onChange={(c) => setOpt(o.key, c)} className="h-8 w-12 p-1" />
                   ) : "choices" in o ? (
                     <select className={input} value={String(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.value)}>
                       {o.choices.map(([v, label]) => (
@@ -377,28 +375,13 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
           {tab === "style" && isPos && (
             <>
               <Row label="Profit color">
-                <input
-                  type="color"
-                  value={o.profit}
-                  onChange={(e) => setOpt("profit", e.target.value)}
-                  className="h-8 w-14 cursor-pointer bg-transparent"
-                />
+                <ColorPicker value={o.profit} onChange={(c) => setOpt("profit", c)} className="h-8 w-12 p-1" />
               </Row>
               <Row label="Stop color">
-                <input
-                  type="color"
-                  value={o.stop}
-                  onChange={(e) => setOpt("stop", e.target.value)}
-                  className="h-8 w-14 cursor-pointer bg-transparent"
-                />
+                <ColorPicker value={o.stop} onChange={(c) => setOpt("stop", c)} className="h-8 w-12 p-1" />
               </Row>
               <Row label="Text color">
-                <input
-                  type="color"
-                  value={d.textColor ?? "#ffffff"}
-                  onChange={(e) => setD({ ...d, textColor: e.target.value })}
-                  className="h-8 w-14 cursor-pointer bg-transparent"
-                />
+                <ColorPicker value={d.textColor ?? "#ffffff"} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-12 p-1" />
               </Row>
               <Row label="Fill opacity (%)">
                 <input
@@ -422,12 +405,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
           {tab === "style" && !isPos && !isVol && (
             <>
               <Row label={spec.colorLabel ?? "Line color"}>
-                <input
-                  type="color"
-                  value={d.color}
-                  onChange={(e) => setD({ ...d, color: e.target.value })}
-                  className="h-8 w-14 cursor-pointer bg-transparent"
-                />
+                <ColorPicker value={d.color} onChange={(c) => setD({ ...d, color: c })} className="h-8 w-12 p-1" />
               </Row>
               <Row label="Line width">
                 <select
@@ -465,12 +443,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
               </Row>
               {!spec.text && (
                 <Row label="Text color">
-                  <input
-                    type="color"
-                    value={d.textColor ?? d.color}
-                    onChange={(e) => setD({ ...d, textColor: e.target.value })}
-                    className="h-8 w-14 cursor-pointer bg-transparent"
-                  />
+                  <ColorPicker value={d.textColor ?? d.color} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-12 p-1" />
                 </Row>
               )}
               {!spec.text && (spec.prompt || d.text !== undefined) && (
@@ -491,12 +464,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
           {tab === "text" && spec.text && (
             <>
               <div className="flex items-center gap-2 py-2">
-                <input
-                  type="color"
-                  value={(d.textColor ?? d.color).slice(0, 7)}
-                  onChange={(e) => setD({ ...d, textColor: e.target.value })}
-                  className="h-8 w-12 cursor-pointer bg-transparent"
-                />
+                <ColorPicker value={d.textColor ?? d.color} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-12 p-1" />
                 <select className={`${input} w-20`} value={Number(optOf(d, "fontSize"))} onChange={(e) => setOpt("fontSize", Number(e.target.value))}>
                   {[10, 11, 12, 14, 16, 20, 24, 28, 32, 40].map((v) => (
                     <option key={v} value={v} className="text-black">{v}</option>
@@ -672,7 +640,8 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
               type="button"
               className="rounded-lg bg-white px-5 py-2 text-sm font-medium text-black hover:bg-neutral-200"
               onClick={() => {
-                api?.replaceSelected(d);
+                accepted.current = true;
+                api?.replaceSelected(d, orig.current);
                 onClose();
               }}
             >

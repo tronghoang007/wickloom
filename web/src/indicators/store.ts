@@ -12,6 +12,8 @@ export type IndicatorInstance = {
 type State = {
   list: IndicatorInstance[];
   favorites: string[];
+  collapsed: boolean; // nút chevron trên legend: ẩn/hiện các hàng indicator (như TV)
+  setCollapsed: (v: boolean) => void;
   add: (id: string) => void;
   remove: (uid: string) => void;
   update: (uid: string, patch: Partial<Pick<IndicatorInstance, "inputs" | "colors">>) => void;
@@ -23,6 +25,8 @@ export const useIndicatorStore = create<State>()(
     (set) => ({
       list: [],
       favorites: ["sma", "ema", "wma", "macd", "rsi", "volume", "vwap"],
+      collapsed: false,
+      setCollapsed: (collapsed) => set({ collapsed }),
       add: (id) =>
         set((s) => {
           const def = byId(id);

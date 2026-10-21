@@ -1,7 +1,7 @@
 "use client";
 
 import { DrawingManager } from "@/drawings/manager";
-import { AddOrderI, AlertI, BuyI, ResetViewI, SellI, SettingsI, SkipToLatest } from "../icons";
+import { AddOrderI, AlertI, BuyI, Chevron, ResetViewI, SellI, SettingsI, SkipToLatest } from "../icons";
 import { useDrawingStore } from "@/drawings/store";
 import { IndicatorManager } from "@/indicators/manager";
 import { byId } from "@/indicators/registry";
@@ -11,6 +11,7 @@ import { SPEEDS, exitReplay, useReplayStore } from "@/replay/store";
 import { useChartStore, type ChartType, type ScaleMode } from "@/store/chart";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
+import { fmtVol, useVolumeStore, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
 import {
   AreaSeries,
   BarSeries,
@@ -40,8 +41,11 @@ import { drawingMenuItems } from "./drawingMenu";
 import FavoritesBar from "./FavoritesBar";
 import InlineTextEditor from "./InlineTextEditor";
 import ReplayBar from "./ReplayBar";
+import { SymbolBadge } from "./SymbolSearchDialog";
 import StylePanel from "./StylePanel";
 import SettingsDialog from "./SettingsDialog";
+import VolumeLegend, { volumeMenuItems } from "./VolumeLegend";
+import VolumeSettingsDialog from "./VolumeSettingsDialog";
 import { heikinAshi } from "./transform";
 
 
@@ -128,11 +132,8 @@ function toPoint(b: Bar, type: ChartType, prevC?: number) {
 
 const volPoint = (b: Bar, prevC?: number) => {
   const cs = useSettingsStore.getState().s;
-  return {
-    time: b.t as UTCTimestamp,
-    value: b.v,
-    color: `${isUp(b, prevC, cs) ? cs.bodyUp : cs.bodyDown}66`,
-  };
+  const vs = useVolumeStore.getState().s;
+  return { time: b.t as UTCTimestamp, value: b.v, color: volColor(vs, cs, volUp(b, prevC, vs)) };
 };
 
 function fmtCountdown(sec: number) {
@@ -143,10 +144,18 @@ function fmtCountdown(sec: number) {
   return h > 0 ? `${p(h)}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
 }
 
-function fmtVol(v: number) {
-  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
-  return String(v);
+// Giá trên legend có dấu phẩy ngàn như TradingView: 4,131.155
+const fmtPrice = (n: number, d: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+// Nhãn khung thời gian trên legend của TV: phút là số trần ("15"), còn lại "1h", "1D"...
+function tfLegend(tf: string) {
+  const sec = TF_SECONDS[tf];
+  if (tf === "MN1") return "1M";
+  if (tf === "W1") return "1W";
+  if (sec >= 86400) return `${sec / 86400}D`;
+  if (sec >= 3600) return `${sec / 3600}h`;
+  return String(sec / 60);
 }
 
 const RANGES: { label: string; secs: number | "ytd" | "all" }[] = [
@@ -178,21 +187,31 @@ const olderUsable = (
   (firstT - older[older.length - 1].t <= gapLimit(tf) ||
     (req?.t === firstT && req.done));
 
-// "Reset chart view" (⌥R): về đúng góc nhìn lúc mới tải - 150 nến cuối, auto-scale giá.
+// Góc nhìn lúc mới tải: bề rộng mỗi nến cố định như TV (~6px, đo từ layout TV), không theo số nến,
+// nên chart rộng thì thấy nhiều nến hơn thay vì nến phình to.
+const DEFAULT_BAR_SPACING = 6;
+function defaultRange(chart: IChartApi, n: number) {
+  const right = useSettingsStore.getState().s.rightOffset;
+  const visible = chart.timeScale().width() / DEFAULT_BAR_SPACING;
+  return { from: Math.max(0, n - 1 + right - visible), to: n - 1 + right };
+}
+
+// "Reset chart view" (⌥R): về đúng góc nhìn lúc mới tải, auto-scale giá.
 function resetChartView(chart: IChartApi | null, n: number) {
   if (!chart || !n) return;
   chart.priceScale("right").setAutoScale(true);
-  const right = useSettingsStore.getState().s.rightOffset;
-  chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 150), to: n - 1 + right });
+  chart.timeScale().setVisibleLogicalRange(defaultRange(chart, n));
 }
 
 function setTabTitle(title: string) {
   if (document.title !== title) document.title = title;
 }
 
-function mergeBars(cur: Bar[], add: Bar[]) {
+// Nến mới nạp (từ DB) ghi đè nến cũ cùng mốc - trừ nến cuối `liveT` đang chạy realtime
+// (WS mới là nguồn đúng nhất của nó). Nến trước đó có thể là bản gom dở đã được EA sửa lại.
+function mergeBars(cur: Bar[], add: Bar[], liveT: number) {
   const m = new Map(cur.map((b) => [b.t, b]));
-  for (const b of add) if (!m.has(b.t)) m.set(b.t, b);
+  for (const b of add) if (!m.has(b.t) || b.t < liveT) m.set(b.t, b);
   return [...m.values()].sort((a, b) => a.t - b.t);
 }
 
@@ -205,11 +224,17 @@ export default function Chart() {
   const symbolDesc = useChartStore(
     (s) => s.symbols.find((x) => x.name === s.symbol)?.description ?? "",
   );
+  const symType = useChartStore((s) => s.symbols.find((x) => x.name === s.symbol)?.type);
+  const broker = useChartStore((s) => {
+    const b = s.symbols.find((x) => x.name === s.symbol)?.broker;
+    return b ? b.split(" ")[0] : "";
+  });
   const digits = cs.precision ?? symDigits;
   const boxRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
   const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const volMaRef = useRef<ISeriesApi<"Line"> | null>(null);
   const barsRef = useRef<Bar[]>([]);
   const typeRef = useRef<ChartType>(chartType);
   const digitsRef = useRef(digits);
@@ -225,8 +250,10 @@ export default function Chart() {
   const drawRef = useRef<DrawingManager | null>(null);
   const indicators = useIndicatorStore((s) => s.list);
   const removeIndicator = useIndicatorStore((s) => s.remove);
+  const legendCollapsed = useIndicatorStore((s) => s.collapsed);
   const [legend, setLegend] = useState<Legend | null>(null);
   const [countdown, setCountdown] = useState("");
+  const cdRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState("");
   const [showLatestButton, setShowLatestButton] = useState(false);
   const [clock, setClock] = useState("");
@@ -257,6 +284,17 @@ export default function Chart() {
     typeRef.current === "heikin"
       ? heikinAshi(barsRef.current)
       : barsRef.current;
+  // Histogram volume + đường MA của nó (cùng thang "vol")
+  const renderVol = () => {
+    const bars = barsRef.current;
+    volRef.current?.setData(bars.map((b, i, a) => volPoint(b, a[i - 1]?.c)));
+    volMaRef.current?.setData(volMaData(bars, useVolumeStore.getState().s.maLength));
+  };
+  const updateVol = (bars: Bar[], i: number) => {
+    volRef.current?.update(volPoint(bars[i], bars[i - 1]?.c));
+    const ma = volMaAt(bars, i, useVolumeStore.getState().s.maLength);
+    if (ma !== null) volMaRef.current?.update({ time: bars[i].t as UTCTimestamp, value: ma });
+  };
   const render = () => {
     const cur = barsRef.current;
     if (cur.some((b, i) => i > 0 && b.t <= cur[i - 1].t)) {
@@ -266,7 +304,7 @@ export default function Chart() {
     seriesRef.current?.setData(
       display().map((b, i, a) => toPoint(b, typeRef.current, a[i - 1]?.c)) as never,
     );
-    volRef.current?.setData(barsRef.current.map((b, i, a) => volPoint(b, a[i - 1]?.c)));
+    renderVol();
     updateTitle();
   };
 
@@ -388,7 +426,7 @@ export default function Chart() {
     if (incremental) {
       for (let i = old.length - 1; i < vis.length; i++) {
         seriesRef.current?.update(toPoint(vis[i], typeRef.current, vis[i - 1]?.c) as never);
-        volRef.current?.update(volPoint(vis[i], vis[i - 1]?.c));
+        updateVol(vis, i);
       }
     } else render();
     refreshExtras();
@@ -477,6 +515,8 @@ export default function Chart() {
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 8,
+        // Lăn chuột zoom ngang lấy mép phải làm gốc (như TradingView), không theo con trỏ.
+        rightBarStaysOnScroll: true,
         tickMarkFormatter: (t: number, type: number) => tickLabel(t, type),
       },
     });
@@ -531,8 +571,8 @@ export default function Chart() {
         e.stopPropagation();
         const ts = chart.timeScale();
         const range = ts.getVisibleLogicalRange();
-        const anchor = ts.coordinateToLogical(x);
-        if (!range || anchor === null) return;
+        if (!range) return;
+        const anchor = range.to; // zoom lấy mép phải làm gốc, như lăn chuột trên vùng chart
         const delta =
           Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         const span = range.to - range.from;
@@ -558,6 +598,13 @@ export default function Chart() {
       priceFormat: { type: "volume" },
       lastValueVisible: false,
       priceLineVisible: false,
+    });
+    volMaRef.current = chart.addSeries(LineSeries, {
+      priceScaleId: "vol",
+      lineWidth: 1,
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
     });
     chart
       .priceScale("vol")
@@ -670,6 +717,7 @@ export default function Chart() {
       chartRef.current = null;
       seriesRef.current = null;
       volRef.current = null;
+      volMaRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -718,6 +766,18 @@ export default function Chart() {
     updateLines();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cs, chartType]);
+
+  // Volume theo Settings riêng của nó (hiện/ẩn, nhãn trục, độ chính xác, màu, MA); chỉnh là áp ngay
+  const vs = useVolumeStore((st) => st.s);
+  useEffect(() => {
+    volRef.current?.applyOptions({
+      visible: volShown(vs, tf),
+      lastValueVisible: vs.priceLabel,
+      priceFormat: { type: "volume", precision: volDigits(vs) },
+    });
+    volMaRef.current?.applyOptions({ visible: volMaShown(vs, tf), color: vs.maColor });
+    renderVol();
+  }, [vs, tf, cs.bodyUp, cs.bodyDown]);
 
   // cursor mode + screenshot
   const cursor = useDrawingStore((s) => s.cursor);
@@ -914,10 +974,7 @@ export default function Chart() {
       refreshExtras();
       chartRef.current?.priceScale("right").setAutoScale(true);
       if (bars.length) {
-        chartRef.current?.timeScale().setVisibleLogicalRange({
-          from: Math.max(0, bars.length - 150),
-          to: bars.length - 1 + useSettingsStore.getState().s.rightOffset,
-        });
+        if (chartRef.current) chartRef.current.timeScale().setVisibleLogicalRange(defaultRange(chartRef.current, bars.length));
       } else {
         clearTimeout(pollTimer);
         pollTimer = setTimeout(load, missing ? 5000 : 800);
@@ -933,7 +990,7 @@ export default function Chart() {
       else return;
       if (typeRef.current === "heikin") render();
       else seriesRef.current?.update(toPoint(b, typeRef.current, arr[arr.length - 2]?.c) as never);
-      volRef.current?.update(volPoint(b, arr[arr.length - 2]?.c));
+      updateVol(arr, arr.length - 1);
       updateLines();
       refreshExtras();
       updateTitle();
@@ -982,7 +1039,7 @@ export default function Chart() {
             // EA vừa nạp: có thể là đoạn cũ hơn (scroll-back) hoặc đoạn mới hơn (catch-up
             // sau khi EA/backend tắt) -> lấy cả 2 phía.
             Promise.all([
-              fetchBars(symbol, tf, undefined, 50000, last.t),
+              fetchBars(symbol, tf, undefined, 50000, last.t - 3 * TF_SECONDS[tf]),
               fetchBars(symbol, tf, first.t, 500),
             ]).then(([newer, older]) => {
               if (!alive || barsRef.current[0] !== first) return;
@@ -991,10 +1048,14 @@ export default function Chart() {
                 return;
               }
               const useOlder = olderUsable(older, first.t, tf, backfillRef.current);
-              const added = newer.some((b) => b.t > last.t);
+              const have = new Map(barsRef.current.map((b) => [b.t, b]));
+              const added = newer.some((b) => {
+                const old = have.get(b.t);
+                return b.t > last.t || (b.t < last.t && old && (old.o !== b.o || old.h !== b.h || old.l !== b.l || old.c !== b.c));
+              });
               if (!useOlder && !added) return;
               const vis = chartRef.current?.timeScale().getVisibleLogicalRange();
-              const merged = mergeBars(barsRef.current, newer);
+              const merged = mergeBars(barsRef.current, newer, last.t);
               barsRef.current = useOlder ? [...older, ...merged] : merged;
               render();
               refreshExtras();
@@ -1054,6 +1115,36 @@ export default function Chart() {
     refreshExtras();
   }, [indicators]);
 
+  // Đếm ngược đóng nến nằm ngay dưới nhãn giá cuối trên trục giá (như TradingView): theo
+  // sát giá khi kéo/zoom trục -> cập nhật vị trí mỗi frame, chỉ đụng style (không setState).
+  useEffect(() => {
+    let raf = 0;
+    const frame = () => {
+      raf = requestAnimationFrame(frame);
+      const el = cdRef.current;
+      const chart = chartRef.current;
+      const series = seriesRef.current;
+      const bars = barsRef.current;
+      const last = bars[bars.length - 1];
+      const y = el && series && last ? series.priceToCoordinate(last.c) : null;
+      if (!el || !chart || y === null || !last) {
+        if (el) el.style.display = "none";
+        return;
+      }
+      const st = useSettingsStore.getState().s;
+      const up = isUp(last, bars[bars.length - 2]?.c, st);
+      const labelH = st.fontSize + 8; // chiều cao nhãn giá cuối của lightweight-charts
+      el.style.display = "flex";
+      el.style.width = `${chart.priceScale("right").width()}px`;
+      el.style.height = `${labelH}px`;
+      el.style.transform = `translateY(${Math.round(y + labelH / 2)}px)`;
+      el.style.background = up ? st.bodyUp : st.bodyDown;
+      el.style.fontSize = `${st.fontSize}px`;
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   // countdown + clock
   useEffect(() => {
     const id = setInterval(() => {
@@ -1100,6 +1191,16 @@ export default function Chart() {
     if (drawRef.current && hit) {
       setCtxMenu({ x: e.clientX, y: e.clientY, items: drawingMenuItems(drawRef.current, hit, tf) });
       return;
+    }
+    // Chuột phải lên cột volume: menu của indicator Volume (như TV)
+    if (volShown(useVolumeStore.getState().s, tf)) {
+      const logical = chart.timeScale().coordinateToLogical(x);
+      const bar = logical === null ? undefined : barsRef.current[Math.round(logical)];
+      const top = bar ? volRef.current?.priceToCoordinate(bar.v) : null;
+      if (top != null && y >= top) {
+        setCtxMenu({ x: e.clientX, y: e.clientY, items: volumeMenuItems(tf) });
+        return;
+      }
     }
     setCtxMenu({ x: e.clientX, y: e.clientY, items: menuItems(seriesRef.current?.coordinateToPrice(y) ?? null) });
   };
@@ -1179,59 +1280,72 @@ export default function Chart() {
             <SkipToLatest />
           </button>
         )}
-        <div className="pointer-events-none absolute left-3 top-2 z-10 text-xs">
-          <div className="flex items-center gap-2 text-[13px]">
+        <div className="pointer-events-none absolute left-3 top-2 z-10 text-[13px] leading-[20px]">
+          <div className="flex flex-wrap items-baseline gap-x-3">
             {cs.showTitle && (
-              <>
-                <span className="font-semibold">
-                  {cs.titleMode === "description" ? symbolDesc || symbol : symbol}
+              <span className="flex items-center whitespace-nowrap text-[16px] text-[var(--fg)]">
+                <span className="mr-2 flex">
+                  <SymbolBadge name={symbol} type={symType} size={20} />
                 </span>
-                <span className="text-[var(--muted)]">· {tf} ·</span>
-              </>
+                <span>
+                  {cs.titleMode === "description" ? symbolDesc || symbol : symbol}
+                  <span className="text-[var(--muted)]"> · </span>
+                  {tfLegend(tf)}
+                  {broker && (
+                    <>
+                      <span className="text-[var(--muted)]"> · </span>
+                      {broker}
+                    </>
+                  )}
+                </span>
+              </span>
             )}
-            {cs.countdown && countdown && (
-              <span className="text-[var(--muted)]">{countdown}</span>
+            {L && cs.showChartValues && (
+              <span className="flex items-baseline gap-x-2 whitespace-nowrap">
+                {(
+                  [
+                    ["O", L.o],
+                    ["H", L.h],
+                    ["L", L.l],
+                    ["C", L.c],
+                  ] as const
+                ).map(([k, v]) => (
+                  <span key={k}>
+                    <span className="text-[var(--fg)]">{k}</span>
+                    <span style={{ color }}>{fmtPrice(v, d)}</span>
+                  </span>
+                ))}
+              </span>
+            )}
+            {L && cs.showBarChange && chg !== null && legend.prev && (
+              <span className="whitespace-nowrap" style={{ color }}>
+                {chg >= 0 ? "+" : "−"}
+                {fmtPrice(Math.abs(chg), d)} ({chg >= 0 ? "+" : "−"}
+                {Math.abs((chg / legend.prev) * 100).toFixed(2)}%)
+              </span>
+            )}
+            {L && cs.showVolume && (
+              <span className="whitespace-nowrap">
+                <span className="text-[var(--fg)]">Vol </span>
+                <span style={{ color }}>{fmtVol(L.v, volDigits(vs))}</span>
+              </span>
             )}
           </div>
-          {L && (cs.showChartValues || cs.showBarChange) && (
-            <div className="mt-0.5 flex gap-2 font-mono" style={{ color }}>
-              {cs.showChartValues && (
-                <>
-              <span>
-                O<b className="ml-1 font-normal">{L.o.toFixed(d)}</b>
-              </span>
-              <span>
-                H<b className="ml-1 font-normal">{L.h.toFixed(d)}</b>
-              </span>
-              <span>
-                L<b className="ml-1 font-normal">{L.l.toFixed(d)}</b>
-              </span>
-              <span>
-                C<b className="ml-1 font-normal">{L.c.toFixed(d)}</b>
-              </span>
-                </>
-              )}
-              {cs.showBarChange && chg !== null && legend.prev && (
-                <span>
-                  {chg >= 0 ? "+" : ""}
-                  {chg.toFixed(d)} ({((chg / legend.prev) * 100).toFixed(2)}%)
-                </span>
-              )}
-            </div>
+          {!legendCollapsed && (
+            <VolumeLegend
+              getBars={() => barsRef.current}
+              bar={L}
+              prev={legend?.prev}
+              onMenu={(x, y) => setCtxMenu({ x, y, items: volumeMenuItems(tf) })}
+            />
           )}
-          {L && cs.showVolume && (
-            <div className="mt-0.5 flex gap-1.5 font-mono">
-              <span className="text-[var(--muted)]">Vol</span>
-              <span style={{ color }}>{fmtVol(L.v)}</span>
-            </div>
-          )}
-          {cs.showIndicatorTitles && indicators.map((inst) => {
+          {!legendCollapsed && cs.showIndicatorTitles && indicators.map((inst) => {
             const def = byId(inst.id);
             const params = def.inputs.map((i) => inst.inputs[i.key]).join(" ");
             return (
               <div
                 key={inst.uid}
-                className="mt-0.5 flex items-center gap-1.5 text-[var(--muted)]"
+                className="flex items-center gap-1.5 text-[var(--muted)]"
               >
                 <span style={{ color: inst.colors[0] }}>{def.name}</span>
                 {cs.showIndicatorInputs && <span>{params}</span>}
@@ -1245,12 +1359,34 @@ export default function Chart() {
               </div>
             );
           })}
+          {(!vs.removed || indicators.length > 0) && (
+            <button
+              type="button"
+              aria-label={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
+              title={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
+              onClick={() => useIndicatorStore.getState().setCollapsed(!legendCollapsed)}
+              className="pointer-events-auto mt-1 flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] text-[var(--fg)] hover:bg-[var(--hover)]"
+            >
+              <span className={legendCollapsed ? "" : "rotate-180"}>
+                <Chevron size={14} />
+              </span>
+            </button>
+          )}
           {status && <div className="mt-1 text-[var(--muted)]">{status}</div>}
         </div>
+        {cs.countdown && countdown && (cs.symbolLabel === "value_line" || cs.symbolLabel === "value") && (
+          <div
+            ref={cdRef}
+            className="pointer-events-none absolute right-0 top-0 z-10 hidden items-center justify-center text-white"
+          >
+            {countdown}
+          </div>
+        )}
         <FavoritesBar />
         <StylePanel />
         <InlineTextEditor />
         <DrawingSettings />
+        <VolumeSettingsDialog />
         {selecting && (
           <div
             className="absolute inset-y-0 left-0 z-30 cursor-pointer"

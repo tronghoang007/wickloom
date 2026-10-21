@@ -1,6 +1,7 @@
 "use client";
 
 import { useDrawingStore } from "@/drawings/store";
+import ColorPicker from "./ColorPicker";
 import { POS_DEFAULTS, SPEC } from "@/drawings/tools";
 import { visibleOn } from "@/drawings/visibility";
 import { useChartStore } from "@/store/chart";
@@ -39,19 +40,13 @@ function ColorButton({
   children: ReactNode;
 }) {
   return (
-    <label className={`${btn} cursor-pointer`} title={title}>
+    <ColorPicker value={color} onChange={onChange} title={title} className={`${btn} cursor-pointer`}>
       {children}
       <span
         className="absolute bottom-[3px] left-1/2 h-[3px] w-[18px] -translate-x-1/2 rounded-[1px]"
         style={{ background: color }}
       />
-      <input
-        type="color"
-        value={color.slice(0, 7)}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 cursor-pointer opacity-0"
-      />
-    </label>
+    </ColorPicker>
   );
 }
 

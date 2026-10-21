@@ -554,8 +554,8 @@ const ICONS: Record<string, ReactNode> = {
   ),
   zoom: (
     <>
-      <circle cx="10.5" cy="10.5" r="6" />
-      <path d="M15 15l5 5M10.5 8v5M8 10.5h5" />
+      <circle cx="9.5" cy="9.5" r="5" />
+      <path d="M13.2 13.2l4.8 4.8M9.5 7.3v4.4M7.3 9.5h4.4" />
     </>
   ),
 

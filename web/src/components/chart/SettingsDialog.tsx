@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import ColorPicker from "./ColorPicker";
 import {
   AlertI,
   CalendarI,
@@ -87,27 +88,19 @@ function CheckRow(props: Parameters<typeof Check>[0] & { children?: ReactNode })
   );
 }
 
-/** Ô màu: click mở color picker của hệ điều hành; `value` null = màu theo theme (`fallback`). */
+/** Ô màu: click mở bảng màu kiểu TV; `value` null = màu theo theme (`fallback`). */
 function Swatch({ value, fallback, onChange, disabled }: {
   value: string | null;
   fallback?: string;
   onChange?: (v: string) => void;
   disabled?: boolean;
 }) {
-  const color = value ?? fallback ?? "#000000";
   return (
-    <label
-      className={`relative h-8 w-8 shrink-0 cursor-pointer rounded-md border border-[var(--border)] p-1 ${disabled ? "pointer-events-none opacity-40" : "hover:border-[var(--muted)]"}`}
-    >
-      <span className="block h-full w-full rounded-sm" style={{ background: color }} />
-      <input
-        type="color"
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        value={color.slice(0, 7)}
-        disabled={disabled}
-        onChange={(e) => onChange?.(e.target.value)}
-      />
-    </label>
+    <ColorPicker
+      value={value ?? fallback ?? "#000000"}
+      onChange={(v) => onChange?.(v)}
+      disabled={disabled}
+    />
   );
 }
 

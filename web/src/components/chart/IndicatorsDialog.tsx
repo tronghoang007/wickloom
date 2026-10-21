@@ -1,7 +1,9 @@
 "use client";
 
 import { INDICATORS, byId } from "@/indicators/registry";
+import ColorPicker from "./ColorPicker";
 import { useIndicatorStore } from "@/indicators/store";
+import { useVolumeStore } from "@/store/volume";
 import { useState, type ReactNode } from "react";
 import { Close, Search, StarI, Svg24 as Svg } from "../icons";
 
@@ -223,16 +225,13 @@ function OnChart() {
             ))}
             <div className="flex gap-2 pt-1">
               {inst.colors.map((c, k) => (
-                <input
+                <ColorPicker
                   key={k}
-                  type="color"
-                  value={c.slice(0, 7)}
-                  className="h-5 w-6 cursor-pointer border-0 bg-transparent p-0"
-                  onChange={(e) =>
+                  value={c}
+                  className="h-5 w-6 p-0.5"
+                  onChange={(v) =>
                     update(inst.uid, {
-                      colors: inst.colors.map((x, j) =>
-                        j === k ? e.target.value : x,
-                      ),
+                      colors: inst.colors.map((x, j) => (j === k ? v : x)),
                     })
                   }
                 />
@@ -367,7 +366,8 @@ export default function IndicatorsDialog({
                     {rows.map((d) => (
                       <div
                         key={d.id}
-                        onClick={() => add(d.id)}
+                        // Volume đã có sẵn trên chart (indicator "Vol · Ticks"): chọn lại chỉ để thêm lại / hiện lại nó, không thêm pane trùng
+                        onClick={() => (d.id === "volume" ? useVolumeStore.getState().set({ removed: false, hidden: false }) : add(d.id))}
                         className="group grid cursor-pointer grid-cols-[1fr_120px_80px] items-center rounded px-3 py-2 text-sm hover:bg-[var(--hover)]"
                       >
                         <span className="flex min-w-0 items-center gap-3">

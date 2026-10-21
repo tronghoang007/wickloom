@@ -87,7 +87,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   precision: null,
   timezone: "local",
   showTitle: true,
-  titleMode: "name",
+  titleMode: "description", // như TV: "Gold vs US Dollar", không phải mã broker
   showChartValues: true,
   showBarChange: true,
   showVolume: true,
@@ -137,6 +137,13 @@ export const useSettingsStore = create<State>()(
     }),
     {
       name: "tv-chart-settings",
+      version: 1,
+      // v0 lưu sẵn titleMode "name" (giá trị mặc định cũ) -> chuyển sang tên mô tả như mặc định mới
+      migrate: (saved, version) => {
+        const st = saved as { s?: Partial<ChartSettings> };
+        if (version < 1 && st?.s) st.s.titleMode = "description";
+        return st as State;
+      },
       partialize: (st) => ({ s: st.s }),
       // thêm field mới vào DEFAULT_SETTINGS không làm mất setting đã lưu
       merge: (saved, cur) => ({ ...cur, s: { ...DEFAULT_SETTINGS, ...(saved as Partial<State>)?.s } }),

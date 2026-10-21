@@ -46,6 +46,8 @@ textarea,
   --hover: #2a2e39;
   --accent: #2962ff;
   --panel: #1f1f1f; /* thanh nổi (favorites, style drawing) - đo từ TradingView */
+  --scroll-thumb: #434651;
+  --scroll-thumb-hover: #5d606b;
 }
 
 [data-theme="light"] {
@@ -56,4 +58,41 @@ textarea,
   --hover: #f0f3fa;
   --accent: #2962ff;
   --panel: #ffffff;
+  --scroll-thumb: #c1c4cd;
+  --scroll-thumb-hover: #9598a1;
+}
+
+/* Thanh cuộn mảnh kiểu TradingView: 8px, chỉ có thumb bo tròn, không track/nút mũi tên. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb, #434651) transparent;
+}
+@supports selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scroll-thumb, #434651);
+    border: 2px solid transparent; /* thumb nhìn mảnh 4px, vùng bắt chuột vẫn 8px */
+    background-clip: padding-box;
+    border-radius: 6px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scroll-thumb-hover, #5d606b);
+  }
 }
