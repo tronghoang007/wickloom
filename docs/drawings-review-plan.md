@@ -200,3 +200,13 @@ Chưa có: Stats của TV là chọn nhiều mục (price range, %, pips, bars, 
 - **Rectangle**: màu nền riêng (`backgroundColor`, trống = màu viền); nền và viền tách thành 2 shape.
 - **Position**: Risk theo `%` hoặc `$` (như TV `riskDisplayMode`).
 - Kiểm trên app: chữ "Trendline hỗ trợ" đậm, chạy dọc đường phía trên; Stats "22.755 / 44 bars" ở đầu phải. Đã trả prefs trình duyệt về như trước test.
+
+## 14. Gann Square / Gann Square Fixed làm lại theo TV (2026-10-21)
+
+Đo lại trên TV (chi tiết trong tài liệu tham chiếu mục Gann), rồi viết lại cả 2 tool trên chung hàm `gannGrid` (lưới 5×5, 6 mức màu, 11 fan line — bật 2×1/1×1/1×2, 11 cung, nền giữa các cung):
+- **Gann Square**: hook mới `spec.init` chạy lúc vẽ xong để chốt `opts.scaleRatio` (giá/nến cho hộp vuông trên màn hình), góc điểm 2 tính từ tỉ lệ; handle điểm 2 nằm ở góc thật; nhãn giá / tỉ lệ / số nến màu xám; tùy chọn Labels, Background.
+- **Gann Square Fixed**: 1 ô = khoảng cách pixel giữa 2 điểm, lưới về phía điểm 2; tùy chọn Background.
+- Kiểm trên app: Gann Square vuông 183×183px, nhãn 20.902 / 0.9087738 / 23; Square Fixed lưới lớn đúng kiểu TV.
+- Hình cũ của Gann Square (chưa có `scaleRatio`) dùng tỉ lệ suy từ 2 điểm đã lưu nên vẫn hiện, không đổi dữ liệu.
+
+Còn: Gann Box, Gann Fan chưa đo được (TV không tải được tool); tùy chọn bật/tắt từng fan line / cung chưa có trong Settings.

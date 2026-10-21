@@ -578,8 +578,12 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private finish(draft: Drawing, points: Anchor[]) {
     const spec = SPEC[draft.type];
     this.mode = { k: "idle" };
-    const d: Drawing = { ...draft, points };
+    let d: Drawing = { ...draft, points };
     const st = useDrawingStore.getState();
+    if (spec.init) {
+      const c = this.ctx(d, this.view());
+      if (c) d = spec.init(d, c);
+    }
 
     if (spec.action === "zoom") {
       const ts = this.o.chart.timeScale();

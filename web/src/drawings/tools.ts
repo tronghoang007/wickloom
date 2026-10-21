@@ -50,6 +50,7 @@ export type ToolSpec = {
   disabled?: boolean;
   options?: ToolOption[]; // tùy chọn riêng của tool (lưu trong d.opts), hiện ở tab Style của Settings
   text?: TextSpec; // có tab Text (d.text + opts fontSize, bold, italic, vAlign, hAlign)
+  init?: (d: Drawing, c: Ctx) => Drawing; // chốt thông số theo khung đang xem lúc vẽ xong (Gann Square)
 };
 
 // Tùy chọn dạng bật/tắt hoặc chọn 1 trong danh sách, đặt tên theo thuộc tính của TV
@@ -649,6 +650,73 @@ function rectangle(c: Ctx): Shape[] {
   return out;
 }
 
+// ---------- Gann Square / Gann Square Fixed (đo trên TV, xem docs/tv-drawing-settings-reference.md) ----------
+// Lưới 5×5 ô tính từ điểm 1; mức 0…5; fan line a×b từ điểm 1 tới mép hộp; cung tâm điểm 1 bán kính
+// = khoảng cách tới điểm lưới (x, y); nền giữa 2 cung liền nhau tô màu cung ngoài 20%.
+const GANN_LEVELS = ["#787b86", "#ff9800", "#00bcd4", "#4caf50", "#089981", "#787b86"];
+const GANN_FANS: [number, number, string, boolean][] = [
+  [8, 1, "#b39ddb", false], [5, 1, "#f23645", false], [4, 1, "#787b86", false], [3, 1, "#ff9800", false],
+  [2, 1, "#00bcd4", true], [1, 1, "#4caf50", true], [1, 2, "#089981", true],
+  [1, 3, "#089981", false], [1, 4, "#2962ff", false], [1, 5, "#9575cd", false], [1, 8, "#b39ddb", false],
+];
+const GANN_ARCS: [number, number, string][] = [
+  [1, 0, "#ff9800"], [1, 1, "#ff9800"], [1.5, 0, "#ff9800"], [2, 0, "#00bcd4"], [2, 1, "#00bcd4"],
+  [3, 0, "#4caf50"], [3, 1, "#4caf50"], [4, 0, "#089981"], [4, 1, "#089981"], [5, 0, "#2962ff"], [5, 1, "#2962ff"],
+];
+
+// o = điểm 1; ux, uy = số pixel của 1 ô theo x / y (có dấu: hướng về phía điểm 2)
+export function gannGrid(o: Pt, ux: number, uy: number, background = true): Shape[] {
+  const P = (x: number, y: number): Pt => ({ x: o.x + x * ux, y: o.y + y * uy });
+  const out: Shape[] = [];
+  const arcs: Shape[] = [];
+  let prev: Pt[] | null = null;
+  for (const [x, y, color] of GANN_ARCS) {
+    const r = Math.hypot(x, y);
+    const arc = Array.from({ length: 49 }, (_, i) => P(r * Math.cos((Math.PI / 2) * (i / 48)), r * Math.sin((Math.PI / 2) * (i / 48))));
+    if (background) out.push(poly(prev ? [...arc, ...[...prev].reverse()] : [o, ...arc], { closed: true, fill: 0.2, noStroke: true, color }));
+    arcs.push(poly(arc, { color }));
+    prev = arc;
+  }
+  for (let i = 0; i <= 5; i++) {
+    out.push(seg(P(i, 0), P(i, 5), { color: GANN_LEVELS[i] }), seg(P(0, i), P(5, i), { color: GANN_LEVELS[i] }));
+  }
+  for (const [a, b, color, on] of GANN_FANS) {
+    if (!on) continue;
+    const k = Math.min(5 / a, 5 / b);
+    out.push(seg(o, P(a * k, b * k), { color }));
+  }
+  return [...out, ...arcs];
+}
+
+// Gann Square: hộp vuông theo tỉ lệ giá/nến (scaleRatio) chốt lúc tạo = đúng hình vuông trên màn
+// hình lúc đó; sau đó zoom thì vẫn giữ tỉ lệ giá/nến. Điểm 2 chỉ quyết định số nến + hướng.
+function gannSquareEnd(c: Ctx) {
+  const [pa, pb] = c.d.points;
+  const bars = c.barsBetween(pa.time, pb.time);
+  const ratio = Number(c.d.opts?.scaleRatio) || (bars ? Math.abs(pb.price - pa.price) / Math.abs(bars) : 1);
+  const price = pa.price + (Math.sign(pb.price - pa.price) || 1) * Math.abs(bars) * ratio;
+  return { bars, ratio, price };
+}
+
+function gannSquare(c: Ctx): Shape[] {
+  const a = c.p[0], xb = c.p[1].x;
+  const { bars, ratio, price } = gannSquareEnd(c);
+  const yb = c.Y(price);
+  if (yb === null) return [];
+  const out = gannGrid(a, (xb - a.x) / 5, (yb - a.y) / 5, Boolean(optOf(c.d, "background")));
+  if (optOf(c.d, "showLabels")) {
+    // như TV: khoảng giá ở góc điểm-2 phía điểm 1, tỉ lệ ở góc điểm 2, số nến ở góc dưới cùng phía điểm 2
+    const out1 = yb < a.y ? -10 : 10;
+    const lbl = { align: "center", size: 12, color: "#b2b5be" }; // TV: nhãn xám, không theo màu hình
+    out.push(
+      txt({ x: a.x, y: yb + out1 }, c.fp(Math.abs(price - c.d.points[0].price)), lbl),
+      txt({ x: xb, y: yb + out1 }, String(+ratio.toFixed(7)), lbl),
+      txt({ x: xb, y: a.y - out1 }, String(Math.abs(bars)), lbl),
+    );
+  }
+  return out;
+}
+
 const gannY = (c: Ctx) => (t: number) => c.Y(priceAt(pt(c, 0).price, pt(c, 1).price, t));
 
 const span = (c: Ctx) => ({ t0: Math.min(pt(c, 0).time, pt(c, 1).time), t1: Math.max(pt(c, 0).time, pt(c, 1).time) });
@@ -876,15 +944,36 @@ export const TOOLS: ToolSpec[] = [
   // Gann
   { id: "gannbox", label: "Gann box", n: 2, style: { width: 1 }, build: (c) => gridBox(c.p[0], c.p[1], [0.25, 0.382, 0.5, 0.618, 0.75, 1], true, gannY(c)) },
   {
+    // Như TV: lưới vuông trên màn hình, 1 ô = khoảng cách pixel giữa 2 điểm, 5×5 ô về phía điểm 2
     id: "gannsqfixed", label: "Gann square fixed", n: 2, style: { width: 1 },
+    options: [{ key: "background", label: "Background", def: true }],
     build: (c) => {
       const [a, b] = c.p;
-      const s = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y));
-      const e = { x: a.x + Math.sign(b.x - a.x || 1) * s, y: a.y + Math.sign(b.y - a.y || 1) * s };
-      return gridBox(a, e, [1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8, 1]);
+      const u = dist(a, b) || 1;
+      return gannGrid(a, (Math.sign(b.x - a.x) || 1) * u, (Math.sign(b.y - a.y) || -1) * u, Boolean(optOf(c.d, "background")));
     },
   },
-  { id: "gannsquare", label: "Gann square", n: 2, style: { width: 1 }, build: (c) => gridBox(c.p[0], c.p[1], [1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8, 1], true, gannY(c)) },
+  {
+    id: "gannsquare", label: "Gann square", n: 2, style: { width: 1 }, build: gannSquare,
+    options: [{ key: "showLabels", label: "Labels", def: true }, { key: "background", label: "Background", def: true }],
+    // handle điểm 2 nằm ở góc thật của hộp (giá suy từ tỉ lệ), không phải giá đã lưu
+    handles: (c) => {
+      const y = c.Y(gannSquareEnd(c).price);
+      return [c.p[0], { x: c.p[1].x, y: y ?? c.p[1].y }];
+    },
+    moveHandle: (pts, i, q) => (i === 0 ? [q, { ...pts[1] }] : [{ ...pts[0] }, q]),
+    // chốt tỉ lệ giá/nến để hộp vuông trên màn hình lúc vẽ xong
+    init: (d, c) => {
+      const [pa, pb] = d.points;
+      const bars = Math.abs(c.barsBetween(pa.time, pb.time));
+      const y0 = c.Y(pa.price), y1 = c.Y(pa.price + 1);
+      const x0 = c.X(pa.time), x1 = c.X(pb.time);
+      if (!bars || y0 === null || y1 === null || x0 === null || x1 === null || y0 === y1) return d;
+      const ratio = (Math.abs(x1 - x0) / bars) / Math.abs(y1 - y0);
+      const price = pa.price + (Math.sign(pb.price - pa.price) || 1) * bars * ratio;
+      return { ...d, points: [pa, { ...pb, price }], opts: { ...d.opts, scaleRatio: ratio } };
+    },
+  },
   {
     id: "gannfan", label: "Gann fan", n: 2, style: { width: 1 },
     build: (c) => {

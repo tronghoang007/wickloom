@@ -144,6 +144,12 @@ Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), se
 - Rectangle: Shift → **hình vuông trên màn hình** (200×200px), cạnh = cạnh dài.
 - Rectangle có 8 handle: 4 góc + 4 giữa cạnh.
 
-### Gann (chưa làm theo)
+### Gann (đo lần 2, 2026-10-21 — đã làm theo cho Gann Square và Gann Square Fixed)
+- Chung: lưới **5×5 ô** tính từ điểm 1 về phía điểm 2; 6 mức 0…5 màu `#808080 #FF9800 #00bcd4 #4caf50 #089981 #808080`; fan line `a×b` từ điểm 1 tới mép hộp (2×1 → mép phải ở 1/2 chiều cao); cung tâm điểm 1, bán kính = khoảng cách tới điểm lưới (x, y), vẽ 1/4 vòng; nền giữa 2 cung liền nhau tô màu cung ngoài, transparency 80.
+- **Gann Square**: lúc tạo TV chốt `scaleRatio` = giá/nến sao cho hộp vuông trên màn hình (176×176px; 29.629 giá / 26 nến = 1.1396), rồi ép giá điểm 2 theo tỉ lệ đó. Nhãn (`showLabels`, cỡ 12): khoảng giá phía trên góc trái, tỉ lệ phía trên góc điểm 2, số nến phía dưới góc phải.
+- **Gann Square Fixed**: không có tỉ lệ; lưới vuông trên màn hình, **1 ô = khoảng cách pixel giữa 2 điểm** (√(176²+118²) ≈ 212px, ô đo được 211px). Điểm 2 là handle tỉ lệ nằm trong ô đầu.
+- Gann Box (`gannbox`) và Gann Fan (`gannbox_fan`): chunk JS không tải được ("Loading chunk … failed") nên chưa đo.
+
+### Gann (lần 1)
 - `gannbox_square` (**Gann Square**): có `scaleRatio` (giá/nến) — điểm 2 bị ép theo tỉ lệ: 30 nến → 4120 → 4157.34 (1.2446/nến). Props: `reverse, showLabels, labelsStyle, arcsBackground, levels, fanlines, arcs, scaleRatio`.
 - `gannbox_fixed` (**Gann Square Fixed**): giữ đúng 2 điểm nhập; props `reverse, arcsBackground{fill, transparency 80}, levels (6 mức, màu #808080 #FF9800 #00bcd4 #4caf50 #089981 #808080), fanlines (11: 8x1 5x1 4x1 3x1 2x1 1x1 1x2 1x3 1x4 1x5 1x8; bật mặc định 2x1 1x1 1x2), arcs (11 cung 1:0, 1:1, 1.5:0, 2:0, 2:1, 3:0, 3:1, 4:0, 4:1, 5:0, 5:1)`. Trên chart điểm 2 là handle **giữa** lưới chứ không phải góc; lưới + cung lớn hơn nhiều so với 2 điểm.

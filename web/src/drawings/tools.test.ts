@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import type { Shape } from "./shapes";
-import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, posConstrain, positionStats, SPEC, type Ctx } from "./tools";
+import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, gannGrid, posConstrain, positionStats, SPEC, type Ctx } from "./tools";
 import type { Anchor } from "./types";
 
 const T = 1_000_000;
@@ -351,5 +351,57 @@ describe("tab Text, Stats, đầu mũi tên, rủi ro theo tiền", () => {
     const p = pos(100, 110, 95);
     expect(positionStats([], p, true, { account: 1000, lot: 1, risk: 50, riskMode: "money" }).riskAmt).toBe(50);
     expect(positionStats([], p, true, { account: 1000, lot: 1, risk: 5 }).riskAmt).toBe(50);
+  });
+});
+
+describe("Gann Square / Square Fixed (đo trên TV)", () => {
+  const segs = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line");
+
+  it("lưới 5×5 từ điểm 1, mức 0…5 đúng màu, fan 2×1 / 1×1 / 1×2 tới mép hộp", () => {
+    const sh = gannGrid({ x: 0, y: 0 }, 10, -10, false);
+    const lines = segs(sh);
+    expect(lines.filter((l) => l.a.x === l.b.x).map((l) => l.a.x)).toEqual([0, 10, 20, 30, 40, 50]);
+    expect(lines.find((l) => l.a.x === 10 && l.b.x === 10)?.color).toBe("#ff9800");
+    const fans = lines.filter((l) => l.a.x === 0 && l.a.y === 0 && l.b.x !== 0 && l.b.y !== 0);
+    expect(fans.map((l) => l.b)).toEqual([{ x: 50, y: -25 }, { x: 50, y: -50 }, { x: 25, y: -50 }]);
+  });
+
+  it("11 cung tâm điểm 1, bán kính theo điểm lưới (1,0) … (5,1); có nền thì tô giữa các cung", () => {
+    const arcs = gannGrid({ x: 0, y: 0 }, 10, -10, false).filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly");
+    expect(arcs).toHaveLength(11);
+    expect(arcs[0].pts[0].x).toBe(10);
+    expect(arcs[0].pts[0].y).toBeCloseTo(0, 9);
+    expect(Math.hypot(arcs[1].pts[0].x, arcs[1].pts[0].y)).toBeCloseTo(10 * Math.SQRT2, 9);
+    const withBg = gannGrid({ x: 0, y: 0 }, 10, -10, true).filter((s) => s.k === "poly" && s.fill === 0.2);
+    expect(withBg).toHaveLength(11);
+  });
+
+  const mk = (type: string, points: Anchor[], opts?: Record<string, number | string | boolean>): Ctx => ({
+    d: { id: "x", type, points, color: "#fff", width: 1, locked: false, hidden: false, opts },
+    // 1 nến = 900s = 6 px; 1 đơn vị giá = 6 px (y ngược)
+    p: points.map((a) => ({ x: a.time / 150, y: 1000 - a.price * 6 })),
+    w: 2000, h: 2000, bars: [], tickSize: 0.01, hovered: false, selected: false, step: 900,
+    barsBetween: (t0, t1) => Math.round((t1 - t0) / 900),
+    X: (t) => t / 150, Y: (price) => 1000 - price * 6, fp: (v) => v.toFixed(3), digits: 3,
+  });
+
+  it("Gann Square Fixed: 1 ô = khoảng cách pixel giữa 2 điểm", () => {
+    const pts = [{ time: 0, price: 100 }, { time: 900 * 30, price: 110 }]; // 180px ngang, 60px dọc
+    const lines = segs(SPEC.gannsqfixed.build(mk("gannsqfixed", pts)));
+    const u = Math.hypot(180, 60);
+    expect(lines.filter((l) => l.a.x === l.b.x)[1].a.x).toBeCloseTo(u, 9);
+  });
+
+  it("Gann Square: lúc tạo chốt tỉ lệ giá/nến để vuông trên màn hình; nhãn giá / tỉ lệ / số nến", () => {
+    const pts = [{ time: 0, price: 100 }, { time: 900 * 30, price: 110 }];
+    const d = SPEC.gannsquare.init!(mk("gannsquare", pts).d, mk("gannsquare", pts));
+    expect(d.opts?.scaleRatio).toBeCloseTo(1, 9); // 6px/nến ÷ 6px/giá
+    expect(d.points[1].price).toBeCloseTo(130, 9); // 30 nến × 1
+    const c = { ...mk("gannsquare", d.points, d.opts as Record<string, number>) };
+    const texts = SPEC.gannsquare.build(c).filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text").map((t) => t.text);
+    expect(texts).toEqual(["30.000", "1", "30"]);
+    // zoom/đổi khung: tỉ lệ đã chốt, kéo điểm 2 sang 10 nến thì giá góc = 100 + 10
+    const moved = mk("gannsquare", [d.points[0], { time: 9000, price: 999 }], d.opts as Record<string, number>);
+    expect(SPEC.gannsquare.handles!(moved)[1].y).toBeCloseTo(1000 - 110 * 6, 9);
   });
 });
