@@ -1,9 +1,10 @@
 export type Bar = { t: number; o: number; h: number; l: number; c: number; v: number };
 export type SymbolInfo = { name: string; digits: number; tick_size: number; type: string; description?: string; broker?: string };
 
-export const TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"] as const;
 export const TF_SECONDS: Record<string, number> = {
-  M1: 60, M5: 300, M15: 900, M30: 1800, H1: 3600, H4: 14400, D1: 86400, W1: 604800, MN1: 2592000,
+  M1: 60, M2: 120, M3: 180, M4: 240, M5: 300, M6: 360, M10: 600, M12: 720, M15: 900, M20: 1200, M30: 1800,
+  H1: 3600, H2: 7200, H3: 10800, H4: 14400, H6: 21600, H8: 28800, H12: 43200,
+  D1: 86400, W1: 604800, MN1: 2592000,
 };
 
 export const API = process.env.NEXT_PUBLIC_API ?? "http://127.0.0.1:8000";

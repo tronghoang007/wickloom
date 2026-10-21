@@ -1,7 +1,7 @@
 "use client";
 
 import { useDrawingStore } from "@/drawings/store";
-import { TIMEFRAMES, fetchSymbols } from "@/lib/api";
+import { fetchSymbols } from "@/lib/api";
 import { useSettingsStore } from "@/store/settings";
 import { toggleReplay, useReplayStore } from "@/replay/store";
 import { useChartStore, type ChartType } from "@/store/chart";
@@ -16,13 +16,11 @@ import {
   CompareI,
   FullscreenI,
   Heikin,
-  IdeaI,
   IndicatorsI,
   LayoutI,
   LineIcon,
   MoonI,
   PlusCircle,
-  QuickSearchI,
   Redo,
   Replay,
   SettingsI,
@@ -32,19 +30,7 @@ import {
 } from "../icons";
 import IndicatorsDialog from "./IndicatorsDialog";
 import SymbolSearchDialog from "./SymbolSearchDialog";
-
-const TF_LABEL: Record<string, string> = {
-  M1: "1m",
-  M5: "5m",
-  M15: "15m",
-  M30: "30m",
-  H1: "1h",
-  H4: "4h",
-  D1: "D",
-  W1: "W",
-  MN1: "M",
-};
-const QUICK_TF = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"];
+import TimeframeBar from "./TimeframeBar";
 
 const CHART_TYPES: { v: ChartType; label: string; icon: ReactNode }[] = [
   { v: "candles", label: "Candles", icon: <Candles /> },
@@ -107,10 +93,9 @@ function SymbolSearch() {
 }
 
 export default function Toolbar() {
-  const { tf, chartType, theme, set } = useChartStore();
+  const { chartType, theme, set } = useChartStore();
   const api = useDrawingStore((s) => s.api);
   const replayOn = useReplayStore((s) => s.active || s.selecting);
-  const [tfOpen, setTfOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
 
   useEffect(() => {
@@ -140,38 +125,7 @@ export default function Toolbar() {
         <PlusCircle />
       </button>
       {sep}
-      {QUICK_TF.map((t) => (
-        <button
-          key={t}
-          onClick={() => set({ tf: t })}
-          className={`${btn} px-2.5 ${t === tf ? "bg-[var(--hover)] font-semibold" : ""}`}
-        >
-          {TF_LABEL[t]}
-        </button>
-      ))}
-      <Menu
-        open={tfOpen}
-        setOpen={setTfOpen}
-        trigger={
-          <button className={`${btn} px-1`}>
-            <Chevron />
-          </button>
-        }
-      >
-        {TIMEFRAMES.map((t) => (
-          <button
-            key={t}
-            onClick={() => {
-              set({ tf: t });
-              setTfOpen(false);
-            }}
-            className="block w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--hover)]"
-          >
-            {TF_LABEL[t]}{" "}
-            <span className="text-xs text-[var(--muted)]">{t}</span>
-          </button>
-        ))}
-      </Menu>
+      <TimeframeBar className={btn} />
       {sep}
       <Menu
         open={typeOpen}
@@ -232,9 +186,6 @@ export default function Toolbar() {
         <Chevron />
       </button>
       {sep}
-      <button className={iconBtn} disabled title="Quick search (sắp có)">
-        <QuickSearchI />
-      </button>
       <button className={iconBtn} title="Settings" onClick={() => useSettingsStore.setState({ open: true })}>
         <SettingsI />
       </button>
@@ -247,9 +198,6 @@ export default function Toolbar() {
         onClick={() => window.dispatchEvent(new Event("tv-screenshot"))}
       >
         <CameraI />
-      </button>
-      <button className={iconBtn} disabled title="Ideas (sắp có)">
-        <IdeaI />
       </button>
       <button
         className={iconBtn}

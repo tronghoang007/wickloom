@@ -191,12 +191,6 @@ export const LayoutI = () => (
     <rect x="4.5" y="5.5" width="19" height="17" rx="3.5" />
   </Tv>
 );
-export const QuickSearchI = () => (
-  <Svg>
-    <circle cx="12.5" cy="12.5" r="6.5" />
-    <path d="M17.5 17.5l5 5M13.5 8.5l-2.5 4.5h3l-2.5 4.5" />
-  </Svg>
-);
 export const SettingsI = () => (
   <Svg>
     <path d="M4.5 14l4.75-8.25h9.5L23.5 14l-4.75 8.25h-9.5z" />
@@ -212,12 +206,6 @@ export const CameraI = () => (
   <Svg>
     <path d="M5.5 10.5a2 2 0 0 1 2-2h2.5l1.5-2.5h5l1.5 2.5h2.5a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
     <circle cx="14" cy="15" r="3.5" />
-  </Svg>
-);
-export const IdeaI = () => (
-  <Svg>
-    <path d="M14 4.5a7 7 0 0 0-4 12.75V20.5h8v-3.25A7 7 0 0 0 14 4.5z" />
-    <path d="M10.5 23.5h7M14 8.5v6M11 11.5h6" />
   </Svg>
 );
 export const SunI = () => (
