@@ -1,5 +1,5 @@
 import type { Bar } from "@/lib/api";
-import type { Ext, Pt, Shape } from "./shapes";
+import { textBox, type Ext, type Pt, type Shape } from "./shapes";
 import type { Anchor, Drawing } from "./types";
 
 export type Ctx = {
@@ -1402,7 +1402,7 @@ export const TOOLS: ToolSpec[] = [
   { id: "highlighter", label: "Highlighter", n: -1, style: { color: "#f5c542", width: 3 }, build: (c) => [poly(c.p, { w: c.d.width * 6, alpha: 0.35 })] },
   // Arrows
   {
-    id: "arrowmarker", label: "Arrow marker", n: 2,
+    id: "arrowmarker", label: "Arrow marker", n: 2, style: { color: "#1e53e5" },
     build: (c) => {
       const [a, b] = c.p;
       const u = unit(sub(b, a)), n = { x: -u.y, y: u.x };
@@ -1419,7 +1419,7 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
-    id: "arrowdown", label: "Arrow mark down", n: 1, style: { color: "#f23645" },
+    id: "arrowdown", label: "Arrow mark down", n: 1, style: { color: "#cc2f3c" },
     build: (c) => {
       const { x, y } = c.p[0], s = 8 + c.d.width * 3;
       return [poly([{ x, y }, { x: x - s, y: y - s }, { x: x - s / 2, y: y - s }, { x: x - s / 2, y: y - s * 2.2 }, { x: x + s / 2, y: y - s * 2.2 }, { x: x + s / 2, y: y - s }, { x: x + s, y: y - s }], { closed: true, fill: 1 })];
@@ -1448,7 +1448,7 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   { id: "path", label: "Path", n: 0, build: (c) => (c.p.length > 1 ? [poly(c.p), head(c.p[c.p.length - 2], c.p[c.p.length - 1], 10 + c.d.width * 2)] : []) },
-  { id: "circle", label: "Circle", n: 2, build: (c) => [poly(circle(c.p[0], dist(c.p[0], c.p[1])), { closed: true, fill: 0.15 })] },
+  { id: "circle", label: "Circle", n: 2, style: { color: "#ff9800" }, build: (c) => [poly(circle(c.p[0], dist(c.p[0], c.p[1])), { closed: true, fill: 0.2 })] },
   {
     id: "ellipse", label: "Ellipse", n: 2, shift: "square",
     build: (c) => {
@@ -1484,14 +1484,23 @@ export const TOOLS: ToolSpec[] = [
   },
 
   // Text & notes
-  { id: "text", label: "Text", n: 1, prompt: "Text", build: (c) => [txt(c.p[0], c.d.text ?? "Text", { size: 12 + c.d.width * 2 })] },
+  // TV: chữ xanh cỡ 14 (width 1 → 14)
+  { id: "text", label: "Text", n: 1, prompt: "Text", style: { width: 1 }, build: (c) => [txt(c.p[0], c.d.text ?? "Text", { size: 12 + c.d.width * 2 })] },
   { id: "note", label: "Note", n: 2, prompt: "Note", oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)], build: (c) => noteShapes(c, c.d.text ?? "Note") },
-  { id: "pricenote", label: "Price note", n: 2, oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)], build: (c) => noteShapes(c, c.fp(c.d.points[0].price)) },
   {
+    // TV: đường từ điểm 1 tới ô giá ở điểm 2; chữ (tab Text) chạy dọc theo đường
+    id: "pricenote", label: "Price note", n: 2, oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)],
+    text: { kind: "line", size: 14, v: "top", h: "center" },
+    build: (c) => [...noteShapes(c, c.fp(c.d.points[0].price)), ...lineText(c, c.p[0], c.p[1])],
+  },
+  {
+    // TV ("note"): chỉ là ghim màu đường; chữ hiện trong ô tối khi hover / chọn
     id: "pin", label: "Pin", n: 1, prompt: "Pin text",
     build: (c) => {
       const { x, y } = c.p[0];
-      return [poly([{ x, y }, { x: x - 6, y: y - 12 }, { x: x + 6, y: y - 12 }], { closed: true, fill: 1 }), poly(circle({ x, y: y - 18 }, 8, 20), { closed: true, fill: 1 }), ...(c.d.text ? [txt({ x, y: y - 36 }, c.d.text, { align: "center", bg: c.d.color, size: 11 })] : [])];
+      const out: Shape[] = [poly([{ x, y }, { x: x - 7, y: y - 14 }, { x: x + 7, y: y - 14 }], { closed: true, fill: 1 }), poly(circle({ x, y: y - 19 }, 9, 24), { closed: true, fill: 1 })];
+      if (c.d.text && (c.hovered || c.selected)) out.push(txt({ x, y: y - 46 }, c.d.text, { align: "center", bg: "#2e2e2e", border: "#4a4a4a", color: "#dbdbdb", size: 14 }));
+      return out;
     },
   },
   {
@@ -1504,12 +1513,24 @@ export const TOOLS: ToolSpec[] = [
       return [...out, txt({ x: x + 6, y: y + ch / 2 }, c.d.text ?? "Table", { size: 12 })];
     },
   },
-  { id: "callout", label: "Callout", n: 2, prompt: "Callout", oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)], build: (c) => noteShapes(c, c.d.text ?? "Callout") },
   {
+    // TV: ô màu (teal) chữ trắng ở điểm 2, đuôi nhọn chỉ về điểm 1
+    id: "callout", label: "Callout", n: 2, prompt: "Callout", style: { color: "#0097a7" }, oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)],
+    build: (c) => {
+      const [a, b] = c.p;
+      const label = { k: "text", at: b, text: c.d.text ?? "Callout", size: 14, align: "left", bg: c.d.color, color: "#ffffff" } as Extract<Shape, { k: "text" }>;
+      const box = textBox(label);
+      const ctr = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+      const n = mul({ x: -unit(sub(a, ctr)).y, y: unit(sub(a, ctr)).x }, Math.min(10, box.h / 2 - 2));
+      return [poly([add(ctr, n), a, sub(ctr, n)], { closed: true, fill: 1 }), label];
+    },
+  },
+  {
+    // TV: bong bóng bo tròn chữ trắng cỡ 16, góc dưới-trái nhọn chỉ vào điểm
     id: "comment", label: "Comment", n: 1, prompt: "Comment",
     build: (c) => {
       const { x, y } = c.p[0];
-      return [poly([{ x, y }, { x: x + 4, y: y - 10 }, { x: x + 16, y: y - 10 }], { closed: true, fill: 1 }), txt({ x, y: y - 22 }, c.d.text ?? "Comment", { align: "left", bg: c.d.color, size: 12 })];
+      return [poly([{ x, y }, { x: x + 4, y: y - 14 }, { x: x + 20, y: y - 14 }], { closed: true, fill: 1 }), txt({ x: x + 6, y: y - 28 }, c.d.text ?? "Comment", { align: "left", bg: c.d.color, color: "#ffffff", size: 16, radius: 16 })];
     },
   },
   {
@@ -1520,10 +1541,11 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
+    // TV: ô tối viền xám chữ sáng, cột xám từ ô xuống điểm neo
     id: "signpost", label: "Signpost", n: 1, prompt: "Signpost",
     build: (c) => {
       const { x, y } = c.p[0];
-      return [seg({ x, y }, { x, y: y + 50 }), txt({ x, y: y - 10 }, c.d.text ?? "Signpost", { align: "center", bg: c.d.color, size: 12 })];
+      return [seg({ x, y }, { x, y: y - 40 }, { w: 1, color: "#787b86" }), txt({ x, y: y - 52 }, c.d.text ?? "Signpost", { align: "center", bg: "#2e2e2e", border: "#4a4a4a", color: "#dbdbdb", size: 12 })];
     },
   },
   {

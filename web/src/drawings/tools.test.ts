@@ -674,3 +674,49 @@ describe("measurers và Arc (đo trên TV)", () => {
     expect(Math.min(...arc.pts.map((q) => q.y))).toBeCloseTo(Y(4155), 9);
   });
 });
+
+describe("annotation (đo trên TV)", () => {
+  const Y = (price: number) => 1000 - price;
+  const mk = (type: string, points: Anchor[], text?: string, extra: Partial<Ctx> = {}): Ctx => ({
+    d: { id: "x", type, points, color: SPEC[type].style?.color ?? "#2962ff", width: 1, locked: false, hidden: false, text },
+    p: points.map((a) => ({ x: a.time, y: Y(a.price) })),
+    w: 1000, h: 1000, bars: [], tickSize: 0.01, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0,
+    X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2, ...extra,
+  });
+  const texts = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text");
+
+  it("Pin: chỉ ghim, chữ (ô tối) hiện khi hover / chọn", () => {
+    const pts = [{ time: 100, price: 100 }];
+    expect(texts(SPEC.pin.build(mk("pin", pts, "Hello")))).toHaveLength(0);
+    const t = texts(SPEC.pin.build(mk("pin", pts, "Hello", { hovered: true })))[0];
+    expect(t).toMatchObject({ text: "Hello", bg: "#2e2e2e", color: "#dbdbdb" });
+  });
+
+  it("Callout: ô teal chữ trắng, đuôi nhọn chạm điểm 1", () => {
+    const sh = SPEC.callout.build(mk("callout", [{ time: 100, price: 100 }, { time: 200, price: 150 }], "Hello"));
+    const tail = sh[0] as Extract<Shape, { k: "poly" }>;
+    expect(tail.pts[1]).toEqual({ x: 100, y: Y(100) });
+    expect(texts(sh)[0]).toMatchObject({ bg: "#0097a7", color: "#ffffff", size: 14 });
+  });
+
+  it("Comment cỡ 16 bo tròn; Signpost ô tối + cột xám xuống điểm neo", () => {
+    expect(texts(SPEC.comment.build(mk("comment", [{ time: 100, price: 100 }], "Hi")))[0]).toMatchObject({ size: 16, radius: 16, color: "#ffffff" });
+    const sp = SPEC.signpost.build(mk("signpost", [{ time: 100, price: 100 }], "S"));
+    expect(sp[0]).toMatchObject({ k: "line", a: { x: 100, y: Y(100) }, color: "#787b86" });
+    expect(texts(sp)[0]).toMatchObject({ bg: "#2e2e2e", color: "#dbdbdb" });
+  });
+
+  it("Price note: ô giá ở điểm 2 + chữ chạy dọc đường", () => {
+    const t = texts(SPEC.pricenote.build(mk("pricenote", [{ time: 100, price: 100 }, { time: 200, price: 150 }], "Hello")));
+    expect(t.map((x) => x.text)).toEqual(["100.00", "Hello"]);
+    expect(t[1].angle).toBeCloseTo(Math.atan2(-50, 100), 9);
+  });
+
+  it("màu mặc định theo TV", () => {
+    expect(SPEC.arrowdown.style?.color).toBe("#cc2f3c");
+    expect(SPEC.arrowmarker.style?.color).toBe("#1e53e5");
+    expect(SPEC.circle.style?.color).toBe("#ff9800");
+    expect(SPEC.callout.style?.color).toBe("#0097a7");
+  });
+});

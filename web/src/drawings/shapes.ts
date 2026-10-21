@@ -29,6 +29,7 @@ export type Shape =
       bold?: boolean;
       italic?: boolean;
       angle?: number; // radian, xoay quanh at (chữ chạy dọc theo trend line như TV)
+      radius?: number; // bo góc ô nền (mặc định 4; Comment của TV bo tròn hẳn)
     };
 
 const HIT = 6;
@@ -145,7 +146,7 @@ export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], d: Dr
       if (t.bg) {
         ctx.fillStyle = t.bg;
         ctx.beginPath();
-        ctx.roundRect(b.x, b.y, b.w, b.h, 4);
+        ctx.roundRect(b.x, b.y, b.w, b.h, Math.min(t.radius ?? 4, b.h / 2));
         ctx.fill();
       }
       if (t.border) {
@@ -153,7 +154,7 @@ export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], d: Dr
         ctx.lineWidth = 1;
         ctx.setLineDash([]);
         ctx.beginPath();
-        ctx.roundRect(b.x, b.y, b.w, b.h, 4);
+        ctx.roundRect(b.x, b.y, b.w, b.h, Math.min(t.radius ?? 4, b.h / 2));
         ctx.stroke();
       }
       ctx.fillStyle = t.color ?? (t.bg ? "#fff" : d.textColor ?? d.color);

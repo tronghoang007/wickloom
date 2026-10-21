@@ -194,3 +194,13 @@ Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), se
 - **date_range**: hộp + 2 cạnh dọc + mũi tên ngang; nhãn ô `labelBackgroundColor #2E2E2E` chữ trắng "20 bars, 5h" / "Vol 138.84K" (`showBarsRange, showDateTimeRange, showVolume`).
 - **date_and_price_range**: hộp + 2 mũi tên; ô tối 3 dòng "25.000 (0.60%) 2,500.0" / "20 bars, 5h" / "Vol 185.08K". Pip có 1 số lẻ và dấu phẩy nghìn.
 - **arc** #e91e63 nền .2: nửa elip, đáy p1–p2, cao tới p3. **curve** #2962FF không nền (điều khiển tại (x điểm 2, giá điểm 1)). **double_curve** #673ab7. **triangle** #089981 nền .2. **rotated_rectangle** #4caf50 nền .2. **polyline** #00bcd4 nền .2. **path** #2962FF, `rightEnd 1` (mũi tên).
+
+### Annotation — hình vẽ + màu mặc định (đo lần 6, 2026-10-21)
+- **text**: color #2962FF, fontsize 14, không nền/viền.
+- **note** (UI "Pin"): chỉ là **ghim (map-pin)** màu `markerColor #2962FF`; chữ trong ô `backgroundColor #2E2E2E`, `textColor #DBDBDB`, `borderColor #4A4A4A`, cỡ 14 — chỉ hiện khi hover/chọn.
+- **callout**: ô màu #0097A7 chữ trắng cỡ 14 ở điểm 2, đuôi nhọn chỉ về điểm 1.
+- **comment**: bong bóng bo tròn nền #2962FF chữ trắng cỡ 16, góc dưới-trái nhọn chỉ vào điểm.
+- **price_note**: chấm ở điểm 1, đường tới ô giá (nền màu đường, chữ trắng, giá điểm 1) ở điểm 2; chữ (textColor #2962FF, cỡ 14) chạy dọc theo đường.
+- **signpost**: ô tối viền xám chữ sáng cỡ 12, cột xám từ ô xuống điểm neo.
+- **arrow_up** #089981, **arrow_down** #CC2F3C (cỡ chữ 14); **arrow_marker** #1E53E5 (chữ 16); **circle** #FF9800 nền.
+- `price_label`, `flag` tạo qua API báo "Value is undefined" — chưa đo được.

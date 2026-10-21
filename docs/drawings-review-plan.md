@@ -264,3 +264,14 @@ Lần này TV tải được các tool (đo chi tiết trong tài liệu tham ch
 - Hàm mới: `volumeIn`, `fmtVol`, `rangeText`, `rangeBox`.
 - Kiểm trên app: Measure "13.359 (0.32%) 1,335.9 / 18 bars, 4h 30m / Vol 61.63K".
 - Chưa: Double curve (TV tạo qua API ra điểm điều khiển lạ, chưa rõ hình học); màu mặc định Circle / Ellipse chưa đo.
+
+## 19. Annotation theo TV (2026-10-21)
+
+- **Pin**: chỉ vẽ ghim; chữ hiện trong ô tối khi hover / chọn (app cũ: luôn vẽ ô chữ màu xanh).
+- **Callout**: ô teal chữ trắng + đuôi nhọn tới điểm 1 (app cũ: đường + chấm + nhãn).
+- **Comment**: cỡ 16, bo tròn hẳn (shape text có thêm `radius`).
+- **Price note**: thêm tab Text, chữ chạy dọc đường.
+- **Signpost**: ô tối viền xám, cột xám xuống điểm neo (app cũ: ô xanh, cột chĩa xuống dưới).
+- Màu mặc định: Text cỡ 14, Arrow down #cc2f3c, Arrow marker #1e53e5, Circle cam.
+- Kiểm trên app: Callout, Signpost, Pin (cả hover) như TV; xóa từng hình test, giữ Short position của user.
+- Chưa đo được: Price label, Flag mark (TV API lỗi "Value is undefined"), Table, Anchored text/note.
