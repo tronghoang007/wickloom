@@ -567,6 +567,7 @@ export default function Chart() {
       chart,
       container: boxRef.current!,
       getBars: () => barsRef.current,
+      getDisplayBars: display,
       getTf: () => useChartStore.getState().tf,
       getDigits: () => digitsRef.current,
       getTickSize: () =>

@@ -23,6 +23,7 @@ type Opts = {
   chart: IChartApi;
   container: HTMLElement;
   getBars: () => Bar[];
+  getDisplayBars?: () => Bar[]; // nến đang vẽ trên chart (Heikin Ashi...) cho magnet; mặc định = getBars
   getTf: () => string;
   getDigits: () => number;
   getTickSize: () => number;
@@ -268,7 +269,8 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (time === null) return null;
     let pr = price as number;
     if (magnet) {
-      const bar = this.o.getBars()[Math.round(l)];
+      // hút về OHLC của nến đang thấy (Heikin Ashi thì là giá HA, không phải giá gốc)
+      const bar = (this.o.getDisplayBars?.() ?? this.o.getBars())[Math.round(l)];
       if (bar) {
         const best = [bar.o, bar.h, bar.l, bar.c]
           .map((v) => ({ v, d: Math.abs((this.series!.priceToCoordinate(v) ?? 1e9) - p.y) }))
@@ -845,7 +847,8 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     const d = this.selected();
     if (!d) return;
     this.pushUndo();
-    const c: Drawing = { ...d, id: crypto.randomUUID(), points: d.points.map((p) => ({ time: p.time, price: p.price * 0.999 })) };
+    // như TV: bản sao nằm đúng chỗ bản gốc (trước đây dịch giá ×0.999)
+    const c: Drawing = { ...d, id: crypto.randomUUID(), points: d.points.map((p) => ({ ...p })) };
     this.drawings.push(c);
     useDrawingStore.setState({ selectedId: c.id });
     this.commit();

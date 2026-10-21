@@ -237,40 +237,41 @@ function channelOffset(a: Pt, b: Pt, c: Pt) {
   return c.y - (a.y + slope * (c.x - a.x));
 }
 
-function fork(c: Ctx, v: 0 | 1 | 2 | 3): Shape[] {
-  const [p0, p1, p2] = c.p;
-  const o = v === 1 ? { x: p0.x, y: (p0.y + p1.y) / 2 } : v === 2 ? mid(p0, p1) : p0;
-  const m = mid(p1, p2);
-  const dir = unit(sub(m, o));
-  const far = (p: Pt) => add(p, mul(dir, 20000));
-  const out: Shape[] = [
-    poly([p1, far(p1), far(p2), p2], { closed: true, fill: 0.06, noStroke: true }),
-    ray(o, add(o, dir)),
-    ray(p1, add(p1, dir)),
-    ray(p2, add(p2, dir)),
-    seg(p1, p2, { dash: 1, w: 1 }),
-  ];
-  if (v === 3) {
-    out.push(ray(mid(m, p1), add(mid(m, p1), dir), { dash: 1, w: 1 }));
-    out.push(ray(mid(m, p2), add(mid(m, p2), dir), { dash: 1, w: 1 }));
-  }
-  if (o !== p0) out.push(seg(p0, o, { dash: 2, w: 1 }));
-  return out;
-}
+// Pitchfork như TV (đo 2026-10-21): median màu đường (mặc định đỏ), các mức tính theo nửa bề rộng
+// (median → nhánh = 1): 0.5 và 1 bật sẵn, tô giữa 2 mức liền nhau màu mức ngoài 20%.
+// Gốc median: thường = p0; Schiff = (p0.x, giữa giá p0–p1); Modified Schiff và Inside = trung điểm p0–p1.
+// Inside: median đi từ trung điểm p1–p2, song song với gốc→p2.
+const FORK_LEVELS: [number, string, boolean][] = [
+  [0.25, "#ffb74d", false], [0.382, "#81c784", false], [0.5, "#089981", true], [0.618, "#089981", false],
+  [0.75, "#00bcd4", false], [1, "#2962ff", true], [1.5, "#9c27b0", false], [1.75, "#e91e63", false], [2, "#f77c80", false],
+];
 
-// y(t): vị trí đường ngang ở tỉ lệ t; mặc định nội suy pixel, Gann box truyền theo giá
-function gridBox(a: Pt, b: Pt, divs: number[], diag = true, y: (t: number) => number | null = (t) => a.y + (b.y - a.y) * t): Shape[] {
-  const x = (t: number) => a.x + (b.x - a.x) * t;
-  const out: Shape[] = [poly([a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }], { closed: true, fill: 0.05 })];
-  for (const t of divs) {
-    out.push(seg({ x: x(t), y: a.y }, { x: x(t), y: b.y }, { w: 1 }));
-    const yt = y(t);
-    if (yt !== null) out.push(seg({ x: a.x, y: yt }, { x: b.x, y: yt }, { w: 1 }));
+type ForkKind = "standard" | "schiff" | "modified" | "inside";
+
+function fork(c: Ctx, v: ForkKind): Shape[] {
+  const [p0, p1, p2] = c.p;
+  const m = mid(p1, p2);
+  const o = v === "standard" ? p0 : v === "schiff" ? { x: p0.x, y: (p0.y + p1.y) / 2 } : mid(p0, p1);
+  const dir = unit(v === "inside" ? sub(p2, o) : sub(m, o));
+  const far = (p: Pt) => add(p, mul(dir, 20000));
+  const half = sub(p1, m);
+  const at = (lvl: number, side: 1 | -1) => add(m, mul(half, lvl * side));
+  const bg = optOf(c.d, "background");
+  const fills: Shape[] = [], lines: Shape[] = [];
+  let prev = 0;
+  for (const [lvl, color, on] of FORK_LEVELS) {
+    if (!on) continue;
+    for (const side of [1, -1] as const) {
+      const q0 = at(prev, side), q1 = at(lvl, side);
+      if (bg) fills.push(poly([q0, far(q0), far(q1), q1], { closed: true, fill: 0.2, noStroke: true, color }));
+      lines.push(ray(q1, add(q1, dir), { color }));
+    }
+    prev = lvl;
   }
-  if (diag) {
-    out.push(seg(a, b, { w: 1 }));
-    out.push(seg({ x: a.x, y: b.y }, { x: b.x, y: a.y }, { w: 1 }));
-  }
+  const start = v === "inside" ? m : o;
+  const out = [...fills, ...lines, ray(start, add(start, dir)), seg(p1, p2)];
+  if (v !== "standard") out.push(seg(p0, p1));
+  if (v === "inside") out.push(seg(o, p2));
   return out;
 }
 
@@ -717,7 +718,69 @@ function gannSquare(c: Ctx): Shape[] {
   return out;
 }
 
-const gannY = (c: Ctx) => (t: number) => c.Y(priceAt(pt(c, 0).price, pt(c, 1).price, t));
+// Gann Box như TV: 7 mức theo cả giá lẫn thời gian tính từ điểm 1, mỗi mức 1 màu; tô dải ngang và
+// dải dọc màu mức ngoài 20%; nhãn hệ số ở cả 4 cạnh; không có đường chéo.
+const GANN_BOX: [number, string][] = [[0, "#787b86"], [0.25, "#ff9800"], [0.382, "#00bcd4"], [0.5, "#4caf50"], [0.618, "#089981"], [0.75, "#2962ff"], [1, "#787b86"]];
+
+function gannBox(c: Ctx): Shape[] {
+  const [a, b] = c.p;
+  const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
+  const xs = GANN_BOX.map(([t]) => a.x + (b.x - a.x) * t);
+  const ys = GANN_BOX.map(([t]) => c.Y(priceAt(pa, pb, t)));
+  if (ys.some((y) => y === null)) return [];
+  const Y = ys as number[];
+  const out: Shape[] = [];
+  if (optOf(c.d, "background")) {
+    for (let i = 1; i < GANN_BOX.length; i++) {
+      const color = GANN_BOX[i][1];
+      out.push(poly([{ x: a.x, y: Y[i - 1] }, { x: b.x, y: Y[i - 1] }, { x: b.x, y: Y[i] }, { x: a.x, y: Y[i] }], { closed: true, fill: 0.2, noStroke: true, color }));
+      out.push(poly([{ x: xs[i - 1], y: a.y }, { x: xs[i], y: a.y }, { x: xs[i], y: b.y }, { x: xs[i - 1], y: b.y }], { closed: true, fill: 0.2, noStroke: true, color }));
+    }
+  }
+  const [x0, x1, y0, y1] = [Math.min(a.x, b.x), Math.max(a.x, b.x), Math.min(a.y, b.y), Math.max(a.y, b.y)];
+  GANN_BOX.forEach(([t, color], i) => {
+    out.push(seg({ x: a.x, y: Y[i] }, { x: b.x, y: Y[i] }, { color }), seg({ x: xs[i], y: a.y }, { x: xs[i], y: b.y }, { color }));
+    if (optOf(c.d, "showLabels")) {
+      const o = { size: 11, color };
+      out.push(
+        txt({ x: x0 - 4, y: Y[i] }, String(t), { ...o, align: "right" }),
+        txt({ x: x1 + 4, y: Y[i] }, String(t), { ...o, align: "left" }),
+        txt({ x: xs[i], y: y0 - 9 }, String(t), { ...o, align: "center" }),
+        txt({ x: xs[i], y: y1 + 9 }, String(t), { ...o, align: "center" }),
+      );
+    }
+  });
+  return out;
+}
+
+// Gann Fan như TV: 9 tia từ điểm 1, tia 1/1 qua điểm 2; tia dốc (1/8…1/2) đặt nhãn ở mức giá điểm 2,
+// tia thoải (2/1…8/1) đặt nhãn trên đường dọc qua điểm 2; tô giữa 2 tia liền nhau 20%.
+const GANN_FAN: [number, string, string][] = [
+  [8, "1/8", "#ff9800"], [4, "1/4", "#089981"], [3, "1/3", "#4caf50"], [2, "1/2", "#089981"], [1, "1/1", "#00bcd4"],
+  [1 / 2, "2/1", "#2962ff"], [1 / 3, "3/1", "#9c27b0"], [1 / 4, "4/1", "#e91e63"], [1 / 8, "8/1", "#f23645"],
+];
+
+function gannFan(c: Ctx): Shape[] {
+  const [a, b] = c.p;
+  const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
+  const rays = GANN_FAN.flatMap(([r, name, color]) => {
+    const y = c.Y(priceAt(pa, pb, r));
+    return y === null ? [] : [{ r, name, color, e: { x: b.x, y } }];
+  });
+  const far = (e: Pt) => add(a, mul(unit(sub(e, a)), 20000));
+  const out: Shape[] = [];
+  if (optOf(c.d, "background")) {
+    for (let i = 0; i + 1 < rays.length; i++) out.push(poly([a, far(rays[i].e), far(rays[i + 1].e)], { closed: true, fill: 0.2, noStroke: true, color: rays[i].color }));
+  }
+  for (const { r, name, color, e } of rays) {
+    out.push(ray(a, e, { color }));
+    if (optOf(c.d, "showLabels")) {
+      const at = r > 1 ? add(a, mul(sub(e, a), 1 / r)) : e;
+      out.push(txt({ x: at.x + 4, y: at.y }, name, { size: 11, color }));
+    }
+  }
+  return out;
+}
 
 const span = (c: Ctx) => ({ t0: Math.min(pt(c, 0).time, pt(c, 1).time), t1: Math.max(pt(c, 0).time, pt(c, 1).time) });
 
@@ -810,10 +873,11 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   // Pitchforks
-  { id: "pitchfork", label: "Pitchfork", n: 3, build: (c) => fork(c, 0) },
-  { id: "schiff", label: "Schiff pitchfork", n: 3, build: (c) => fork(c, 1) },
-  { id: "mschiff", label: "Modified Schiff pitchfork", n: 3, build: (c) => fork(c, 2) },
-  { id: "insidefork", label: "Inside pitchfork", n: 3, build: (c) => fork(c, 3) },
+  ...([["pitchfork", "Pitchfork", "standard"], ["schiff", "Schiff pitchfork", "schiff"], ["mschiff", "Modified Schiff pitchfork", "modified"], ["insidefork", "Inside pitchfork", "inside"]] as [string, string, ForkKind][])
+    .map(([id, label, kind]): ToolSpec => ({
+      id, label, n: 3, style: { color: "#f23645" }, build: (c) => fork(c, kind),
+      options: [{ key: "background", label: "Background", def: true }],
+    })),
 
   // Fib
   {
@@ -942,7 +1006,12 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   // Gann
-  { id: "gannbox", label: "Gann box", n: 2, style: { width: 1 }, build: (c) => gridBox(c.p[0], c.p[1], [0.25, 0.382, 0.5, 0.618, 0.75, 1], true, gannY(c)) },
+  {
+    id: "gannbox", label: "Gann box", n: 2, style: { width: 1 }, build: gannBox,
+    options: [{ key: "showLabels", label: "Labels", def: true }, { key: "background", label: "Background", def: true }],
+    handles: (c) => rectHandles(c).slice(0, 4), // TV: 4 handle góc
+    moveHandle: moveRectHandle,
+  },
   {
     // Như TV: lưới vuông trên màn hình, 1 ô = khoảng cách pixel giữa 2 điểm, 5×5 ô về phía điểm 2
     id: "gannsqfixed", label: "Gann square fixed", n: 2, style: { width: 1 },
@@ -975,18 +1044,8 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
-    id: "gannfan", label: "Gann fan", n: 2, style: { width: 1 },
-    build: (c) => {
-      const [a, b] = c.p;
-      const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
-      const R: [number, string][] = [[8, "8x1"], [4, "4x1"], [3, "3x1"], [2, "2x1"], [1, "1x1"], [1 / 2, "1x2"], [1 / 3, "1x3"], [1 / 4, "1x4"], [1 / 8, "1x8"]];
-      return R.flatMap(([r, name], i) => {
-        const y = c.Y(priceAt(pa, pb, r));
-        if (y === null) return [];
-        const e = { x: b.x, y };
-        return [ray(a, e, { color: FC[i % FC.length], w: 1 }), txt({ x: e.x + 3, y: e.y }, name, { size: 10, color: FC[i % FC.length] })];
-      });
-    },
+    id: "gannfan", label: "Gann fan", n: 2, style: { width: 1 }, build: gannFan,
+    options: [{ key: "showLabels", label: "Labels", def: true }, { key: "background", label: "Background", def: true }],
   },
 
   // Patterns

@@ -148,7 +148,13 @@ Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), se
 - Chung: lưới **5×5 ô** tính từ điểm 1 về phía điểm 2; 6 mức 0…5 màu `#808080 #FF9800 #00bcd4 #4caf50 #089981 #808080`; fan line `a×b` từ điểm 1 tới mép hộp (2×1 → mép phải ở 1/2 chiều cao); cung tâm điểm 1, bán kính = khoảng cách tới điểm lưới (x, y), vẽ 1/4 vòng; nền giữa 2 cung liền nhau tô màu cung ngoài, transparency 80.
 - **Gann Square**: lúc tạo TV chốt `scaleRatio` = giá/nến sao cho hộp vuông trên màn hình (176×176px; 29.629 giá / 26 nến = 1.1396), rồi ép giá điểm 2 theo tỉ lệ đó. Nhãn (`showLabels`, cỡ 12): khoảng giá phía trên góc trái, tỉ lệ phía trên góc điểm 2, số nến phía dưới góc phải.
 - **Gann Square Fixed**: không có tỉ lệ; lưới vuông trên màn hình, **1 ô = khoảng cách pixel giữa 2 điểm** (√(176²+118²) ≈ 212px, ô đo được 211px). Điểm 2 là handle tỉ lệ nằm trong ô đầu.
-- Gann Box (`gannbox`) và Gann Fan (`gannbox_fan`): chunk JS không tải được ("Loading chunk … failed") nên chưa đo.
+- **Gann Box** (`gannbox`, đo lần 3): `hlevel1..7` / `vlevel1..7` = 0 #808080, 0.25 #FF9800, 0.382 #00bcd4, 0.5 #4caf50, 0.618 #089981, 0.75 #2962FF, 1 #808080 (giá và thời gian, tính từ điểm 1); `fillHorzBackground` + `fillVertBackground` transparency 80 (dải màu mức ngoài); `showTop/Bottom/Left/RightLabels` (nhãn hệ số 4 cạnh); `fans` (#9C9C9C) tắt; 4 handle góc; `linewidth 2`.
+- **Gann Fan** (`gannbox_fan`): 9 tia từ điểm 1, tia 1/1 qua điểm 2; màu 1/8 #FF9800, 1/4 #089981, 1/3 #4caf50, 1/2 #089981, 1/1 #00bcd4, 2/1 #2962FF, 3/1 #9c27b0, 4/1 #e91e63, 8/1 #F23645; nhãn tia dốc (1/8…1/2) ở mức giá điểm 2, tia thoải (2/1…8/1) trên đường dọc qua điểm 2; `fillBackground` transparency 80; `showLabels`.
+
+### Pitchfork (đo lần 3)
+- 4 tool cùng 1 loại, khác `style`: pitchfork 0, schiff_pitchfork_modified 1, inside_pitchfork 2, schiff_pitchfork 3.
+- Props: `median {#F23645, width 2}`, mức (theo nửa bề rộng median→nhánh = 1): 0.25 #ffb74d, 0.382 #81c784, **0.5 #089981 bật**, 0.618 #089981, 0.75 #00bcd4, **1 #2962FF bật**, 1.5 #9c27b0, 1.75 #e91e63, 2 #F77C80; `fillBackground` transparency 80; `extendLines false`.
+- Gốc median: thường = p0; Schiff = (p0.x, giữa giá p0–p1); Modified = trung điểm p0–p1; **Inside** = trung điểm p0–p1 nhưng median bắt đầu ở trung điểm p1–p2 và song song gốc→p2 (độ dốc đo 0.054 vs 0.056). Đoạn nối vẽ màu median: p1–p2 (mọi loại), p0–p1 (Schiff, Modified, Inside), gốc–p2 (Inside).
 
 ### Gann (lần 1)
 - `gannbox_square` (**Gann Square**): có `scaleRatio` (giá/nến) — điểm 2 bị ép theo tỉ lệ: 30 nến → 4120 → 4157.34 (1.2446/nến). Props: `reverse, showLabels, labelsStyle, arcsBackground, levels, fanlines, arcs, scaleRatio`.

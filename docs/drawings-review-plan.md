@@ -210,3 +210,14 @@ Chưa có: Stats của TV là chọn nhiều mục (price range, %, pips, bars, 
 - Hình cũ của Gann Square (chưa có `scaleRatio`) dùng tỉ lệ suy từ 2 điểm đã lưu nên vẫn hiện, không đổi dữ liệu.
 
 Còn: Gann Box, Gann Fan chưa đo được (TV không tải được tool); tùy chọn bật/tắt từng fan line / cung chưa có trong Settings.
+
+## 15. Gann Box, Gann Fan, 4 Pitchfork theo TV (2026-10-21)
+
+Lần này TV tải được các tool (đo chi tiết trong tài liệu tham chiếu):
+- **Gann Box**: 7 mức (0 … 1) theo cả giá và thời gian, mỗi mức 1 màu, dải ngang + dọc 20%, nhãn 4 cạnh, 4 handle góc, bỏ đường chéo (app cũ: 8 mức, cùng màu, có chéo). Tùy chọn Labels, Background.
+- **Gann Fan**: nhãn kiểu TV (1/8 … 8/1 thay "8x1"), màu theo TV, nền giữa các tia, vị trí nhãn như TV. Tùy chọn Labels, Background.
+- **Pitchfork / Schiff / Modified Schiff / Inside**: median màu đường (mặc định đỏ #f23645), mức 0.5 + 1 với màu và nền như TV, đoạn nối như TV; **Inside** sửa đúng hình học (app cũ: gốc p0 + 2 đường phụ). Tùy chọn Background.
+- Kiểm trên app: Gann Box, Gann Fan, Inside pitchfork trông như ảnh TV.
+- Sửa thêm: flyout của toolbar trái cao tối đa tới đáy cửa sổ (trước tràn ra ngoài, không cuộn tới "Gann fan").
+- Sửa lỗi nhẹ mục 1: Clone giữ đúng chỗ (bỏ ×0.999); magnet hút về giá Heikin Ashi khi chart đang ở HA.
+- Layout TV: phát hiện 1 Gann Square Fixed test còn sót từ lượt trước (đóng tab trước khi TV lưu) — đã xóa, chờ 8s, reload xác nhận 0 hình.

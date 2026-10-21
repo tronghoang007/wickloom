@@ -405,3 +405,60 @@ describe("Gann Square / Square Fixed (đo trên TV)", () => {
     expect(SPEC.gannsquare.handles!(moved)[1].y).toBeCloseTo(1000 - 110 * 6, 9);
   });
 });
+
+describe("Gann Box / Gann Fan / Pitchfork (đo trên TV)", () => {
+  const Y = (price: number) => 1000 - price;
+  const mk = (type: string, points: Anchor[], opts?: Record<string, boolean>): Ctx => ({
+    d: { id: "x", type, points, color: "#f23645", width: 1, locked: false, hidden: false, opts },
+    p: points.map((a) => ({ x: a.time, y: Y(a.price) })),
+    w: 1000, h: 1000, bars: [], tickSize: 0.01, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0,
+    X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2,
+  });
+  const lines = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line");
+  const texts = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text");
+
+  it("Gann Box: 7 mức theo giá và theo thời gian, màu từng mức, nhãn 4 cạnh, không có chéo", () => {
+    const sh = SPEC.gannbox.build(mk("gannbox", [{ time: 100, price: 100 }, { time: 300, price: 200 }]));
+    const ls = lines(sh);
+    expect(ls).toHaveLength(14);
+    expect(ls.every((l) => l.a.x === l.b.x || l.a.y === l.b.y)).toBe(true);
+    expect(ls.find((l) => l.a.y === Y(125) && l.b.y === Y(125))?.color).toBe("#ff9800"); // 0.25 theo giá
+    expect(ls.find((l) => l.a.x === 150 && l.b.x === 150)?.color).toBe("#ff9800"); // 0.25 theo thời gian
+    expect(texts(sh).filter((t) => t.text === "0.382")).toHaveLength(4);
+    expect(SPEC.gannbox.handles!(mk("gannbox", [{ time: 100, price: 100 }, { time: 300, price: 200 }]))).toHaveLength(4);
+  });
+
+  it("Gann Fan: tia 1/1 qua điểm 2, nhãn kiểu TV, tia dốc nhãn ở mức giá điểm 2", () => {
+    const sh = SPEC.gannfan.build(mk("gannfan", [{ time: 100, price: 100 }, { time: 300, price: 200 }]));
+    expect(texts(sh).map((t) => t.text)).toEqual(["1/8", "1/4", "1/3", "1/2", "1/1", "2/1", "3/1", "4/1", "8/1"]);
+    const one = lines(sh).find((l) => l.color === "#00bcd4")!;
+    expect(one.b).toEqual({ x: 300, y: Y(200) });
+    const half = texts(sh).find((t) => t.text === "1/2")!;
+    expect(half.at.x).toBeCloseTo(100 + 200 / 2 + 4, 9);
+    expect(half.at.y).toBeCloseTo(Y(200), 9);
+  });
+
+  const P = [{ time: 0, price: 0 }, { time: 100, price: 100 }, { time: 200, price: 40 }];
+  const median = (type: string) => lines(SPEC[type].build(mk(type, P))).find((l) => l.ext === "right" && !l.color)!;
+
+  it("Pitchfork: median từ p0 qua trung điểm p1–p2; mức 0.5 và 1 (2 nhánh) bật sẵn", () => {
+    const sh = SPEC.pitchfork.build(mk("pitchfork", P));
+    expect(median("pitchfork").a).toEqual({ x: 0, y: Y(0) });
+    expect(lines(sh).filter((l) => l.color === "#2962ff").map((l) => l.a)).toEqual([{ x: 100, y: Y(100) }, { x: 200, y: Y(40) }]);
+    expect(lines(sh).filter((l) => l.color === "#089981")).toHaveLength(2);
+  });
+
+  it("Schiff / Modified Schiff: gốc median dời theo TV", () => {
+    expect(median("schiff").a).toEqual({ x: 0, y: Y(50) });
+    expect(median("mschiff").a).toEqual({ x: 50, y: Y(50) });
+  });
+
+  it("Inside: median bắt đầu ở trung điểm p1–p2, song song gốc (trung điểm p0–p1) → p2", () => {
+    const m = median("insidefork");
+    expect(m.a).toEqual({ x: 150, y: Y(70) });
+    const dir = { x: m.b.x - m.a.x, y: m.b.y - m.a.y };
+    const want = { x: 200 - 50, y: Y(40) - Y(50) };
+    expect(dir.y / dir.x).toBeCloseTo(want.y / want.x, 9);
+  });
+});
