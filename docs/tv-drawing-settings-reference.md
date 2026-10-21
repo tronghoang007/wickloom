@@ -5,7 +5,7 @@ Thu thập 2026-10-21 từ tab TradingView của user (OANDA:XAUUSD), qua `Tradi
 Defaults bên dưới là default **trong tài khoản user** (có thể đã chỉnh), không phải default gốc của TV.
 
 **Giới hạn:** DNS của mạng (Viettel) trả `tradingview-static.b-cdn.net` → 127.0.0.1, nên TV không tải được code của tool chưa có trong cache.
-Chỉ lấy được đủ 18 tool dưới đây + FRVP (chụp tay). Còn lại (fib, gann, pitchfork, channel, pattern, elliott, position, measure, brush…) chưa có dữ liệu thật.
+Lần đầu chỉ lấy được 18 tool + FRVP (chụp tay). Lần 2 (Phase 4) lấy thêm Position, Fib retracement, Gann square/fixed, Shift. Còn lại (pitchfork, channel, pattern, elliott, measure, brush…) chưa có dữ liệu thật.
 
 ## 1. Khung dialog (chung cho mọi tool)
 
@@ -122,5 +122,28 @@ Ký hiệu: `[x]`/`[ ]` checkbox, `<…▾>` dropdown, `(màu)` nút màu, `{…
 - Style: `[x] Volume profile` › `[ ] Values (màu)` · `Width (% of the box) {30}` · `Placement <Left/Right ▾>` · `Up Volume` · `Down Volume` · `Value Area Up` · `Value Area Down` (màu có opacity) · `[x] VAH (màu+nét)` · `[x] VAL (màu+nét)` · `[x] POC (màu+nét)` · `[ ] Developing POC` · `[ ] Developing VA` · `Histogram Box (màu)`
 - Coordinates: `#1 (bar)`, `#2 (bar)`.
 
-### longpos — chỉ có toolbar
+### longpos / shortpos (Position) — đo 2026-10-21
 Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), settings, add-alert, lock, remove, more.
+- **Mô hình:** chỉ 2 điểm `[entry (time, price), mép phải (time)]`; stop/target lưu là `stopLevel`/`profitLevel` = **số tick lệch so với entry**. Hệ quả: kéo entry thì target và stop dịch theo; mép phải giữ thời gian.
+- Giá entry làm tròn theo tick (4122.71). Điểm của trend line thì **không** làm tròn.
+- **Tạo bằng 1 click:** stop = target = **20% biên độ High−Low của các nến đang thấy** (đo 0.1993 và 0.1991 ở 2 mức zoom); rộng **≈ 1/7 số nến đang thấy** (28/193, 31/214).
+- Props: `linecolor #808080, textcolor #fff, stopBackground rgba(242,54,69,.2), profitBackground rgba(8,153,129,.2), linewidth 1, fontsize 12, compact false, riskDisplayMode money|percents, accountSize 1000, lotSize 1, risk, leverage, alwaysShowStats false, showPriceLabels true, qtyPrecision default, infoBlocks{tp/sl PriceOffset, PercentOffset, TickOffset, Amount, PL, openClosePL, qty, riskRewardRatio}`.
+- **Nhãn** (hiện khi chọn): `Target: 14.327 (0.347%) 1,432.7, Amount: 1250` · `Stop: 14.327 (0.347%) 1,432.7, Amount: 750` · giữa trên đường entry: `Closed PnL: 14.327, Qty: 17` / `Risk/reward ratio: 1`.
+  - số thứ 3 là **pip** (XAUUSD tick 0.001 → pip 0.01), có dấu phẩy nghìn; Amount **không** có dấu phẩy.
+  - Amount = **tài khoản ± rủi ro × R** (R:R 2 → 1500), không phải qty × khoảng cách.
+  - PnL ghi theo **giá** (14.327), không theo tiền. Qty = rủi ro / (stop × lot) **làm tròn xuống** (17.64 → 17).
+- Handles: entry, target, stop ở mép trái; 1 handle mép phải trên đường entry.
+
+### fib_retracement — props (default **đã chỉnh trong tài khoản user**)
+- Mức trong tài khoản: 0, 0.382, 0.5, 0.618, 1 hiện (màu cam); 0.236, 0.786, 1.618, 2.618, 3.618, 4.236, 1.272, 1.414, 2.272, 2.414, 2, 3, 3.272, 3.414, 4, 4.272, 4.414, 4.618, 4.764 ẩn. Default gốc của TV không đọc được qua API (`TradingView.factoryDefaults` trả object rỗng).
+- `trendline {#808080, width 1, style 2 (dashed)}`, `levelsStyle {width 1, style 0}`, `showCoeffs, showPrices, fillBackground true, transparency (user 100), extendLines/extendLinesLeft false, reverse false, coeffsAsPercents false, fibLevelsBasedOnLogScale false, labelFontSize 11, horzLabelsAlign (user right), vertLabelsAlign middle`.
+- Vẽ: mức 0 ở điểm 2, 1 ở điểm 1; đường mức chạy giữa x của 2 điểm; nhãn `0.5 (4,132.000)` nằm **ngoài** đầu đường, canh giữa dọc, giá đủ số lẻ theo tick.
+
+### Shift khi vẽ (TV)
+- Trend line: Shift → ngang tuyệt đối (2 điểm cùng giá).
+- Rectangle: Shift → **hình vuông trên màn hình** (200×200px), cạnh = cạnh dài.
+- Rectangle có 8 handle: 4 góc + 4 giữa cạnh.
+
+### Gann (chưa làm theo)
+- `gannbox_square` (**Gann Square**): có `scaleRatio` (giá/nến) — điểm 2 bị ép theo tỉ lệ: 30 nến → 4120 → 4157.34 (1.2446/nến). Props: `reverse, showLabels, labelsStyle, arcsBackground, levels, fanlines, arcs, scaleRatio`.
+- `gannbox_fixed` (**Gann Square Fixed**): giữ đúng 2 điểm nhập; props `reverse, arcsBackground{fill, transparency 80}, levels (6 mức, màu #808080 #FF9800 #00bcd4 #4caf50 #089981 #808080), fanlines (11: 8x1 5x1 4x1 3x1 2x1 1x1 1x2 1x3 1x4 1x5 1x8; bật mặc định 2x1 1x1 1x2), arcs (11 cung 1:0, 1:1, 1.5:0, 2:0, 2:1, 3:0, 3:1, 4:0, 4:1, 5:0, 5:1)`. Trên chart điểm 2 là handle **giữa** lưới chứ không phải góc; lưới + cung lớn hơn nhiều so với 2 điểm.

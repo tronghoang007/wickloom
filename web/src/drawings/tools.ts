@@ -20,11 +20,20 @@ export type Ctx = {
   digits: number;
 };
 
+// Khung đang xem lúc tạo hình bằng 1 click
+export type OneClickView = {
+  span: number; // khoảng giá trên trục
+  hiLo: number; // High − Low của các nến đang thấy
+  visibleBars: number;
+  tick: number;
+  addBars: (t: number, n: number) => number; // thời điểm sau t đúng n nến
+};
+
 export type ToolSpec = {
   id: string;
   label: string;
   n: number; // số điểm; 0 = nhiều điểm (double-click/Enter để kết thúc), -1 = vẽ tay
-  oneClick?: (a: Anchor, step: number, span: number) => Anchor[]; // 1 click tạo đủ điểm mặc định; span = khoảng giá đang hiển thị
+  oneClick?: (a: Anchor, v: OneClickView) => Anchor[]; // 1 click tạo đủ điểm mặc định theo khung đang xem
   build: (c: Ctx) => Shape[];
   handles?: (c: Ctx) => Pt[];
   style?: Partial<Pick<Drawing, "color" | "width" | "dash">>;
@@ -32,7 +41,11 @@ export type ToolSpec = {
   axes?: "price" | "time"; // nhãn điểm trên trục khi chọn: chỉ giá / chỉ thời gian (mặc định cả hai)
   ephemeral?: boolean;
   panel?: "position" | "volume";
-  constrain?: (pts: Anchor[], moved: number, tick?: number) => void; // tick: kẹp giá khi kéo trên chart
+  // tick: kẹp/làm tròn giá khi kéo trên chart; prev: các điểm trước khi đổi
+  constrain?: (pts: Anchor[], moved: number, tick?: number, prev?: Anchor[]) => void;
+  // handle riêng (khác điểm neo) kéo được: moveHandle trả về điểm mới; không có thì handle = kéo cả hình
+  moveHandle?: (pts: Anchor[], handle: number, a: Anchor) => Anchor[];
+  shift?: "square"; // Shift khi vẽ: hình vuông / tròn trên màn hình (mặc định khóa góc 0/45/90°)
   action?: "zoom";
   disabled?: boolean;
 };
@@ -116,7 +129,7 @@ function lineLevels(c: Ctx, levels: number[], extend = false): Shape[] {
     const color = FC[i % FC.length];
     if (prev !== null) out.push(poly([{ x: left, y: prev }, { x: right, y: prev }, { x: right, y }, { x: left, y }], { closed: true, fill: 0.07, noStroke: true, color }));
     out.push(seg({ x: left, y }, { x: right, y }, { color, w: 1 }));
-    out.push(txt({ x: left + 4, y: y - 7 }, `${lvl} (${c.fp(price)})`, { size: 11, color }));
+    out.push(txt({ x: left - 4, y }, `${lvl} (${c.fp(price)})`, { size: 11, color, align: "right" })); // như TV: ngoài đầu trái, giữa dọc
     prev = y;
   });
   out.push(seg(a, b, { dash: 1, w: 1, color: "#787b86" }));
@@ -318,16 +331,26 @@ function measure(c: Ctx): Shape[] {
   ];
 }
 
-export const POS_DEFAULTS = { account: 1000, lot: 1, risk: 2, profit: "#089981", stop: "#f23645", alpha: 0.25 };
+export const POS_DEFAULTS = { account: 1000, lot: 1, risk: 2, profit: "#089981", stop: "#f23645", alpha: 0.2 };
+
+// Số lẻ của bước giá (0.001 -> 3, 0.25 -> 2) và làm tròn giá theo bước đó
+const decimals = (x: number) => {
+  let d = 0;
+  while (d < 10 && Math.abs(Math.round(x * 10 ** d) - x * 10 ** d) > 1e-9) d++;
+  return d;
+};
+export const roundToTick = (v: number, tick: number) => +(Math.round(v / tick) * tick).toFixed(decimals(tick));
 
 // Khối lượng theo % rủi ro và kết quả lệnh: đi từng nến sau entry tới mép phải, chạm stop
 // trước (cùng nến thì tính stop) hay target trước; chưa chạm thì P&L theo giá đóng cửa.
+// Như TV: Qty làm tròn xuống; P&L ghi theo giá (pnlPts); số dư khi chạm target/stop =
+// tài khoản ± rủi ro × R.
 export function positionStats(bars: Bar[], points: Anchor[], long: boolean, o: Pick<typeof POS_DEFAULTS, "account" | "lot" | "risk">) {
   const [pe, pT, pR, pS] = points;
   const dT = Math.abs(pT.price - pe.price), dS = Math.abs(pS.price - pe.price) || 1e-9;
   const riskAmt = (o.account * o.risk) / 100;
   const qtyRaw = riskAmt / (dS * o.lot);
-  const qty = qtyRaw >= 10 ? Math.round(qtyRaw) : +qtyRaw.toFixed(2);
+  const qty = qtyRaw >= 1 ? Math.floor(qtyRaw) : Math.floor(qtyRaw * 100) / 100;
 
   let closed = false, exitPrice = pe.price, exitT: number | null = null;
   const tEnd = Math.max(pe.time, pR.time);
@@ -341,9 +364,14 @@ export function positionStats(bars: Bar[], points: Anchor[], long: boolean, o: P
     if (hitT) { closed = true; exitPrice = pT.price; break; }
     exitPrice = b.c;
   }
-  const pnl = (long ? exitPrice - pe.price : pe.price - exitPrice) * qty * o.lot;
-  return { dT, dS, riskAmt, qty, closed, exitPrice, exitT, pnl };
+  const pnlPts = long ? exitPrice - pe.price : pe.price - exitPrice;
+  const pnl = pnlPts * qty * o.lot;
+  const rr = dT / dS;
+  return { dT, dS, riskAmt, qty, closed, exitPrice, exitT, pnl, pnlPts, rr, tpAmount: o.account + riskAmt * rr, slAmount: o.account - riskAmt };
 }
+
+// Số pip: cặp có pip lẻ (giá 3 hoặc 5 số lẻ, vd XAUUSD 0.001) thì 1 pip = 10 tick, như TV
+const pips = (dist: number, digits: number) => dist / 10 ** -digits / (digits === 3 || digits === 5 ? 10 : 1);
 
 // points: [entry, target, right-edge, stop]
 function position(c: Ctx): Shape[] {
@@ -352,9 +380,8 @@ function position(c: Ctx): Shape[] {
   const pe = c.d.points[0];
   const long = c.d.type !== "shortpos"; // như TV: theo loại tool, không suy từ vị trí target
   const x0 = Math.min(e.x, r.x), x1 = Math.max(e.x, r.x);
-  const { dT, dS, riskAmt, qty, closed, exitPrice, exitT, pnl } = positionStats(c.bars, c.d.points, long, o);
-  const tick = 10 ** -c.digits;
-  const money = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const { dT, dS, qty, closed, exitPrice, exitT, pnlPts, rr, tpAmount, slAmount } = positionStats(c.bars, c.d.points, long, o);
+  const num = (v: number, max = 2, useGrouping = true) => v.toLocaleString(undefined, { maximumFractionDigits: max, useGrouping });
 
   const rect = (y0: number, y1: number, color: string) =>
     poly([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }], { closed: true, fill: o.alpha, noStroke: true, color });
@@ -366,31 +393,34 @@ function position(c: Ctx): Shape[] {
   if (ex !== null && ey !== null) out.push(seg({ x: x0, y: e.y }, { x: ex, y: ey }, { dash: 1, w: 1, color: "#b2b5be" }));
 
   if (c.hovered || c.selected) {
+    const line = (name: string, dist: number, amount: number) =>
+      `${name}: ${c.fp(dist)} (${((dist / pe.price) * 100).toFixed(3)}%) ${num(pips(dist, c.digits), 1)}, Amount: ${num(amount, 2, false)}`; // TV: "1,432.7" nhưng "Amount: 1250"
     out.push(
-      txt({ x: cx, y: t.y + (t.y < e.y ? -14 : 14) }, `Target: ${c.fp(dT)} (${((dT / pe.price) * 100).toFixed(3)}%) ${(dT / tick).toLocaleString(undefined, { maximumFractionDigits: 1 })}, Amount: ${money(qty * o.lot * dT)}`, { align: "center", bg: o.profit, color: tc, size: 12 }),
-      txt({ x: cx, y: s.y + (s.y > e.y ? 14 : -14) }, `Stop: ${c.fp(dS)} (${((dS / pe.price) * 100).toFixed(3)}%) ${(dS / tick).toLocaleString(undefined, { maximumFractionDigits: 1 })}, Amount: ${money(riskAmt)}`, { align: "center", bg: o.stop, color: tc, size: 12 }),
-      // như TV: nhãn PnL nằm giữa, ngay trên đường entry, không viền
-      txt({ x: cx, y: e.y }, `${closed ? "Closed" : "Open"} P&L: ${money(pnl)}, Qty: ${qty}\nRisk/Reward Ratio: ${(dT / dS).toFixed(2)}`, { align: "center", bg: pnl >= 0 ? o.profit : o.stop, color: tc, size: 12 }),
+      txt({ x: cx, y: t.y + (t.y < e.y ? -14 : 14) }, line("Target", dT, tpAmount), { align: "center", bg: o.profit, color: tc, size: 12 }),
+      txt({ x: cx, y: s.y + (s.y > e.y ? 14 : -14) }, line("Stop", dS, slAmount), { align: "center", bg: o.stop, color: tc, size: 12 }),
+      // như TV: nhãn PnL (theo giá) nằm giữa, ngay trên đường entry
+      txt({ x: cx, y: e.y }, `${closed ? "Closed" : "Open"} PnL: ${c.fp(pnlPts)}, Qty: ${num(qty)}\nRisk/reward ratio: ${num(rr)}`, { align: "center", bg: pnlPts >= 0 ? o.profit : o.stop, color: tc, size: 12 }),
     );
   }
   return out;
 }
 
-// points: [entry, target, right-edge, stop]. Như TV: target luôn ở phía lời, stop ở phía lỗ,
-// cách entry ít nhất 1 tick - kéo quá entry thì bị kẹp lại chứ không tự đổi Long <-> Short.
-// Không có tick (ô nhập giá trong Settings, đang gõ dở) thì không kẹp.
-export const posConstrain = (dir: 1 | -1) => (p: Anchor[], i: number, tick?: number) => {
+// points: [entry, target, right-edge, stop]. Như TV (lưu target/stop theo khoảng cách tới entry):
+// - kéo entry thì target và stop dịch theo (prev = điểm trước khi kéo)
+// - target luôn ở phía lời, stop ở phía lỗ, cách entry ít nhất 1 tick: kéo quá entry thì bị kẹp
+//   chứ không tự đổi Long <-> Short
+// - giá làm tròn theo tick. Không có tick (ô nhập giá trong Settings, đang gõ dở) thì không kẹp/tròn.
+export const posConstrain = (dir: 1 | -1) => (p: Anchor[], i: number, tick?: number, prev?: Anchor[]) => {
   const [e, t, , s] = p;
+  if (i === 0 && prev) {
+    const d = e.price - prev[0].price;
+    t.price = prev[1].price + d;
+    s.price = prev[3].price + d;
+  }
   if (tick !== undefined) {
-    if (i === 0) {
-      const lo = dir === 1 ? s.price + tick : t.price + tick;
-      const hi = dir === 1 ? t.price - tick : s.price - tick;
-      if (lo <= hi) e.price = Math.min(hi, Math.max(lo, e.price));
-    } else if (i === 1) {
-      t.price = dir === 1 ? Math.max(t.price, e.price + tick) : Math.min(t.price, e.price - tick);
-    } else if (i === 3) {
-      s.price = dir === 1 ? Math.min(s.price, e.price - tick) : Math.max(s.price, e.price + tick);
-    }
+    for (const q of [e, t, s]) q.price = roundToTick(q.price, tick);
+    if (i === 1) t.price = dir === 1 ? Math.max(t.price, e.price + tick) : Math.min(t.price, e.price - tick);
+    else if (i === 3) s.price = dir === 1 ? Math.min(s.price, e.price - tick) : Math.max(s.price, e.price + tick);
   }
   if (i === 0) {
     t.time = s.time = e.time;
@@ -399,15 +429,17 @@ export const posConstrain = (dir: 1 | -1) => (p: Anchor[], i: number, tick?: num
   else if (i === 2) p[2].price = e.price;
 };
 
-// Như TV: 1 click tạo khối vừa mắt theo khung đang xem - target/stop cách entry ~8% khoảng
-// giá hiển thị, rộng 20 nến (trước: ±0.1% giá, 8 nến -> khối vài px, nhãn đè nhau).
-const posAt = (a: Anchor, s: number, dir: 1 | -1, span: number): Anchor[] => {
-  const d = span > 0 ? span * 0.08 : a.price * 0.002;
+// Như TV (đo trên XAUUSD 15m ở 2 mức zoom): target/stop cách entry 20% biên độ High−Low của các
+// nến đang thấy (làm tròn theo tick), rộng 1/7 số nến đang thấy (đếm theo nến, bỏ qua nghỉ phiên).
+const posAt = (a: Anchor, v: OneClickView, dir: 1 | -1): Anchor[] => {
+  const raw = v.hiLo > 0 ? v.hiLo * 0.2 : v.span > 0 ? v.span * 0.2 : a.price * 0.002;
+  const d = Math.max(v.tick, roundToTick(raw, v.tick));
+  const e = { time: a.time, price: roundToTick(a.price, v.tick) };
   return [
-    a,
-    { time: a.time, price: a.price + dir * d },
-    { time: a.time + s * 20, price: a.price },
-    { time: a.time, price: a.price - dir * d },
+    e,
+    { time: a.time, price: e.price + dir * d },
+    { time: v.addBars(a.time, Math.max(1, Math.round(v.visibleBars / 7))), price: e.price },
+    { time: a.time, price: e.price - dir * d },
   ];
 };
 
@@ -416,7 +448,23 @@ const noteShapes = (c: Ctx, text: string): Shape[] => {
   return [seg(a, b, { w: 1 }), poly(circle(a, 3, 12), { closed: true, fill: 1 }), txt(b, text, { align: "left", bg: c.d.color, size: 12 })];
 };
 
-const offsetPt = (a: Anchor, step: number, bars = 10, pct = 0.002): Anchor => ({ time: a.time + step * bars, price: a.price * (1 + pct) });
+const offsetPt = (a: Anchor, v: OneClickView, bars = 10, pct = 0.002): Anchor => ({ time: v.addBars(a.time, bars), price: a.price * (1 + pct) });
+
+// Như TV: rectangle có 8 handle - 4 góc (0,1 là 2 điểm neo; 2 = góc (t0, p1), 3 = (t1, p0))
+// rồi 4 điểm giữa cạnh (trái, phải, cạnh p0, cạnh p1)
+const rectHandles = (c: Ctx): Pt[] => {
+  const [a, b] = c.p, m = mid(a, b);
+  return [a, b, { x: a.x, y: b.y }, { x: b.x, y: a.y }, { x: a.x, y: m.y }, { x: b.x, y: m.y }, { x: m.x, y: a.y }, { x: m.x, y: b.y }];
+};
+
+const moveRectHandle = (pts: Anchor[], i: number, q: Anchor): Anchor[] => {
+  const A = { ...pts[0] }, B = { ...pts[1] };
+  if (i === 0 || i === 2 || i === 4) A.time = q.time;
+  if (i === 1 || i === 3 || i === 5) B.time = q.time;
+  if (i === 0 || i === 3 || i === 6) A.price = q.price;
+  if (i === 1 || i === 2 || i === 7) B.price = q.price;
+  return [A, B];
+};
 
 const gannY = (c: Ctx) => (t: number) => c.Y(priceAt(pt(c, 0).price, pt(c, 1).price, t));
 
@@ -531,7 +579,7 @@ export const TOOLS: ToolSpec[] = [
         if (y === null) return;
         const color = FC[i % FC.length];
         out.push(seg({ x: left, y }, { x: right, y }, { color, w: 1 }));
-        out.push(txt({ x: left + 4, y: y - 7 }, `${lvl} (${c.fp(price)})`, { size: 11, color }));
+        out.push(txt({ x: left - 4, y }, `${lvl} (${c.fp(price)})`, { size: 11, color, align: "right" })); // như TV: ngoài đầu trái, giữa dọc
       });
       return out;
     },
@@ -721,8 +769,8 @@ export const TOOLS: ToolSpec[] = [
   },
 
   // Forecasting
-  { id: "longpos", label: "Long position", n: 4, panel: "position", constrain: posConstrain(1), oneClick: (a, s, span) => posAt(a, s, 1, span), build: position },
-  { id: "shortpos", label: "Short position", n: 4, panel: "position", constrain: posConstrain(-1), oneClick: (a, s, span) => posAt(a, s, -1, span), build: position },
+  { id: "longpos", label: "Long position", n: 4, panel: "position", constrain: posConstrain(1), oneClick: (a, v) => posAt(a, v, 1), build: position },
+  { id: "shortpos", label: "Short position", n: 4, panel: "position", constrain: posConstrain(-1), oneClick: (a, v) => posAt(a, v, -1), build: position },
   { id: "forecast", label: "Position forecast", n: 2, build: () => [], disabled: true },
   { id: "barspattern", label: "Bars pattern", n: 2, build: () => [], disabled: true },
   { id: "ghost", label: "Ghost feed", n: 2, build: () => [], disabled: true },
@@ -818,7 +866,12 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   // Shapes
-  { id: "rect", label: "Rectangle", n: 2, build: (c) => [poly([c.p[0], { x: c.p[1].x, y: c.p[0].y }, c.p[1], { x: c.p[0].x, y: c.p[1].y }], { closed: true, fill: 0.15 })] },
+  {
+    id: "rect", label: "Rectangle", n: 2, shift: "square",
+    build: (c) => [poly([c.p[0], { x: c.p[1].x, y: c.p[0].y }, c.p[1], { x: c.p[0].x, y: c.p[1].y }], { closed: true, fill: 0.15 })],
+    handles: rectHandles,
+    moveHandle: moveRectHandle,
+  },
   {
     id: "rotrect", label: "Rotated rectangle", n: 3,
     build: (c) => {
@@ -831,7 +884,7 @@ export const TOOLS: ToolSpec[] = [
   { id: "path", label: "Path", n: 0, build: (c) => (c.p.length > 1 ? [poly(c.p), head(c.p[c.p.length - 2], c.p[c.p.length - 1], 10 + c.d.width * 2)] : []) },
   { id: "circle", label: "Circle", n: 2, build: (c) => [poly(circle(c.p[0], dist(c.p[0], c.p[1])), { closed: true, fill: 0.15 })] },
   {
-    id: "ellipse", label: "Ellipse", n: 2,
+    id: "ellipse", label: "Ellipse", n: 2, shift: "square",
     build: (c) => {
       const m = mid(c.p[0], c.p[1]), rx = Math.abs(c.p[1].x - c.p[0].x) / 2, ry = Math.abs(c.p[1].y - c.p[0].y) / 2;
       return [poly(circle(m, 1).map((q) => ({ x: m.x + (q.x - m.x) * rx, y: m.y + (q.y - m.y) * ry })), { closed: true, fill: 0.15 })];
@@ -870,8 +923,8 @@ export const TOOLS: ToolSpec[] = [
 
   // Text & notes
   { id: "text", label: "Text", n: 1, prompt: "Text", build: (c) => [txt(c.p[0], c.d.text ?? "Text", { size: 12 + c.d.width * 2 })] },
-  { id: "note", label: "Note", n: 2, prompt: "Note", oneClick: (a, s) => [a, offsetPt(a, s, 8, 0.002)], build: (c) => noteShapes(c, c.d.text ?? "Note") },
-  { id: "pricenote", label: "Price note", n: 2, oneClick: (a, s) => [a, offsetPt(a, s, 8, 0.002)], build: (c) => noteShapes(c, c.fp(c.d.points[0].price)) },
+  { id: "note", label: "Note", n: 2, prompt: "Note", oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)], build: (c) => noteShapes(c, c.d.text ?? "Note") },
+  { id: "pricenote", label: "Price note", n: 2, oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)], build: (c) => noteShapes(c, c.fp(c.d.points[0].price)) },
   {
     id: "pin", label: "Pin", n: 1, prompt: "Pin text",
     build: (c) => {
@@ -889,7 +942,7 @@ export const TOOLS: ToolSpec[] = [
       return [...out, txt({ x: x + 6, y: y + ch / 2 }, c.d.text ?? "Table", { size: 12 })];
     },
   },
-  { id: "callout", label: "Callout", n: 2, prompt: "Callout", oneClick: (a, s) => [a, offsetPt(a, s, 8, 0.002)], build: (c) => noteShapes(c, c.d.text ?? "Callout") },
+  { id: "callout", label: "Callout", n: 2, prompt: "Callout", oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)], build: (c) => noteShapes(c, c.d.text ?? "Callout") },
   {
     id: "comment", label: "Comment", n: 1, prompt: "Comment",
     build: (c) => {

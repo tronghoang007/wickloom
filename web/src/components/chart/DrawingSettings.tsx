@@ -45,7 +45,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
   const setPoint = (i: number, patch: Partial<Drawing["points"][number]>) => {
     const points = d.points.map((p) => ({ ...p }));
     points[i] = { ...points[i], ...patch };
-    spec.constrain?.(points, i);
+    spec.constrain?.(points, i, undefined, d.points);
     setD({ ...d, points });
   };
   const num = (v: string, fallback: number) =>

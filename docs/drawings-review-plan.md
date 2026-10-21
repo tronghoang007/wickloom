@@ -145,3 +145,26 @@ Chưa làm: Gann square fixed vẫn tính theo pixel (đổi hình khi zoom) —
 | 5. Text inline | Bỏ `window.prompt`: tạo Text/Note/Pin/... mở ô gõ ngay trên chart; Enter xong, Shift+Enter xuống dòng, Esc hủy, click ra ngoài = xong. Double-click hình có text để sửa. Tạo + gõ lần đầu = 1 bước undo; Text mới mà Esc/để trống thì bỏ hẳn | Gõ "Vùng cản 4137 🚀" lưu đúng; double-click đúng vào emoji mở sửa; Cmd+Z 2 lần: về text cũ rồi mất hình; Esc khi vừa tạo: server rỗng |
 
 Còn lại / chưa chắc so với TV: ô sửa text không đi theo khi cuộn/zoom lúc đang gõ; ngưỡng magnet yếu 20px và việc Shift có áp cho rectangle (vẽ hình vuông) hay không chưa đối chiếu TV; tool 3+ điểm có cho nhấn-kéo-thả từng đoạn không cũng chưa kiểm. Mục 6–7 phần 3 (tùy chọn từng tool, ẩn theo timeframe) chưa làm.
+
+## 11. Phase 4 – đợt 1 (2026-10-21)
+
+Đo trên TradingView thật (OANDA:XAUUSD 15m, qua `TradingViewApi`, hình test đã xóa hết). Dữ liệu chi tiết: `docs/tv-drawing-settings-reference.md` mục longpos, fib_retracement, Shift, Gann.
+
+| Tool | Khác TV | Đã sửa |
+|---|---|---|
+| Position | Kích thước 1-click (app: ±8% khoảng giá, 20 nến theo thời gian) | ±20% High−Low nến đang thấy (tròn tick), rộng 1/7 số nến đang thấy, đếm theo nến |
+| Position | Kéo entry chỉ dịch entry (bị kẹp giữa stop/target) | Target/stop dịch theo entry (TV lưu theo tick lệch) |
+| Position | Giá không làm tròn | Làm tròn theo tick khi tạo/kéo (Settings đang gõ thì không) |
+| Position | Nhãn: Amount = qty×khoảng / rủi ro; P&L theo tiền; Qty làm tròn; số tick; "P&L", "Risk/Reward Ratio: 1.00" | Amount = tài khoản ± rủi ro×R (không dấu phẩy nghìn); PnL theo giá; Qty làm tròn xuống; pip (tick/10 với giá 3/5 số lẻ); "Closed PnL", "Risk/reward ratio: 1"; nền 20% |
+| Mọi tool | Giá ≥ 100 bị cắt còn 2 số lẻ | Đủ số lẻ theo tick |
+| Fib retracement / extension | Nhãn ở trong, phía trên đường | Ngoài đầu trái, canh giữa dọc |
+| Rectangle | 2 handle; Shift khóa góc (rect gần ngang thành dẹt) | 8 handle (4 góc + 4 giữa cạnh); Shift = hình vuông (Ellipse = tròn) |
+
+Khớp sẵn: trend line Shift → ngang; trend line không làm tròn giá; Fib mức 0 ở điểm 2; Qty = rủi ro/(stop×lot).
+
+Chưa làm / còn mở:
+- **Gann**: app đặt tên lệch — TV "Gann Square" mới là hình ép vuông theo `scaleRatio` (giá/nến); "Gann Square Fixed" giữ 2 điểm, có levels + 11 fan line + 11 cung, điểm 2 là handle giữa. Cần làm lại cả 2.
+- Default Fib gốc của TV chưa đọc được (tài khoản user đã chỉnh: chỉ 0/0.382/0.5/0.618/1, màu cam, nhãn bên phải). App giữ bộ mức + màu gốc (theo hiểu biết, chưa đo).
+- Position: chế độ rủi ro theo tiền (`riskDisplayMode money`), leverage, các info block bật/tắt — chưa có trong Settings.
+- FRVP: chưa kiểm số liệu (TV không cho xuất dữ liệu nến: "Data export is not supported").
+- Horizontal ray, trend line: khác biệt chủ yếu ở Settings (Stats, Price labels, Middle point...) — thuộc mục 6 phần 3.

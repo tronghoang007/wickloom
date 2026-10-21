@@ -40,14 +40,23 @@ describe("posConstrain (lỗi #3)", () => {
     expect(p[3].price).toBeCloseTo(100.01, 9);
   });
 
-  it("kéo entry: kẹp giữa stop và target, mép phải theo giá entry", () => {
-    const p = pos(100, 110, 95);
+  it("kéo entry: target và stop dịch theo (như TV), mép phải theo giá entry", () => {
+    const prev = pos(100, 110, 95);
+    const p = prev.map((q) => ({ ...q }));
     p[0] = { time: T + 3600, price: 200 };
-    posConstrain(1)(p, 0, tick);
-    expect(p[0].price).toBeCloseTo(109.99, 9);
-    expect(p[2].price).toBe(p[0].price);
+    posConstrain(1)(p, 0, tick, prev);
+    expect(prices(p)).toEqual([200, 210, 195]);
+    expect(p[2].price).toBe(200);
     expect(p[1].time).toBe(T + 3600);
     expect(p[3].time).toBe(T + 3600);
+  });
+
+  it("làm tròn giá theo tick khi kéo trên chart", () => {
+    const prev = pos(100, 110, 95);
+    const p = prev.map((q) => ({ ...q }));
+    p[1].price = 112.34567;
+    posConstrain(1)(p, 1, 0.001, prev);
+    expect(p[1].price).toBe(112.346);
   });
 
   it("kéo đúng phía thì không đổi", () => {
@@ -66,12 +75,22 @@ describe("posConstrain (lỗi #3)", () => {
 });
 
 describe("positionStats", () => {
+  it("như TV: Qty làm tròn xuống, Amount = tài khoản ± rủi ro × R, P&L theo giá", () => {
+    // TV XAUUSD: rủi ro 250 / stop 14.172 = 17.64 → Qty 17; R:R 2 → Amount 1500 / 750
+    const p = pos(4130, 4130 + 28.344, 4130 - 14.172);
+    const s = positionStats([], p, true, { account: 1000, lot: 1, risk: 25 });
+    expect(s.qty).toBe(17);
+    expect(s.rr).toBeCloseTo(2, 9);
+    expect(s.tpAmount).toBeCloseTo(1500, 9);
+    expect(s.slAmount).toBe(750);
+  });
+
   const bar = (i: number, o: number, h: number, l: number, c: number): Bar => ({ t: T + i * 3600, o, h, l, c, v: 1 });
   const opts = { account: 1000, lot: 1, risk: 2 };
 
   it("Long chạm target", () => {
     const s = positionStats([bar(0, 100, 100, 100, 100), bar(1, 100, 104, 99, 103), bar(2, 103, 111, 102, 110)], pos(100, 110, 95), true, opts);
-    expect(s).toMatchObject({ closed: true, exitPrice: 110, exitT: T + 7200, riskAmt: 20, qty: 4 });
+    expect(s).toMatchObject({ closed: true, exitPrice: 110, exitT: T + 7200, riskAmt: 20, qty: 4, pnlPts: 10 });
     expect(s.pnl).toBe(40);
   });
 
@@ -163,5 +182,39 @@ describe("mức theo giá trên trục log (lỗi #6)", () => {
     const shapes = SPEC.gannfan.build(ctxFor("gannfan", pts));
     const ends = shapes.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line").map((s) => s.b);
     expect(ends).toContainEqual({ x: 300, y: Y(250) });
+  });
+});
+
+describe("Position tạo bằng 1 click (kích thước như TV)", () => {
+  it("stop/target = 20% biên độ nến đang thấy, rộng 1/7 số nến, làm tròn tick", () => {
+    const v = { span: 73, hiLo: 71.092, visibleBars: 193, tick: 0.001, addBars: (t: number, n: number) => t + n * 900 };
+    const [e, t, r, s] = SPEC.longpos.oneClick!({ time: T, price: 4130.0004 }, v);
+    expect(e.price).toBe(4130);
+    expect(t.price).toBeCloseTo(4130 + 14.218, 9);
+    expect(s.price).toBeCloseTo(4130 - 14.218, 9);
+    expect((r.time - T) / 900).toBe(28);
+    const [, ts, , ss] = SPEC.shortpos.oneClick!({ time: T, price: 4130 }, v);
+    expect(ts.price).toBeLessThan(4130);
+    expect(ss.price).toBeGreaterThan(4130);
+  });
+});
+
+describe("Rectangle 8 handle (như TV)", () => {
+  const A = { time: 100, price: 10 }, B = { time: 200, price: 20 };
+  const move = SPEC.rect.moveHandle!;
+  it("góc phụ đổi 1 thời gian + 1 giá của 2 điểm neo", () => {
+    expect(move([A, B], 2, { time: 90, price: 25 })).toEqual([{ time: 90, price: 10 }, { time: 200, price: 25 }]);
+    expect(move([A, B], 3, { time: 210, price: 5 })).toEqual([{ time: 100, price: 5 }, { time: 210, price: 20 }]);
+  });
+  it("giữa cạnh chỉ đổi 1 chiều", () => {
+    expect(move([A, B], 4, { time: 50, price: 99 })).toEqual([{ time: 50, price: 10 }, B]);
+    expect(move([A, B], 7, { time: 50, price: 30 })).toEqual([A, { time: 200, price: 30 }]);
+  });
+  it("8 handle: 4 góc + 4 giữa cạnh", () => {
+    const c = { p: [{ x: 0, y: 0 }, { x: 100, y: 50 }] } as unknown as Ctx;
+    expect(SPEC.rect.handles!(c)).toEqual([
+      { x: 0, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }, { x: 100, y: 0 },
+      { x: 0, y: 25 }, { x: 100, y: 25 }, { x: 50, y: 0 }, { x: 50, y: 50 },
+    ]);
   });
 });

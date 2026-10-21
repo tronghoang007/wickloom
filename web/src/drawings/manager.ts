@@ -15,7 +15,7 @@ import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } fr
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
 import { useDrawingStore, type MagnetMode } from "./store";
 import { DrawingSync } from "./sync";
-import { GROUPS, SPEC, type Ctx } from "./tools";
+import { GROUPS, SPEC, type Ctx, type OneClickView } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
 
 type Opts = {
@@ -271,9 +271,14 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   // Điểm neo dưới con trỏ khi vẽ / kéo điểm, như TV:
   // - Shift: khóa hướng từ ref về ngang / dọc / 45° (bỏ qua magnet)
   // - Ctrl/Cmd: đảo magnet trong lúc giữ phím
-  private anchorAt(p: Pt, e: Mods, ref?: Anchor | null): Anchor | null {
+  // - Shift với Rectangle/Ellipse (spec.shift = "square"): vuông / tròn trên màn hình, cạnh = cạnh dài
+  private anchorAt(p: Pt, e: Mods, ref?: Anchor | null, square = false): Anchor | null {
     if (e.shiftKey && ref) {
       const r = this.toPx(ref);
+      if (r && square) {
+        const dx = p.x - r.x, dy = p.y - r.y, side = Math.max(Math.abs(dx), Math.abs(dy));
+        return this.fromPx({ x: r.x + (Math.sign(dx) || 1) * side, y: r.y + (Math.sign(dy) || 1) * side });
+      }
       if (r) {
         const s = snapAngle(p, r);
         const a = this.fromPx(s.p);
@@ -290,6 +295,21 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private shiftable(type: DrawingType) {
     const spec = SPEC[type];
     return spec.n !== -1 && spec.n !== 1 && !spec.constrain && !spec.oneClick;
+  }
+
+  // Khung đang xem cho tool tạo bằng 1 click (Position: kích thước theo biên độ nến đang thấy)
+  private oneClickView(span: number): OneClickView {
+    const bars = this.o.getBars(), step = this.step();
+    const r = this.o.chart.timeScale().getVisibleLogicalRange();
+    const i0 = Math.max(0, Math.ceil(r?.from ?? 0)), i1 = Math.min(bars.length - 1, Math.floor(r?.to ?? bars.length - 1));
+    const vis = bars.slice(i0, i1 + 1);
+    return {
+      span,
+      hiLo: vis.length ? Math.max(...vis.map((b) => b.h)) - Math.min(...vis.map((b) => b.l)) : 0,
+      visibleBars: vis.length,
+      tick: this.tick(),
+      addBars: (t, n) => shiftAnchors(bars, step, [{ time: t, price: 0 }], n, 0)?.[0].time ?? t + n * step,
+    };
   }
 
   private draftRef(m: Extract<Mode, { k: "drafting" }>) {
@@ -342,7 +362,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       barsBetween: (t0, t1) => barsBetween(bars, step, t0, t1),
       X: (t) => this.timeToX(t),
       Y: (price) => (series.priceToCoordinate(price) as number | null) ?? null,
-      fp: (v) => v.toFixed(Math.abs(v) >= 100 ? Math.min(digits, 2) : digits),
+      fp: (v) => v.toFixed(digits), // như TV: đủ số lẻ theo tick
       digits,
     };
   }
@@ -395,7 +415,9 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (sel && !sel.hidden) {
       const b = this.built(sel, v);
       const i = b ? this.handlePts(sel, b.c).findIndex((q) => Math.hypot(q.x - p.x, q.y - p.y) <= HANDLE_R) : -1;
-      if (i >= 0) return { d: sel, hit: SPEC[sel.type].handles ? { kind: "body" } : { kind: "point", index: i } };
+      // handle riêng mà tool không định nghĩa cách kéo (hline, vline) = kéo cả hình
+      const spec = SPEC[sel.type];
+      if (i >= 0) return { d: sel, hit: spec.handles && !spec.moveHandle ? { kind: "body" } : { kind: "point", index: i } };
     }
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const d = this.drawings[i];
@@ -486,7 +508,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private place(tool: DrawingType, p: Pt, e: Mods) {
     const spec = SPEC[tool];
     const m = this.mode;
-    const a = this.anchorAt(p, e, m.k === "drafting" ? this.draftRef(m) : null);
+    const a = this.anchorAt(p, e, m.k === "drafting" ? this.draftRef(m) : null, spec.shift === "square");
     if (!a) return;
     if (m.k !== "drafting") {
       const d = this.newDraft(tool);
@@ -494,7 +516,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
         const top = this.series?.coordinateToPrice(0);
         const bot = this.series?.coordinateToPrice(this.o.container.clientHeight);
         const span = top != null && bot != null ? Math.abs(top - bot) : 0;
-        return this.finish(d, spec.oneClick(a, this.step(), span));
+        return this.finish(d, spec.oneClick(a, this.oneClickView(span)));
       }
       if (spec.n === 1) return this.finish(d, [a]);
       d.points = spec.n === -1 ? [a] : [a, { ...a }];
@@ -567,7 +589,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     const p = this.rel(e);
     const m = this.mode;
     if (m.k === "drafting") {
-      const a = this.anchorAt(p, e, this.draftRef(m));
+      const a = this.anchorAt(p, e, this.draftRef(m), SPEC[m.d.type].shift === "square");
       if (SPEC[m.d.type].n === -1) {
         if (m.pressed && a) { m.d.points.push(a); this.refresh(); }
       } else if (a) {
@@ -582,12 +604,19 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       const d = this.drawings.find((x) => x.id === m.id);
       if (!d) return;
       if (m.k === "dragPoint") {
-        const other = m.index > 0 ? m.index - 1 : 1;
-        const a = this.anchorAt(p, e, this.shiftable(d.type) ? d.points[other] : null);
+        const spec = SPEC[d.type];
+        // Shift: so với điểm kề (handle riêng: chỉ 2 góc neo của rectangle, so với góc đối diện)
+        const other = spec.moveHandle ? (m.index < 2 ? 1 - m.index : -1) : m.index > 0 ? m.index - 1 : 1;
+        const ref = this.shiftable(d.type) && other >= 0 ? d.points[other] : null;
+        const a = this.anchorAt(p, e, ref, spec.shift === "square");
         if (!a) return;
-        const pts = d.points.map((q) => ({ ...q }));
-        pts[m.index] = a;
-        SPEC[d.type].constrain?.(pts, m.index, this.tick());
+        let pts: Anchor[];
+        if (spec.moveHandle) pts = spec.moveHandle(d.points, m.index, a);
+        else {
+          pts = d.points.map((q) => ({ ...q }));
+          pts[m.index] = a;
+          spec.constrain?.(pts, m.index, this.tick(), d.points);
+        }
         this.moveTo(m, d, pts);
       } else {
         // Như TV: cả hình dịch cùng 1 delta (số nến, giá), không cho magnet hút từng điểm
