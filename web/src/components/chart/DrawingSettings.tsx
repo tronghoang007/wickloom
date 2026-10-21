@@ -120,6 +120,33 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
     </Row>
   );
 
+  // tùy chọn riêng của tool (spec.options), tên theo TV
+  const optionRows = spec.options?.map((o, i, all) => (
+                <div key={o.key}>
+                  {o.section && o.section !== all[i - 1]?.section && (
+                    <div className="pb-1 pt-3 text-[11px] font-semibold tracking-wide text-[var(--muted)]">{o.section}</div>
+                  )}
+                <Row label={o.label}>
+                  {"color" in o ? (
+                    <input
+                      type="color"
+                      value={String(optOf(d, o.key) || d.color).slice(0, 7)}
+                      onChange={(e) => setOpt(o.key, e.target.value)}
+                      className="h-8 w-14 cursor-pointer bg-transparent"
+                    />
+                  ) : "choices" in o ? (
+                    <select className={input} value={String(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.value)}>
+                      {o.choices.map(([v, label]) => (
+                        <option key={v} value={v} className="text-black">{label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input type="checkbox" className="h-4 w-4" checked={Boolean(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.checked)} />
+                  )}
+                </Row>
+                </div>
+              ));
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -154,12 +181,26 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
         <div className="min-h-[200px] flex-1 overflow-y-auto px-5 py-2">
           {tab === "inputs" && isVol && (
             <>
-              <Row label="Row size (rows)">
+              <Row label="Rows layout">
+                <select
+                  className={input}
+                  value={v.layout}
+                  onChange={(e) => setOpt("layout", e.target.value)}
+                >
+                  <option value="rows" className="text-black">
+                    Number of rows
+                  </option>
+                  <option value="ticks" className="text-black">
+                    Ticks per row
+                  </option>
+                </select>
+              </Row>
+              <Row label="Row size">
                 <input
                   className={input}
                   type="number"
-                  min={2}
-                  max={500}
+                  min={v.layout === "ticks" ? 1 : 2}
+                  max={v.layout === "ticks" ? 100000 : 500}
                   value={v.rows}
                   onChange={(e) => setOpt("rows", num(e.target.value, v.rows))}
                 />
@@ -175,6 +216,9 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   </option>
                   <option value="total" className="text-black">
                     Total
+                  </option>
+                  <option value="delta" className="text-black">
+                    Delta
                   </option>
                 </select>
               </Row>
@@ -287,6 +331,15 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   }
                 />
               </Row>
+              <Row label="Leverage">
+                <input
+                  className={input}
+                  type="number"
+                  min={0}
+                  value={o.leverage}
+                  onChange={(e) => setOpt("leverage", num(e.target.value, o.leverage))}
+                />
+              </Row>
               <Row label="Profit level (price)">
                 <input
                   className={input}
@@ -310,6 +363,13 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                     })
                   }
                 />
+              </Row>
+              <Row label="QTY precision">
+                <select className={input} value={o.qtyPrecision} onChange={(e) => setOpt("qtyPrecision", e.target.value)}>
+                  {[["default", "Default"], ["0", "Integer"], ...Array.from({ length: 10 }, (_, i) => [String(i + 1), `${i + 1} decimal${i ? "s" : ""}`])].map(([v, l]) => (
+                    <option key={v} value={v} className="text-black">{l}</option>
+                  ))}
+                </select>
               </Row>
             </>
           )}
@@ -355,12 +415,13 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   }
                 />
               </Row>
+              {optionRows}
             </>
           )}
 
           {tab === "style" && !isPos && !isVol && (
             <>
-              <Row label="Line color">
+              <Row label={spec.colorLabel ?? "Line color"}>
                 <input
                   type="color"
                   value={d.color}
@@ -421,32 +482,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   />
                 </Row>
               )}
-              {/* tùy chọn riêng của tool (spec.options), tên theo TV */}
-              {spec.options?.map((o, i, all) => (
-                <div key={o.key}>
-                  {o.section && o.section !== all[i - 1]?.section && (
-                    <div className="pb-1 pt-3 text-[11px] font-semibold tracking-wide text-[var(--muted)]">{o.section}</div>
-                  )}
-                <Row label={o.label}>
-                  {"color" in o ? (
-                    <input
-                      type="color"
-                      value={String(optOf(d, o.key) || d.color).slice(0, 7)}
-                      onChange={(e) => setOpt(o.key, e.target.value)}
-                      className="h-8 w-14 cursor-pointer bg-transparent"
-                    />
-                  ) : "choices" in o ? (
-                    <select className={input} value={String(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.value)}>
-                      {o.choices.map(([v, label]) => (
-                        <option key={v} value={v} className="text-black">{label}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input type="checkbox" className="h-4 w-4" checked={Boolean(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.checked)} />
-                  )}
-                </Row>
-                </div>
-              ))}
+              {optionRows}
               {spec.levels && <FibLevels levels={fibLevelsOf(d)} onChange={(lv) => setOpt("levels", encodeFibLevels(lv))} />}
             </>
           )}

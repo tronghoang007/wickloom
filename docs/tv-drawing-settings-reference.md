@@ -206,3 +206,28 @@ Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), se
 - `price_label`, `flag` tạo qua API báo "Value is undefined" — chưa đo được.
 - **price_label** (tạo được khi không truyền `text`): `color #ffffff, backgroundColor #2962FF, borderColor #2962FF, fontWeight bold, fontsize 14`; ô giá phía trên-phải điểm, góc dưới-trái nhọn chạm điểm.
 - **flag**: `flagColor #2962FF`; lá cờ nhỏ (~12×8px) trên cán xám ngắn (~18px).
+
+## Đo thêm 2026-10-21 (tối)
+
+### Position — Inputs / Style / cách tính
+- Inputs: `Account size {1000} <Default ▾>` · `Lot size {1}` · `Risk {250} <USD / % ▾>` · `Entry price` · `Leverage {10000.0}` · PROFIT LEVEL `Ticks` `Price` · STOP LEVEL `Ticks` `Price` · `QTY precision <Default / Integer / 1 decimal … 10 decimals ▾>`.
+- Style: `Lines (màu+nét)` · `Stop color` · `Target color` · `Text (màu) <12▾>` · `[x] Price labels` · INFO: `Stats` (chọn nhiều: TP price offset, TP percent offset, TP tick offset, TP amount, TP PL (tắt), Open/closed PL, Qty, Risk/reward ratio, SL price offset, SL percent offset, SL tick offset, SL amount, SL PL (tắt)) · `[ ] Compact stats mode` · `[ ] Always show stats`.
+- **Leverage giới hạn Qty**: qty = min(rủi ro / (stop × lot), tài khoản × leverage / (entry × lot)). Leverage 1, entry 4140 → qty 0.2415, nhãn "Qty: 0" (Default = làm tròn xuống số nguyên); Amount 1001.93 / 998.07 và PnL 1.932 tính theo qty chưa làm tròn. Leverage 50 → Qty 12, PnL 96.618.
+- TP PL / SL PL: thêm `, PnL: 250.000` / `, PnL: −250.000` vào cuối nhãn Target / Stop (= qty × khoảng cách × lot, 3 số lẻ).
+- Compact: bỏ tên mục — `16.815 (0.408%) 1,681.5 1250`; nhãn giữa `21.740 ~ 14` / `1`.
+- **Khớp lệnh**: nét đứt từ nến chạm entry tới nến chạm target/stop; phần giữa 2 nến đó, từ giá entry tới giá thoát, tô đậm thêm (màu lời/lỗ). Giá **chưa chạm entry**: không nét đứt, không tô đậm, không đóng lệnh dù giá vượt target/stop, nhưng vẫn ghi `Open PnL` = giá đóng cửa nến cuối trong khối − entry (vd −22.860, nền đỏ).
+- Price labels: nhãn giá entry (xám) / target (xanh) / stop (đỏ) trên trục giá, hiện cả khi không chọn.
+
+### Fib levels based on log scale
+- Chỉ có tác dụng khi **trục giá đang log**. Trục thường + bật tùy chọn: 0.5 vẫn 4140.000 (4110→4170). Trục log + bật: 0.5 = 4139.891 = √(4110×4170), 0.382 = 4146.977 = 4170 × (4110/4170)^0.382. Trục log + tắt: như trục thường.
+
+### Stats của trend line (định dạng)
+- Dòng 1: `30.000 (0.73%), 3,000.0` — khoảng giá, (phần trăm) cách bằng dấu cách; pip sau dấu phẩy, **không** có chữ "pips". Chỉ pip: `3,000.0`.
+- Dòng 2: `16 bars (4h), distance: 421 px` — thời gian trong ngoặc sau số nến; chỉ thời gian: `4h`; distance = độ dài đường trên màn hình (CSS px, làm tròn).
+- Dòng 3: `33.26°`.
+
+### Table
+- Props: `backgroundColor #0F0F0F, borderColor #575757, textColor #DBDBDB, fontSize 14, horzAlign left, anchored false, rowsCount 3, colsCount 3, cells [[…]], columnWidths [120,120,120], rowHeights [0,0,0] (0 = tự động)`.
+- Neo ở góc trên trái = điểm click. Hàng cao ~31px với chữ 14. Lưới 3×3 viền xám, ô rỗng.
+- Dialog: chỉ tab Style (`Background`, `Border`, `Text (màu) <14▾>`, `Text alignment <Left/Center/Right ▾>`) + Visibility.
+- Toolbar: templates, **add column**, **add row**, màu nền, màu viền, màu chữ, settings, lock, **anchor**, remove, more. Chuột phải: `Add column to right`, `Add row below`, …, `Anchor`.

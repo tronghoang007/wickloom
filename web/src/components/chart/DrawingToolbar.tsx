@@ -15,7 +15,7 @@ import { ToolIcon } from "../toolIcons";
 const base = "relative flex h-[38px] w-[38px] items-center justify-center rounded";
 // Nút nhóm kiểu TradingView: icon 38px giữa cột 52px + vùng mũi tên 11px ở mép phải
 // (mũi tên hiện khi hover hoặc khi flyout đang mở).
-const wrap = "group relative flex w-[52px] justify-center";
+const wrap = "group relative flex w-full justify-center"; // w-full: cột chỉ rộng 51px (52 trừ viền), w-[52px] làm tràn 1px và hiện thanh cuộn ngang
 const arrowBtn = (open: boolean) =>
   `absolute right-0 top-1/2 flex h-[34px] w-[11px] -translate-y-1/2 items-center justify-center rounded-sm text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] ${
     // ẩn bằng opacity (không dùng visibility) để vẫn click/focus được
@@ -390,7 +390,7 @@ export default function DrawingToolbar() {
   return (
     <div
       ref={toolbarRef}
-      className="flex w-[52px] shrink-0 flex-col items-center overflow-y-auto overflow-x-visible border-r border-[var(--border)] py-2"
+      className="flex w-[52px] shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden border-r border-[var(--border)] py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <CursorButton />
       {divider}

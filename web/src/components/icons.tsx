@@ -312,3 +312,40 @@ export const TradingI = () => (
     <path d="M5.5 22.5l5-5 4 3 8-8" opacity=".5" />
   </Svg>
 );
+
+// --- thanh nổi của hình đang chọn (StylePanel); chừa đáy khung cho vạch màu ----------------
+export const PenI = () => (
+  <Svg>
+    <g transform="rotate(45 14 13)">
+      <path d="M12.2 5.5h3.6v11L14 20l-1.8-3.5z" />
+      <path d="M12.2 8.8h3.6" />
+    </g>
+  </Svg>
+);
+export const BucketI = () => (
+  <Svg>
+    <path d="M13.5 5.5L21 13l-5.8 5.8a1.6 1.6 0 0 1-2.3 0l-5.2-5.2a1.6 1.6 0 0 1 0-2.3z" />
+    <path d="M7.8 12.5h12.6" />
+    <path d="M22 16.5c-.8 1.2-1.4 2-1.4 2.8a1.4 1.4 0 0 0 2.8 0c0-.8-.6-1.6-1.4-2.8z" />
+  </Svg>
+);
+export const TextColorI = () => (
+  <Svg>
+    <path d="M8 20.5l6-14 6 14M10.3 15.5h7.4" />
+  </Svg>
+);
+export const DotsI = () => (
+  <Svg>
+    <g fill="currentColor" stroke="none">
+      <circle cx="8.5" cy="14" r="1.5" />
+      <circle cx="14" cy="14" r="1.5" />
+      <circle cx="19.5" cy="14" r="1.5" />
+    </g>
+  </Svg>
+);
+export const AnchorI = () => (
+  <Svg>
+    <circle cx="14" cy="7.5" r="2" />
+    <path d="M14 9.5v12M10.5 12.5h7M6.5 15.5c0 3.6 3.4 6 7.5 6s7.5-2.4 7.5-6" />
+  </Svg>
+);

@@ -288,4 +288,36 @@ Lần này TV tải được các tool (đo chi tiết trong tài liệu tham ch
 - Ô sửa text inline đi theo hình khi cuộn / zoom lúc đang gõ (theo dõi vị trí neo mỗi frame, chỉ cập nhật khi đổi). Đã kiểm trên app: zoom + kéo ngang lúc đang gõ, ô gõ bám đúng mốc thời gian, gõ tiếp được, Esc xóa hẳn.
 - Position: nhãn Target / Stop đẩy ra xa đủ để không đè nhãn PnL 2 dòng khi target/stop sát entry (có test).
 - `next build` production chạy sạch sau toàn bộ thay đổi.
-- Position: lệnh chỉ mở khi giá chạm entry (range nến hoặc gap qua entry so với close nến trước), sau đó mới xét target/stop. Nét đứt vẽ từ nến khớp entry tới điểm thoát; chưa khớp thì không có nét đứt, Open PnL 0. Trước đây luôn nối từ mép trái tới nến đầu tiên chạm target/stop, kể cả khi giá chưa bao giờ tới entry (có test, đã kiểm trên app với 3 position trên XAUUSDm).
+- Position: lệnh chỉ mở khi giá chạm entry (range nến hoặc gap qua entry so với close nến trước), sau đó mới xét target/stop. Nét đứt vẽ từ nến khớp entry tới điểm thoát; chưa khớp thì không có nét đứt (Open PnL: xem mục 22 — TV vẫn tính theo close nến cuối). Trước đây luôn nối từ mép trái tới nến đầu tiên chạm target/stop, kể cả khi giá chưa bao giờ tới entry (có test, đã kiểm trên app với 3 position trên XAUUSDm).
+
+## 22. Các mục còn thiếu, đo lại trên TV (2026-10-21 tối)
+
+Số đo chi tiết: `docs/tv-drawing-settings-reference.md` mục "Đo thêm 2026-10-21 (tối)".
+
+- **Position**
+  - Chưa khớp entry: TV không vẽ nét đứt, không đóng lệnh dù giá vượt target/stop, nhưng Open PnL = close nến cuối trong khối − entry (mục 21 ghi PnL 0 là sai, đã sửa).
+  - Đã khớp: tô đậm thêm vùng từ nến khớp tới nến thoát, giữa giá entry và giá thoát.
+  - Inputs: **Leverage** (mặc định 10000; Qty ≤ tài khoản × leverage / (entry × lot)) và **QTY precision** (Default = Integer, 1–10 decimals, làm tròn xuống). Amount / PnL tính theo Qty chưa làm tròn.
+  - Style: **Price labels** (nhãn entry / target / stop trên trục, luôn hiện), INFO: 13 mục Stats như TV (TP/SL PL tắt sẵn, dạng `PnL: 250.000`), **Compact stats mode** (`21.740 ~ 14`), **Always show stats**.
+  - Số âm dùng dấu trừ "−"; pip luôn 1 số lẻ (`800.0`). Tạo bằng 1 click: target/stop làm tròn tick (trước ra 4132.8179999…).
+- **Fib levels based on log scale** (Fib retracement, Trend-based fib extension): chỉ có tác dụng khi trục giá log, mức chia theo tỉ lệ giá (0.5 giữa 4110 và 4170 = 4139.891 như TV).
+- **Stats của trend line**: thêm **Distance** (`distance: 421 px`, độ dài trên màn hình); định dạng như TV: `30.000 (0.73%), 3,000.0` / `16 bars (4h), distance: 421 px` / góc.
+- **Table** làm lại theo TV: lưới 3×3, cột 120px, hàng 31px (chữ 14), nền #0f0f0f, viền #575757, chữ #dbdbdb. Tạo xong mở ô gõ ở ô đầu; double-click sửa đúng ô; toolbar **Add column / Add row**; Settings: Border, Background, Text size, Text alignment. Nội dung ô, số hàng/cột không lưu làm mặc định.
+- **Anchor** (Text, Pin, Table — 3 tool TV có nút toggle-anchor): ghim cố định trên màn hình (lưu tỉ lệ khung), kéo được khi đang ghim, bỏ ghim thì về lại thời gian + giá ở chỗ đang đứng; hình đang ghim không có nhãn trục.
+- Kiểm trên app: Table (tạo, gõ, double-click ô, thêm cột/hàng, ghim + cuộn, kéo khi ghim, bỏ ghim, căn giữa), Position (nhãn, trục, Leverage/QTY precision, TP/SL PL). Đã xóa hình test, trả prefs về như cũ (chỉ còn default FRVP của user). Anchor của Text / Pin chưa thử trên trình duyệt (cùng đường code với Table).
+- Còn: Double curve (chưa rõ hình học của TV), số liệu FRVP (TV không xuất dữ liệu nến). Table chưa có xóa hàng/cột, kéo đổi độ rộng cột (TV có handle ở góc), chữ dài chưa tự cắt trong ô.
+
+## 23. Thanh nổi, menu chuột phải hình, thanh vẽ bên trái, Volume profile (2026-10-21 tối)
+
+- **Thanh nổi (StylePanel)** vẽ lại bằng icon lưới 28 (`PenI`, `BucketI`, `TextColorI`, `AnchorI`, `DotsI` + `SettingsI`/`AlertI`/`Lock`/`Trash` dùng chung với toolbar chính): nút 34px, vạch màu 3px dưới icon, menu width/style đảo màu dòng đang chọn, nút "..." mở menu thật (Visual order ›, Visibility on intervals ›, Clone, Copy, Hide). Nút Settings trước chỉ là hình lục giác trống. Backdrop đóng menu đặt ngoài thanh vì thanh có `transform` (fixed bên trong chỉ phủ đúng thanh).
+- **Chuột phải lên hình** (`DrawingManager.pickAt` + `drawingMenu.tsx`): chọn hình rồi hiện menu như TV: Add alert… · Visual order › (front / forward / backward / back) · Visibility on intervals › · Object tree… · Clone · Copy · Lock · Hide · Remove · Settings…. Alert, Object tree, Copy còn disabled. `ChartContextMenu` có menu con (`children`).
+- **Thanh vẽ bên trái**: `w-[52px]` trong khung chỉ còn 51px (viền phải) làm tràn 1px → thanh cuộn ngang. Đã sửa (`w-full`, `overflow-x-hidden`, ẩn scrollbar; cuộn bằng wheel như cũ).
+- **Volume profile** (help chính thức của TV: Fixed range volume profile, Anchored volume profile drawing tool):
+  - Mỗi row là 1 thanh riêng, cách nhau 1px khi row ≥ 3px (đã đo pixel: alpha 0 đúng 1px giữa các thanh).
+  - Đang vẽ / đang kéo chỉ hiện vạch dọc: FRVP 2 vạch, AVP 1 vạch ở điểm neo; thả ra mới tính profile.
+  - Dữ liệu: cả FRVP và AVP chia volume theo nến khung nhỏ (M1, M5, M15, M30, H1, H4, D1; khung đầu tiên nhỏ hơn khung chart mà khoảng đó < 5000 nến; backend không có M3 như danh sách AVP của TV). Nến cuối của chart (đang chạy) lấy từ chart; đầu / đuôi khung nhỏ không phủ tới dùng nến chart (`profileSource`). Khoảng gồm trọn cả nến cuối (trước đây thiếu phần sau nến đầu tiên của nến cuối).
+  - Extend Right của FRVP gom volume tới nến mới nhất (trước chỉ kéo dài đường).
+  - Up volume = đóng > mở, còn lại (kể cả doji) là down.
+  - Rows layout: Number of rows (ticks/row = (đỉnh − đáy) / số row / tick, làm tròn lên hoặc xuống cho tổng row gần số yêu cầu nhất, row cuối có thể ngắn; ví dụ 100 tick / 30 row → 3 tick, 34 row — có test) và Ticks per row. Chặn 1000 row.
+  - Volume = Delta: thanh dài theo |up − down| của row (so với row lệch nhất), màu Up nếu dương / Down nếu âm, row delta 0 không có thanh, nhãn Values ghi delta có dấu. POC / Value Area vẫn tính theo tổng volume (TV không nói rõ delta có đổi POC không).
+  - Chưa làm: 1S data khi khoảng ≤ 5 phút, Developing POC / VA, Histogram Box. Cách tính Value Area quanh POC TV không công bố (đang mở từng row, hàng lớn hơn trước, không vượt % yêu cầu).

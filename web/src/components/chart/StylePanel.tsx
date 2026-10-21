@@ -2,16 +2,16 @@
 
 import { useDrawingStore } from "@/drawings/store";
 import { POS_DEFAULTS, SPEC } from "@/drawings/tools";
-import { presetVisibility, visibleOn, type VisPreset } from "@/drawings/visibility";
+import { visibleOn } from "@/drawings/visibility";
 import { useChartStore } from "@/store/chart";
 import { useRef, useState, type ReactNode } from "react";
-import { Svg24 } from "../icons";
+import { AlertI, AnchorI, BucketI, DotsI, Lock, PenI, SettingsI, Svg, TemplatesI, TextColorI, Trash } from "../icons";
+import ChartContextMenu from "./ChartContextMenu";
+import { drawingMenuItems } from "./drawingMenu";
 
-// Icon 24px: chừa chỗ cho vạch màu dưới icon trong nút 36px (thanh nổi kiểu TradingView).
-const Svg = ({ children }: { children: ReactNode }) => <Svg24 size={24}>{children}</Svg24>;
-
+// Thanh nổi kiểu TradingView: cao 38px, nút 34px với icon 28px, vạch màu 3px dưới icon.
 const btn =
-  "relative flex h-9 w-9 items-center justify-center rounded hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
+  "relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
 
 const Grip = () => (
   <svg
@@ -40,13 +40,11 @@ function ColorButton({
 }) {
   return (
     <label className={`${btn} cursor-pointer`} title={title}>
-      <div className="flex flex-col items-center">
-        {children}
-        <span
-          className="-mt-0.5 h-[3px] w-5 rounded"
-          style={{ background: color }}
-        />
-      </div>
+      {children}
+      <span
+        className="absolute bottom-[3px] left-1/2 h-[3px] w-[18px] -translate-x-1/2 rounded-[1px]"
+        style={{ background: color }}
+      />
       <input
         type="color"
         value={color.slice(0, 7)}
@@ -57,8 +55,9 @@ function ColorButton({
   );
 }
 
-const DASH_LABEL = ["Solid", "Dashed", "Dotted"];
-const dashLine = (dash: number) => (
+const DASH_LABEL = ["Line", "Dashed line", "Dotted line"];
+// Mẫu nét; w = độ dày thật (menu độ dày / nút hiện đúng 1-4px)
+const dashLine = (dash: number, w = 2) => (
   <svg width="26" height="8" viewBox="0 0 26 8">
     <line
       x1="1"
@@ -66,7 +65,7 @@ const dashLine = (dash: number) => (
       x2="25"
       y2="4"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth={w}
       strokeDasharray={dash === 1 ? "6 4" : dash === 2 ? "2 3" : undefined}
     />
   </svg>
@@ -74,7 +73,8 @@ const dashLine = (dash: number) => (
 
 export default function StylePanel() {
   const { drawings, selectedId, api } = useDrawingStore();
-  const [menu, setMenu] = useState<"width" | "dash" | "more" | null>(null);
+  const [menu, setMenu] = useState<"width" | "dash" | null>(null);
+  const [more, setMore] = useState<{ x: number; y: number } | null>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const dragRef = useRef<{
     sx: number;
@@ -91,302 +91,221 @@ export default function StylePanel() {
   const isPos = SPEC[d.type]?.panel === "position";
   const isVol = SPEC[d.type]?.panel === "volume";
   const po = { ...POS_DEFAULTS, ...d.opts } as typeof POS_DEFAULTS;
+  // Menu thả xuống của nút width / style: dòng đang chọn đảo màu như TV
   const popup = (items: ReactNode) => (
-    <>
-      <div className="fixed inset-0 z-30" onClick={() => setMenu(null)} />
-      <div className="absolute left-0 top-9 z-40 min-w-28 whitespace-nowrap rounded border border-[var(--border)] bg-[var(--bg)] py-1 shadow-xl">
-        {items}
-      </div>
-    </>
+    <div className="absolute left-0 top-[38px] z-40 min-w-[120px] whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl">
+      {items}
+    </div>
   );
-  const item =
-    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--hover)]";
+  const item = (on: boolean) =>
+    `flex h-8 w-full items-center gap-2 px-3 text-left text-sm ${on ? "bg-[var(--fg)] text-[var(--bg)]" : "hover:bg-[var(--hover)]"}`;
 
   return (
-    <div
-      className="absolute left-1/2 top-12 z-20 flex h-[38px] select-none items-center gap-0.5 rounded-md bg-[var(--panel)] px-1 text-[var(--fg)] shadow-[0_2px_4px_rgba(0,0,0,0.4)]"
-      style={{ transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)` }}
-    >
+    <>
+      {/* Nền bắt click ngoài để đóng menu: nằm ngoài thanh (thanh có transform nên fixed bên trong không phủ cả màn hình) */}
+      {menu && <div className="absolute inset-0 z-[19]" onMouseDown={() => setMenu(null)} />}
       <div
-        className="mr-1 flex h-9 w-4 cursor-grab items-center justify-center touch-none active:cursor-grabbing"
-        onPointerDown={(e) => {
-          e.preventDefault(); // kéo thanh không bôi đen (select) chữ trên trang
-          e.currentTarget.setPointerCapture(e.pointerId);
-          dragRef.current = {
-            sx: e.clientX,
-            sy: e.clientY,
-            ox: pos.x,
-            oy: pos.y,
-          };
-        }}
-        onPointerMove={(e) => {
-          const s = dragRef.current;
-          if (!s) return;
-          if (e.buttons === 0) {
-            dragRef.current = null;
-            return;
-          }
-          setPos({ x: s.ox + e.clientX - s.sx, y: s.oy + e.clientY - s.sy });
-        }}
-        onPointerUp={() => (dragRef.current = null)}
-        onPointerCancel={() => (dragRef.current = null)}
-        onLostPointerCapture={() => (dragRef.current = null)}
+        className="absolute left-1/2 top-12 z-20 flex h-[38px] select-none items-center gap-0.5 rounded-md bg-[var(--panel)] px-0.5 text-[var(--fg)] shadow-[0_2px_4px_rgba(0,0,0,0.4)]"
+        style={{ transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)` }}
       >
-        <Grip />
-      </div>
+        <div
+          className="flex h-[34px] w-4 cursor-grab items-center justify-center touch-none active:cursor-grabbing"
+          onPointerDown={(e) => {
+            e.preventDefault(); // kéo thanh không bôi đen (select) chữ trên trang
+            e.currentTarget.setPointerCapture(e.pointerId);
+            dragRef.current = {
+              sx: e.clientX,
+              sy: e.clientY,
+              ox: pos.x,
+              oy: pos.y,
+            };
+          }}
+          onPointerMove={(e) => {
+            const s = dragRef.current;
+            if (!s) return;
+            if (e.buttons === 0) {
+              dragRef.current = null;
+              return;
+            }
+            setPos({ x: s.ox + e.clientX - s.sx, y: s.oy + e.clientY - s.sy });
+          }}
+          onPointerUp={() => (dragRef.current = null)}
+          onPointerCancel={() => (dragRef.current = null)}
+          onLostPointerCapture={() => (dragRef.current = null)}
+        >
+          <Grip />
+        </div>
 
-      <button className={btn} disabled title="Template (sắp có)">
-        <Svg>
-          <rect x="4" y="4" width="6" height="6" />
-          <rect x="14" y="4" width="6" height="6" />
-          <rect x="4" y="14" width="6" height="6" />
-          <path d="M17 14v6M14 17h6" />
-        </Svg>
-      </button>
+        <button className={btn} disabled title="Template (sắp có)">
+          <TemplatesI />
+        </button>
 
-      {isVol ? null : isPos ? (
-        <>
-          <ColorButton
-            title="Text color"
-            color={d.textColor ?? "#ffffff"}
-            onChange={(c) => api.update({ textColor: c })}
+        {/* Table như TV: thêm cột bên phải / hàng bên dưới */}
+        {SPEC[d.type]?.grid && (
+          <>
+            <button className={btn} title="Add column" onClick={() => api.tableAdd("col")}>
+              <Svg>
+                <rect x="6.5" y="7.5" width="9" height="13" />
+                <path d="M20.5 11v6M17.5 14h6" />
+              </Svg>
+            </button>
+            <button className={btn} title="Add row" onClick={() => api.tableAdd("row")}>
+              <Svg>
+                <rect x="7.5" y="6.5" width="13" height="9" />
+                <path d="M14 18.5v5M11.5 21h5" />
+              </Svg>
+            </button>
+          </>
+        )}
+
+        {isVol ? null : isPos ? (
+          <>
+            <ColorButton
+              title="Text color"
+              color={d.textColor ?? "#ffffff"}
+              onChange={(c) => api.update({ textColor: c })}
+            >
+              <TextColorI />
+            </ColorButton>
+            <ColorButton
+              title="Profit color"
+              color={po.profit}
+              onChange={(c) => api.update({ opts: { profit: c } })}
+            >
+              <BucketI />
+            </ColorButton>
+            <ColorButton
+              title="Stop color"
+              color={po.stop}
+              onChange={(c) => api.update({ opts: { stop: c } })}
+            >
+              <BucketI />
+            </ColorButton>
+            <button className={btn} disabled title="Add to chart (sắp có)">
+              <Svg>
+                <rect x="5.5" y="6.5" width="17" height="12" rx="2" />
+                <path d="M9 15l3-3 3 2 4-5M14 21.5v-3" />
+              </Svg>
+            </button>
+          </>
+        ) : (
+          <>
+            <ColorButton
+              title="Line color"
+              color={d.color}
+              onChange={(c) => api.update({ color: c })}
+            >
+              <PenI />
+            </ColorButton>
+
+            <ColorButton
+              title="Text color"
+              color={d.textColor ?? d.color}
+              onChange={(c) => api.update({ textColor: c })}
+            >
+              <TextColorI />
+            </ColorButton>
+
+            <div className="relative">
+              <button
+                className={`${btn} w-auto gap-1.5 px-1.5 text-[13px]`}
+                title="Line width"
+                onClick={() => setMenu(menu === "width" ? null : "width")}
+              >
+                {dashLine(0, d.width)} {d.width}px
+              </button>
+              {menu === "width" &&
+                popup(
+                  [1, 2, 3, 4].map((w) => (
+                    <button
+                      key={w}
+                      className={item(d.width === w)}
+                      onClick={() => {
+                        api.update({ width: w });
+                        setMenu(null);
+                      }}
+                    >
+                      {dashLine(0, w)} {w}px
+                    </button>
+                  )),
+                )}
+            </div>
+
+            <div className="relative">
+              <button
+                className={btn}
+                title="Line style"
+                onClick={() => setMenu(menu === "dash" ? null : "dash")}
+              >
+                {dashLine(dash)}
+              </button>
+              {menu === "dash" &&
+                popup(
+                  [0, 1, 2].map((v) => (
+                    <button
+                      key={v}
+                      className={item(dash === v)}
+                      onClick={() => {
+                        api.update({ dash: v as 0 | 1 | 2 });
+                        setMenu(null);
+                      }}
+                    >
+                      {dashLine(v)} {DASH_LABEL[v]}
+                    </button>
+                  )),
+                )}
+            </div>
+          </>
+        )}
+
+        <button
+          className={btn}
+          title="Settings"
+          onClick={() => useDrawingStore.setState({ settingsOpen: true })}
+        >
+          <SettingsI />
+        </button>
+
+        <button className={btn} disabled title="Alert (sắp có)">
+          <AlertI />
+        </button>
+
+        <button
+          className={btn}
+          title={d.locked ? "Unlock" : "Lock"}
+          onClick={() => api.update({ locked: !d.locked })}
+        >
+          <Lock open={!d.locked} />
+        </button>
+
+        {/* Anchor như TV: ghim cố định trên màn hình, không chạy theo chart */}
+        {SPEC[d.type]?.anchorable && (
+          <button
+            className={`${btn} ${d.opts?.anchored ? "text-[var(--accent)]" : ""}`}
+            title={d.opts?.anchored ? "Unanchor" : "Anchor"}
+            onClick={() => api.toggleAnchor()}
           >
-            <Svg>
-              <path d="M6 6h12M12 6v13M9 19h6" />
-            </Svg>
-          </ColorButton>
-          <ColorButton
-            title="Profit color"
-            color={po.profit}
-            onChange={(c) => api.update({ opts: { profit: c } })}
-          >
-            <Svg>
-              <path d="M5 13l7-8 7 8-7 7zM19 15c1 1.500 1.500 2.500 1.500 3.500" />
-            </Svg>
-          </ColorButton>
-          <ColorButton
-            title="Stop color"
-            color={po.stop}
-            onChange={(c) => api.update({ opts: { stop: c } })}
-          >
-            <Svg>
-              <path d="M5 13l7-8 7 8-7 7zM19 15c1 1.500 1.500 2.500 1.500 3.500" />
-            </Svg>
-          </ColorButton>
-          <button className={btn} disabled title="Add to chart (sắp có)">
-            <Svg>
-              <rect x="4" y="4" width="16" height="14" rx="2" />
-              <path d="M7 14l3-3 3 2 4-5M12 21v-3" />
-            </Svg>
+            <AnchorI />
           </button>
-        </>
-      ) : (
-        <>
-          <ColorButton
-            title="Line color"
-            color={d.color}
-            onChange={(c) => api.update({ color: c })}
-          >
-            <Svg>
-              <path d="M4 20l1-4L16 5l3 3L8 19z" />
-            </Svg>
-          </ColorButton>
+        )}
 
-          <ColorButton
-            title="Text color"
-            color={d.textColor ?? d.color}
-            onChange={(c) => api.update({ textColor: c })}
-          >
-            <Svg>
-              <path d="M6 6h12M12 6v13M9 19h6" />
-            </Svg>
-          </ColorButton>
+        <button className={btn} title="Remove" onClick={() => api.deleteSelected()}>
+          <Trash />
+        </button>
 
-          <div className="relative">
-            <button
-              className={`${btn} w-auto gap-1.5 px-2 text-sm`}
-              title="Line width"
-              onClick={() => setMenu(menu === "width" ? null : "width")}
-            >
-              {dashLine(0)} {d.width}px
-            </button>
-            {menu === "width" &&
-              popup(
-                [1, 2, 3, 4].map((w) => (
-                  <button
-                    key={w}
-                    className={item}
-                    onClick={() => {
-                      api.update({ width: w });
-                      setMenu(null);
-                    }}
-                  >
-                    <svg width="26" height="8">
-                      <line
-                        x1="1"
-                        y1="4"
-                        x2="25"
-                        y2="4"
-                        stroke="currentColor"
-                        strokeWidth={w}
-                      />
-                    </svg>{" "}
-                    {w}px
-                  </button>
-                )),
-              )}
-          </div>
-
-          <div className="relative">
-            <button
-              className={btn}
-              title="Line style"
-              onClick={() => setMenu(menu === "dash" ? null : "dash")}
-            >
-              {dashLine(dash)}
-            </button>
-            {menu === "dash" &&
-              popup(
-                [0, 1, 2].map((v) => (
-                  <button
-                    key={v}
-                    className={item}
-                    onClick={() => {
-                      api.update({ dash: v as 0 | 1 | 2 });
-                      setMenu(null);
-                    }}
-                  >
-                    {dashLine(v)} {DASH_LABEL[v]}
-                  </button>
-                )),
-              )}
-          </div>
-        </>
-      )}
-
-      <button
-        className={btn}
-        title="Settings"
-        onClick={() => useDrawingStore.setState({ settingsOpen: true })}
-      >
-        <Svg>
-          <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
-        </Svg>
-      </button>
-
-      <button className={btn} disabled title="Alert (sắp có)">
-        <Svg>
-          <circle cx="12" cy="13" r="7" />
-          <path d="M12 9v4l3 2M5 4l-2 2M19 4l2 2" />
-        </Svg>
-      </button>
-
-      <button
-        className={btn}
-        title={d.locked ? "Unlock" : "Lock"}
-        onClick={() => api.update({ locked: !d.locked })}
-      >
-        <Svg>
-          {d.locked ? (
-            <>
-              <rect x="5" y="11" width="14" height="9" rx="1" />
-              <path d="M8 11V8a4 4 0 018 0v3" />
-            </>
-          ) : (
-            <>
-              <rect x="5" y="11" width="14" height="9" rx="1" />
-              <path d="M8 11V8a4 4 0 017.5-2" />
-            </>
-          )}
-        </Svg>
-      </button>
-
-      <button
-        className={btn}
-        title="Delete"
-        onClick={() => api.deleteSelected()}
-      >
-        <Svg>
-          <path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13" />
-        </Svg>
-      </button>
-
-      <div className="relative">
         <button
           className={btn}
           title="More"
-          onClick={() => setMenu(menu === "more" ? null : "more")}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenu(null);
+            setMore({ x: r.left, y: r.bottom + 4 });
+          }}
         >
-          <Svg>
-            <circle cx="5" cy="12" r="1" />
-            <circle cx="12" cy="12" r="1" />
-            <circle cx="19" cy="12" r="1" />
-          </Svg>
+          <DotsI />
         </button>
-        {menu === "more" &&
-          popup(
-            <>
-              <button
-                className={item}
-                onClick={() => {
-                  api.cloneSelected();
-                  setMenu(null);
-                }}
-              >
-                Clone
-              </button>
-              <button
-                className={item}
-                onClick={() => {
-                  api.reorder("front");
-                  setMenu(null);
-                }}
-              >
-                Bring to front
-              </button>
-              <button
-                className={item}
-                onClick={() => {
-                  api.reorder("back");
-                  setMenu(null);
-                }}
-              >
-                Send to back
-              </button>
-              {/* như menu "Visibility on intervals" của TV */}
-              <div className="mt-1 border-t border-[var(--border)] px-3 pb-1 pt-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
-                VISIBILITY ON INTERVALS
-              </div>
-              {([
-                ["above", "Current interval and above"],
-                ["below", "Current interval and below"],
-                ["only", "Current interval only"],
-                ["all", "All intervals"],
-              ] as [VisPreset, string][]).map(([preset, label]) => (
-                <button
-                  key={preset}
-                  className={item}
-                  onClick={() => {
-                    api.update({ visibility: presetVisibility(preset, useChartStore.getState().tf) });
-                    setMenu(null);
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-              <div className="mt-1 border-t border-[var(--border)]" />
-              <button
-                className={item}
-                onClick={() => {
-                  api.update({ hidden: true });
-                  setMenu(null);
-                }}
-              >
-                Hide
-              </button>
-            </>,
-          )}
       </div>
-    </div>
+      {more && <ChartContextMenu x={more.x} y={more.y} items={drawingMenuItems(api, d, tf, true)} onClose={() => setMore(null)} />}
+    </>
   );
 }

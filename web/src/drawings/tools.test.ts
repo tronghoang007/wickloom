@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import { textBox, type Shape } from "./shapes";
-import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, regression, SPEC, volumeIn, type Ctx } from "./tools";
+import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, profileSource, regression, SPEC, tableCellAt, tableCells, volumeIn, type Ctx } from "./tools";
 import type { Anchor } from "./types";
 
 const T = 1_000_000;
@@ -107,10 +107,27 @@ describe("positionStats", () => {
     expect(s.pnl).toBe(10);
   });
 
-  it("giá chưa chạm entry thì lệnh chưa mở: không có điểm thoát, PnL 0", () => {
+  it("giá chưa chạm entry: lệnh chưa mở, không đóng dù vượt target, PnL theo close nến cuối (TV)", () => {
     // Short entry 100 nhưng giá chỉ chạy dưới, dù đã thấp hơn target
     const s = positionStats([bar(0, 85, 86, 84, 85), bar(1, 85, 86, 80, 81), bar(2, 81, 83, 79, 82)], pos(100, 90, 105), false, opts);
-    expect(s).toMatchObject({ closed: false, entryT: null, exitT: null, pnlPts: 0 });
+    expect(s).toMatchObject({ closed: false, entryT: null, exitPrice: 82, pnlPts: 18 });
+  });
+
+  it("leverage giới hạn Qty; Amount / PL theo Qty chưa làm tròn (TV: leverage 1 → Qty 0, PnL 1.932)", () => {
+    const p = pos(4140, 4148, 4132);
+    const s = positionStats([], p, true, { account: 1000, lot: 1, risk: 250, riskMode: "money", leverage: 1 });
+    expect(s.qty).toBe(0);
+    expect(s.tpPL).toBeCloseTo(1.932, 3);
+    expect(s.tpAmount).toBeCloseTo(1001.93, 2);
+    expect(s.slAmount).toBeCloseTo(998.07, 2);
+    expect(positionStats([], p, true, { account: 1000, lot: 1, risk: 250, riskMode: "money", leverage: 50 }).qty).toBe(12);
+  });
+
+  it("QTY precision: số lẻ làm tròn xuống", () => {
+    const p = pos(4140, 4148, 4132);
+    const o = { account: 1000, lot: 1, risk: 250, riskMode: "money", leverage: 1 };
+    expect(positionStats([], p, true, { ...o, qtyPrecision: "2" }).qty).toBe(0.24);
+    expect(positionStats([], p, true, { ...o, qtyPrecision: "0" }).qty).toBe(0);
   });
 
   it("lệnh mở ở nến chạm entry, rồi mới xét target/stop", () => {
@@ -166,6 +183,147 @@ describe("computeProfile", () => {
   });
 });
 
+describe("computeProfile theo help của TV", () => {
+  const bar = (l: number, h: number, v: number, o = l, c = h): Bar => ({ t: 0, o, h, l, c, v });
+
+  it("Number of rows: ví dụ của TV (100 tick, 30 row) làm tròn xuống 3 tick/row => 34 row, row cuối chỉ 1 tick", () => {
+    const vp = computeProfile([bar(0, 100, 1000)], 1, 30, 70)!;
+    expect(vp.size).toBe(3);
+    expect(vp.N).toBe(34);
+  });
+
+  it("Number of rows: chọn làm tròn lên khi tổng row gần số yêu cầu hơn", () => {
+    // 100 tick, 24 row: 4.17 => 4 tick (25 row) gần 24 hơn 5 tick (20 row)
+    const vp = computeProfile([bar(0, 100, 1000)], 1, 24, 70)!;
+    expect(vp.size).toBe(4);
+    expect(vp.N).toBe(25);
+  });
+
+  it("Ticks per row: Row Size là số tick mỗi row, số row tự tính", () => {
+    const vp = computeProfile([bar(200, 300, 1000)], 0.01, 25, 70, "ticks")!;
+    expect(vp.size).toBeCloseTo(0.25, 9);
+    expect(vp.N).toBe(400);
+  });
+
+  it("Ticks per row quá nhỏ thì gộp lại để không quá 1000 row", () => {
+    const vp = computeProfile([bar(0, 100, 1000)], 0.001, 1, 70, "ticks")!;
+    expect(vp.N).toBeLessThanOrEqual(1000);
+  });
+
+  it("nến đóng > mở là up volume; đóng = mở (doji) và đóng < mở là down", () => {
+    const vp = computeProfile([bar(0, 1, 10, 0, 1), bar(0, 1, 20, 1, 0), bar(0, 1, 40, 0.5, 0.5)], 1, 2, 70)!;
+    expect(vp.up[0]).toBeCloseTo(10, 9);
+    expect(vp.dn[0]).toBeCloseTo(60, 9);
+  });
+});
+
+describe("profileSource: ghép nến khung nhỏ với nến chart", () => {
+  const mk = (t: number, v = 1): Bar => ({ t, o: 1, h: 2, l: 1, c: 2, v });
+  // nến chart 900s: 0, 900, 1800, 2700 (2700 là nến đang chạy); khung nhỏ 300s
+  const chart = [mk(0), mk(900), mk(1800), mk(2700)];
+  const base = (fine: Bar[]): Ctx =>
+    ({ bars: chart, step: 900, profileBars: fine, profileStep: 300 }) as unknown as Ctx;
+  const ts = (bs: Bar[]) => bs.map((b) => b.t);
+
+  it("chưa có dữ liệu khung nhỏ thì dùng nến chart trong khoảng [from, to)", () => {
+    expect(ts(profileSource({ ...base([]), profileStep: undefined } as Ctx, 900, 2700))).toEqual([900, 1800]);
+  });
+
+  it("nến đã đóng lấy từ khung nhỏ, nến đang chạy lấy từ chart", () => {
+    const fine = [0, 300, 600, 900, 1200, 1500, 1800, 2100, 2400, 2700, 3000].map((t) => mk(t));
+    expect(ts(profileSource(base(fine), 0, 3600))).toEqual([0, 300, 600, 900, 1200, 1500, 1800, 2100, 2400, 2700]);
+    // 2700 ở đây là nến chart (đang chạy), không phải nến khung nhỏ 2700 và 3000
+    expect(profileSource(base(fine), 0, 3600).filter((b) => b.t === 2700)).toHaveLength(1);
+  });
+
+  it("khung nhỏ chỉ phủ một phần: đầu và đuôi bù bằng nến chart", () => {
+    const fine = [900, 1200, 1500].map((t) => mk(t));
+    expect(ts(profileSource(base(fine), 0, 3600))).toEqual([0, 900, 1200, 1500, 1800, 2700]);
+  });
+});
+
+describe("volume profile vẽ dạng thanh", () => {
+  // 20 nến phủ giá 0..100, trục giá y = 500 - 4·price => mỗi row 10 giá = 40px
+  const bars: Bar[] = Array.from({ length: 20 }, (_, i) => ({ t: i, o: 5 * i, h: 5 * i + 10, l: 5 * i, c: 5 * i + 10, v: 100 }));
+  const ctx = (type: string, rows: number, k = 4): Ctx => ({
+    d: { id: "x", type, points: [{ time: 0, price: 0 }, { time: 19, price: 100 }], color: "#2962ff", width: 1, locked: false, hidden: false, opts: { rows } },
+    p: [{ x: 0, y: 500 }, { x: 190, y: 100 }],
+    w: 400, h: 500, bars, tickSize: 1, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0,
+    X: (t) => t * 10, Y: (price) => 500 - k * price, fp: (v) => v.toFixed(2), digits: 0,
+  });
+  // khoảng y [trên, dưới] của từng thanh nền (poly kín có fill), xếp từ trên xuống
+  const bands = (shapes: Shape[]) =>
+    shapes
+      .filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill)
+      .map((s) => [Math.min(...s.pts.map((q) => q.y)), Math.max(...s.pts.map((q) => q.y))])
+      .sort((a, b) => a[0] - b[0]);
+
+  it("các row cách nhau 1px, không dính thành 1 khối", () => {
+    const rows = bands(SPEC.frvp.build(ctx("frvp", 10)));
+    expect(rows.length).toBeGreaterThanOrEqual(10);
+    for (let i = 1; i < rows.length; i++) expect(rows[i][0] - rows[i - 1][1]).toBeCloseTo(1, 9);
+  });
+
+  it("đang vẽ / kéo chỉ có vạch dọc ở 2 mép khoảng, không có thanh", () => {
+    const shapes = SPEC.frvp.build({ ...ctx("frvp", 10), dragging: true });
+    expect(shapes).toHaveLength(2);
+    for (const s of shapes) {
+      expect(s.k).toBe("line");
+      if (s.k === "line") {
+        expect(s.a.x).toBe(s.b.x);
+        expect([s.a.y, s.b.y]).toEqual([0, 500]);
+      }
+    }
+    expect(shapes.map((s) => (s.k === "line" ? s.a.x : -1))).toEqual([0, 190]);
+  });
+
+  it("Anchored VP khi kéo chỉ có 1 vạch ở điểm neo", () => {
+    expect(SPEC.avp.build({ ...ctx("avp", 10), dragging: true })).toHaveLength(1);
+  });
+
+  describe("Volume = Delta", () => {
+    // row 0 có up 100 / down 0, row 1 có up 20 / down 60, row 2 có up 50 / down 50 (delta 0)
+    const dbars: Bar[] = [
+      { t: 0, o: 0, h: 10, l: 0, c: 10, v: 100 },
+      { t: 1, o: 20, h: 20, l: 10, c: 10, v: 60 },
+      { t: 2, o: 10, h: 20, l: 10, c: 20, v: 20 },
+      { t: 3, o: 20, h: 30, l: 20, c: 30, v: 50 },
+      { t: 4, o: 30, h: 30, l: 20, c: 20, v: 50 },
+    ];
+    const run = (volume: string, extra = {}) => {
+      const c = ctx("frvp", 3);
+      return SPEC.frvp.build({ ...c, bars: dbars, d: { ...c.d, opts: { rows: 3, volume, ...extra } } });
+    };
+    const rects = (shapes: Shape[]) =>
+      shapes.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill)
+        .map((s) => ({ w: Math.max(...s.pts.map((q) => q.x)) - Math.min(...s.pts.map((q) => q.x)), color: s.color }))
+        .sort((a, b) => a.w - b.w);
+
+    it("thanh dài theo |up − down|, row lệch nhất dài hết cỡ, delta 0 thì không có thanh", () => {
+      const r = rects(run("delta"));
+      expect(r).toHaveLength(2); // row delta 0 bị bỏ
+      expect(r[1].w).toBeGreaterThan(r[0].w);
+    });
+
+    it("màu theo dấu: delta dương dùng màu Up, âm dùng màu Down", () => {
+      const colors = new Set(rects(run("delta", { up: "#111111", down: "#222222", vaUp: "#111111", vaDown: "#222222" })).map((x) => x.color));
+      expect(colors).toEqual(new Set(["#111111", "#222222"]));
+    });
+
+    it("nhãn Values hiện delta có dấu", () => {
+      const labels = run("delta", { values: true }).filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text").map((s) => s.text);
+      expect(labels).toContain("100");
+      expect(labels.some((t) => t.startsWith("-"))).toBe(true);
+    });
+  });
+
+  it("row thấp hơn 3px thì để liền, không chừa khe", () => {
+    const rows = bands(SPEC.frvp.build(ctx("frvp", 50, 0.5))); // 50 row trong 50px => 1px/row
+    for (let i = 1; i < rows.length; i++) expect(rows[i][0] - rows[i - 1][1]).toBeCloseTo(0, 9);
+  });
+});
+
 // Ctx giả với trục giá log: y = 1000 - 100·ln(price)
 describe("mức theo giá trên trục log (lỗi #6)", () => {
   const Y = (price: number) => 1000 - 100 * Math.log(price);
@@ -190,6 +348,19 @@ describe("mức theo giá trên trục log (lỗi #6)", () => {
     expect(label && label.k === "text" && label.text).toBe("0.5 (250.00)");
   });
 
+  it("Fib levels based on log scale: chỉ khi trục log (TV: 4110→4170, 0.5 = 4139.891)", () => {
+    const pts = [{ time: 100, price: 4110 }, { time: 300, price: 4170 }];
+    const label = (c: Ctx) => SPEC.fib.build(c).find((s) => s.k === "text" && s.text.startsWith("0.5 "));
+    const text = (c: Ctx) => { const l = label(c); return l && l.k === "text" ? l.text : ""; };
+    const withOpt = (log: boolean, on: boolean) => {
+      const c = ctxFor("fib", pts);
+      return { ...c, log, d: { ...c.d, opts: { logLevels: on } }, fp: (v: number) => v.toFixed(3) };
+    };
+    expect(text(withOpt(true, true))).toBe("0.5 (4139.891)");
+    expect(text(withOpt(false, true))).toBe("0.5 (4140.000)");
+    expect(text(withOpt(true, false))).toBe("0.5 (4140.000)");
+  });
+
   it("Gann box: đường ngang theo giá", () => {
     const pts = [{ time: 100, price: 100 }, { time: 300, price: 400 }];
     const ys = horizontalYs(SPEC.gannbox.build(ctxFor("gannbox", pts)));
@@ -209,8 +380,8 @@ describe("Position tạo bằng 1 click (kích thước như TV)", () => {
     const v = { span: 73, hiLo: 71.092, visibleBars: 193, tick: 0.001, addBars: (t: number, n: number) => t + n * 900 };
     const [e, t, r, s] = SPEC.longpos.oneClick!({ time: T, price: 4130.0004 }, v);
     expect(e.price).toBe(4130);
-    expect(t.price).toBeCloseTo(4130 + 14.218, 9);
-    expect(s.price).toBeCloseTo(4130 - 14.218, 9);
+    expect(t.price).toBe(4144.218); // đúng tick, không còn 4144.2179999…
+    expect(s.price).toBe(4115.782);
     expect((r.time - T) / 900).toBe(28);
     const [, ts, , ss] = SPEC.shortpos.oneClick!({ time: T, price: 4130 }, v);
     expect(ts.price).toBeLessThan(4130);
@@ -285,8 +456,10 @@ describe("tùy chọn từng tool (mục 6)", () => {
     const pts = [{ time: 100, price: 100 }, { time: 300, price: 110 }];
     expect(texts(SPEC.trendline.build(mk("trendline", pts)))).toEqual([]);
     expect(texts(SPEC.trendline.build(mk("trendline", pts, { priceLabels: true }))).map((t) => t.text)).toEqual(["100.00", "110.00"]);
-    // Info line: mọi mục Stats bật như TV (giá, %, pip / số nến, thời gian / góc)
-    expect(texts(SPEC.infoline.build(mk("infoline", pts)))[0].text).toBe("10.00 (10.00%) 1,000 pips\n200 bars, 3m\n2.86°");
+    // Info line: mọi mục Stats bật, định dạng như TV ("30.000 (0.73%), 3,000.0" / "16 bars (4h), distance: 421 px" / góc)
+    expect(texts(SPEC.infoline.build(mk("infoline", pts)))[0].text).toBe("10.00 (10.00%), 1,000.0\n200 bars (3m), distance: 200 px\n2.86°");
+    const down = [{ time: 100, price: 110 }, { time: 300, price: 100 }];
+    expect(texts(SPEC.infoline.build(mk("infoline", down, { showBars: false, showDistance: false, showAngle: false })))[0].text).toBe("\u221210.00 (\u22129.09%), \u22121,000.0\n3m");
     expect(SPEC.trendline.build(mk("trendline", pts, { middlePoint: true })).some((s) => s.k === "poly")).toBe(true);
   });
 
@@ -772,5 +945,33 @@ describe("nhãn Position không đè nhau", () => {
     const target = t.find((x) => x.text.startsWith("Target"))!, pnl = t.find((x) => x.text.includes("PnL"))!;
     const tb = textBox(target), pb = textBox(pnl);
     expect(tb.y + tb.h).toBeLessThanOrEqual(pb.y + 1e-6);
+  });
+});
+
+describe("Table (như TV)", () => {
+  const mk = (opts?: Record<string, string | number | boolean>): Ctx => ({
+    d: { id: "t", type: "table", points: [{ time: 100, price: 1 }], color: "#575757", width: 1, locked: false, hidden: false, opts },
+    p: [{ x: 100, y: 50 }],
+    w: 1000, h: 800, bars: [], tickSize: 0.01, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0,
+    X: (t) => t, Y: (p) => p, fp: (v) => v.toFixed(2), digits: 2,
+  });
+
+  it("mặc định 3×3 ô rỗng; cells hỏng thì coi như rỗng; thêm hàng giữ nội dung cũ", () => {
+    expect(tableCells(mk().d)).toEqual([["", "", ""], ["", "", ""], ["", "", ""]]);
+    expect(tableCells(mk({ cells: "{oops" }).d)[0]).toEqual(["", "", ""]);
+    const d = mk({ rows: 4, cols: 2, cells: JSON.stringify([["a", "b", "c"]]) }).d;
+    expect(tableCells(d)).toEqual([["a", "b"], ["", ""], ["", ""], ["", ""]]);
+  });
+
+  it("cột 120px, hàng 31px với chữ 14 (TV); ô dưới con trỏ", () => {
+    const { d } = mk();
+    expect(tableCellAt(d, { x: 100, y: 50 }, { x: 100 + 125, y: 50 + 40 })).toEqual([1, 1]);
+    expect(tableCellAt(d, { x: 100, y: 50 }, { x: 100 + 361, y: 60 })).toBeNull();
+    const sh = SPEC.table.build(mk({ cells: JSON.stringify([["Entry", "", "4140"]]) }));
+    const texts = sh.filter((s) => s.k === "text");
+    expect(texts.map((t) => t.k === "text" && [t.text, t.at.x, t.at.y])).toEqual([["Entry", 108, 65.5], ["4140", 348, 65.5]]);
+    // nền + viền ngoài + 2 đường dọc + 2 đường ngang
+    expect(sh.filter((s) => s.k === "line")).toHaveLength(4);
   });
 });

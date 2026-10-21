@@ -36,6 +36,7 @@ import {
 } from "react";
 import ChartContextMenu, { type MenuItem } from "./ChartContextMenu";
 import DrawingSettings from "./DrawingSettings";
+import { drawingMenuItems } from "./drawingMenu";
 import FavoritesBar from "./FavoritesBar";
 import InlineTextEditor from "./InlineTextEditor";
 import ReplayBar from "./ReplayBar";
@@ -1094,6 +1095,12 @@ export default function Chart() {
     const x = e.clientX - r.left;
     const y = e.clientY - r.top;
     if (x > chart.timeScale().width() || y > r.height - chart.timeScale().height()) return; // trục giá/thời gian
+    // Chuột phải lên hình: chọn hình và hiện menu riêng của hình (như TV), không phải menu chart
+    const hit = drawRef.current?.pickAt(e.nativeEvent);
+    if (drawRef.current && hit) {
+      setCtxMenu({ x: e.clientX, y: e.clientY, items: drawingMenuItems(drawRef.current, hit, tf) });
+      return;
+    }
     setCtxMenu({ x: e.clientX, y: e.clientY, items: menuItems(seriesRef.current?.coordinateToPrice(y) ?? null) });
   };
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useDrawingStore } from "@/drawings/store";
+import { optOf, tableCells } from "@/drawings/tools";
 import type { Drawing } from "@/drawings/types";
 import { useEffect, useRef, useState } from "react";
 
@@ -13,14 +14,30 @@ export default function InlineTextEditor() {
   const d = editing && drawings.find((x) => x.id === editing.id);
   const at = d && api?.textAnchor(d.id);
   if (!d || !api || !at) return null;
-  return <Editor key={d.id} d={d} at={at} anchor={() => api.textAnchor(d.id)} onDone={(t) => api.endEdit(t)} />;
+  // Table: sửa từng ô, cỡ chữ theo bảng
+  const cell = editing.cell;
+  const initial = cell ? tableCells(d)[cell[0]]?.[cell[1]] ?? "" : d.text ?? "";
+  const size = cell ? Number(optOf(d, "fontSize")) || 14 : d.type === "text" ? 12 + d.width * 2 : 12;
+  return (
+    <Editor
+      key={`${d.id}|${cell ?? ""}`}
+      d={d}
+      initial={initial}
+      size={size}
+      at={at}
+      anchor={() => api.textAnchor(d.id)}
+      onDone={(t) => api.endEdit(t)}
+    />
+  );
 }
 
 type Pt = { x: number; y: number };
 
-function Editor({ d, at: initial, anchor, onDone }: { d: Drawing; at: Pt; anchor: () => Pt | null; onDone: (text: string | null) => void }) {
-  const [text, setText] = useState(d.text ?? "");
-  const [at, setAt] = useState(initial);
+type EditorProps = { d: Drawing; initial: string; size: number; at: Pt; anchor: () => Pt | null; onDone: (text: string | null) => void };
+
+function Editor({ d, initial, size, at: start, anchor, onDone }: EditorProps) {
+  const [text, setText] = useState(initial);
+  const [at, setAt] = useState(start);
   const done = useRef(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const finish = (t: string | null) => {
@@ -48,7 +65,6 @@ function Editor({ d, at: initial, anchor, onDone }: { d: Drawing; at: Pt; anchor
     return () => cancelAnimationFrame(raf);
   }, [anchor]);
 
-  const size = d.type === "text" ? 12 + d.width * 2 : 12;
   const lines = text.split("\n");
   return (
     <textarea

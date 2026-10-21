@@ -25,7 +25,7 @@ type State = {
   drawings: Drawing[];
   selectedId: string | null;
   settingsOpen: boolean;
-  editing: { id: string; isNew: boolean } | null; // đang sửa text inline trên chart
+  editing: { id: string; isNew: boolean; cell?: [number, number] } | null; // đang sửa text inline trên chart (cell: ô của Table)
   api: DrawingManager | null;
   setToolDefault: (type: string, defs: DrawingDefaults) => void;
   resetToolDefault: (type: string) => void;
