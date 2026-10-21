@@ -119,3 +119,17 @@ Còn lại / thấy thêm:
 - #6, #8 → Phase 2 như plan. Clone ×0.999, `window.prompt`, Measure vẫn hiện mini toolbar, magnet lấy OHLC thật khi Heikin Ashi: chưa sửa.
 - Settings vẫn cho nhập target Long dưới entry (không kẹp khi gõ); có thể kẹp khi bấm Ok.
 - Giá điểm chưa làm tròn theo tick (entry 4128.2025788…); nhãn Target đè lên nhãn P&L khi target sát entry.
+
+## 9. Phase 2 (2026-10-21)
+
+| Mục | Làm gì | Kiểm |
+|---|---|---|
+| **Lỗi trong commit ae425ee** | `sync.ts` gọi `window.fetch` với `this` = DrawingSync → "Illegal invocation" → load luôn lỗi, thử lại mãi: drawings không load/không lưu (không mất dữ liệu). Lần test trước không lộ vì fetch bị bọc bằng arrow function. Đã sửa + test giả fetch kiểu trình duyệt | Reload: Fib trên server hiện lại; kéo → lưu |
+| #6 | Fib retracement, Fib speed fan, Gann box, Gann square, Gann fan: mức tính theo giá rồi mới `Y(price)` | D + log, Fib 3946→4690: mức 0.5 (4318.64) khớp trục giá, khoảng cách mức không đều như phải thế |
+| #8 | Nhấn khi cầm tool / bắt đầu kéo hình / eraser → `handleScroll`/`handleScale` = false, nhả (pointerup/pointercancel) thì trả lại. Phải `structuredClone` options cũ vì `merge` của LWC sửa object con tại chỗ | Giả lập pointer+touch: không tool → chart trôi; cầm Trend line → chart đứng, nét nháp theo ngón; bỏ tool → trôi lại |
+| State machine | `mode`: `idle` / `drafting` / `dragPoint` / `dragBody` thay cho `draft`, `placed`, `pressed`, `drag` | |
+| Cache shape | `WeakMap<Drawing, Built>` theo key khung nhìn (khoảng logical, giá ở 3 điểm trục → bắt cả linear↔log, kích thước pane, số nến + nến cuối, `profileVer`) + hover/chọn. Draft vẫn build mỗi frame | Pan/zoom: hình đi theo chart |
+| Bitmap space | Vẽ bằng `useBitmapCoordinateSpace`; nét ngang/dọc, hình chữ nhật thẳng trục bắt vào lưới pixel thiết bị; độ dày làm tròn ra pixel thiết bị | Test `drawShapes` với ctx giả |
+| Store bất biến | Drawing không bị sửa tại chỗ nữa (`put` thay object mới) — cần cho cache và để Settings không thấy giá trị cũ | |
+
+Chưa làm: Gann square fixed vẫn tính theo pixel (đổi hình khi zoom) — chưa rõ TV định nghĩa "fixed" theo tỉ lệ giá/nến nào, để Phase 4 đối chiếu. Fib channel, pitchfork, channel vẫn theo pixel (đường thẳng trên màn hình như TV, chưa kiểm trên log). Chưa có tùy chọn "Fib levels based on log scale".

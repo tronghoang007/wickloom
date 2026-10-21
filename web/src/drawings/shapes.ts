@@ -55,29 +55,60 @@ export function textBox(s: Extract<Shape, { k: "text" }>) {
   return { x: x0 - pad, y: s.at.y - h / 2 - pad, w: w + pad * 2, h: h + pad * 2, tx: x0, tw: w, lines, lh, top: s.at.y - h / 2, font };
 }
 
-export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], d: Drawing) {
+// Nét ngang/dọc và hình chữ nhật thẳng trục: bắt vào lưới pixel thiết bị để nét 1px không bị nhòe
+// thành 2px mờ. pr = số pixel thiết bị trên 1 pixel CSS (ctx đã scale theo pr).
+function pixelGrid(pr: number, width: number) {
+  const dev = Math.max(1, Math.round(width * pr));
+  const half = dev % 2 === 1;
+  return {
+    width: dev / pr,
+    stroke: (v: number) => (half ? Math.floor(v * pr) + 0.5 : Math.round(v * pr)) / pr,
+    fill: (v: number) => Math.round(v * pr) / pr,
+  };
+}
+
+const axisAligned = (pts: Pt[], closed?: boolean) => {
+  const n = pts.length;
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    if (a.x !== b.x && a.y !== b.y) return false;
+  }
+  return true;
+};
+
+export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], d: Drawing, pr = 1) {
   for (const s of shapes) {
     ctx.save();
     const color = ("color" in s && s.color) || d.color;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.lineWidth = ("w" in s && s.w) || d.width;
+    const grid = pixelGrid(pr, ("w" in s && s.w) || d.width);
+    ctx.lineWidth = grid.width;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     const dash = "dash" in s && s.dash !== undefined ? s.dash : d.dash;
     ctx.setLineDash(dashArr(dash));
 
     if (s.k === "line") {
-      const [a, b] = lineEnds(s);
+      let [a, b] = lineEnds(s);
+      if (a.x === b.x || a.y === b.y) {
+        const q = (p: Pt) => ({ x: grid.stroke(p.x), y: grid.stroke(p.y) });
+        [a, b] = [q(a), q(b)];
+      }
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
     } else if (s.k === "poly") {
       if (s.pts.length < 2) { ctx.restore(); continue; }
+      let pts = s.pts;
+      if (axisAligned(pts, s.closed)) {
+        const f = s.noStroke ? grid.fill : grid.stroke;
+        pts = pts.map((p) => ({ x: f(p.x), y: f(p.y) }));
+      }
       ctx.beginPath();
-      ctx.moveTo(s.pts[0].x, s.pts[0].y);
-      for (let i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i].x, s.pts[i].y);
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       if (s.closed) ctx.closePath();
       if (s.fill) {
         ctx.globalAlpha = s.fill;

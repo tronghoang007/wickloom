@@ -95,6 +95,13 @@ function fmtDur(sec: number) {
   return [d && `${d}d`, h && `${h}h`, (m || (!d && !h)) && `${m}m`].filter(Boolean).join(" ");
 }
 
+// Giá tại mức lvl giữa 2 điểm: lvl 0 ở điểm 2, lvl 1 ở điểm 1 (như Fib retracement của TV)
+export const fibPrice = (pa: number, pb: number, lvl: number) => pb - (pb - pa) * lvl;
+// Giá tại tỉ lệ t đi từ pa tới pb
+const priceAt = (pa: number, pb: number, t: number) => pa + (pb - pa) * t;
+
+// Mức tính theo giá rồi mới ra pixel: đúng cả khi trục giá log (nội suy pixel thì đường lệch
+// khỏi giá ghi trên nhãn).
 function lineLevels(c: Ctx, levels: number[], extend = false): Shape[] {
   const [a, b] = c.p;
   const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
@@ -102,11 +109,13 @@ function lineLevels(c: Ctx, levels: number[], extend = false): Shape[] {
   const out: Shape[] = [];
   let prev: number | null = null;
   levels.forEach((lvl, i) => {
-    const y = b.y - (b.y - a.y) * lvl;
+    const price = fibPrice(pa, pb, lvl);
+    const y = c.Y(price);
+    if (y === null) return;
     const color = FC[i % FC.length];
     if (prev !== null) out.push(poly([{ x: left, y: prev }, { x: right, y: prev }, { x: right, y }, { x: left, y }], { closed: true, fill: 0.07, noStroke: true, color }));
     out.push(seg({ x: left, y }, { x: right, y }, { color, w: 1 }));
-    out.push(txt({ x: left + 4, y: y - 7 }, `${lvl} (${c.fp(pb - (pb - pa) * lvl)})`, { size: 11, color }));
+    out.push(txt({ x: left + 4, y: y - 7 }, `${lvl} (${c.fp(price)})`, { size: 11, color }));
     prev = y;
   });
   out.push(seg(a, b, { dash: 1, w: 1, color: "#787b86" }));
@@ -139,12 +148,14 @@ function fork(c: Ctx, v: 0 | 1 | 2 | 3): Shape[] {
   return out;
 }
 
-function gridBox(a: Pt, b: Pt, divs: number[], diag = true): Shape[] {
-  const x = (t: number) => a.x + (b.x - a.x) * t, y = (t: number) => a.y + (b.y - a.y) * t;
+// y(t): vị trí đường ngang ở tỉ lệ t; mặc định nội suy pixel, Gann box truyền theo giá
+function gridBox(a: Pt, b: Pt, divs: number[], diag = true, y: (t: number) => number | null = (t) => a.y + (b.y - a.y) * t): Shape[] {
+  const x = (t: number) => a.x + (b.x - a.x) * t;
   const out: Shape[] = [poly([a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }], { closed: true, fill: 0.05 })];
   for (const t of divs) {
     out.push(seg({ x: x(t), y: a.y }, { x: x(t), y: b.y }, { w: 1 }));
-    out.push(seg({ x: a.x, y: y(t) }, { x: b.x, y: y(t) }, { w: 1 }));
+    const yt = y(t);
+    if (yt !== null) out.push(seg({ x: a.x, y: yt }, { x: b.x, y: yt }, { w: 1 }));
   }
   if (diag) {
     out.push(seg(a, b, { w: 1 }));
@@ -406,6 +417,8 @@ const noteShapes = (c: Ctx, text: string): Shape[] => {
 
 const offsetPt = (a: Anchor, step: number, bars = 10, pct = 0.002): Anchor => ({ time: a.time + step * bars, price: a.price * (1 + pct) });
 
+const gannY = (c: Ctx) => (t: number) => c.Y(priceAt(pt(c, 0).price, pt(c, 1).price, t));
+
 const span = (c: Ctx) => ({ t0: Math.min(pt(c, 0).time, pt(c, 1).time), t1: Math.max(pt(c, 0).time, pt(c, 1).time) });
 
 // ---------- catalog ----------
@@ -550,10 +563,14 @@ export const TOOLS: ToolSpec[] = [
     id: "fibfan", label: "Fib speed resistance fan", n: 2, style: { width: 1 },
     build: (c) => {
       const [a, b] = c.p;
+      const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
       return [
         seg({ x: b.x, y: a.y }, b, { dash: 1, w: 1 }),
         seg(a, { x: b.x, y: a.y }, { dash: 1, w: 1 }),
-        ...[0.25, 0.382, 0.5, 0.618, 0.75, 1].map((l, i) => ray(a, { x: b.x, y: a.y + (b.y - a.y) * l }, { color: FC[(i + 1) % FC.length], w: 1 })),
+        ...[0.25, 0.382, 0.5, 0.618, 0.75, 1].flatMap((l, i) => {
+          const y = c.Y(priceAt(pa, pb, l));
+          return y === null ? [] : [ray(a, { x: b.x, y }, { color: FC[(i + 1) % FC.length], w: 1 })];
+        }),
       ];
     },
   },
@@ -615,7 +632,7 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   // Gann
-  { id: "gannbox", label: "Gann box", n: 2, style: { width: 1 }, build: (c) => gridBox(c.p[0], c.p[1], [0.25, 0.382, 0.5, 0.618, 0.75, 1].map((v) => v)) },
+  { id: "gannbox", label: "Gann box", n: 2, style: { width: 1 }, build: (c) => gridBox(c.p[0], c.p[1], [0.25, 0.382, 0.5, 0.618, 0.75, 1], true, gannY(c)) },
   {
     id: "gannsqfixed", label: "Gann square fixed", n: 2, style: { width: 1 },
     build: (c) => {
@@ -625,15 +642,17 @@ export const TOOLS: ToolSpec[] = [
       return gridBox(a, e, [1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8, 1]);
     },
   },
-  { id: "gannsquare", label: "Gann square", n: 2, style: { width: 1 }, build: (c) => gridBox(c.p[0], c.p[1], [1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8, 1]) },
+  { id: "gannsquare", label: "Gann square", n: 2, style: { width: 1 }, build: (c) => gridBox(c.p[0], c.p[1], [1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8, 1], true, gannY(c)) },
   {
     id: "gannfan", label: "Gann fan", n: 2, style: { width: 1 },
     build: (c) => {
       const [a, b] = c.p;
-      const dx = b.x - a.x, dy = b.y - a.y;
+      const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
       const R: [number, string][] = [[8, "8x1"], [4, "4x1"], [3, "3x1"], [2, "2x1"], [1, "1x1"], [1 / 2, "1x2"], [1 / 3, "1x3"], [1 / 4, "1x4"], [1 / 8, "1x8"]];
       return R.flatMap(([r, name], i) => {
-        const e = { x: a.x + dx, y: a.y + dy * r };
+        const y = c.Y(priceAt(pa, pb, r));
+        if (y === null) return [];
+        const e = { x: b.x, y };
         return [ray(a, e, { color: FC[i % FC.length], w: 1 }), txt({ x: e.x + 3, y: e.y }, name, { size: 10, color: FC[i % FC.length] })];
       });
     },

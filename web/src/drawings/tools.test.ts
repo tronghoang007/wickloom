@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
-import { computeProfile, posConstrain, positionStats } from "./tools";
+import type { Shape } from "./shapes";
+import { computeProfile, fibPrice, posConstrain, positionStats, SPEC, type Ctx } from "./tools";
 import type { Anchor } from "./types";
 
 const T = 1_000_000;
@@ -124,5 +125,43 @@ describe("computeProfile", () => {
     expect(vp.vh).toBeGreaterThanOrEqual(vp.poc);
     const inVa = vp.total.slice(vp.vl, vp.vh + 1).reduce((s, v) => s + v, 0);
     expect(inVa).toBeLessThanOrEqual(150 * 0.7 + 1e-9);
+  });
+});
+
+// Ctx giả với trục giá log: y = 1000 - 100·ln(price)
+describe("mức theo giá trên trục log (lỗi #6)", () => {
+  const Y = (price: number) => 1000 - 100 * Math.log(price);
+  const ctxFor = (type: string, points: Anchor[]): Ctx => ({
+    d: { id: "x", type, points, color: "#fff", width: 1, locked: false, hidden: false },
+    p: points.map((a) => ({ x: a.time, y: Y(a.price) })),
+    w: 1000, h: 1000, bars: [], tickSize: 0.01, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0,
+    X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2,
+  });
+  const horizontalYs = (shapes: Shape[]) =>
+    shapes.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line" && s.a.y === s.b.y).map((s) => s.a.y);
+
+  it("Fib retracement: đường mức 0.5 nằm đúng giá ghi trên nhãn", () => {
+    const pts = [{ time: 100, price: 100 }, { time: 300, price: 400 }];
+    const shapes = SPEC.fib.build(ctxFor("fib", pts));
+    const half = fibPrice(100, 400, 0.5); // 250
+    expect(horizontalYs(shapes)).toContainEqual(Y(half));
+    const pixelMid = (Y(100) + Y(400)) / 2; // cách cũ: ~ giá 200, nhãn vẫn ghi 250
+    expect(horizontalYs(shapes).some((y) => Math.abs(y - pixelMid) < 1e-6)).toBe(false);
+    const label = shapes.find((s) => s.k === "text" && s.text.startsWith("0.5 "));
+    expect(label && label.k === "text" && label.text).toBe("0.5 (250.00)");
+  });
+
+  it("Gann box: đường ngang theo giá", () => {
+    const pts = [{ time: 100, price: 100 }, { time: 300, price: 400 }];
+    const ys = horizontalYs(SPEC.gannbox.build(ctxFor("gannbox", pts)));
+    expect(ys).toContainEqual(Y(100 + 300 * 0.5));
+  });
+
+  it("Gann fan: tia 1x2 đi qua giá giữa tại thời điểm điểm 2", () => {
+    const pts = [{ time: 100, price: 100 }, { time: 300, price: 400 }];
+    const shapes = SPEC.gannfan.build(ctxFor("gannfan", pts));
+    const ends = shapes.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line").map((s) => s.b);
+    expect(ends).toContainEqual({ x: 300, y: Y(250) });
   });
 });

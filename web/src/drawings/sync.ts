@@ -26,7 +26,8 @@ export class DrawingSync {
 
   get state() { return this.status; }
 
-  private get f() { return this.o.fetch ?? fetch; }
+  // Gọi tách rời: window.fetch gọi với this khác window sẽ ném "Illegal invocation"
+  private f(input: string, init?: RequestInit) { return (this.o.fetch ?? fetch)(input, init); }
 
   open(symbol: string) {
     this.flush();

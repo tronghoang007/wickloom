@@ -193,6 +193,22 @@ describe("DrawingSync (lỗi #1)", () => {
     expect(be.rows["/drawings/XAU"]).toEqual({ version: DRAWINGS_VERSION, items: ["a"] });
   });
 
+  it("gọi fetch không kèm this (window.fetch ném Illegal invocation nếu this khác window)", async () => {
+    const be = backend({ "/drawings/XAU": { items: ["cũ"] } });
+    const strict = function (this: unknown, u: string | URL | Request, i?: RequestInit) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return be.fetch(u, i);
+    };
+    const { m, sync, edit } = setup({ ...be, fetch: strict as typeof fetch });
+    sync.open("XAU");
+    await tick();
+    expect(sync.state).toBe("ready");
+    expect(m.items).toEqual(["cũ"]);
+    edit("mới");
+    await tick(500);
+    expect(be.puts()).toHaveLength(1);
+  });
+
   it("close() lưu nốt rồi ngừng", async () => {
     const be = backend();
     const { sync, edit } = setup(be);
