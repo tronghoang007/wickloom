@@ -603,11 +603,19 @@ export function positionStats(bars: Bar[], points: Anchor[], long: boolean, o: P
   const qtyRaw = riskAmt / (dS * o.lot);
   const qty = qtyRaw >= 1 ? Math.floor(qtyRaw) : Math.floor(qtyRaw * 100) / 100;
 
-  let closed = false, exitPrice = pe.price, exitT: number | null = null;
+  let closed = false, exitPrice = pe.price, exitT: number | null = null, entryT: number | null = null;
+  let prevC: number | null = null;
   const tEnd = Math.max(pe.time, pR.time);
   for (const b of bars) {
-    if (b.t <= pe.time) continue;
+    if (b.t <= pe.time) { prevC = b.c; continue; }
     if (b.t > tEnd) break;
+    if (entryT === null) {
+      // như TV: lệnh chỉ mở khi giá chạm entry (tính cả gap qua entry so với giá đóng cửa nến trước)
+      const lo = Math.min(b.l, prevC ?? b.l), hi = Math.max(b.h, prevC ?? b.h);
+      prevC = b.c;
+      if (lo > pe.price || hi < pe.price) continue;
+      entryT = b.t;
+    }
     const hitS = long ? b.l <= pS.price : b.h >= pS.price;
     const hitT = long ? b.h >= pT.price : b.l <= pT.price;
     exitT = b.t;
@@ -618,7 +626,7 @@ export function positionStats(bars: Bar[], points: Anchor[], long: boolean, o: P
   const pnlPts = long ? exitPrice - pe.price : pe.price - exitPrice;
   const pnl = pnlPts * qty * o.lot;
   const rr = dT / dS;
-  return { dT, dS, riskAmt, qty, closed, exitPrice, exitT, pnl, pnlPts, rr, tpAmount: o.account + riskAmt * rr, slAmount: o.account - riskAmt };
+  return { dT, dS, riskAmt, qty, closed, entryT, exitPrice, exitT, pnl, pnlPts, rr, tpAmount: o.account + riskAmt * rr, slAmount: o.account - riskAmt };
 }
 
 // Số pip: cặp có pip lẻ (giá 3 hoặc 5 số lẻ, vd XAUUSD 0.001) thì 1 pip = 10 tick, như TV
@@ -631,7 +639,7 @@ function position(c: Ctx): Shape[] {
   const pe = c.d.points[0];
   const long = c.d.type !== "shortpos"; // như TV: theo loại tool, không suy từ vị trí target
   const x0 = Math.min(e.x, r.x), x1 = Math.max(e.x, r.x);
-  const { dT, dS, qty, closed, exitPrice, exitT, pnlPts, rr, tpAmount, slAmount } = positionStats(c.bars, c.d.points, long, o);
+  const { dT, dS, qty, closed, entryT, exitPrice, exitT, pnlPts, rr, tpAmount, slAmount } = positionStats(c.bars, c.d.points, long, o);
   const num = (v: number, max = 2, useGrouping = true) => v.toLocaleString(undefined, { maximumFractionDigits: max, useGrouping });
 
   const rect = (y0: number, y1: number, color: string) =>
@@ -640,15 +648,22 @@ function position(c: Ctx): Shape[] {
   const tc = c.d.textColor ?? "#ffffff";
   const out: Shape[] = [rect(e.y, t.y, o.profit), rect(e.y, s.y, o.stop)];
 
-  const ex = exitT === null ? null : c.X(exitT), ey = exitT === null ? null : c.Y(exitPrice);
-  if (ex !== null && ey !== null) out.push(seg({ x: x0, y: e.y }, { x: ex, y: ey }, { dash: 1, w: 1, color: "#b2b5be" }));
+  // nét đứt từ nến khớp entry tới điểm thoát (hoặc giá đóng cửa nến cuối trong khối)
+  const nx = entryT === null ? null : c.X(entryT), ex = exitT === null ? null : c.X(exitT), ey = c.Y(exitPrice);
+  if (nx !== null && ex !== null && ey !== null) out.push(seg({ x: nx, y: e.y }, { x: ex, y: ey }, { dash: 1, w: 1, color: "#b2b5be" }));
 
   if (c.hovered || c.selected) {
     const line = (name: string, dist: number, amount: number) =>
       `${name}: ${c.fp(dist)} (${((dist / pe.price) * 100).toFixed(3)}%) ${num(pips(dist, c.digits), 1)}, Amount: ${num(amount, 2, false)}`; // TV: "1,432.7" nhưng "Amount: 1250"
+    // nhãn target/stop nằm ngoài vùng, nhưng không đè nhãn PnL 2 dòng ở giữa khi target/stop sát entry
+    const gap = (2 * 12 * 1.3) / 2 + 5 + (12 * 1.3) / 2 + 5 + 2;
+    const away = (y: number, fallback: 1 | -1) => {
+      const dir = Math.sign(y - e.y) || fallback;
+      return e.y + dir * Math.max(Math.abs(y + dir * 14 - e.y), gap);
+    };
     out.push(
-      txt({ x: cx, y: t.y + (t.y < e.y ? -14 : 14) }, line("Target", dT, tpAmount), { align: "center", bg: o.profit, color: tc, size: 12 }),
-      txt({ x: cx, y: s.y + (s.y > e.y ? 14 : -14) }, line("Stop", dS, slAmount), { align: "center", bg: o.stop, color: tc, size: 12 }),
+      txt({ x: cx, y: away(t.y, long ? -1 : 1) }, line("Target", dT, tpAmount), { align: "center", bg: o.profit, color: tc, size: 12 }),
+      txt({ x: cx, y: away(s.y, long ? 1 : -1) }, line("Stop", dS, slAmount), { align: "center", bg: o.stop, color: tc, size: 12 }),
       // như TV: nhãn PnL (theo giá) nằm giữa, ngay trên đường entry
       txt({ x: cx, y: e.y }, `${closed ? "Closed" : "Open"} PnL: ${c.fp(pnlPts)}, Qty: ${num(qty)}\nRisk/reward ratio: ${num(rr)}`, { align: "center", bg: pnlPts >= 0 ? o.profit : o.stop, color: tc, size: 12 }),
     );

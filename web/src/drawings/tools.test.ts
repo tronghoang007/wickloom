@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
-import type { Shape } from "./shapes";
+import { textBox, type Shape } from "./shapes";
 import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, regression, SPEC, volumeIn, type Ctx } from "./tools";
 import type { Anchor } from "./types";
 
@@ -105,6 +105,25 @@ describe("positionStats", () => {
     expect(s.closed).toBe(false);
     expect(s.exitPrice).toBe(102.5);
     expect(s.pnl).toBe(10);
+  });
+
+  it("giá chưa chạm entry thì lệnh chưa mở: không có điểm thoát, PnL 0", () => {
+    // Short entry 100 nhưng giá chỉ chạy dưới, dù đã thấp hơn target
+    const s = positionStats([bar(0, 85, 86, 84, 85), bar(1, 85, 86, 80, 81), bar(2, 81, 83, 79, 82)], pos(100, 90, 105), false, opts);
+    expect(s).toMatchObject({ closed: false, entryT: null, exitT: null, pnlPts: 0 });
+  });
+
+  it("lệnh mở ở nến chạm entry, rồi mới xét target/stop", () => {
+    const s = positionStats(
+      [bar(0, 85, 86, 84, 85), bar(1, 85, 92, 84, 91), bar(2, 91, 101, 93, 98), bar(3, 98, 99, 89, 89.5)],
+      pos(100, 90, 105), false, opts,
+    );
+    expect(s).toMatchObject({ closed: true, entryT: T + 7200, exitT: T + 3 * 3600, exitPrice: 90 });
+  });
+
+  it("gap qua entry (so với giá đóng cửa nến trước) cũng tính là khớp", () => {
+    const s = positionStats([bar(0, 98, 99, 97, 99), bar(1, 102, 104, 101, 103)], pos(100, 110, 95), true, opts);
+    expect(s).toMatchObject({ entryT: T + 3600, exitPrice: 103 });
   });
 
   it("Short: lời khi giá giảm", () => {
@@ -737,5 +756,21 @@ describe("Price label, Flag (đo trên TV)", () => {
     const [pole, flag] = SPEC.flag.build(mk("flag"));
     expect(pole).toMatchObject({ k: "line", color: "#b2b5be", a: { x: 100, y: 500 }, b: { x: 100, y: 482 } });
     expect(Math.max(...(flag as Extract<Shape, { k: "poly" }>).pts.map((q) => q.x)) - 100).toBe(12);
+  });
+});
+
+describe("nhãn Position không đè nhau", () => {
+  it("target sát entry: nhãn Target đẩy ra ngoài nhãn PnL", () => {
+    const Y = (price: number) => 1000 - price * 10;
+    const points = [{ time: 100, price: 100 }, { time: 100, price: 100.5 }, { time: 300, price: 100 }, { time: 100, price: 90 }];
+    const c: Ctx = {
+      d: { id: "x", type: "longpos", points, color: "#fff", width: 1, locked: false, hidden: false },
+      p: points.map((a) => ({ x: a.time, y: Y(a.price) })), w: 1000, h: 1000, bars: [], tickSize: 0.01, hovered: false, selected: true,
+      step: 1, barsBetween: (a, b) => b - a, X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2,
+    };
+    const t = SPEC.longpos.build(c).filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text");
+    const target = t.find((x) => x.text.startsWith("Target"))!, pnl = t.find((x) => x.text.includes("PnL"))!;
+    const tb = textBox(target), pb = textBox(pnl);
+    expect(tb.y + tb.h).toBeLessThanOrEqual(pb.y + 1e-6);
   });
 });

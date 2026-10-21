@@ -282,3 +282,10 @@ Lần này TV tải được các tool (đo chi tiết trong tài liệu tham ch
 - Flag: cán xám 18px + cờ 12×8px (app cũ: cán 34px cùng màu, cờ 24px).
 - Settings → Ok cho Position: kẹp target/stop về đúng phía entry + làm tròn tick (lúc gõ vẫn không kẹp) — đóng lỗi còn ghi ở mục 8.
 - Đã so với TV gần như mọi tool. Còn: Double curve (TV tạo qua API ra điểm điều khiển lạ), Table, Anchored text/note, số liệu FRVP (TV không xuất dữ liệu nến), ô sửa text đi theo khi cuộn, nhãn Target đè nhãn P&L khi target sát entry.
+
+## 21. Dọn mục nhỏ (2026-10-21)
+
+- Ô sửa text inline đi theo hình khi cuộn / zoom lúc đang gõ (theo dõi vị trí neo mỗi frame, chỉ cập nhật khi đổi). Đã kiểm trên app: zoom + kéo ngang lúc đang gõ, ô gõ bám đúng mốc thời gian, gõ tiếp được, Esc xóa hẳn.
+- Position: nhãn Target / Stop đẩy ra xa đủ để không đè nhãn PnL 2 dòng khi target/stop sát entry (có test).
+- `next build` production chạy sạch sau toàn bộ thay đổi.
+- Position: lệnh chỉ mở khi giá chạm entry (range nến hoặc gap qua entry so với close nến trước), sau đó mới xét target/stop. Nét đứt vẽ từ nến khớp entry tới điểm thoát; chưa khớp thì không có nét đứt, Open PnL 0. Trước đây luôn nối từ mép trái tới nến đầu tiên chạm target/stop, kể cả khi giá chưa bao giờ tới entry (có test, đã kiểm trên app với 3 position trên XAUUSDm).

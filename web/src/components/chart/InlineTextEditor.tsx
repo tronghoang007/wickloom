@@ -13,11 +13,14 @@ export default function InlineTextEditor() {
   const d = editing && drawings.find((x) => x.id === editing.id);
   const at = d && api?.textAnchor(d.id);
   if (!d || !api || !at) return null;
-  return <Editor key={d.id} d={d} at={at} onDone={(t) => api.endEdit(t)} />;
+  return <Editor key={d.id} d={d} at={at} anchor={() => api.textAnchor(d.id)} onDone={(t) => api.endEdit(t)} />;
 }
 
-function Editor({ d, at, onDone }: { d: Drawing; at: { x: number; y: number }; onDone: (text: string | null) => void }) {
+type Pt = { x: number; y: number };
+
+function Editor({ d, at: initial, anchor, onDone }: { d: Drawing; at: Pt; anchor: () => Pt | null; onDone: (text: string | null) => void }) {
   const [text, setText] = useState(d.text ?? "");
+  const [at, setAt] = useState(initial);
   const done = useRef(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const finish = (t: string | null) => {
@@ -32,6 +35,18 @@ function Editor({ d, at, onDone }: { d: Drawing; at: { x: number; y: number }; o
     el.focus();
     el.select();
   }, []);
+
+  // Đi theo hình khi chart cuộn / zoom trong lúc đang gõ
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const p = anchor();
+      if (p) setAt((cur) => (Math.abs(cur.x - p.x) > 0.5 || Math.abs(cur.y - p.y) > 0.5 ? p : cur));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [anchor]);
 
   const size = d.type === "text" ? 12 + d.width * 2 : 12;
   const lines = text.split("\n");
