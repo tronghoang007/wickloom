@@ -188,3 +188,9 @@ Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), se
 - **Cyclic lines**: chỉ lặp về phía phải điểm 1; đoạn chấm điểm 1 → 2.
 - **Time cycles**: nửa đường tròn thật (đường kính = khoảng 2 điểm) lặp 2 phía.
 - **Sine line**: đáy/đỉnh tại 2 điểm, nửa chu kỳ = khoảng 2 điểm, kéo hết chiều ngang.
+
+### Measurers, Shapes (đo lần 5, 2026-10-21)
+- **price_range**: `linecolor #2962FF`, nền rgba(41,98,255,.15), `showPriceRange false, showPercentPriceRange true, showPipsPriceRange true, showVolume`; hộp + 2 cạnh ngang + mũi tên dọc ở giữa; nhãn **không nền** "0.60%, 2,500.0" phía điểm 2.
+- **date_range**: hộp + 2 cạnh dọc + mũi tên ngang; nhãn ô `labelBackgroundColor #2E2E2E` chữ trắng "20 bars, 5h" / "Vol 138.84K" (`showBarsRange, showDateTimeRange, showVolume`).
+- **date_and_price_range**: hộp + 2 mũi tên; ô tối 3 dòng "25.000 (0.60%) 2,500.0" / "20 bars, 5h" / "Vol 185.08K". Pip có 1 số lẻ và dấu phẩy nghìn.
+- **arc** #e91e63 nền .2: nửa elip, đáy p1–p2, cao tới p3. **curve** #2962FF không nền (điều khiển tại (x điểm 2, giá điểm 1)). **double_curve** #673ab7. **triangle** #089981 nền .2. **rotated_rectangle** #4caf50 nền .2. **polyline** #00bcd4 nền .2. **path** #2962FF, `rightEnd 1` (mũi tên).

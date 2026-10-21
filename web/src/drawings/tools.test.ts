@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import type { Shape } from "./shapes";
-import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, gannGrid, posConstrain, positionStats, regression, SPEC, type Ctx } from "./tools";
+import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, regression, SPEC, volumeIn, type Ctx } from "./tools";
 import type { Anchor } from "./types";
 
 const T = 1_000_000;
@@ -629,5 +629,48 @@ describe("patterns, Elliott, cycles (đo trên TV)", () => {
     const sh = SPEC.timecycles.build(mk("timecycles", [4130, 4130], 40));
     const arc = polys(sh).find((p) => !p.noStroke)!;
     expect(Math.min(...arc.pts.map((q) => q.y))).toBeCloseTo(Y(4130) - 20, 6);
+  });
+});
+
+describe("measurers và Arc (đo trên TV)", () => {
+  const Y = (price: number) => 5000 - price;
+  const bars: Bar[] = Array.from({ length: 30 }, (_, i) => ({ t: 1000 + i * 900, o: 1, h: 1, l: 1, c: 1, v: 9254 }));
+  const mk = (type: string, points: Anchor[]): Ctx => ({
+    d: { id: "x", type, points, color: "#2962ff", width: 1, locked: false, hidden: false },
+    p: points.map((a) => ({ x: (a.time - 1000) / 10, y: Y(a.price) })),
+    w: 2000, h: 2000, bars, tickSize: 0.001, hovered: false, selected: false, step: 900,
+    barsBetween: (t0, t1) => Math.round((t1 - t0) / 900),
+    X: (t) => (t - 1000) / 10, Y, fp: (v) => v.toFixed(3), digits: 3,
+  });
+  const texts = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text");
+  // 20 nến, +25 giá từ 4135 (TV: "25.000 (0.60%) 2,500.0 / 20 bars, 5h / Vol 185.08K")
+  const pts = [{ time: 1000, price: 4135 }, { time: 1000 + 20 * 900, price: 4160 }];
+
+  it("Date and price range: 3 dòng như TV, ô nền tối", () => {
+    const t = texts(SPEC.daterangeprice.build(mk("daterangeprice", pts)))[0];
+    expect(t.text).toBe("25.000 (0.60%) 2,500.0\n20 bars, 5h\nVol 194.33K");
+    expect(t.bg).toBe("#2e2e2e");
+  });
+
+  it("Price range: '0.60%, 2,500.0' không nền; Date range: 'bars, thời gian' + Vol", () => {
+    const pr = texts(SPEC.pricerange.build(mk("pricerange", pts)))[0];
+    expect(pr.text).toBe("0.60%, 2,500.0");
+    expect(pr.bg).toBeUndefined();
+    expect(texts(SPEC.daterange.build(mk("daterange", pts)))[0].text).toBe("20 bars, 5h\nVol 194.33K");
+  });
+
+  it("volume và định dạng K/M", () => {
+    expect(volumeIn(bars, 1000, 1000 + 20 * 900)).toBe(21 * 9254);
+    expect(fmtVol(185080)).toBe("185.08K");
+    expect(fmtVol(2_500_000)).toBe("2.50M");
+    expect(fmtVol(950)).toBe("950");
+  });
+
+  it("Arc: nửa elip đáy p1–p2, đỉnh cao tới p3", () => {
+    const sh = SPEC.arc.build(mk("arc", [{ time: 1000, price: 4135 }, { time: 1000 + 2000, price: 4135 }, { time: 1000 + 1000, price: 4155 }]));
+    const arc = sh.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !s.noStroke)[0];
+    expect(arc.pts[0]).toEqual({ x: 0, y: Y(4135) });
+    expect(arc.pts[64].x).toBeCloseTo(200, 9);
+    expect(Math.min(...arc.pts.map((q) => q.y))).toBeCloseTo(Y(4155), 9);
   });
 });

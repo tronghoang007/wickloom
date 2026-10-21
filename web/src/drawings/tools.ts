@@ -529,22 +529,56 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
   return out;
 }
 
-function measure(c: Ctx): Shape[] {
+// Tổng volume các nến trong khoảng thời gian, dạng TV "185.08K"
+export function volumeIn(bars: Bar[], t0: number, t1: number) {
+  const [lo, hi] = t0 <= t1 ? [t0, t1] : [t1, t0];
+  return bars.reduce((s, b) => (b.t >= lo && b.t <= hi ? s + b.v : s), 0);
+}
+export const fmtVol = (v: number) =>
+  v >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(2)}K` : String(Math.round(v));
+
+// Các dòng nhãn của measurers như TV: "25.000 (0.60%) 2,500.0" / "20 bars, 5h" / "Vol 185.08K"
+function rangeText(c: Ctx) {
+  const [pa, pb] = c.d.points;
+  const d = pb.price - pa.price;
+  const pip = (Math.sign(d) * pips(Math.abs(d), c.digits)).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return {
+    change: c.fp(d), pct: pctStr(pa.price, pb.price), pip,
+    time: `${c.barsBetween(pa.time, pb.time)} bars, ${fmtDur(pb.time - pa.time)}`,
+    vol: `Vol ${fmtVol(volumeIn(c.bars, pa.time, pb.time))}`,
+  };
+}
+
+// Hộp đo như TV: nền 15%, mũi tên dọc (giá) / ngang (thời gian) ở giữa, nhãn ngoài hộp về phía điểm 2.
+// box: ô nền tối (#2E2E2E) cho nhãn; không có thì chữ màu hình, không nền.
+function rangeBox(c: Ctx, o: { vArrow: boolean; hArrow: boolean; hEdges: boolean; vEdges: boolean; lines: string[]; color?: string; box?: string }): Shape[] {
   const [a, b] = c.p;
-  const [pa, pb] = [pt(c, 0), pt(c, 1)];
-  const up = pb.price >= pa.price;
-  const color = up ? "#2962ff" : "#f23645";
-  const bars = c.barsBetween(pa.time, pb.time);
-  const label = `${c.fp(pb.price - pa.price)} (${pctStr(pa.price, pb.price)})  ${bars} bars, ${fmtDur(pb.time - pa.time)}`;
+  const color = o.color ?? c.d.color;
   const m = mid(a, b);
-  return [
-    poly([a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }], { closed: true, fill: 0.15, noStroke: true, color }),
-    seg({ x: m.x, y: a.y }, { x: m.x, y: b.y }, { color, w: 1 }),
-    head({ x: m.x, y: a.y }, { x: m.x, y: b.y }, 8, { color }),
-    seg({ x: a.x, y: m.y }, { x: b.x, y: m.y }, { color, w: 1 }),
-    head({ x: a.x, y: m.y }, { x: b.x, y: m.y }, 8, { color }),
-    txt({ x: m.x, y: (up ? Math.min(a.y, b.y) - 18 : Math.max(a.y, b.y) + 18) }, label, { align: "center", bg: color, size: 11 }),
-  ];
+  const [x0, x1, y0, y1] = [Math.min(a.x, b.x), Math.max(a.x, b.x), Math.min(a.y, b.y), Math.max(a.y, b.y)];
+  const out: Shape[] = [poly([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }], { closed: true, fill: 0.15, noStroke: true, color })];
+  if (o.hEdges) out.push(seg({ x: x0, y: a.y }, { x: x1, y: a.y }, { color }), seg({ x: x0, y: b.y }, { x: x1, y: b.y }, { color }));
+  if (o.vEdges) out.push(seg({ x: a.x, y: y0 }, { x: a.x, y: y1 }, { color }), seg({ x: b.x, y: y0 }, { x: b.x, y: y1 }, { color }));
+  if (o.vArrow) out.push(seg({ x: m.x, y: a.y }, { x: m.x, y: b.y }, { color }), head({ x: m.x, y: a.y }, { x: m.x, y: b.y }, 8, { color }));
+  if (o.hArrow) out.push(seg({ x: a.x, y: m.y }, { x: b.x, y: m.y }, { color }), head({ x: a.x, y: m.y }, { x: b.x, y: m.y }, 8, { color }));
+  const text = o.lines.filter(Boolean).join("\n");
+  if (text) {
+    const up = b.y <= a.y;
+    const half = (o.lines.filter(Boolean).length * 12 * 1.3) / 2 + (o.box ? 5 : 0) + 6;
+    out.push(txt({ x: m.x, y: up ? y0 - half : y1 + half }, text, { align: "center", size: 12, ...(o.box ? { bg: o.box, color: "#ffffff" } : { color }) }));
+  }
+  return out;
+}
+
+// Date and price range; Measure (tạm) thì xanh khi giá tăng, đỏ khi giảm
+function measure(c: Ctx, directional = false): Shape[] {
+  const t = rangeText(c);
+  const up = c.d.points[1].price >= c.d.points[0].price;
+  const color = directional ? (up ? "#2962ff" : "#f23645") : undefined;
+  return rangeBox(c, {
+    vArrow: true, hArrow: true, hEdges: false, vEdges: false, color,
+    lines: [`${t.change} (${t.pct}) ${t.pip}`, t.time, t.vol], box: directional ? color : "#2e2e2e",
+  });
 }
 
 // riskMode như TV riskDisplayMode: risk là % tài khoản (percent) hay số tiền (money)
@@ -1337,37 +1371,30 @@ export const TOOLS: ToolSpec[] = [
   { id: "avp", label: "Anchored volume profile", n: 1, panel: "volume", axes: "time", build: (c) => volumeProfile(c, pt(c, 0).time, c.bars[c.bars.length - 1]?.t ?? pt(c, 0).time, true) },
   // Measurers
   {
+    // TV: nhãn không nền "0.60%, 2,500.0" (khoảng giá ẩn mặc định)
     id: "pricerange", label: "Price range", n: 2,
+    options: [
+      { key: "showPriceRange", label: "Price range", def: false },
+      { key: "showPercent", label: "Percent change", def: true },
+      { key: "showPips", label: "Change in pips", def: true },
+    ],
     build: (c) => {
-      const [a, b] = c.p;
-      const [pa, pb] = c.d.points;
-      const x = (a.x + b.x) / 2;
-      return [
-        seg({ x: Math.min(a.x, b.x), y: a.y }, { x: Math.max(a.x, b.x), y: a.y }, { dash: 1, w: 1 }),
-        seg({ x: Math.min(a.x, b.x), y: b.y }, { x: Math.max(a.x, b.x), y: b.y }, { dash: 1, w: 1 }),
-        seg({ x, y: a.y }, { x, y: b.y }),
-        head({ x, y: a.y }, { x, y: b.y }, 8),
-        txt({ x, y: (a.y + b.y) / 2 }, `${c.fp(pb.price - pa.price)} (${pctStr(pa.price, pb.price)})`, { align: "center", bg: c.d.color, size: 11 }),
-      ];
+      const t = rangeText(c);
+      const label = [optOf(c.d, "showPriceRange") && t.change, optOf(c.d, "showPercent") && t.pct, optOf(c.d, "showPips") && t.pip].filter(Boolean).join(", ");
+      return rangeBox(c, { vArrow: true, hArrow: false, hEdges: true, vEdges: false, lines: [label] });
     },
   },
   {
+    // TV: nhãn ô tối "20 bars, 5h" / "Vol 138.84K"
     id: "daterange", label: "Date range", n: 2,
+    options: [{ key: "showVolume", label: "Volume", def: true }],
     build: (c) => {
-      const [a, b] = c.p;
-      const [pa, pb] = c.d.points;
-      const y = (a.y + b.y) / 2;
-      return [
-        seg({ x: a.x, y: Math.min(a.y, b.y) - 30 }, { x: a.x, y: Math.max(a.y, b.y) + 30 }, { dash: 1, w: 1 }),
-        seg({ x: b.x, y: Math.min(a.y, b.y) - 30 }, { x: b.x, y: Math.max(a.y, b.y) + 30 }, { dash: 1, w: 1 }),
-        seg({ x: a.x, y }, { x: b.x, y }),
-        head({ x: a.x, y }, { x: b.x, y }, 8),
-        txt({ x: (a.x + b.x) / 2, y: y - 14 }, `${c.barsBetween(pa.time, pb.time)} bars, ${fmtDur(pb.time - pa.time)}`, { align: "center", bg: c.d.color, size: 11 }),
-      ];
+      const t = rangeText(c);
+      return rangeBox(c, { vArrow: false, hArrow: true, hEdges: false, vEdges: true, lines: [t.time, optOf(c.d, "showVolume") ? t.vol : ""], box: "#2e2e2e" });
     },
   },
-  { id: "daterangeprice", label: "Date and price range", n: 2, build: measure },
-  { id: "measure", label: "Measure", n: 2, build: measure, ephemeral: true },
+  { id: "daterangeprice", label: "Date and price range", n: 2, build: (c) => measure(c) },
+  { id: "measure", label: "Measure", n: 2, build: (c) => measure(c, true), ephemeral: true },
   { id: "zoom", label: "Zoom in", n: 2, action: "zoom", build: (c) => [poly([c.p[0], { x: c.p[1].x, y: c.p[0].y }, c.p[1], { x: c.p[0].x, y: c.p[1].y }], { closed: true, fill: 0.1, dash: 1, w: 1 })] },
 
   // Brushes
@@ -1412,12 +1439,12 @@ export const TOOLS: ToolSpec[] = [
     moveHandle: moveRectHandle,
   },
   {
-    id: "rotrect", label: "Rotated rectangle", n: 3,
+    id: "rotrect", label: "Rotated rectangle", n: 3, style: { color: "#4caf50" },
     build: (c) => {
       const [a, b, p] = c.p;
       const u = unit(sub(b, a)), n = { x: -u.y, y: u.x };
       const off = mul(n, (p.x - a.x) * n.x + (p.y - a.y) * n.y);
-      return [poly([a, b, add(b, off), add(a, off)], { closed: true, fill: 0.15 })];
+      return [poly([a, b, add(b, off), add(a, off)], { closed: true, fill: 0.2 })];
     },
   },
   { id: "path", label: "Path", n: 0, build: (c) => (c.p.length > 1 ? [poly(c.p), head(c.p[c.p.length - 2], c.p[c.p.length - 1], 10 + c.d.width * 2)] : []) },
@@ -1429,30 +1456,26 @@ export const TOOLS: ToolSpec[] = [
       return [poly(circle(m, 1).map((q) => ({ x: m.x + (q.x - m.x) * rx, y: m.y + (q.y - m.y) * ry })), { closed: true, fill: 0.15 })];
     },
   },
-  { id: "polyline", label: "Polyline", n: 0, build: (c) => [poly(c.p, { fill: 0.1 })] },
-  { id: "triangle", label: "Triangle", n: 3, build: (c) => [poly(c.p.slice(0, 3), { closed: true, fill: 0.15 })] },
+  // màu mặc định theo TV
+  { id: "polyline", label: "Polyline", n: 0, style: { color: "#00bcd4" }, build: (c) => [poly(c.p, { fill: 0.2 })] },
+  { id: "triangle", label: "Triangle", n: 3, style: { color: "#089981" }, build: (c) => [poly(c.p.slice(0, 3), { closed: true, fill: 0.2 })] },
   {
-    id: "arc", label: "Arc", n: 3,
+    // TV: nửa elip, đáy là đoạn p1–p2, cao tới p3 (khoảng cách vuông góc từ p3 tới p1–p2); nền 20%
+    id: "arc", label: "Arc", n: 3, style: { color: "#e91e63" },
     build: (c) => {
       const [a, b, p] = c.p;
-      const d = 2 * (a.x * (b.y - p.y) + b.x * (p.y - a.y) + p.x * (a.y - b.y));
-      if (Math.abs(d) < 1e-6) return [seg(a, b)];
-      const sq = (q: Pt) => q.x * q.x + q.y * q.y;
-      const ctr = {
-        x: (sq(a) * (b.y - p.y) + sq(b) * (p.y - a.y) + sq(p) * (a.y - b.y)) / d,
-        y: (sq(a) * (p.x - b.x) + sq(b) * (a.x - p.x) + sq(p) * (b.x - a.x)) / d,
-      };
-      const r = dist(ctr, a);
-      const ang = (q: Pt) => Math.atan2(q.y - ctr.y, q.x - ctr.x);
-      const TAU = Math.PI * 2, norm = (v: number) => ((v % TAU) + TAU) % TAU;
-      const a0 = ang(a), sweepB = norm(ang(b) - a0), sweepP = norm(ang(p) - a0);
-      const a1 = sweepP <= sweepB ? a0 + sweepB : a0 - (TAU - sweepB);
-      return [poly(arcPts(ctr, r, a0, a1, 64))];
+      const m = mid(a, b), u = unit(sub(b, a)), n = { x: -u.y, y: u.x };
+      const rx = dist(a, b) / 2, h = (p.x - a.x) * n.x + (p.y - a.y) * n.y;
+      const pts = Array.from({ length: 65 }, (_, i) => {
+        const th = Math.PI - (Math.PI * i) / 64;
+        return add(m, add(mul(u, rx * Math.cos(th)), mul(n, h * Math.sin(th))));
+      });
+      return [poly(pts, { closed: true, fill: 0.2, noStroke: true }), poly(pts)];
     },
   },
-  { id: "curve", label: "Curve", n: 2, build: (c) => [poly(bezier(c.p[0], { x: c.p[1].x, y: c.p[0].y }, { x: c.p[1].x, y: c.p[0].y }, c.p[1]))] },
+  { id: "curve", label: "Curve", n: 2, style: { color: "#2962ff" }, build: (c) => [poly(bezier(c.p[0], { x: c.p[1].x, y: c.p[0].y }, { x: c.p[1].x, y: c.p[0].y }, c.p[1]))] },
   {
-    id: "doublecurve", label: "Double curve", n: 2,
+    id: "doublecurve", label: "Double curve", n: 2, style: { color: "#673ab7" },
     build: (c) => {
       const [a, b] = c.p;
       const m = (a.x + b.x) / 2;

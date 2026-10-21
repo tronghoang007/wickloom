@@ -255,3 +255,12 @@ Lần này TV tải được các tool (đo chi tiết trong tài liệu tham ch
 - Hàm mới: `intersect`, `harmonic`, `headShoulders`, `trianglePattern`, `elliott`.
 - Kiểm trên app: XABCD, Head and shoulders, Elliott impulse, Sine như ảnh TV. Đã xóa từng hình test, giữ Short position của user.
 - Còn chưa so: measurers (Price/Date range…), shapes (rect đã làm; circle, ellipse, arc, curve…), annotation, Position forecast/Bars pattern/Ghost feed (đang disabled).
+
+## 18. Measurers và Shapes theo TV (2026-10-21)
+
+- Price range / Date range / Date and price range / Measure: nhãn đúng định dạng TV (khoảng giá, %, **pip**, số nến, thời gian, **Vol tổng volume**), hộp nền 15%, mũi tên và cạnh như TV; Date range và Date & price range dùng ô nhãn tối #2E2E2E; Price range nhãn không nền, có tùy chọn bật/tắt từng mục; Measure giữ màu xanh/đỏ theo chiều.
+- Arc: **nửa elip** đáy p1–p2 cao tới p3 (app cũ: cung tròn qua 3 điểm), nền 20%.
+- Màu mặc định theo TV: Arc hồng, Curve xanh, Double curve tím, Triangle teal, Rotated rectangle xanh lá, Polyline cyan (nền 20%).
+- Hàm mới: `volumeIn`, `fmtVol`, `rangeText`, `rangeBox`.
+- Kiểm trên app: Measure "13.359 (0.32%) 1,335.9 / 18 bars, 4h 30m / Vol 61.63K".
+- Chưa: Double curve (TV tạo qua API ra điểm điều khiển lạ, chưa rõ hình học); màu mặc định Circle / Ellipse chưa đo.
