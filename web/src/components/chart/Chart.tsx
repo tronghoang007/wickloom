@@ -37,6 +37,7 @@ import {
 import ChartContextMenu, { type MenuItem } from "./ChartContextMenu";
 import DrawingSettings from "./DrawingSettings";
 import FavoritesBar from "./FavoritesBar";
+import InlineTextEditor from "./InlineTextEditor";
 import ReplayBar from "./ReplayBar";
 import StylePanel from "./StylePanel";
 import SettingsDialog from "./SettingsDialog";
@@ -1240,6 +1241,7 @@ export default function Chart() {
         </div>
         <FavoritesBar />
         <StylePanel />
+        <InlineTextEditor />
         <DrawingSettings />
         {selecting && (
           <div

@@ -133,3 +133,15 @@ Còn lại / thấy thêm:
 | Store bất biến | Drawing không bị sửa tại chỗ nữa (`put` thay object mới) — cần cho cache và để Settings không thấy giá trị cũ | |
 
 Chưa làm: Gann square fixed vẫn tính theo pixel (đổi hình khi zoom) — chưa rõ TV định nghĩa "fixed" theo tỉ lệ giá/nến nào, để Phase 4 đối chiếu. Fib channel, pitchfork, channel vẫn theo pixel (đường thẳng trên màn hình như TV, chưa kiểm trên log). Chưa có tùy chọn "Fib levels based on log scale".
+
+## 10. Phase 3 (2026-10-21)
+
+| Mục | Làm gì | Kiểm trên app |
+|---|---|---|
+| 1. Nhấn-kéo-thả | Nhấn điểm đầu, kéo, nhả cách > 5px → chỗ nhả là điểm 2 (vẫn click từng điểm được). Chỉ áp cho đoạn đầu; tool 3+ điểm đặt tiếp bằng click | Trend line và Measure tạo bằng 1 lần kéo |
+| 2. Phím | Shift khi vẽ / kéo điểm: khóa ngang / dọc / 45° so với điểm trước (ngang giữ đúng giá, dọc đúng thời gian; bỏ qua magnet; không áp cho tool 1 điểm, Position, brush). Ctrl/Cmd: đảo magnet khi giữ. Magnet Weak (< 20px) / Strong (luôn hút), chọn ở mũi tên cạnh nút magnet, lưu trong prefs | Shift: 2 điểm cùng giá 4128.2026. Strong: điểm hút về Low 4141.677; Cmd+click khi Strong bật: không hút |
+| 3. Nhãn trục | Hình đang chọn / đang vẽ: nhãn xanh giá + thời gian từng điểm, dải tô giữa min–max trên cả 2 trục. `axes` trong spec: hline chỉ giá; vline, AVWAP, FRVP, AVP chỉ thời gian | Thấy trên trend line, Measure |
+| 4. Mini toolbar | Đã có sẵn (StylePanel). Chỉ thêm: ẩn với Measure như TV | Measure không còn toolbar |
+| 5. Text inline | Bỏ `window.prompt`: tạo Text/Note/Pin/... mở ô gõ ngay trên chart; Enter xong, Shift+Enter xuống dòng, Esc hủy, click ra ngoài = xong. Double-click hình có text để sửa. Tạo + gõ lần đầu = 1 bước undo; Text mới mà Esc/để trống thì bỏ hẳn | Gõ "Vùng cản 4137 🚀" lưu đúng; double-click đúng vào emoji mở sửa; Cmd+Z 2 lần: về text cũ rồi mất hình; Esc khi vừa tạo: server rỗng |
+
+Còn lại / chưa chắc so với TV: ô sửa text không đi theo khi cuộn/zoom lúc đang gõ; ngưỡng magnet yếu 20px và việc Shift có áp cho rectangle (vẽ hình vuông) hay không chưa đối chiếu TV; tool 3+ điểm có cho nhấn-kéo-thả từng đoạn không cũng chưa kiểm. Mục 6–7 phần 3 (tùy chọn từng tool, ẩn theo timeframe) chưa làm.

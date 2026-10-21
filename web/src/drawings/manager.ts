@@ -1,4 +1,5 @@
 import { API, TF_SECONDS, fetchBars, type Bar } from "@/lib/api";
+import { crosshairLabel } from "@/lib/timefmt";
 import type {
     IChartApi,
     IPrimitivePaneRenderer,
@@ -10,9 +11,9 @@ import type {
     SeriesType,
     Time,
 } from "lightweight-charts";
-import { barsBetween, logicalToTime, shiftAnchors, timeToLogical } from "./coords";
+import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } from "./coords";
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
-import { useDrawingStore } from "./store";
+import { useDrawingStore, type MagnetMode } from "./store";
 import { DrawingSync } from "./sync";
 import { GROUPS, SPEC, type Ctx } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
@@ -32,7 +33,8 @@ type Hit = { kind: "point"; index: number } | { kind: "body" };
 // before: ảnh chụp để undo, chỉ đưa vào undo khi thật sự có kéo (click chọn thì không).
 type Mode =
   | { k: "idle" }
-  | { k: "drafting"; d: Drawing; placed: number; pressed: boolean } // pressed: đang giữ chuột vẽ tay
+  // pressed: đang giữ chuột vẽ tay. downAt: chỗ nhấn điểm đầu, nhả xa chỗ đó = đặt điểm 2 (nhấn-kéo-thả)
+  | { k: "drafting"; d: Drawing; placed: number; pressed: boolean; downAt: Pt | null }
   | { k: "dragPoint"; id: string; index: number; before: string; moved: boolean }
   | { k: "dragBody"; id: string; start: Pt; orig: Anchor[]; before: string; moved: boolean };
 
@@ -40,7 +42,11 @@ type Mode =
 type View = { w: number; h: number; bars: Bar[]; step: number; key: string };
 type Built = { key: string; c: Ctx; shapes: Shape[] };
 
+type Mods = { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean };
+
 const HANDLE_R = 8;
+const DRAG_MIN = 5; // px: nhả chuột xa hơn chỗ nhấn mới tính là nhấn-kéo-thả
+const AXIS_BG = "#2962ff";
 
 export class DrawingManager implements ISeriesPrimitive<Time> {
   private series: ISeriesApi<SeriesType> | null = null;
@@ -101,19 +107,72 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   attached(p: SeriesAttachedParameter<Time>) { this.redraw = p.requestUpdate; }
   detached() { this.redraw = null; }
   paneViews(): readonly IPrimitivePaneView[] { return [this.paneView]; }
+  // Như TV: hình đang chọn / đang vẽ có nhãn giá và thời gian của từng điểm trên 2 trục,
+  // kèm dải tô giữa điểm thấp nhất và cao nhất.
   updateAllViews() {
     this.axis = [];
+    this.timeAxis = [];
+    this.bands = { price: null, time: null };
     const st = useDrawingStore.getState();
-    const d = this.selected();
-    if (!d || d.hidden || st.hideAll) return;
-    const b = this.built(d, this.view());
-    if (!b) return;
-    for (const s of b.shapes) {
-      if (s.k === "axis") this.axis.push({ coordinate: () => s.y, text: () => s.text, textColor: () => s.color, backColor: () => s.bg });
+    const m = this.mode;
+    const d = m.k === "drafting" ? { ...m.d, points: m.d.points.slice(0, m.placed + 1) } : this.selected();
+    if (!d || d.hidden || st.hideAll || !this.series) return;
+    const spec = SPEC[d.type];
+    if (!spec) return;
+    if (m.k !== "drafting") {
+      const b = this.built(d, this.view());
+      for (const s of b?.shapes ?? []) {
+        if (s.k === "axis") this.axis.push({ coordinate: () => s.y, text: () => s.text, textColor: () => s.color, backColor: () => s.bg });
+      }
+    }
+    const label = (coordinate: number, text: string): ISeriesPrimitiveAxisView =>
+      ({ coordinate: () => coordinate, text: () => text, textColor: () => "#ffffff", backColor: () => AXIS_BG });
+    const digits = this.o.getDigits();
+    if (spec.axes !== "time") {
+      const ys: number[] = [];
+      for (const price of new Set(d.points.map((a) => a.price))) {
+        const y = this.series.priceToCoordinate(price);
+        if (y === null) continue;
+        ys.push(y);
+        this.axis.push(label(y, price.toFixed(digits)));
+      }
+      if (ys.length > 1) this.bands.price = [Math.min(...ys), Math.max(...ys)];
+    }
+    if (spec.axes !== "price") {
+      const xs: number[] = [];
+      for (const t of new Set(d.points.map((a) => a.time))) {
+        const x = this.timeToX(t);
+        if (x === null) continue;
+        xs.push(x);
+        this.timeAxis.push(label(x, crosshairLabel(t)));
+      }
+      if (xs.length > 1) this.bands.time = [Math.min(...xs), Math.max(...xs)];
     }
   }
   priceAxisViews(): readonly ISeriesPrimitiveAxisView[] { return this.axis; }
+  timeAxisViews(): readonly ISeriesPrimitiveAxisView[] { return this.timeAxis; }
+  priceAxisPaneViews(): readonly IPrimitivePaneView[] { return [this.bandView("price")]; }
+  timeAxisPaneViews(): readonly IPrimitivePaneView[] { return [this.bandView("time")]; }
   private axis: ISeriesPrimitiveAxisView[] = [];
+  private timeAxis: ISeriesPrimitiveAxisView[] = [];
+  private bands: { price: [number, number] | null; time: [number, number] | null } = { price: null, time: null };
+
+  private bandView(which: "price" | "time"): IPrimitivePaneView {
+    return {
+      zOrder: () => "bottom",
+      renderer: (): IPrimitivePaneRenderer => ({
+        draw: (target) => {
+          const band = this.bands[which];
+          if (!band) return;
+          target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+            context.fillStyle = "rgba(41, 98, 255, 0.25)";
+            if (which === "price") context.fillRect(0, band[0], mediaSize.width, band[1] - band[0]);
+            else context.fillRect(band[0], 0, band[1] - band[0], mediaSize.height);
+          });
+        },
+      }),
+    };
+  }
   refresh() { this.redraw?.(); }
 
   private paneView: IPrimitivePaneView = {
@@ -188,7 +247,8 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     return x === null || y === null ? null : { x, y };
   }
 
-  private fromPx(p: Pt): Anchor | null {
+  // magnet: null = tắt; weak = chỉ hút khi cách OHLC < 20px; strong = luôn hút về OHLC gần nhất
+  private fromPx(p: Pt, magnet: MagnetMode | null = null): Anchor | null {
     if (!this.series) return null;
     const l = this.o.chart.timeScale().coordinateToLogical(p.x);
     const price = this.series.coordinateToPrice(p.y);
@@ -196,16 +256,44 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     const time = this.logicalToTime(l);
     if (time === null) return null;
     let pr = price as number;
-    if (useDrawingStore.getState().magnet) {
+    if (magnet) {
       const bar = this.o.getBars()[Math.round(l)];
       if (bar) {
         const best = [bar.o, bar.h, bar.l, bar.c]
           .map((v) => ({ v, d: Math.abs((this.series!.priceToCoordinate(v) ?? 1e9) - p.y) }))
           .sort((a, b) => a.d - b.d)[0];
-        if (best.d < 20) pr = best.v;
+        if (magnet === "strong" || best.d < 20) pr = best.v;
       }
     }
     return { time, price: pr };
+  }
+
+  // Điểm neo dưới con trỏ khi vẽ / kéo điểm, như TV:
+  // - Shift: khóa hướng từ ref về ngang / dọc / 45° (bỏ qua magnet)
+  // - Ctrl/Cmd: đảo magnet trong lúc giữ phím
+  private anchorAt(p: Pt, e: Mods, ref?: Anchor | null): Anchor | null {
+    if (e.shiftKey && ref) {
+      const r = this.toPx(ref);
+      if (r) {
+        const s = snapAngle(p, r);
+        const a = this.fromPx(s.p);
+        if (a && s.axis === "h") a.price = ref.price;
+        if (a && s.axis === "v") a.time = ref.time;
+        return a;
+      }
+    }
+    const st = useDrawingStore.getState();
+    return this.fromPx(p, st.magnet !== (e.ctrlKey || e.metaKey) ? st.magnetMode : null);
+  }
+
+  // Tool khóa góc được bằng Shift: hình nối các điểm, không có ràng buộc riêng
+  private shiftable(type: DrawingType) {
+    const spec = SPEC[type];
+    return spec.n !== -1 && spec.n !== 1 && !spec.constrain && !spec.oneClick;
+  }
+
+  private draftRef(m: Extract<Mode, { k: "drafting" }>) {
+    return this.shiftable(m.d.type) && m.placed > 0 ? m.d.points[m.placed - 1] : null;
   }
 
   private view(): View {
@@ -376,7 +464,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (tool && SPEC[tool]) {
       this.consume(e);
       this.lockChart();
-      this.place(tool, p);
+      this.place(tool, p, e);
       return;
     }
 
@@ -395,11 +483,11 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   };
 
   // Click khi đang cầm tool: điểm đầu tạo draft, các điểm sau đặt tiếp tới khi đủ
-  private place(tool: DrawingType, p: Pt) {
+  private place(tool: DrawingType, p: Pt, e: Mods) {
     const spec = SPEC[tool];
-    const a = this.fromPx(p);
-    if (!a) return;
     const m = this.mode;
+    const a = this.anchorAt(p, e, m.k === "drafting" ? this.draftRef(m) : null);
+    if (!a) return;
     if (m.k !== "drafting") {
       const d = this.newDraft(tool);
       if (spec.oneClick) {
@@ -410,7 +498,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       }
       if (spec.n === 1) return this.finish(d, [a]);
       d.points = spec.n === -1 ? [a] : [a, { ...a }];
-      this.mode = { k: "drafting", d, placed: 1, pressed: spec.n === -1 };
+      this.mode = { k: "drafting", d, placed: 1, pressed: spec.n === -1, downAt: p };
     } else {
       m.d.points[m.placed] = a;
       m.placed++;
@@ -422,6 +510,15 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
 
   private onDbl = (e: MouseEvent) => {
     const m = this.mode;
+    if (m.k === "idle") {
+      // double-click vào hình có text: sửa text tại chỗ
+      const f = useDrawingStore.getState().tool ? null : this.hitAt(this.rel(e));
+      if (f && SPEC[f.d.type].prompt && !f.d.locked) {
+        this.consume(e);
+        this.startEdit(f.d.id, false);
+      }
+      return;
+    }
     if (m.k !== "drafting" || SPEC[m.d.type]?.n !== 0) return;
     this.consume(e);
     let pts = m.d.points.slice(0, m.placed);
@@ -455,28 +552,22 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       return;
     }
 
-    if (spec.prompt) {
-      const t = window.prompt(spec.prompt, d.text ?? spec.prompt);
-      if (t === null || (d.type === "text" && !t)) {
-        useDrawingStore.setState({ tool: null });
-        this.refresh();
-        return;
-      }
-      d.text = t;
-    }
+    // Text gõ ngay trên chart (InlineTextEditor) thay vì window.prompt
+    if (spec.prompt && d.text === undefined) d.text = d.type === "text" ? "" : spec.prompt;
     if (!spec.ephemeral) this.pushUndo(); // Measure không vào undo
     this.drawings.push(d);
     this.prefetchProfileBars(d);
     if (!st.stay) useDrawingStore.setState({ tool: null });
     this.select(d.id);
     this.commit();
+    if (spec.prompt) this.startEdit(d.id, true);
   }
 
   private onMove = (e: PointerEvent) => {
     const p = this.rel(e);
     const m = this.mode;
     if (m.k === "drafting") {
-      const a = this.fromPx(p);
+      const a = this.anchorAt(p, e, this.draftRef(m));
       if (SPEC[m.d.type].n === -1) {
         if (m.pressed && a) { m.d.points.push(a); this.refresh(); }
       } else if (a) {
@@ -491,7 +582,8 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       const d = this.drawings.find((x) => x.id === m.id);
       if (!d) return;
       if (m.k === "dragPoint") {
-        const a = this.fromPx(p);
+        const other = m.index > 0 ? m.index - 1 : 1;
+        const a = this.anchorAt(p, e, this.shiftable(d.type) ? d.points[other] : null);
         if (!a) return;
         const pts = d.points.map((q) => ({ ...q }));
         pts[m.index] = a;
@@ -531,13 +623,18 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.refresh();
   };
 
-  private onUp = () => {
+  private onUp = (e: PointerEvent) => {
     this.unlockChart();
     const m = this.mode;
     if (m.k === "drafting") {
       if (m.pressed) {
         const pts = m.d.points;
         if (pts.length >= 2) this.finish(m.d, pts); else this.cancelDraft();
+      } else if (m.downAt) {
+        // Nhấn điểm đầu, kéo rồi nhả: chỗ nhả là điểm thứ 2 (ngoài cách click từng điểm)
+        const p = this.rel(e), far = Math.hypot(p.x - m.downAt.x, p.y - m.downAt.y) > DRAG_MIN;
+        m.downAt = null;
+        if (far && e.type === "pointerup") this.place(m.d.type, p, e);
       }
       return;
     }
@@ -641,6 +738,41 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       textColor: next.textColor,
       opts: next.opts ? { ...next.opts } : undefined,
     });
+  }
+
+  // --- sửa text inline ---
+  startEdit(id: string, isNew: boolean) {
+    this.select(id);
+    useDrawingStore.setState({ editing: { id, isNew } });
+  }
+
+  // Góc trên-trái ô sửa text (tọa độ chart): điểm mang text của hình
+  textAnchor(id: string): Pt | null {
+    const d = this.drawings.find((x) => x.id === id);
+    const b = d && this.built(d, this.view());
+    if (!d || !b) return null;
+    return SPEC[d.type].n === 2 ? b.c.p[1] : b.c.p[0];
+  }
+
+  // text = null: hủy (Esc). Hình mới tạo mà hủy / để trống thì bỏ luôn, kể cả bước undo lúc tạo.
+  endEdit(text: string | null) {
+    const ed = useDrawingStore.getState().editing;
+    if (!ed) return;
+    useDrawingStore.setState({ editing: null });
+    const d = this.drawings.find((x) => x.id === ed.id);
+    if (!d) return;
+    const value = text === null ? d.text ?? "" : text.trim() ? text : d.type === "text" ? "" : SPEC[d.type].prompt ?? "";
+    if (!value && d.type === "text") {
+      if (ed.isNew) this.undoStack.pop(); else this.pushUndo();
+      this.drawings = this.drawings.filter((x) => x !== d);
+      useDrawingStore.setState({ selectedId: null });
+      this.commit();
+      return;
+    }
+    if (value === d.text) return;
+    if (!ed.isNew) this.pushUndo(); // hình mới: gộp vào bước undo lúc tạo
+    this.put({ ...d, text: value });
+    this.commit();
   }
 
   deleteSelected() {

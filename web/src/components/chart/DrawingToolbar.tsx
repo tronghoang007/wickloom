@@ -4,6 +4,7 @@ import {
   toggleFavorite,
   useDrawingStore,
   type CursorMode,
+  type MagnetMode,
 } from "@/drawings/store";
 import { GROUPS, SPEC, type Group } from "@/drawings/tools";
 import { useIndicatorStore } from "@/indicators/store";
@@ -271,6 +272,45 @@ function EmojiButton() {
   );
 }
 
+// Như TV: click bật/tắt magnet; mũi tên mở chọn Weak / Strong magnet
+function MagnetButton() {
+  const { magnet, magnetMode } = useDrawingStore();
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const choose = (m: MagnetMode) => {
+    useDrawingStore.setState({ magnet: true, magnetMode: m });
+    setRect(null);
+  };
+  const label = magnetMode === "strong" ? "Strong magnet" : "Weak magnet";
+  return (
+    <div ref={ref} className={wrap}>
+      <button
+        className={cls(magnet)}
+        title={`${label} (giữ Ctrl/Cmd để đảo tạm thời)`}
+        onClick={() => useDrawingStore.setState({ magnet: !magnet })}
+      >
+        <Magnet strong={magnetMode === "strong"} />
+      </button>
+      <button className={arrowBtn(!!rect)} onClick={() => setRect(ref.current!.getBoundingClientRect())} title="Magnet mode">
+        <FlyoutArrowI />
+      </button>
+      {rect && (
+        <Flyout rect={rect} onClose={() => setRect(null)} width={200}>
+          {(["weak", "strong"] as const).map((m) => (
+            <div
+              key={m}
+              className={`flex h-10 cursor-pointer items-center gap-2 px-2.5 text-sm hover:bg-[var(--hover)] ${magnet && magnetMode === m ? "text-[var(--accent)]" : ""}`}
+              onClick={() => choose(m)}
+            >
+              <Magnet strong={m === "strong"} /> {m === "strong" ? "Strong magnet" : "Weak magnet"}
+            </div>
+          ))}
+        </Flyout>
+      )}
+    </div>
+  );
+}
+
 function TrashButton() {
   const api = useDrawingStore((s) => s.api);
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -323,11 +363,10 @@ function TrashButton() {
 }
 
 export default function DrawingToolbar() {
-  const { tool, magnet, stay, lockAll, hideAll, showFavs, api } =
-    useDrawingStore();
+  const { tool, stay, lockAll, hideAll, showFavs, api } = useDrawingStore();
   const toolbarRef = useRef<HTMLDivElement>(null);
   const divider = <div className="my-1 h-px w-8 shrink-0 bg-[var(--border)]" />;
-  const toggle = (k: "magnet" | "stay" | "lockAll" | "hideAll", v: boolean) =>
+  const toggle = (k: "stay" | "lockAll" | "hideAll", v: boolean) =>
     useDrawingStore.setState({ [k]: !v });
 
   useEffect(() => {
@@ -374,13 +413,7 @@ export default function DrawingToolbar() {
         <ToolIcon id="zoom" />
       </button>
       {divider}
-      <button
-        className={cls(magnet)}
-        title="Magnet mode"
-        onClick={() => toggle("magnet", magnet)}
-      >
-        <Magnet />
-      </button>
+      <MagnetButton />
       <button
         className={cls(stay)}
         title="Stay in drawing mode"

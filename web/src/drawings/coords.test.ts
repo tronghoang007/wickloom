@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
-import { barsBetween, logicalToTime, shiftAnchors, timeToLogical } from "./coords";
+import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } from "./coords";
 
 const H = 3600;
 const bar = (t: number): Bar => ({ t, o: 1, h: 1, l: 1, c: 1, v: 1 });
@@ -79,5 +79,23 @@ describe("shiftAnchors (lỗi #4)", () => {
 
   it("dịch được ra ngoài vùng dữ liệu", () => {
     expect(shiftAnchors(BARS, H, [{ time: MON_15, price: 1 }], 2, 0)).toEqual([{ time: MON_15 + 2 * H, price: 1 }]);
+  });
+});
+
+describe("snapAngle (Shift)", () => {
+  const ref = { x: 100, y: 100 };
+  it("gần ngang → ngang", () => {
+    expect(snapAngle({ x: 200, y: 108 }, ref)).toEqual({ p: { x: 200, y: 100 }, axis: "h" });
+    expect(snapAngle({ x: 0, y: 92 }, ref)).toEqual({ p: { x: 0, y: 100 }, axis: "h" });
+  });
+  it("gần dọc → dọc", () => {
+    expect(snapAngle({ x: 95, y: 300 }, ref)).toEqual({ p: { x: 100, y: 300 }, axis: "v" });
+    expect(snapAngle({ x: 104, y: 0 }, ref)).toEqual({ p: { x: 100, y: 0 }, axis: "v" });
+  });
+  it("gần chéo → đúng 45°", () => {
+    const { p, axis } = snapAngle({ x: 200, y: 190 }, ref);
+    expect(axis).toBe("d");
+    expect(p.x - ref.x).toBeCloseTo(p.y - ref.y, 9);
+    expect(p.x - ref.x).toBeCloseTo(95, 9);
   });
 });

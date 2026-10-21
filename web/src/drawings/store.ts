@@ -5,6 +5,7 @@ import { DEFAULT_FAVORITES } from "./tools";
 import type { Drawing, DrawingType } from "./types";
 
 export type CursorMode = "cross" | "dot" | "arrow" | "eraser";
+export type MagnetMode = "weak" | "strong"; // yếu: chỉ hút khi gần OHLC; mạnh: luôn hút
 
 export type DrawingDefaults = Partial<Pick<Drawing, "color" | "width" | "dash" | "textColor" | "opts">>;
 
@@ -12,6 +13,7 @@ type State = {
   tool: DrawingType | null;
   cursor: CursorMode;
   magnet: boolean;
+  magnetMode: MagnetMode;
   stay: boolean; // giữ tool sau khi vẽ xong
   lockAll: boolean;
   hideAll: boolean;
@@ -23,6 +25,7 @@ type State = {
   drawings: Drawing[];
   selectedId: string | null;
   settingsOpen: boolean;
+  editing: { id: string; isNew: boolean } | null; // đang sửa text inline trên chart
   api: DrawingManager | null;
   setToolDefault: (type: string, defs: DrawingDefaults) => void;
   resetToolDefault: (type: string) => void;
@@ -34,6 +37,7 @@ export const useDrawingStore = create<State>()(
       tool: null,
       cursor: "cross",
       magnet: false,
+      magnetMode: "weak",
       stay: false,
       lockAll: false,
       hideAll: false,
@@ -45,6 +49,7 @@ export const useDrawingStore = create<State>()(
       drawings: [],
       selectedId: null,
       settingsOpen: false,
+      editing: null,
       api: null,
       setToolDefault: (type, defs) => {
         set((s) => ({
@@ -76,6 +81,7 @@ export const useDrawingStore = create<State>()(
         showFavs: s.showFavs,
         favoritesPos: s.favoritesPos,
         magnet: s.magnet,
+        magnetMode: s.magnetMode,
         stay: s.stay,
         lastTool: s.lastTool,
         cursor: s.cursor,

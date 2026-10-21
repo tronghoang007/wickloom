@@ -60,3 +60,20 @@ export function shiftAnchors(bars: Bar[], step: number, pts: Anchor[], dBars: nu
   }
   return out;
 }
+
+// Shift khi vẽ/kéo điểm: khóa hướng từ ref tới p về bội số 45° (ngang, dọc, chéo) trong
+// không gian pixel, giữ độ dài hình chiếu. axis cho biết cần giữ nguyên giá (h) hay thời gian (v).
+export function snapAngle(p: { x: number; y: number }, ref: { x: number; y: number }) {
+  const dx = p.x - ref.x, dy = p.y - ref.y;
+  const k = ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8;
+  const ang = (k * Math.PI) / 4;
+  const len = dx * Math.cos(ang) + dy * Math.sin(ang);
+  const axis: "h" | "v" | "d" = k % 4 === 0 ? "h" : k % 4 === 2 ? "v" : "d";
+  return {
+    p: {
+      x: axis === "v" ? ref.x : ref.x + len * Math.cos(ang),
+      y: axis === "h" ? ref.y : ref.y + len * Math.sin(ang),
+    },
+    axis,
+  };
+}

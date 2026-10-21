@@ -43,11 +43,13 @@ export function Svg24({ children, size = 28 }: { children: ReactNode; size?: num
   );
 }
 
-export const Magnet = () => (
+// strong: thêm 1 tia ở giữa để phân biệt Strong / Weak magnet
+export const Magnet = ({ strong = false }: { strong?: boolean }) => (
   <Svg>
     <path d="M8.5 6.5h3.5v8a2 2 0 0 0 4 0v-8h3.5v8a5.5 5.5 0 0 1-11 0z" />
     <path d="M8.5 10.5h3.5M16 10.5h3.5" />
     <path d="M10.5 22.5l-1 2h2l-1 2M17.5 22.5l-1 2h2l-1 2" />
+    {strong && <path d="M14.5 22.5l-1 2h2l-1 2" />}
   </Svg>
 );
 export const Trash = () => (

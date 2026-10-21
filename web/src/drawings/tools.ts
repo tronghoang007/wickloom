@@ -28,7 +28,8 @@ export type ToolSpec = {
   build: (c: Ctx) => Shape[];
   handles?: (c: Ctx) => Pt[];
   style?: Partial<Pick<Drawing, "color" | "width" | "dash">>;
-  prompt?: string; // hỏi text khi tạo
+  prompt?: string; // có text sửa được (mở ô sửa inline khi tạo / double-click); cũng là text mặc định
+  axes?: "price" | "time"; // nhãn điểm trên trục khi chọn: chỉ giá / chỉ thời gian (mặc định cả hai)
   ephemeral?: boolean;
   panel?: "position" | "volume";
   constrain?: (pts: Anchor[], moved: number, tick?: number) => void; // tick: kẹp giá khi kéo trên chart
@@ -444,13 +445,13 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
-    id: "hline", label: "Horizontal line", n: 1,
+    id: "hline", label: "Horizontal line", n: 1, axes: "price",
     build: (c) => [seg({ x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y }), txt({ x: 6, y: c.p[0].y - 8 }, c.fp(c.d.points[0].price), { size: 11 })],
     handles: (c) => [{ x: c.w / 2, y: c.p[0].y }],
   },
   { id: "hray", label: "Horizontal ray", n: 1, build: (c) => [seg(c.p[0], { x: c.w, y: c.p[0].y })] },
   {
-    id: "vline", label: "Vertical line", n: 1,
+    id: "vline", label: "Vertical line", n: 1, axes: "time",
     build: (c) => [seg({ x: c.p[0].x, y: 0 }, { x: c.p[0].x, y: c.h })],
     handles: (c) => [{ x: c.p[0].x, y: c.h / 2 }],
   },
@@ -735,7 +736,7 @@ export const TOOLS: ToolSpec[] = [
   },
   // Volume
   {
-    id: "avwap", label: "Anchored VWAP", n: 1,
+    id: "avwap", label: "Anchored VWAP", n: 1, axes: "time",
     build: (c) => {
       const t0 = pt(c, 0).time;
       let pv = 0, vv = 0;
@@ -751,8 +752,8 @@ export const TOOLS: ToolSpec[] = [
       return [poly(pts)];
     },
   },
-  { id: "frvp", label: "Fixed range volume profile", n: 2, panel: "volume", build: (c) => volumeProfile(c, span(c).t0, span(c).t1) },
-  { id: "avp", label: "Anchored volume profile", n: 1, panel: "volume", build: (c) => volumeProfile(c, pt(c, 0).time, c.bars[c.bars.length - 1]?.t ?? pt(c, 0).time, true) },
+  { id: "frvp", label: "Fixed range volume profile", n: 2, panel: "volume", axes: "time", build: (c) => volumeProfile(c, span(c).t0, span(c).t1) },
+  { id: "avp", label: "Anchored volume profile", n: 1, panel: "volume", axes: "time", build: (c) => volumeProfile(c, pt(c, 0).time, c.bars[c.bars.length - 1]?.t ?? pt(c, 0).time, true) },
   // Measurers
   {
     id: "pricerange", label: "Price range", n: 2,

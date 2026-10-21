@@ -81,7 +81,7 @@ export default function StylePanel() {
     oy: number;
   } | null>(null);
   const d = drawings.find((x) => x.id === selectedId);
-  if (!d || !api) return null;
+  if (!d || !api || SPEC[d.type]?.ephemeral) return null; // Measure: không có toolbar như TV
 
   const dash = d.dash ?? 0;
   const isPos = SPEC[d.type]?.panel === "position";
