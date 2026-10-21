@@ -175,3 +175,16 @@ Toolbar: templates, text-color, (màu lời), (màu lỗ), (biểu tượng), se
 - **fib_speed_resist_arcs**: cùng bộ mức; **nửa đường tròn tâm điểm 1**, bán kính = hệ số × |điểm 1→2|, phía điểm 2 (`fullCircles false`); nhãn trên đỉnh cung.
 - **fib_wedge**: .236 #F23645, .382 #FF9800, .5 #4caf50, .618 #089981, .786 #00bcd4, 1 #808080; cạnh xám liền; nền .2.
 - **fib_spiral**: #00bcd4, chiều kim đồng hồ. **pitchfan**: median #F23645, mức .5 #00bcd4, 1 #2962FF, nền .2 (tia từ p0).
+
+### Patterns, Elliott, Cycles (đo lần 4, 2026-10-21)
+- Màu mặc định: XABCD, Cypher #2962FF (nền, transparency 85); Head and shoulders #089981 (nền 85); ABCD #089981 (không nền); Triangle pattern #673ab7 (nền 85); Three drives #673ab7; Elliott impulse, correction #3d85c6; Elliott triangle #FF9800; double/triple combo #6aa84f (`degree 7`, `showWave`); Cyclic lines #80ccdb; Time cycles #159980 + nền rgba(106,168,79,.5) transparency 50; Sine #159980. Chữ trắng cỡ 12, nét dày 2.
+- **XABCD**: tô X-A-B và B-C-D; đường chấm kèm ô tỉ lệ: X–B = AB/XA, A–C = BC/AB, B–D = CD/BC, X–D = AD/XA (vd 0.6, 0.556, 2.4, 1.067); chữ X A B C D trong ô nền.
+- **Cypher**: như XABCD nhưng A–C = XC/XA (1.167), X–D = CD/XC (0.857).
+- **ABCD**: chấm A–C (BC/AB) và B–D (CD/BC), không tô.
+- **Three drives**: không có chữ; chấm nối đỉnh drive 1–2 và 2–3 với tỉ lệ mở rộng 2 số lẻ (2.43, 1.89).
+- **Head and shoulders**: tô vai trái, đầu, vai phải phía trên đường cổ; đường cổ chấm qua 2 đáy, tới chỗ cắt cạnh ngoài; nhãn "Left Shoulder / Head / Right Shoulder" trong ô nền.
+- **Triangle pattern**: AC và BD kéo tới đỉnh hội tụ (chấm), đường chấm dọc tại A, tô tam giác.
+- **Elliott**: nhãn "(1)…(5)", "(A)(B)(C)", "(A)…(E)", "(W)(X)(Y)…" màu đường, không nền; điểm đầu không có nhãn.
+- **Cyclic lines**: chỉ lặp về phía phải điểm 1; đoạn chấm điểm 1 → 2.
+- **Time cycles**: nửa đường tròn thật (đường kính = khoảng 2 điểm) lặp 2 phía.
+- **Sine line**: đáy/đỉnh tại 2 điểm, nửa chu kỳ = khoảng 2 điểm, kéo hết chiều ngang.

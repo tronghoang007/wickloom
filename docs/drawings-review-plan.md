@@ -244,3 +244,14 @@ Lần này TV tải được các tool (đo chi tiết trong tài liệu tham ch
 - Mỗi tool có bộ mức mặc định riêng (`spec.levels`) và dùng chung bảng sửa mức trong Settings.
 - Kiểm trên app: Disjoint, Regression, Fib circles, Speed fan trông như TV. Chỉ xóa đúng hình test (chart XAUUSDm có 1 Short position của user — giữ nguyên).
 - Còn: Fib extension — vị trí x của các đường mức chưa đo; chưa so: patterns, Elliott, cycles, measurers, shapes, annotation.
+
+## 17. Patterns, Elliott, Cycles theo TV (2026-10-21)
+
+- XABCD / Cypher / ABCD / Three drives: **nhãn tỉ lệ** trên đường chấm (công thức như TV, Cypher khác ở A–C và X–D; Three drives 2 số lẻ), chữ trong ô nền, nền 15%; Three drives bỏ chữ số.
+- Head and shoulders: tô 3 vùng, đường cổ chấm cắt cạnh ngoài, nhãn có nền, màu xanh lá (app cũ: tia đỏ, không tô).
+- Triangle pattern: đỉnh hội tụ + đường dọc tại A + tô tam giác (app cũ: tô tứ giác + 2 tia).
+- Elliott: "(1)…", không nền, bỏ nhãn "0"; màu mặc định theo từng loại sóng.
+- Cyclic lines chỉ về bên phải; Time cycles nửa vòng tròn thật + nền 50%; **Sine** sửa công thức (app cũ: chu kỳ 4×Δ, dao động quanh điểm 1).
+- Hàm mới: `intersect`, `harmonic`, `headShoulders`, `trianglePattern`, `elliott`.
+- Kiểm trên app: XABCD, Head and shoulders, Elliott impulse, Sine như ảnh TV. Đã xóa từng hình test, giữ Short position của user.
+- Còn chưa so: measurers (Price/Date range…), shapes (rect đã làm; circle, ellipse, arc, curve…), annotation, Position forecast/Bars pattern/Ghost feed (đang disabled).

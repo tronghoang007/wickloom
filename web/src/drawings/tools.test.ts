@@ -555,3 +555,79 @@ describe("kênh và các tool Fib (đo trên TV)", () => {
     expect(ends).toContainEqual({ x: 100, y: Y(200) }); // 1 = dọc
   });
 });
+
+describe("patterns, Elliott, cycles (đo trên TV)", () => {
+  const Y = (price: number) => 1000 - price;
+  const mk = (type: string, prices: number[], step = 10): Ctx => {
+    const points = prices.map((price, i) => ({ time: 100 + i * step, price }));
+    return {
+      d: { id: "x", type, points, color: "#2962ff", width: 1, locked: false, hidden: false },
+      p: points.map((a) => ({ x: a.time, y: Y(a.price) })),
+      w: 600, h: 800, bars: [], tickSize: 0.01, hovered: false, selected: false, step: 1,
+      barsBetween: (t0, t1) => t1 - t0,
+      X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2,
+    };
+  };
+  const texts = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text").map((t) => t.text);
+  const lines = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line");
+  const polys = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly");
+
+  it("XABCD: tỉ lệ như TV (0.6, 0.556, 2.4, 1.067) + chữ X A B C D", () => {
+    const t = texts(SPEC.xabcd.build(mk("xabcd", [4130, 4160, 4142, 4152, 4128])));
+    expect(t).toEqual(["0.6", "0.556", "2.4", "1.067", "X", "A", "B", "C", "D"]);
+  });
+
+  it("Cypher: A–C = XC/XA, X–D = CD/XC (TV: 1.167, 0.857)", () => {
+    const t = texts(SPEC.cypher.build(mk("cypher", [4130, 4160, 4142, 4165, 4135])));
+    expect(t.slice(0, 4)).toEqual(["0.6", "1.167", "1.304", "0.857"]);
+  });
+
+  it("ABCD: 0.6 và 1.278; Three drives: 2.43 và 1.89, không có chữ", () => {
+    expect(texts(SPEC.abcd.build(mk("abcd", [4130, 4160, 4142, 4165]))).slice(0, 2)).toEqual(["0.6", "1.278"]);
+    expect(texts(SPEC.threedrives.build(mk("threedrives", [4130, 4145, 4138, 4155, 4146, 4163, 4140])))).toEqual(["2.43", "1.89"]);
+  });
+
+  it("Head and shoulders: 3 vùng tô, đường cổ qua 2 đáy, nhãn có nền", () => {
+    const sh = SPEC.headshoulders.build(mk("headshoulders", [4130, 4150, 4138, 4165, 4137, 4150, 4128]));
+    expect(polys(sh).filter((p) => p.fill === 0.15)).toHaveLength(3);
+    const neck = lines(sh)[0];
+    expect(neck.dash).toBe(2);
+    expect(neck.a.x).toBeLessThan(120); // chạm cạnh trái (giữa điểm 0 và 1)
+    expect(neck.b.x).toBeGreaterThan(150); // chạm cạnh phải (giữa điểm 5 và 6)
+    expect(texts(sh)).toEqual(["Left Shoulder", "Head", "Right Shoulder"]);
+  });
+
+  it("Triangle pattern: AC và BD gặp nhau ở đỉnh, tô tam giác từ đường dọc tại A", () => {
+    const sh = SPEC.trianglepattern.build(mk("trianglepattern", [4130, 4160, 4138, 4152]));
+    const fill = polys(sh).find((p) => p.fill === 0.15)!;
+    expect(fill.pts[0]).toEqual({ x: 100, y: Y(4130) });
+    expect(fill.pts[1].x).toBeCloseTo(100, 9);
+    expect(fill.pts[2].x).toBeGreaterThan(130);
+  });
+
+  it("Elliott: nhãn trong ngoặc, điểm đầu không có nhãn, không nền", () => {
+    const sh = SPEC.elliottimpulse.build(mk("elliottimpulse", [4130, 4145, 4138, 4162, 4150, 4168]));
+    expect(texts(sh)).toEqual(["(1)", "(2)", "(3)", "(4)", "(5)"]);
+    expect(sh.some((s) => s.k === "text" && s.bg)).toBe(false);
+  });
+
+  it("Cyclic lines chỉ lặp về bên phải điểm 1", () => {
+    const xs = lines(SPEC.cyclic.build(mk("cyclic", [4160, 4160], 50))).filter((l) => l.a.x === l.b.x).map((l) => l.a.x);
+    expect(Math.min(...xs)).toBe(100);
+    expect(xs.slice(0, 3)).toEqual([100, 150, 200]);
+  });
+
+  it("Sine: qua điểm 1 và điểm 2 (đáy/đỉnh), nửa chu kỳ = khoảng 2 điểm", () => {
+    const sh = SPEC.sine.build(mk("sine", [100, 200], 30));
+    const pts = polys(sh)[0].pts;
+    const at = (x: number) => pts.find((q) => Math.abs(q.x - x) < 1e-9)!.y;
+    expect(at(99)).toBeCloseTo(Y(100) + (Y(100) - Y(150)) * (Math.cos(Math.PI * -1 / 30) - 1), 6);
+    expect(at(129)).toBeCloseTo(Y(150) + (Y(100) - Y(150)) * Math.cos((Math.PI * 29) / 30), 6);
+  });
+
+  it("Time cycles: nửa đường tròn thật, cao = nửa khoảng 2 điểm", () => {
+    const sh = SPEC.timecycles.build(mk("timecycles", [4130, 4130], 40));
+    const arc = polys(sh).find((p) => !p.noStroke)!;
+    expect(Math.min(...arc.pts.map((q) => q.y))).toBeCloseTo(Y(4130) - 20, 6);
+  });
+});

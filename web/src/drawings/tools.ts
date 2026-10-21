@@ -335,24 +335,83 @@ function fork(c: Ctx, v: ForkKind): Shape[] {
   return out;
 }
 
+// Nhãn điểm: phía trên đỉnh / dưới đáy (so với 2 điểm kề). bg: ô nền màu hình chữ trắng (patterns của TV);
+// không bg: chữ màu hình (Elliott). Tên rỗng = không nhãn.
 function letters(c: Ctx, names: string[], bg = false): Shape[] {
-  return c.p.slice(0, names.length).map((p, i, arr) => {
+  return c.p.slice(0, names.length).flatMap((p, i, arr) => {
+    if (!names[i]) return [];
     const nb = [arr[i - 1], arr[i + 1]].filter(Boolean) as Pt[];
     const avg = nb.length ? nb.reduce((s, q) => s + q.y, 0) / nb.length : p.y + 1;
     const above = p.y < avg;
-    return txt({ x: p.x, y: p.y + (above ? -14 : 14) }, names[i], bg ? { align: "center", bg: c.d.color, size: 11 } : { align: "center", size: 12 });
+    return [txt({ x: p.x, y: p.y + (above ? -14 : 14) }, names[i], bg ? { align: "center", bg: c.d.color, size: 12 } : { align: "center", size: 13 })];
   });
 }
 
-function pattern(c: Ctx, names: string[], dashed: [number, number][], fills: number[][] = []): Shape[] {
+// Tỉ lệ ghi trên đường chấm của patterns (TV: XABCD/Cypher/ABCD tối đa 3 số lẻ, Three drives 2)
+const ratioOf = (num: number, den: number, digits = 3) => (den ? String(+Math.abs(num / den).toFixed(digits)) : "");
+
+// Pattern như TV: đường gấp khúc, tam giác tô 15%, đường chấm i–j kèm ô tỉ lệ ở giữa, chữ trong ô
+function pattern(c: Ctx, names: string[], links: [number, number, string][], fills: number[][] = []): Shape[] {
   const p = c.p;
   return [
-    ...fills.map((f) => poly(f.map((i) => p[i]), { closed: true, fill: 0.1, noStroke: true })),
-    poly(p.slice(0, names.length)),
-    ...dashed.map(([i, j]) => seg(p[i], p[j], { dash: 1, w: 1 })),
-    ...letters(c, names),
+    ...fills.map((f) => poly(f.map((i) => p[i]), { closed: true, fill: 0.15, noStroke: true })),
+    poly(p.slice(0, Math.max(names.length, 2))),
+    ...links.flatMap(([i, j, text]) => [seg(p[i], p[j], { dash: 2, w: 1 }), ...(text ? [txt(mid(p[i], p[j]), text, { align: "center", bg: c.d.color, size: 12 })] : [])]),
+    ...letters(c, names, true),
   ];
 }
+
+// Giao điểm 2 đường thẳng (vô hạn) u1u2 và v1v2; song song thì null
+function intersect(u1: Pt, u2: Pt, v1: Pt, v2: Pt): Pt | null {
+  const d = (u1.x - u2.x) * (v1.y - v2.y) - (u1.y - u2.y) * (v1.x - v2.x);
+  if (Math.abs(d) < 1e-9) return null;
+  const t = ((u1.x - v1.x) * (v1.y - v2.y) - (u1.y - v1.y) * (v1.x - v2.x)) / d;
+  return { x: u1.x + t * (u2.x - u1.x), y: u1.y + t * (u2.y - u1.y) };
+}
+
+// XABCD và Cypher: tỉ lệ trên X–B, A–C, B–D, X–D (Cypher đo A–C theo XC/XA, X–D theo CD/XC)
+function harmonic(c: Ctx, cypher: boolean): Shape[] {
+  const [X, A, B, C, D] = c.d.points.map((q) => q.price);
+  return pattern(c, ["X", "A", "B", "C", "D"], [
+    [0, 2, ratioOf(B - A, A - X)],
+    [1, 3, cypher ? ratioOf(C - X, A - X) : ratioOf(C - B, B - A)],
+    [2, 4, ratioOf(D - C, C - B)],
+    [0, 4, cypher ? ratioOf(D - C, C - X) : ratioOf(D - A, A - X)],
+  ], [[0, 1, 2], [2, 3, 4]]);
+}
+
+// Head and shoulders như TV: đường cổ chấm qua 2 đáy, kéo tới chỗ cắt cạnh ngoài; tô vai trái, đầu, vai phải
+function headShoulders(c: Ctx): Shape[] {
+  const p = c.p;
+  const L = intersect(p[2], p[4], p[0], p[1]) ?? p[2], R = intersect(p[2], p[4], p[5], p[6]) ?? p[4];
+  const label = (i: number, text: string) => {
+    const neck = p[2].y + ((p[4].y - p[2].y) * (p[i].x - p[2].x)) / (p[4].x - p[2].x || 1);
+    return txt({ x: p[i].x, y: p[i].y + (p[i].y < neck ? -14 : 14) }, text, { align: "center", bg: c.d.color, size: 12 });
+  };
+  return [
+    ...[[L, p[1], p[2]], [p[2], p[3], p[4]], [p[4], p[5], R]].map((t) => poly(t, { closed: true, fill: 0.15, noStroke: true })),
+    poly(p),
+    seg(L, R, { dash: 2, w: 1 }),
+    label(1, "Left Shoulder"), label(3, "Head"), label(5, "Right Shoulder"),
+  ];
+}
+
+// Triangle pattern như TV: AC và BD kéo tới đỉnh hội tụ, đường chấm dọc tại A, tô tam giác đó
+function trianglePattern(c: Ctx): Shape[] {
+  const [a, b, cc, d] = c.p;
+  const apex = intersect(a, cc, b, d);
+  const out: Shape[] = [];
+  if (apex && apex.x > Math.max(a.x, b.x, cc.x, d.x)) {
+    const top = intersect(b, d, a, { x: a.x, y: a.y + 1 }) ?? b;
+    out.push(poly([a, top, apex], { closed: true, fill: 0.15, noStroke: true }), seg(a, apex, { dash: 2, w: 1 }), seg(top, apex, { dash: 2, w: 1 }), seg(a, top, { dash: 2, w: 1 }));
+  } else {
+    out.push(ray(a, cc, { dash: 2, w: 1 }), ray(b, d, { dash: 2, w: 1 }));
+  }
+  return [...out, poly(c.p), ...letters(c, ["A", "B", "C", "D"], true)];
+}
+
+// Elliott như TV: nhãn "(1)…" màu đường, không nền, điểm đầu không có nhãn
+const elliott = (names: string[]) => (c: Ctx): Shape[] => [poly(c.p), ...letters(c, ["", ...names.map((x) => `(${x})`)])];
 
 export const VP_DEFAULTS = {
   rows: 24, volume: "updown", va: 70, extend: false, width: 30, place: "left", values: false,
@@ -1175,62 +1234,69 @@ export const TOOLS: ToolSpec[] = [
   },
 
   // Patterns
-  { id: "xabcd", label: "XABCD pattern", n: 5, build: (c) => pattern(c, ["X", "A", "B", "C", "D"], [[0, 2], [2, 4], [1, 3], [0, 4]], [[0, 1, 2], [2, 3, 4]]) },
-  { id: "cypher", label: "Cypher pattern", n: 5, build: (c) => pattern(c, ["X", "A", "B", "C", "D"], [[0, 2], [2, 4], [1, 3], [0, 4]], [[0, 1, 2], [2, 3, 4]]) },
+  // Màu mặc định theo TV
+  { id: "xabcd", label: "XABCD pattern", n: 5, build: (c) => harmonic(c, false) },
+  { id: "cypher", label: "Cypher pattern", n: 5, build: (c) => harmonic(c, true) },
+  { id: "headshoulders", label: "Head and shoulders", n: 7, style: { color: "#089981" }, build: headShoulders },
   {
-    id: "headshoulders", label: "Head and shoulders", n: 7,
-    build: (c) => [
-      poly(c.p),
-      ray(c.p[2], c.p[4], { color: "#f23645" }),
-      txt({ x: c.p[1].x, y: c.p[1].y - 14 }, "Left Shoulder", { align: "center", size: 11 }),
-      txt({ x: c.p[3].x, y: c.p[3].y - 14 }, "Head", { align: "center", size: 11 }),
-      txt({ x: c.p[5].x, y: c.p[5].y - 14 }, "Right Shoulder", { align: "center", size: 11 }),
-    ],
+    id: "abcd", label: "ABCD pattern", n: 4, style: { color: "#089981" },
+    build: (c) => {
+      const [A, B, C, D] = c.d.points.map((q) => q.price);
+      return pattern(c, ["A", "B", "C", "D"], [[0, 2, ratioOf(C - B, B - A)], [1, 3, ratioOf(D - C, C - B)]]);
+    },
   },
-  { id: "abcd", label: "ABCD pattern", n: 4, build: (c) => pattern(c, ["A", "B", "C", "D"], [[0, 2], [1, 3]]) },
+  { id: "trianglepattern", label: "Triangle pattern", n: 4, style: { color: "#673ab7" }, build: trianglePattern },
   {
-    id: "trianglepattern", label: "Triangle pattern", n: 4,
-    build: (c) => [poly([c.p[0], c.p[2], c.p[3], c.p[1]], { closed: true, fill: 0.08, noStroke: true }), poly(c.p), ray(c.p[0], c.p[2], { w: 1 }), ray(c.p[1], c.p[3], { w: 1 }), ...letters(c, ["A", "B", "C", "D"])],
+    // TV: không có chữ, 2 đường chấm nối đỉnh drive kèm tỉ lệ mở rộng
+    id: "threedrives", label: "Three drives pattern", n: 7, style: { color: "#673ab7" },
+    build: (c) => {
+      const q = c.d.points.map((x) => x.price);
+      return pattern(c, [], [[1, 3, ratioOf(q[3] - q[2], q[1] - q[2], 2)], [3, 5, ratioOf(q[5] - q[4], q[3] - q[4], 2)]]);
+    },
   },
-  { id: "threedrives", label: "Three drives pattern", n: 7, build: (c) => [poly(c.p), ...letters(c, ["0", "1", "2", "3", "4", "5", "6"])] },
-  { id: "elliottimpulse", label: "Elliott impulse wave (1·2·3·4·5)", n: 6, build: (c) => [poly(c.p), ...letters(c, ["0", "1", "2", "3", "4", "5"], true)] },
-  { id: "elliottcorrection", label: "Elliott correction wave (A·B·C)", n: 4, build: (c) => [poly(c.p), ...letters(c, ["0", "A", "B", "C"], true)] },
-  { id: "elliotttriangle", label: "Elliott triangle wave (A·B·C·D·E)", n: 6, build: (c) => [poly(c.p), ...letters(c, ["0", "A", "B", "C", "D", "E"], true)] },
-  { id: "elliottdouble", label: "Elliott double combo wave (W·X·Y)", n: 4, build: (c) => [poly(c.p), ...letters(c, ["0", "W", "X", "Y"], true)] },
-  { id: "elliotttriple", label: "Elliott triple combo wave (W·X·Y·X·Z)", n: 6, build: (c) => [poly(c.p), ...letters(c, ["0", "W", "X", "Y", "X", "Z"], true)] },
+  { id: "elliottimpulse", label: "Elliott impulse wave (1·2·3·4·5)", n: 6, style: { color: "#3d85c6" }, build: elliott(["1", "2", "3", "4", "5"]) },
+  { id: "elliottcorrection", label: "Elliott correction wave (A·B·C)", n: 4, style: { color: "#3d85c6" }, build: elliott(["A", "B", "C"]) },
+  { id: "elliotttriangle", label: "Elliott triangle wave (A·B·C·D·E)", n: 6, style: { color: "#ff9800" }, build: elliott(["A", "B", "C", "D", "E"]) },
+  { id: "elliottdouble", label: "Elliott double combo wave (W·X·Y)", n: 4, style: { color: "#6aa84f" }, build: elliott(["W", "X", "Y"]) },
+  { id: "elliotttriple", label: "Elliott triple combo wave (W·X·Y·X·Z)", n: 6, style: { color: "#6aa84f" }, build: elliott(["W", "X", "Y", "X", "Z"]) },
   // Cycles
   {
-    id: "cyclic", label: "Cyclic lines", n: 2, style: { width: 1 },
+    // TV: chỉ lặp về bên phải điểm 1; đoạn chấm điểm 1 → điểm 2
+    id: "cyclic", label: "Cyclic lines", n: 2, style: { color: "#80ccdb" },
     build: (c) => {
-      const dx = Math.abs(c.p[1].x - c.p[0].x) || 1;
-      const out: Shape[] = [];
-      for (let k = Math.floor(-c.p[0].x / dx); k <= Math.ceil((c.w - c.p[0].x) / dx) && out.length < 400; k++) {
-        const x = c.p[0].x + k * dx;
+      const [a, b] = c.p;
+      const dx = Math.abs(b.x - a.x) || 1;
+      const out: Shape[] = [seg(a, { x: b.x, y: a.y }, { dash: 1, w: 1, color: "#787b86" })];
+      for (let k = Math.max(0, Math.floor(-a.x / dx)); k <= Math.ceil((c.w - a.x) / dx) && out.length < 400; k++) {
+        const x = a.x + k * dx;
         out.push(seg({ x, y: 0 }, { x, y: c.h }));
       }
       return out;
     },
   },
   {
-    id: "timecycles", label: "Time cycles", n: 2,
+    // TV: nửa đường tròn thật (đường kính = khoảng 2 điểm) lặp 2 phía, nền xanh lá 50%
+    id: "timecycles", label: "Time cycles", n: 2, style: { color: "#159980" }, options: [BG],
     build: (c) => {
       const [a, b] = c.p;
       const dx = Math.abs(b.x - a.x) || 1;
       const out: Shape[] = [];
-      for (let k = Math.floor(-a.x / dx); k <= Math.ceil((c.w - a.x) / dx) && out.length < 200; k++) {
-        const cx = a.x + (k + 0.5) * dx;
-        out.push(poly(arcPts({ x: cx, y: a.y }, dx / 2, Math.PI, Math.PI * 2).map((q) => ({ x: q.x, y: a.y + (q.y - a.y) * 0.6 })), { fill: 0.08 }));
+      for (let k = Math.floor(-a.x / dx); k <= Math.ceil((c.w - a.x) / dx) && out.length < 400; k++) {
+        const arc = arcPts({ x: a.x + (k + 0.5) * dx, y: a.y }, dx / 2, Math.PI, Math.PI * 2);
+        if (optOf(c.d, "background")) out.push(poly(arc, { closed: true, fill: 0.5, noStroke: true, color: "#6aa84f" }));
+        out.push(poly(arc));
       }
       return out;
     },
   },
   {
-    id: "sine", label: "Sine line", n: 2,
+    // TV: đỉnh/đáy tại 2 điểm, nửa chu kỳ = khoảng 2 điểm
+    id: "sine", label: "Sine line", n: 2, style: { color: "#159980" },
     build: (c) => {
       const [a, b] = c.p;
-      const dx = b.x - a.x || 1;
+      const dx = b.x - a.x || 1, m = (a.y + b.y) / 2;
       const pts: Pt[] = [];
-      for (let x = 0; x <= c.w; x += 3) pts.push({ x, y: a.y + (b.y - a.y) * Math.sin(((Math.PI / 2) * (x - a.x)) / dx) });
+      for (let x = 0; x <= c.w; x += 3) pts.push({ x, y: m + (a.y - m) * Math.cos((Math.PI * (x - a.x)) / dx) });
       return [poly(pts)];
     },
   },
