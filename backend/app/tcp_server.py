@@ -50,7 +50,11 @@ def _handle_ticks(body: TicksIn) -> None:
 
 def _handle_bars(body: BarsIn) -> None:
     state.broker_offset["value"] = body.broker_utc_offset
-    state.bars.upsert(body.symbol, body.tf, [b.model_dump() for b in body.bars])
+    rows = [b.model_dump() for b in body.bars]
+    state.bars.upsert(body.symbol, body.tf, rows)
+    merged = state.aggregator.merge(body.symbol, body.tf, rows)
+    if merged:  # nến đang chạy vừa được sửa theo MT5 -> chart đổi ngay, khỏi chờ tick sau
+        state._on_update(body.symbol, body.tf, merged)
     if body.done or len(body.bars) > 0:
         state.hub.publish(body.symbol, body.tf, {"type": "bars_loaded", "symbol": body.symbol, "tf": body.tf})
 

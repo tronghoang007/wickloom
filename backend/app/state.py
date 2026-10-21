@@ -31,7 +31,21 @@ def _on_close(symbol: str, tf: str, bar: Dict[str, Any]) -> None:
     hub.publish(symbol, tf, {"type": "bar_close", "symbol": symbol, "tf": tf, "bar": bar})
 
 
-aggregator = Aggregator(bars.last, _on_update, _on_close)
+_seeding: Dict[tuple, float] = {}
+
+
+def _on_unseeded(symbol: str, tf: str) -> None:
+    """Nến đang gom bắt đầu giữa chừng -> xin EA 3 nến mới nhất của MT5 (gồm nến đang chạy)
+    cùng phần còn thiếu nếu cache cũ; chặn gửi lặp trong 5s."""
+    now = time.time()
+    if now - _seeding.get((symbol, tf), 0) < 5:
+        return
+    _seeding[(symbol, tf)] = now
+    request_backfill(symbol, tf, 3)
+    request_catchup(symbol, tf)
+
+
+aggregator = Aggregator(bars.last, _on_update, _on_close, _on_unseeded)
 
 
 class EaHub:

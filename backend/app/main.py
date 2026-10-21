@@ -113,3 +113,4 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         state.hub.clients.pop(ws, None)
+        _push_subscribe()  # symbol không còn ai xem thì EA thôi stream tick

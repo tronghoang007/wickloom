@@ -173,3 +173,28 @@ def test_symbols_replaced_not_merged():
     names = [s["name"] for s in TestClient(app).get("/symbols").json()]
     assert names == ["XAUUSD"]
     assert [r["id"] for r in state.meta.list("symbols")] == ["XAUUSD"]
+
+
+def test_midbar_start_requests_seed_and_merges_mt5_bar():
+    from app.aggregator import Aggregator
+
+    seeds, updates = [], []
+    agg = Aggregator(lambda s, tf: None, lambda s, tf, b: updates.append(b), lambda *_: None,
+                     lambda s, tf: seeds.append((s, tf)))
+    agg.watch("SEED", "M15")
+    agg.tick("SEED", (900 * 10 + 400) * 1000, 105.0, 1, 0)  # tick đầu tiên thấy được, giữa nến
+    assert ("SEED", "M15") in seeds and ("SEED", "M1") in seeds
+    agg.tick("SEED", (900 * 10 + 500) * 1000, 107.0, 1, 0)
+    merged = agg.merge("SEED", "M15", [{"t": 9000, "o": 100.0, "h": 110.0, "l": 99.0, "c": 104.0, "v": 800.0}])
+    assert merged == {"t": 9000, "o": 100.0, "h": 110.0, "l": 99.0, "c": 107.0, "v": 800.0}
+    assert agg.merge("SEED", "M15", [{"t": 8100, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}]) is None
+
+
+def test_tick_at_bar_start_does_not_request_seed():
+    from app.aggregator import Aggregator
+
+    seeds = []
+    agg = Aggregator(lambda s, tf: None, lambda *_: None, lambda *_: None, lambda s, tf: seeds.append(tf))
+    agg.watch("FRESH", "M15")
+    agg.tick("FRESH", 9000 * 1000, 100.0, 1, 0)  # đúng giây đầu của nến
+    assert seeds == []
