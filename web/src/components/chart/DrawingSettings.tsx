@@ -1,8 +1,9 @@
 "use client";
 
 import { useDrawingStore } from "@/drawings/store";
-import { POS_DEFAULTS, SPEC, VP_BY, VP_DEFAULTS } from "@/drawings/tools";
+import { encodeFibLevels, fibLevelsOf, optOf, POS_DEFAULTS, SPEC, VP_BY, VP_DEFAULTS, type FibLevel } from "@/drawings/tools";
 import type { Drawing } from "@/drawings/types";
+import { UNITS, type Unit } from "@/drawings/visibility";
 import { useState, type ReactNode } from "react";
 import { Close } from "../icons";
 
@@ -14,6 +15,28 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex items-center justify-between py-2">
       <span className="text-sm">{label}</span>
       {children}
+    </div>
+  );
+}
+
+// Bảng mức Fib như TV: 2 cột, mỗi mức có bật/tắt, hệ số, màu
+function FibLevels({ levels, onChange }: { levels: FibLevel[]; onChange: (lv: FibLevel[]) => void }) {
+  const set = (i: number, patch: Partial<FibLevel>) => onChange(levels.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  return (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-[var(--border)] pt-3">
+      {levels.map((l, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input type="checkbox" className="h-4 w-4" checked={l.on} onChange={(e) => set(i, { on: e.target.checked })} />
+          <input
+            className="w-20 rounded border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none focus:border-[var(--accent)]"
+            type="number"
+            step="0.001"
+            value={l.coeff}
+            onChange={(e) => e.target.value !== "" && Number.isFinite(Number(e.target.value)) && set(i, { coeff: Number(e.target.value) })}
+          />
+          <input type="color" value={l.color} onChange={(e) => set(i, { color: e.target.value })} className="h-7 w-9 cursor-pointer bg-transparent" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -30,7 +53,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
   const isPos = spec.panel === "position";
   const isVol = spec.panel === "volume";
   const [d, setD] = useState<Drawing>(() => structuredClone(init));
-  const [tab, setTab] = useState<"inputs" | "style" | "coords">(
+  const [tab, setTab] = useState<"inputs" | "style" | "coords" | "visibility">(
     isPos || isVol ? "inputs" : "style",
   );
   const [templateMenu, setTemplateMenu] = useState(false);
@@ -55,7 +78,16 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
     ...(isPos || isVol ? [["inputs", "Inputs"] as const] : []),
     ["style", "Style"] as const,
     ["coords", "Coordinates"] as const,
+    ["visibility", "Visibility"] as const,
   ];
+  // Như tab Visibility của TV: mỗi đơn vị khung thời gian bật/tắt + khoảng từ–đến
+  const visRange = (u: Unit, max: number) => d.visibility?.[u] ?? { on: true, from: 1, to: max };
+  const setVis = (u: Unit, max: number, patch: Partial<{ on: boolean; from: number; to: number }>) => {
+    const r = { ...visRange(u, max), ...patch };
+    r.from = Math.max(1, Math.min(max, r.from));
+    r.to = Math.max(r.from, Math.min(max, r.to));
+    setD({ ...d, visibility: { ...d.visibility, [u]: r } });
+  };
   const check = (label: string, key: string, color?: string) => (
     <Row label={label}>
       <span className="flex items-center gap-3">
@@ -379,6 +411,21 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   />
                 </Row>
               )}
+              {/* tùy chọn riêng của tool (spec.options), tên theo TV */}
+              {spec.options?.map((o) => (
+                <Row key={o.key} label={o.label}>
+                  {"choices" in o ? (
+                    <select className={input} value={String(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.value)}>
+                      {o.choices.map(([v, label]) => (
+                        <option key={v} value={v} className="text-black">{label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input type="checkbox" className="h-4 w-4" checked={Boolean(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.checked)} />
+                  )}
+                </Row>
+              ))}
+              {d.type === "fib" && <FibLevels levels={fibLevelsOf(d)} onChange={(lv) => setOpt("levels", encodeFibLevels(lv))} />}
             </>
           )}
 
@@ -414,6 +461,38 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                 </Row>
               </div>
             ))}
+
+          {tab === "visibility" &&
+            UNITS.map(({ id, label, max }) => {
+              const r = visRange(id, max);
+              return (
+                <div key={id} className="flex items-center gap-3 py-2">
+                  <label className="flex w-28 items-center gap-2 text-sm">
+                    <input type="checkbox" className="h-4 w-4" checked={r.on} onChange={(e) => setVis(id, max, { on: e.target.checked })} />
+                    {label}
+                  </label>
+                  <input
+                    className={`${input} w-20`}
+                    type="number"
+                    min={1}
+                    max={max}
+                    disabled={!r.on}
+                    value={r.from}
+                    onChange={(e) => setVis(id, max, { from: num(e.target.value, r.from) })}
+                  />
+                  <span className="text-[var(--muted)]">–</span>
+                  <input
+                    className={`${input} w-20`}
+                    type="number"
+                    min={1}
+                    max={max}
+                    disabled={!r.on}
+                    value={r.to}
+                    onChange={(e) => setVis(id, max, { to: num(e.target.value, r.to) })}
+                  />
+                </div>
+              );
+            })}
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--border)] px-5 py-3">

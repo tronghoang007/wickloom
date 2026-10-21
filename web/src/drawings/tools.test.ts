@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import type { Shape } from "./shapes";
-import { computeProfile, fibPrice, posConstrain, positionStats, SPEC, type Ctx } from "./tools";
+import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, posConstrain, positionStats, SPEC, type Ctx } from "./tools";
 import type { Anchor } from "./types";
 
 const T = 1_000_000;
@@ -216,5 +216,73 @@ describe("Rectangle 8 handle (như TV)", () => {
       { x: 0, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }, { x: 100, y: 0 },
       { x: 0, y: 25 }, { x: 100, y: 25 }, { x: 50, y: 0 }, { x: 50, y: 50 },
     ]);
+  });
+});
+
+describe("tùy chọn từng tool (mục 6)", () => {
+  const Y = (price: number) => 1000 - price;
+  const mk = (type: string, points: Anchor[], opts?: Record<string, string | number | boolean>): Ctx => ({
+    d: { id: "x", type, points, color: "#2962ff", width: 1, locked: false, hidden: false, opts },
+    p: points.map((a) => ({ x: a.time, y: Y(a.price) })),
+    w: 1000, h: 1000, bars: [], tickSize: 0.01, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0,
+    X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2,
+  });
+  const lines = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line");
+  const texts = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text");
+
+  it("mức Fib mã hóa / đọc lại được, mặc định 8 mức bật", () => {
+    expect(fibLevelsOf({ type: "fib" } as never).filter((l) => l.on).map((l) => l.coeff)).toEqual([0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618]);
+    const lv = [{ coeff: 0, color: "#ff9800", on: true }, { coeff: 0.705, color: "#2962ff", on: false }];
+    expect(fibLevelsOf({ type: "fib", opts: { levels: encodeFibLevels(lv) } } as never)).toEqual(lv);
+  });
+
+  it("Fib: chỉ vẽ mức bật; Reverse đảo đầu; tắt Prices thì nhãn chỉ còn hệ số; nhãn phải", () => {
+    const pts = [{ time: 100, price: 100 }, { time: 300, price: 200 }];
+    const levels = encodeFibLevels([{ coeff: 0, color: "#fff", on: true }, { coeff: 0.25, color: "#fff", on: true }, { coeff: 1, color: "#fff", on: false }]);
+    const base = SPEC.fib.build(mk("fib", pts, { levels }));
+    expect(texts(base).map((t) => t.text)).toEqual(["0 (200.00)", "0.25 (175.00)"]);
+    const rev = SPEC.fib.build(mk("fib", pts, { levels, reverse: true, showPrices: false, labels: "right" }));
+    expect(texts(rev).map((t) => t.text)).toEqual(["0", "0.25"]);
+    expect(lines(rev).map((l) => l.a.y)).toContain(Y(100)); // mức 0 giờ ở điểm 1
+    expect(texts(rev)[0].at.x).toBe(304);
+  });
+
+  it("Fib Extend right: đường mức chạy tới mép phải", () => {
+    const sh = SPEC.fib.build(mk("fib", [{ time: 100, price: 100 }, { time: 300, price: 200 }], { extend: "right" }));
+    expect(lines(sh)[0].b.x).toBe(1000);
+  });
+
+  it("Trend line: Extend left theo màn hình (đầu có x nhỏ), default của Ray/Extended", () => {
+    const pts = [{ time: 300, price: 100 }, { time: 100, price: 200 }]; // vẽ từ phải sang trái
+    const l = lines(SPEC.trendline.build(mk("trendline", pts, { extend: "left" })))[0];
+    expect(l.a.x).toBe(100);
+    expect(l.ext).toBe("left");
+    expect(lines(SPEC.ray.build(mk("ray", pts)))[0].ext).toBe("right");
+    expect(lines(SPEC.extended.build(mk("extended", pts)))[0].ext).toBe("both");
+  });
+
+  it("Trend line: Price labels, Middle point, Stats (Info line bật sẵn)", () => {
+    const pts = [{ time: 100, price: 100 }, { time: 300, price: 110 }];
+    expect(texts(SPEC.trendline.build(mk("trendline", pts)))).toEqual([]);
+    expect(texts(SPEC.trendline.build(mk("trendline", pts, { priceLabels: true }))).map((t) => t.text)).toEqual(["100.00", "110.00"]);
+    expect(texts(SPEC.infoline.build(mk("infoline", pts)))[0].text).toBe("10.00 (10.00%) 200 bars");
+    expect(SPEC.trendline.build(mk("trendline", pts, { middlePoint: true })).some((s) => s.k === "poly")).toBe(true);
+  });
+
+  it("Horizontal line/ray: Price label luôn hiện trên trục, tắt được", () => {
+    const pts = [{ time: 100, price: 150 }];
+    const ax = SPEC.hray.build(mk("hray", pts)).find((s) => s.k === "axis");
+    expect(ax).toMatchObject({ text: "150.00", always: true, bg: "#2962ff" });
+    expect(SPEC.hline.build(mk("hline", pts, { showPrice: false })).some((s) => s.k === "axis")).toBe(false);
+  });
+
+  it("Rectangle: Extend, Middle line, tắt Background", () => {
+    const pts = [{ time: 100, price: 100 }, { time: 300, price: 200 }];
+    const sh = SPEC.rect.build(mk("rect", pts, { extend: "both", middleLine: true, background: false }));
+    const box = sh[0] as Extract<Shape, { k: "poly" }>;
+    expect(box.pts.map((p) => p.x)).toEqual([0, 1000, 1000, 0]);
+    expect(box.fill).toBe(0);
+    expect(lines(sh)[0].a.y).toBe(Y(150));
   });
 });

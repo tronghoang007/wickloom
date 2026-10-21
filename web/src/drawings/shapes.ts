@@ -1,9 +1,10 @@
 import type { Drawing } from "./types";
 
 export type Pt = { x: number; y: number };
+export type Ext = "none" | "left" | "right" | "both"; // kéo dài đường qua đầu a (left) / đầu b (right)
 
 export type Shape =
-  | { k: "line"; a: Pt; b: Pt; ext?: "none" | "right" | "both"; dash?: 0 | 1 | 2; w?: number; color?: string }
+  | { k: "line"; a: Pt; b: Pt; ext?: Ext; dash?: 0 | 1 | 2; w?: number; color?: string }
   | {
       k: "poly";
       pts: Pt[];
@@ -15,7 +16,7 @@ export type Shape =
       alpha?: number;
       color?: string;
     }
-  | { k: "axis"; y: number; text: string; bg: string; color: string }
+  | { k: "axis"; y: number; text: string; bg: string; color: string; always?: boolean } // always: hiện cả khi không chọn
   | { k: "text"; at: Pt; text: string; size?: number; color?: string; bg?: string; border?: string; align?: "left" | "center" | "right" };
 
 const HIT = 6;
@@ -28,7 +29,7 @@ function lineEnds(s: Extract<Shape, { k: "line" }>): [Pt, Pt] {
   const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
   const len = Math.hypot(dx, dy) || 1;
   const ux = (dx / len) * BIG, uy = (dy / len) * BIG;
-  const a = s.ext === "both" ? { x: s.a.x - ux, y: s.a.y - uy } : s.a;
+  const a = s.ext === "both" || s.ext === "left" ? { x: s.a.x - ux, y: s.a.y - uy } : s.a;
   const b = s.ext === "right" || s.ext === "both" ? { x: s.b.x + ux, y: s.b.y + uy } : s.b;
   return [a, b];
 }

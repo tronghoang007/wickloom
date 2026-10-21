@@ -1,3 +1,5 @@
+import type { Visibility } from "./visibility";
+
 export type DrawingType = string;
 
 export type Anchor = { time: number; price: number };
@@ -14,4 +16,5 @@ export type Drawing = {
   opts?: Record<string, number | string | boolean>;
   locked: boolean;
   hidden: boolean;
+  visibility?: Visibility; // hiện theo khung thời gian; không có = mọi khung
 };

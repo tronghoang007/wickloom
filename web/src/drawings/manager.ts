@@ -15,6 +15,7 @@ import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } fr
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
 import { useDrawingStore, type MagnetMode } from "./store";
 import { DrawingSync } from "./sync";
+import { visibleOn } from "./visibility";
 import { GROUPS, SPEC, type Ctx, type OneClickView } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
 
@@ -114,13 +115,22 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.timeAxis = [];
     this.bands = { price: null, time: null };
     const st = useDrawingStore.getState();
+    if (st.hideAll || !this.series) return;
+    const v = this.view();
+    // Nhãn trục luôn hiện (vd "Price label" của Horizontal line/ray), kể cả hình không chọn
+    for (const x of this.drawings) {
+      if (x.id === st.selectedId || !this.shown(x)) continue;
+      for (const s of this.built(x, v)?.shapes ?? []) {
+        if (s.k === "axis" && s.always) this.axis.push({ coordinate: () => s.y, text: () => s.text, textColor: () => s.color, backColor: () => s.bg });
+      }
+    }
     const m = this.mode;
     const d = m.k === "drafting" ? { ...m.d, points: m.d.points.slice(0, m.placed + 1) } : this.selected();
-    if (!d || d.hidden || st.hideAll || !this.series) return;
+    if (!d || !this.shown(d)) return;
     const spec = SPEC[d.type];
     if (!spec) return;
     if (m.k !== "drafting") {
-      const b = this.built(d, this.view());
+      const b = this.built(d, v);
       for (const s of b?.shapes ?? []) {
         if (s.k === "axis") this.axis.push({ coordinate: () => s.y, text: () => s.text, textColor: () => s.color, backColor: () => s.bg });
       }
@@ -134,7 +144,8 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
         const y = this.series.priceToCoordinate(price);
         if (y === null) continue;
         ys.push(y);
-        this.axis.push(label(y, price.toFixed(digits)));
+        // đã có nhãn của chính hình ở đúng giá này (Price label) thì không chồng thêm
+        if (!this.axis.some((v) => Math.abs(v.coordinate() - y) < 0.5)) this.axis.push(label(y, price.toFixed(digits)));
       }
       if (ys.length > 1) this.bands.price = [Math.min(...ys), Math.max(...ys)];
     }
@@ -187,7 +198,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
           context.scale(hpr, vpr);
           const v = this.view();
           for (const d of this.drawings) {
-            if (d.hidden) continue;
+            if (!this.shown(d)) continue;
             const b = this.built(d, v);
             if (!b) continue;
             drawShapes(context, b.shapes, d, hpr);
@@ -388,6 +399,11 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     return b;
   }
 
+  // Ẩn tay (Hide) hoặc không hiện ở khung thời gian đang xem (Visibility)
+  private shown(d: Drawing) {
+    return !d.hidden && visibleOn(d.visibility, this.o.getTf());
+  }
+
   private handlePts(d: Drawing, c: Ctx): Pt[] {
     return SPEC[d.type].handles?.(c) ?? c.p.slice(0, d.points.length);
   }
@@ -412,7 +428,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (st.hideAll) return null;
     const v = this.view();
     const sel = this.selected();
-    if (sel && !sel.hidden) {
+    if (sel && this.shown(sel)) {
       const b = this.built(sel, v);
       const i = b ? this.handlePts(sel, b.c).findIndex((q) => Math.hypot(q.x - p.x, q.y - p.y) <= HANDLE_R) : -1;
       // handle riêng mà tool không định nghĩa cách kéo (hline, vline) = kéo cả hình
@@ -421,7 +437,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     }
     for (let i = this.drawings.length - 1; i >= 0; i--) {
       const d = this.drawings[i];
-      if (d.hidden) continue;
+      if (!this.shown(d)) continue;
       const b = this.built(d, v);
       if (b && hitShapes(b.shapes, p)) return { d, hit: { kind: "body" } };
     }
@@ -730,7 +746,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.refresh();
   }
 
-  update(patch: Partial<Pick<Drawing, "color" | "width" | "dash" | "textColor" | "locked" | "hidden" | "text">> & { opts?: Drawing["opts"] }) {
+  update(patch: Partial<Pick<Drawing, "color" | "width" | "dash" | "textColor" | "locked" | "hidden" | "text" | "visibility">> & { opts?: Drawing["opts"] }) {
     const d = this.selected();
     if (!d) return;
     this.pushUndo();

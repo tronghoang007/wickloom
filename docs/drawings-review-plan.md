@@ -168,3 +168,22 @@ Chưa làm / còn mở:
 - Position: chế độ rủi ro theo tiền (`riskDisplayMode money`), leverage, các info block bật/tắt — chưa có trong Settings.
 - FRVP: chưa kiểm số liệu (TV không cho xuất dữ liệu nến: "Data export is not supported").
 - Horizontal ray, trend line: khác biệt chủ yếu ở Settings (Stats, Price labels, Middle point...) — thuộc mục 6 phần 3.
+
+## 12. Mục 6–7 phần 3: tùy chọn từng tool + ẩn theo khung thời gian (2026-10-21)
+
+**Mục 7 – Visibility** (`visibility.ts`): mỗi drawing có `visibility?` theo đơn vị phút/giờ/ngày/tuần/tháng (bật/tắt + khoảng từ–đến) như tab Visibility của TV (bỏ tick/giây/range vì app không có). Không có = hiện mọi khung (dữ liệu cũ không đổi). Hình ẩn ở khung hiện tại thì không vẽ, không hit, không nhãn trục, không mini toolbar.
+- Dialog Settings: tab **Visibility**.
+- Mini toolbar → More: **Current interval and above / and below / only / All intervals**.
+- Kiểm: Horizontal ray "Current interval only" ở 15m → 1h ẩn, 15m hiện lại, lưu đúng lên server.
+
+**Mục 6 – tùy chọn từng tool** (`spec.options`, lưu trong `d.opts`, hiện ở tab Style; tên theo thuộc tính TV):
+| Tool | Tùy chọn |
+|---|---|
+| Trend line, Ray, Extended, Info line, Arrow (cùng 1 loại như TV, chỉ khác default) | Extend (none/left/right/both theo màn hình), Middle point, Price labels, Always show stats (Info line bật sẵn) |
+| Horizontal line / ray | Price label = nhãn giá trên trục **luôn hiện** (bỏ chữ giá vẽ trong chart của hline) |
+| Rectangle | Extend, Middle line, Background |
+| Fib retracement | Extend lines, Reverse, Levels, Prices, Labels trái/phải, Background, **bảng 24 mức** (bật/tắt, hệ số, màu; mặc định 8 mức 0…1.618 bật, 16 mức mở rộng tắt) |
+- Bấm Ok trong Settings lưu luôn làm mặc định cho lần vẽ sau (như TV) — kể cả bộ mức Fib.
+- Kiểm: bật 1.272 / tắt 0.786 → vẽ lại đúng; lưu `levels` dạng chuỗi `coeff|màu|1;…` (opts chỉ chứa giá trị đơn).
+
+Chưa có: Stats của TV là chọn nhiều mục (price range, %, pips, bars, date/time, distance, angle) — app gộp thành 1 bật/tắt; tab Text (cỡ chữ, B/I, căn lề); đầu mút mũi tên trái/phải; màu nền riêng của Rectangle; tùy chọn Position (risk theo tiền, leverage, info block); Gann (mục 11).

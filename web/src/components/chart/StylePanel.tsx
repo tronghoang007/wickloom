@@ -2,6 +2,8 @@
 
 import { useDrawingStore } from "@/drawings/store";
 import { POS_DEFAULTS, SPEC } from "@/drawings/tools";
+import { presetVisibility, visibleOn, type VisPreset } from "@/drawings/visibility";
+import { useChartStore } from "@/store/chart";
 import { useRef, useState, type ReactNode } from "react";
 import { Svg24 } from "../icons";
 
@@ -80,8 +82,10 @@ export default function StylePanel() {
     ox: number;
     oy: number;
   } | null>(null);
+  const tf = useChartStore((s) => s.tf);
   const d = drawings.find((x) => x.id === selectedId);
-  if (!d || !api || SPEC[d.type]?.ephemeral) return null; // Measure: không có toolbar như TV
+  // Measure: không có toolbar như TV; hình ẩn ở khung đang xem (Visibility) cũng không
+  if (!d || !api || SPEC[d.type]?.ephemeral || !visibleOn(d.visibility, tf)) return null;
 
   const dash = d.dash ?? 0;
   const isPos = SPEC[d.type]?.panel === "position";
@@ -90,7 +94,7 @@ export default function StylePanel() {
   const popup = (items: ReactNode) => (
     <>
       <div className="fixed inset-0 z-30" onClick={() => setMenu(null)} />
-      <div className="absolute left-0 top-9 z-40 min-w-28 rounded border border-[var(--border)] bg-[var(--bg)] py-1 shadow-xl">
+      <div className="absolute left-0 top-9 z-40 min-w-28 whitespace-nowrap rounded border border-[var(--border)] bg-[var(--bg)] py-1 shadow-xl">
         {items}
       </div>
     </>
@@ -349,6 +353,28 @@ export default function StylePanel() {
               >
                 Send to back
               </button>
+              {/* như menu "Visibility on intervals" của TV */}
+              <div className="mt-1 border-t border-[var(--border)] px-3 pb-1 pt-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
+                VISIBILITY ON INTERVALS
+              </div>
+              {([
+                ["above", "Current interval and above"],
+                ["below", "Current interval and below"],
+                ["only", "Current interval only"],
+                ["all", "All intervals"],
+              ] as [VisPreset, string][]).map(([preset, label]) => (
+                <button
+                  key={preset}
+                  className={item}
+                  onClick={() => {
+                    api.update({ visibility: presetVisibility(preset, useChartStore.getState().tf) });
+                    setMenu(null);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              <div className="mt-1 border-t border-[var(--border)]" />
               <button
                 className={item}
                 onClick={() => {

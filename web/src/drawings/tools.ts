@@ -1,5 +1,5 @@
 import type { Bar } from "@/lib/api";
-import type { Pt, Shape } from "./shapes";
+import type { Ext, Pt, Shape } from "./shapes";
 import type { Anchor, Drawing } from "./types";
 
 export type Ctx = {
@@ -48,7 +48,28 @@ export type ToolSpec = {
   shift?: "square"; // Shift khi vẽ: hình vuông / tròn trên màn hình (mặc định khóa góc 0/45/90°)
   action?: "zoom";
   disabled?: boolean;
+  options?: ToolOption[]; // tùy chọn riêng của tool (lưu trong d.opts), hiện ở tab Style của Settings
 };
+
+// Tùy chọn dạng bật/tắt hoặc chọn 1 trong danh sách, đặt tên theo thuộc tính của TV
+export type ToolOption =
+  | { key: string; label: string; def: boolean }
+  | { key: string; label: string; def: string; choices: [string, string][] };
+
+const EXTEND: [string, string][] = [["none", "Don't extend"], ["left", "Extend left"], ["right", "Extend right"], ["both", "Extend both"]];
+
+// Giá trị tùy chọn: d.opts, không có thì default của tool
+export function optOf(d: Drawing, key: string): number | string | boolean | undefined {
+  return d.opts?.[key] ?? SPEC[d.type]?.options?.find((o) => o.key === key)?.def;
+}
+
+// "Extend left/right" theo màn hình (TV): đầu trái là điểm có x nhỏ hơn
+function lineExt(c: Ctx, [a, b]: Pt[]): { a: Pt; b: Pt; ext: Ext } {
+  const e = String(optOf(c.d, "extend") ?? "none") as Ext;
+  const swap = a.x > b.x;
+  const [l, r] = swap ? [b, a] : [a, b];
+  return { a: l, b: r, ext: e };
+}
 
 // ---------- helpers ----------
 const mid = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -99,7 +120,6 @@ const head = (from: Pt, to: Pt, size: number, o: O = {}) => {
 };
 
 const FC = ["#787b86", "#f23645", "#ff9800", "#4caf50", "#089981", "#00bcd4", "#787b86", "#2962ff", "#9c27b0"];
-const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618];
 const pctStr = (a: number, b: number) => `${(((b - a) / a) * 100).toFixed(2)}%`;
 const pt = (c: Ctx, i: number) => c.d.points[i];
 
@@ -114,24 +134,53 @@ export const fibPrice = (pa: number, pb: number, lvl: number) => pb - (pb - pa) 
 // Giá tại tỉ lệ t đi từ pa tới pb
 const priceAt = (pa: number, pb: number, t: number) => pa + (pb - pa) * t;
 
+export type FibLevel = { coeff: number; color: string; on: boolean };
+
+// Bộ mức như TV: 0…1.618 bật, các mức mở rộng có sẵn nhưng tắt (bật trong Settings)
+export const FIB_LEVELS: FibLevel[] = [
+  ...[0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618].map((coeff, i) => ({ coeff, color: FC[i], on: true })),
+  ...([[2.618, "#f23645"], [3.618, "#9c27b0"], [4.236, "#e91e63"], [1.272, "#ff9800"], [1.414, "#f23645"], [2, "#089981"], [2.272, "#ff9800"], [2.414, "#4caf50"], [3, "#00bcd4"], [3.272, "#787b86"], [3.414, "#2962ff"], [4, "#f23645"], [4.272, "#9c27b0"], [4.414, "#e91e63"], [4.618, "#ff9800"], [4.764, "#089981"]] as [number, string][])
+    .map(([coeff, color]) => ({ coeff, color, on: false })),
+];
+
+// d.opts chỉ chứa giá trị đơn: mức lưu thành chuỗi "coeff|màu|1;..."
+export const encodeFibLevels = (lv: FibLevel[]) => lv.map((l) => `${l.coeff}|${l.color}|${l.on ? 1 : 0}`).join(";");
+export function fibLevelsOf(d: Drawing): FibLevel[] {
+  const raw = d.opts?.levels;
+  if (typeof raw !== "string" || !raw) return FIB_LEVELS;
+  return raw.split(";").map((x) => {
+    const [coeff, color, on] = x.split("|");
+    return { coeff: Number(coeff), color, on: on === "1" };
+  }).filter((l) => Number.isFinite(l.coeff));
+}
+
 // Mức tính theo giá rồi mới ra pixel: đúng cả khi trục giá log (nội suy pixel thì đường lệch
-// khỏi giá ghi trên nhãn).
-function lineLevels(c: Ctx, levels: number[], extend = false): Shape[] {
+// khỏi giá ghi trên nhãn). Tùy chọn như TV: extend, reverse, hiện hệ số / giá, nhãn trái/phải, nền.
+function fibRetracement(c: Ctx): Shape[] {
   const [a, b] = c.p;
-  const [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
-  const left = Math.min(a.x, b.x), right = extend ? c.w : Math.max(a.x, b.x);
+  const d = c.d;
+  let [pa, pb] = [pt(c, 0).price, pt(c, 1).price];
+  if (optOf(d, "reverse")) [pa, pb] = [pb, pa];
+  const ext = String(optOf(d, "extend"));
+  const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
+  const left = ext === "left" || ext === "both" ? 0 : x0, right = ext === "right" || ext === "both" ? c.w : x1;
+  const labelsRight = optOf(d, "labels") === "right";
+  const coeffs = optOf(d, "showCoeffs"), prices = optOf(d, "showPrices"), bg = optOf(d, "background");
+  const levels = fibLevelsOf(d).filter((l) => l.on).sort((p, q) => p.coeff - q.coeff);
   const out: Shape[] = [];
   let prev: number | null = null;
-  levels.forEach((lvl, i) => {
-    const price = fibPrice(pa, pb, lvl);
+  for (const lvl of levels) {
+    const price = fibPrice(pa, pb, lvl.coeff);
     const y = c.Y(price);
-    if (y === null) return;
-    const color = FC[i % FC.length];
-    if (prev !== null) out.push(poly([{ x: left, y: prev }, { x: right, y: prev }, { x: right, y }, { x: left, y }], { closed: true, fill: 0.07, noStroke: true, color }));
-    out.push(seg({ x: left, y }, { x: right, y }, { color, w: 1 }));
-    out.push(txt({ x: left - 4, y }, `${lvl} (${c.fp(price)})`, { size: 11, color, align: "right" })); // như TV: ngoài đầu trái, giữa dọc
+    if (y === null) continue;
+    const color = lvl.color;
+    if (bg && prev !== null) out.push(poly([{ x: left, y: prev }, { x: right, y: prev }, { x: right, y }, { x: left, y }], { closed: true, fill: 0.07, noStroke: true, color }));
+    out.push(seg({ x: left, y }, { x: right, y }, { color, w: c.d.width }));
+    const text = [coeffs ? String(lvl.coeff) : "", prices ? `(${c.fp(price)})` : ""].filter(Boolean).join(" ");
+    // như TV: nhãn ngoài đầu đường mức, canh giữa dọc
+    if (text) out.push(txt({ x: labelsRight ? right + 4 : left - 4, y }, text, { size: 11, color, align: labelsRight ? "left" : "right" }));
     prev = y;
-  });
+  }
   out.push(seg(a, b, { dash: 1, w: 1, color: "#787b86" }));
   return out;
 }
@@ -466,6 +515,49 @@ const moveRectHandle = (pts: Anchor[], i: number, q: Anchor): Anchor[] => {
   return [A, B];
 };
 
+function lineOptions(extend: Ext, stats: boolean): ToolOption[] {
+  return [
+    { key: "extend", label: "Extend", def: extend, choices: EXTEND },
+    { key: "middlePoint", label: "Middle point", def: false },
+    { key: "priceLabels", label: "Price labels", def: false },
+    { key: "stats", label: "Always show stats", def: stats },
+  ];
+}
+
+// Trend line và họ hàng: đường + (tùy chọn) điểm giữa, nhãn giá 2 đầu, thống kê như Info line
+function lineTool(c: Ctx): Shape[] {
+  const [pa, pb] = c.d.points;
+  const l = lineExt(c, c.p);
+  const out: Shape[] = [{ k: "line", ...l }];
+  const m = mid(c.p[0], c.p[1]);
+  if (optOf(c.d, "middlePoint")) out.push(poly(circle(m, 3, 12), { closed: true, fill: 1 }));
+  if (optOf(c.d, "priceLabels")) {
+    for (const [p, a] of [[c.p[0], pa], [c.p[1], pb]] as const) {
+      const above = p.y <= m.y;
+      out.push(txt({ x: p.x, y: p.y + (above ? -12 : 12) }, c.fp(a.price), { align: "center", size: 11 }));
+    }
+  }
+  if (optOf(c.d, "stats")) {
+    const bars = c.barsBetween(pa.time, pb.time);
+    out.push(txt(m, `${c.fp(pb.price - pa.price)} (${pctStr(pa.price, pb.price)}) ${bars} bars`, { align: "center", bg: c.d.color, size: 11 }));
+  }
+  return out;
+}
+
+// Như TV: nhãn giá trên trục giá luôn hiện (tùy chọn "Price label")
+const priceLabel = (c: Ctx): Shape[] =>
+  optOf(c.d, "showPrice") ? [{ k: "axis", y: c.p[0].y, text: c.fp(c.d.points[0].price), bg: c.d.color, color: axisText(c.d.color), always: true }] : [];
+
+function rectangle(c: Ctx): Shape[] {
+  const [a, b] = c.p;
+  const ext = String(optOf(c.d, "extend"));
+  const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
+  const left = ext === "left" || ext === "both" ? 0 : x0, right = ext === "right" || ext === "both" ? c.w : x1;
+  const out: Shape[] = [poly([{ x: left, y: a.y }, { x: right, y: a.y }, { x: right, y: b.y }, { x: left, y: b.y }], { closed: true, fill: optOf(c.d, "background") ? 0.15 : 0 })];
+  if (optOf(c.d, "middleLine")) out.push(seg({ x: left, y: (a.y + b.y) / 2 }, { x: right, y: (a.y + b.y) / 2 }, { dash: 1, w: 1 }));
+  return out;
+}
+
 const gannY = (c: Ctx) => (t: number) => c.Y(priceAt(pt(c, 0).price, pt(c, 1).price, t));
 
 const span = (c: Ctx) => ({ t0: Math.min(pt(c, 0).time, pt(c, 1).time), t1: Math.max(pt(c, 0).time, pt(c, 1).time) });
@@ -473,17 +565,11 @@ const span = (c: Ctx) => ({ t0: Math.min(pt(c, 0).time, pt(c, 1).time), t1: Math
 // ---------- catalog ----------
 export const TOOLS: ToolSpec[] = [
   // Lines
-  { id: "trendline", label: "Trend line", n: 2, build: (c) => [seg(c.p[0], c.p[1])] },
-  { id: "ray", label: "Ray", n: 2, build: (c) => [ray(c.p[0], c.p[1])] },
-  {
-    id: "infoline", label: "Info line", n: 2,
-    build: (c) => {
-      const [pa, pb] = c.d.points;
-      const bars = c.barsBetween(pa.time, pb.time);
-      return [seg(c.p[0], c.p[1]), txt(mid(c.p[0], c.p[1]), `${c.fp(pb.price - pa.price)} (${pctStr(pa.price, pb.price)}) ${bars} bars`, { align: "center", bg: c.d.color, size: 11 })];
-    },
-  },
-  { id: "extended", label: "Extended line", n: 2, build: (c) => [{ k: "line", a: c.p[0], b: c.p[1], ext: "both" } as Shape] },
+  // Như TV: trend line, ray, extended, info line, arrow là cùng 1 loại, chỉ khác default
+  { id: "trendline", label: "Trend line", n: 2, build: (c) => lineTool(c), options: lineOptions("none", false) },
+  { id: "ray", label: "Ray", n: 2, build: (c) => lineTool(c), options: lineOptions("right", false) },
+  { id: "infoline", label: "Info line", n: 2, build: (c) => lineTool(c), options: lineOptions("none", true) },
+  { id: "extended", label: "Extended line", n: 2, build: (c) => lineTool(c), options: lineOptions("both", false) },
   {
     id: "trendangle", label: "Trend angle", n: 2,
     build: (c) => {
@@ -493,11 +579,14 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
-    id: "hline", label: "Horizontal line", n: 1, axes: "price",
-    build: (c) => [seg({ x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y }), txt({ x: 6, y: c.p[0].y - 8 }, c.fp(c.d.points[0].price), { size: 11 })],
+    id: "hline", label: "Horizontal line", n: 1, axes: "price", options: [{ key: "showPrice", label: "Price label", def: true }],
+    build: (c) => [seg({ x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y }), ...priceLabel(c)],
     handles: (c) => [{ x: c.w / 2, y: c.p[0].y }],
   },
-  { id: "hray", label: "Horizontal ray", n: 1, build: (c) => [seg(c.p[0], { x: c.w, y: c.p[0].y })] },
+  {
+    id: "hray", label: "Horizontal ray", n: 1, options: [{ key: "showPrice", label: "Price label", def: true }],
+    build: (c) => [seg(c.p[0], { x: c.w, y: c.p[0].y }), ...priceLabel(c)],
+  },
   {
     id: "vline", label: "Vertical line", n: 1, axes: "time",
     build: (c) => [seg({ x: c.p[0].x, y: 0 }, { x: c.p[0].x, y: c.h })],
@@ -565,7 +654,17 @@ export const TOOLS: ToolSpec[] = [
   { id: "insidefork", label: "Inside pitchfork", n: 3, build: (c) => fork(c, 3) },
 
   // Fib
-  { id: "fib", label: "Fib retracement", n: 2, build: (c) => lineLevels(c, FIB), style: { width: 1 } },
+  {
+    id: "fib", label: "Fib retracement", n: 2, build: fibRetracement, style: { width: 1 },
+    options: [
+      { key: "extend", label: "Extend lines", def: "none", choices: EXTEND },
+      { key: "reverse", label: "Reverse", def: false },
+      { key: "showCoeffs", label: "Levels", def: true },
+      { key: "showPrices", label: "Prices", def: true },
+      { key: "labels", label: "Labels", def: "left", choices: [["left", "Left"], ["right", "Right"]] },
+      { key: "background", label: "Background", def: true },
+    ],
+  },
   {
     id: "fibext", label: "Trend-based fib extension", n: 3, style: { width: 1 },
     build: (c) => {
@@ -850,7 +949,7 @@ export const TOOLS: ToolSpec[] = [
       return [poly([a, add(hb, mul(n, 3)), add(hb, mul(n, 9)), b, sub(hb, mul(n, 9)), sub(hb, mul(n, 3))], { closed: true, fill: 1 })];
     },
   },
-  { id: "arrow", label: "Arrow", n: 2, build: (c) => [seg(c.p[0], c.p[1]), head(c.p[0], c.p[1], 10 + c.d.width * 2)] },
+  { id: "arrow", label: "Arrow", n: 2, build: (c) => [...lineTool(c), head(c.p[0], c.p[1], 10 + c.d.width * 2)], options: lineOptions("none", false) },
   {
     id: "arrowup", label: "Arrow mark up", n: 1, style: { color: "#089981" },
     build: (c) => {
@@ -867,8 +966,12 @@ export const TOOLS: ToolSpec[] = [
   },
   // Shapes
   {
-    id: "rect", label: "Rectangle", n: 2, shift: "square",
-    build: (c) => [poly([c.p[0], { x: c.p[1].x, y: c.p[0].y }, c.p[1], { x: c.p[0].x, y: c.p[1].y }], { closed: true, fill: 0.15 })],
+    id: "rect", label: "Rectangle", n: 2, shift: "square", build: rectangle,
+    options: [
+      { key: "extend", label: "Extend", def: "none", choices: EXTEND },
+      { key: "middleLine", label: "Middle line", def: false },
+      { key: "background", label: "Background", def: true },
+    ],
     handles: rectHandles,
     moveHandle: moveRectHandle,
   },
