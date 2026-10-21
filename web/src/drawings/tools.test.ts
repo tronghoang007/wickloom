@@ -266,7 +266,8 @@ describe("tùy chọn từng tool (mục 6)", () => {
     const pts = [{ time: 100, price: 100 }, { time: 300, price: 110 }];
     expect(texts(SPEC.trendline.build(mk("trendline", pts)))).toEqual([]);
     expect(texts(SPEC.trendline.build(mk("trendline", pts, { priceLabels: true }))).map((t) => t.text)).toEqual(["100.00", "110.00"]);
-    expect(texts(SPEC.infoline.build(mk("infoline", pts)))[0].text).toBe("10.00 (10.00%) 200 bars");
+    // Info line: mọi mục Stats bật như TV (giá, %, pip / số nến, thời gian / góc)
+    expect(texts(SPEC.infoline.build(mk("infoline", pts)))[0].text).toBe("10.00 (10.00%) 1,000 pips\n200 bars, 3m\n2.86°");
     expect(SPEC.trendline.build(mk("trendline", pts, { middlePoint: true })).some((s) => s.k === "poly")).toBe(true);
   });
 
@@ -280,9 +281,75 @@ describe("tùy chọn từng tool (mục 6)", () => {
   it("Rectangle: Extend, Middle line, tắt Background", () => {
     const pts = [{ time: 100, price: 100 }, { time: 300, price: 200 }];
     const sh = SPEC.rect.build(mk("rect", pts, { extend: "both", middleLine: true, background: false }));
-    const box = sh[0] as Extract<Shape, { k: "poly" }>;
-    expect(box.pts.map((p) => p.x)).toEqual([0, 1000, 1000, 0]);
-    expect(box.fill).toBe(0);
+    const polys = sh.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly");
+    expect(polys).toHaveLength(1); // chỉ còn viền
+    expect(polys[0].pts.map((p) => p.x)).toEqual([0, 1000, 1000, 0]);
+    expect(polys[0].fill).toBeUndefined();
     expect(lines(sh)[0].a.y).toBe(Y(150));
+    const filled = SPEC.rect.build(mk("rect", pts, { backgroundColor: "#ff0000" }));
+    expect(filled[0]).toMatchObject({ k: "poly", fill: 0.15, noStroke: true, color: "#ff0000" });
+  });
+});
+
+describe("tab Text, Stats, đầu mũi tên, rủi ro theo tiền", () => {
+  const Y = (price: number) => 1000 - price;
+  const mk = (type: string, points: Anchor[], opts?: Record<string, string | number | boolean>, text?: string): Ctx => ({
+    d: { id: "x", type, points, color: "#2962ff", width: 1, locked: false, hidden: false, opts, text },
+    p: points.map((a) => ({ x: a.time, y: Y(a.price) })),
+    w: 1000, h: 1000, bars: [], tickSize: 0.01, hovered: false, selected: false, step: 1,
+    barsBetween: (t0, t1) => t1 - t0,
+    X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2,
+  });
+  const texts = (sh: Shape[]) => sh.filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text");
+
+  it("chữ của trend line chạy dọc đường, mặc định phía trên, giữa, cỡ 14", () => {
+    const sh = SPEC.trendline.build(mk("trendline", [{ time: 100, price: 100 }, { time: 300, price: 300 }], undefined, "Breakout"));
+    const t = texts(sh)[0];
+    expect(t).toMatchObject({ text: "Breakout", size: 14, align: "center" });
+    expect(t.angle).toBeCloseTo(-Math.PI / 4, 9);
+    // phía trên đường: lệch về phía y nhỏ hơn so với trung điểm (200, 800)
+    expect(t.at.y).toBeLessThan(800);
+    expect(t.at.x).toBeLessThan(200);
+  });
+
+  it("chữ đậm/nghiêng/cỡ và căn trái theo đầu trái màn hình", () => {
+    const sh = SPEC.trendline.build(mk("trendline", [{ time: 300, price: 100 }, { time: 100, price: 100 }], { bold: true, italic: true, fontSize: 20, hAlign: "left", vAlign: "middle" }, "x"));
+    expect(texts(sh)[0]).toMatchObject({ bold: true, italic: true, size: 20, align: "left", at: { x: 100, y: Y(100) } });
+  });
+
+  it("Horizontal ray: chữ mặc định phía dưới đường (TV: Bottom / Center)", () => {
+    const t = texts(SPEC.hray.build(mk("hray", [{ time: 100, price: 100 }], undefined, "R1")))[0];
+    expect(t.at.y).toBeGreaterThan(Y(100));
+  });
+
+  it("Rectangle: chữ trong hộp theo căn lề", () => {
+    const t = texts(SPEC.rect.build(mk("rect", [{ time: 100, price: 100 }, { time: 300, price: 200 }], { vAlign: "top", hAlign: "right" }, "Zone")))[0];
+    expect(t.align).toBe("right");
+    expect(t.at.x).toBe(294);
+    expect(t.at.y).toBeLessThan(Y(150));
+  });
+
+  it("Arrow: mũi tên ở đầu phải (default), bật thêm đầu trái", () => {
+    const pts = [{ time: 100, price: 100 }, { time: 300, price: 100 }];
+    const heads = (sh: Shape[]) => sh.filter((s) => s.k === "poly" && s.fill === 1);
+    expect(heads(SPEC.arrow.build(mk("arrow", pts)))).toHaveLength(1);
+    expect(heads(SPEC.arrow.build(mk("arrow", pts, { leftEnd: "arrow" })))).toHaveLength(2);
+    expect(heads(SPEC.trendline.build(mk("trendline", pts)))).toHaveLength(0);
+  });
+
+  it("Stats của trend line: tắt sẵn; bật vài mục thì chỉ hiện khi chọn, trừ khi Always show stats", () => {
+    const pts = [{ time: 100, price: 100 }, { time: 300, price: 110 }];
+    expect(texts(SPEC.trendline.build(mk("trendline", pts)))).toHaveLength(0);
+    const opts = { showBars: true, showAngle: true };
+    expect(texts(SPEC.trendline.build(mk("trendline", pts, opts)))).toHaveLength(0);
+    const sel = { ...mk("trendline", pts, opts), selected: true };
+    expect(texts(SPEC.trendline.build(sel))[0].text).toBe("200 bars\n2.86°");
+    expect(texts(SPEC.trendline.build(mk("trendline", pts, { ...opts, alwaysShowStats: true })))).toHaveLength(1);
+  });
+
+  it("Position: rủi ro theo số tiền", () => {
+    const p = pos(100, 110, 95);
+    expect(positionStats([], p, true, { account: 1000, lot: 1, risk: 50, riskMode: "money" }).riskAmt).toBe(50);
+    expect(positionStats([], p, true, { account: 1000, lot: 1, risk: 5 }).riskAmt).toBe(50);
   });
 });

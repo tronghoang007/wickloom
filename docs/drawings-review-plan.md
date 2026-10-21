@@ -187,3 +187,16 @@ Chưa làm / còn mở:
 - Kiểm: bật 1.272 / tắt 0.786 → vẽ lại đúng; lưu `levels` dạng chuỗi `coeff|màu|1;…` (opts chỉ chứa giá trị đơn).
 
 Chưa có: Stats của TV là chọn nhiều mục (price range, %, pips, bars, date/time, distance, angle) — app gộp thành 1 bật/tắt; tab Text (cỡ chữ, B/I, căn lề); đầu mút mũi tên trái/phải; màu nền riêng của Rectangle; tùy chọn Position (risk theo tiền, leverage, info block); Gann (mục 11).
+
+## 13. Tab Text, Stats nhiều mục, đầu mũi tên, nền Rectangle, rủi ro theo tiền (2026-10-21)
+
+- **Tab Text** (tool có `spec.text`): màu, cỡ (10–40), B, I, textarea, căn lề dọc + ngang. Lưu `d.text` + opts `fontSize, bold, italic, vAlign, hAlign`.
+  - Họ trend line (trend line, ray, info line, extended, arrow): chữ **chạy dọc theo đường** (xoay theo góc), mặc định cỡ 14, Top / Center như TV; căn trái/phải theo đầu trái/phải màn hình.
+  - Horizontal line: cỡ 12, Top / Center. Horizontal ray: cỡ 12, **Bottom / Center** (theo tài liệu tham chiếu).
+  - Rectangle: chữ trong hộp, 3×3 vị trí, mặc định giữa.
+  - Chữ xoay: `shapes.ts` vẽ trong hệ tọa độ quay quanh `at`, hit-test quay ngược điểm click.
+- **Stats** của họ trend line giờ chọn nhiều mục như TV: Price range, Percent change, Change in pips, Bars range, Date/time range, Angle + Stats position (trái/giữa/phải) + Always show stats. Tắt "Always" thì chỉ hiện khi hover/chọn. Info line bật sẵn mọi mục, canh giữa (TV). Chưa có "Distance" (chưa rõ đơn vị TV dùng).
+- **Left end / Right end** (Normal/Arrow) cho cả họ trend line; Arrow = trend line có Right end = Arrow.
+- **Rectangle**: màu nền riêng (`backgroundColor`, trống = màu viền); nền và viền tách thành 2 shape.
+- **Position**: Risk theo `%` hoặc `$` (như TV `riskDisplayMode`).
+- Kiểm trên app: chữ "Trendline hỗ trợ" đậm, chạy dọc đường phía trên; Stats "22.755 / 44 bars" ở đầu phải. Đã trả prefs trình duyệt về như trước test.

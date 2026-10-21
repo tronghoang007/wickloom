@@ -49,18 +49,64 @@ export type ToolSpec = {
   action?: "zoom";
   disabled?: boolean;
   options?: ToolOption[]; // tùy chọn riêng của tool (lưu trong d.opts), hiện ở tab Style của Settings
+  text?: TextSpec; // có tab Text (d.text + opts fontSize, bold, italic, vAlign, hAlign)
 };
 
 // Tùy chọn dạng bật/tắt hoặc chọn 1 trong danh sách, đặt tên theo thuộc tính của TV
-export type ToolOption =
-  | { key: string; label: string; def: boolean }
-  | { key: string; label: string; def: string; choices: [string, string][] };
+export type ToolOption = { key: string; label: string; section?: string } & (
+  | { def: boolean }
+  | { def: string; choices: [string, string][] }
+  | { def: string; color: true } // "" = dùng màu đường
+);
+
+// Tab Text của TV: chữ chạy dọc đường (line), nằm trong hộp (box); kèm default cỡ chữ + căn lề
+export type TextSpec = { kind: "line" | "box"; size: number; v: "top" | "middle" | "bottom"; h: "left" | "center" | "right" };
 
 const EXTEND: [string, string][] = [["none", "Don't extend"], ["left", "Extend left"], ["right", "Extend right"], ["both", "Extend both"]];
 
 // Giá trị tùy chọn: d.opts, không có thì default của tool
 export function optOf(d: Drawing, key: string): number | string | boolean | undefined {
-  return d.opts?.[key] ?? SPEC[d.type]?.options?.find((o) => o.key === key)?.def;
+  const spec = SPEC[d.type];
+  const t = spec?.text;
+  const textDef = t && { fontSize: t.size, bold: false, italic: false, vAlign: t.v, hAlign: t.h }[key];
+  return d.opts?.[key] ?? spec?.options?.find((o) => o.key === key)?.def ?? textDef;
+}
+
+// Chữ của tab Text: cỡ, đậm, nghiêng, màu (mặc định màu đường)
+function textStyle(c: Ctx) {
+  return {
+    size: Number(optOf(c.d, "fontSize")) || 14,
+    bold: Boolean(optOf(c.d, "bold")),
+    italic: Boolean(optOf(c.d, "italic")),
+    color: c.d.textColor ?? c.d.color,
+  };
+}
+
+// Như TV: chữ của trend line chạy dọc theo đường (xoay theo góc), căn trái/giữa/phải theo đoạn
+// đang thấy; Top/Bottom = phía trên/dưới đường.
+function lineText(c: Ctx, a: Pt, b: Pt): Shape[] {
+  if (!c.d.text) return [];
+  const st = textStyle(c);
+  const v = optOf(c.d, "vAlign"), h = optOf(c.d, "hAlign");
+  const [l, r] = a.x <= b.x ? [a, b] : [b, a];
+  const ang = Math.atan2(r.y - l.y, r.x - l.x);
+  const up = { x: Math.sin(ang), y: -Math.cos(ang) };
+  const gap = (c.d.text.split("\n").length * st.size * 1.3) / 2 + 4;
+  const base = h === "left" ? l : h === "right" ? r : mid(l, r);
+  const at = v === "top" ? add(base, mul(up, gap)) : v === "bottom" ? sub(base, mul(up, gap)) : base;
+  return [txt(at, c.d.text, { ...st, align: h === "left" ? "left" : h === "right" ? "right" : "center", angle: ang || undefined })];
+}
+
+// Chữ trong hộp (rectangle): căn theo 3×3 vị trí bên trong
+function boxText(c: Ctx, x0: number, y0: number, x1: number, y1: number): Shape[] {
+  if (!c.d.text) return [];
+  const st = textStyle(c);
+  const v = optOf(c.d, "vAlign"), h = optOf(c.d, "hAlign");
+  const [top, bot] = [Math.min(y0, y1), Math.max(y0, y1)];
+  const half = (c.d.text.split("\n").length * st.size * 1.3) / 2;
+  const x = h === "left" ? x0 + 6 : h === "right" ? x1 - 6 : (x0 + x1) / 2;
+  const y = v === "top" ? top + half + 4 : v === "bottom" ? bot - half - 4 : (top + bot) / 2;
+  return [txt({ x, y }, c.d.text, { ...st, align: h === "left" ? "left" : h === "right" ? "right" : "center" })];
 }
 
 // "Extend left/right" theo màn hình (TV): đầu trái là điểm có x nhỏ hơn
@@ -380,7 +426,8 @@ function measure(c: Ctx): Shape[] {
   ];
 }
 
-export const POS_DEFAULTS = { account: 1000, lot: 1, risk: 2, profit: "#089981", stop: "#f23645", alpha: 0.2 };
+// riskMode như TV riskDisplayMode: risk là % tài khoản (percent) hay số tiền (money)
+export const POS_DEFAULTS = { account: 1000, lot: 1, risk: 2, riskMode: "percent", profit: "#089981", stop: "#f23645", alpha: 0.2 };
 
 // Số lẻ của bước giá (0.001 -> 3, 0.25 -> 2) và làm tròn giá theo bước đó
 const decimals = (x: number) => {
@@ -394,10 +441,10 @@ export const roundToTick = (v: number, tick: number) => +(Math.round(v / tick) *
 // trước (cùng nến thì tính stop) hay target trước; chưa chạm thì P&L theo giá đóng cửa.
 // Như TV: Qty làm tròn xuống; P&L ghi theo giá (pnlPts); số dư khi chạm target/stop =
 // tài khoản ± rủi ro × R.
-export function positionStats(bars: Bar[], points: Anchor[], long: boolean, o: Pick<typeof POS_DEFAULTS, "account" | "lot" | "risk">) {
+export function positionStats(bars: Bar[], points: Anchor[], long: boolean, o: Pick<typeof POS_DEFAULTS, "account" | "lot" | "risk"> & { riskMode?: string }) {
   const [pe, pT, pR, pS] = points;
   const dT = Math.abs(pT.price - pe.price), dS = Math.abs(pS.price - pe.price) || 1e-9;
-  const riskAmt = (o.account * o.risk) / 100;
+  const riskAmt = o.riskMode === "money" ? o.risk : (o.account * o.risk) / 100;
   const qtyRaw = riskAmt / (dS * o.lot);
   const qty = qtyRaw >= 1 ? Math.floor(qtyRaw) : Math.floor(qtyRaw * 100) / 100;
 
@@ -515,20 +562,54 @@ const moveRectHandle = (pts: Anchor[], i: number, q: Anchor): Anchor[] => {
   return [A, B];
 };
 
-function lineOptions(extend: Ext, stats: boolean): ToolOption[] {
+const END: [string, string][] = [["normal", "Normal"], ["arrow", "Arrow"]];
+
+// Như TV: Info line bật sẵn mọi mục Stats, canh giữa, luôn hiện; trend line thì tắt hết
+function lineOptions(extend: Ext, info: boolean, rightEnd = "normal"): ToolOption[] {
   return [
+    { key: "leftEnd", label: "Left end", def: "normal", choices: END },
+    { key: "rightEnd", label: "Right end", def: rightEnd, choices: END },
     { key: "extend", label: "Extend", def: extend, choices: EXTEND },
     { key: "middlePoint", label: "Middle point", def: false },
     { key: "priceLabels", label: "Price labels", def: false },
-    { key: "stats", label: "Always show stats", def: stats },
+    { key: "showPriceRange", label: "Price range", def: info, section: "STATS" },
+    { key: "showPercent", label: "Percent change", def: info, section: "STATS" },
+    { key: "showPips", label: "Change in pips", def: info, section: "STATS" },
+    { key: "showBars", label: "Bars range", def: info, section: "STATS" },
+    { key: "showDateTime", label: "Date/time range", def: info, section: "STATS" },
+    { key: "showAngle", label: "Angle", def: info, section: "STATS" },
+    { key: "statsPosition", label: "Stats position", def: info ? "center" : "right", choices: [["left", "Left"], ["center", "Center"], ["right", "Right"]], section: "STATS" },
+    { key: "alwaysShowStats", label: "Always show stats", def: info, section: "STATS" },
   ];
 }
 
-// Trend line và họ hàng: đường + (tùy chọn) điểm giữa, nhãn giá 2 đầu, thống kê như Info line
+const LINE_TEXT: TextSpec = { kind: "line", size: 14, v: "top", h: "center" };
+
+// Nội dung Stats theo các mục đã bật (mỗi nhóm 1 dòng)
+export function lineStats(c: Ctx): string {
+  const [pa, pb] = c.d.points;
+  const on = (k: string) => Boolean(optOf(c.d, k));
+  const d = pb.price - pa.price;
+  const price = [
+    on("showPriceRange") && c.fp(d),
+    on("showPercent") && `(${pctStr(pa.price, pb.price)})`,
+    on("showPips") && `${(pips(Math.abs(d), c.digits) * Math.sign(d)).toLocaleString(undefined, { maximumFractionDigits: 1 })} pips`,
+  ].filter(Boolean).join(" ");
+  const time = [on("showBars") && `${c.barsBetween(pa.time, pb.time)} bars`, on("showDateTime") && fmtDur(pb.time - pa.time)].filter(Boolean).join(", ");
+  const [a, b] = c.p;
+  const angle = on("showAngle") ? `${((-Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI).toFixed(2)}°` : "";
+  return [price, time, angle].filter(Boolean).join("\n");
+}
+
+// Trend line và họ hàng: đường + đầu mũi tên, điểm giữa, nhãn giá 2 đầu, Stats, chữ
 function lineTool(c: Ctx): Shape[] {
   const [pa, pb] = c.d.points;
   const l = lineExt(c, c.p);
   const out: Shape[] = [{ k: "line", ...l }];
+  // đầu trái/phải theo màn hình
+  const size = 10 + c.d.width * 2;
+  if (optOf(c.d, "leftEnd") === "arrow") out.push(head(l.b, l.a, size));
+  if (optOf(c.d, "rightEnd") === "arrow") out.push(head(l.a, l.b, size));
   const m = mid(c.p[0], c.p[1]);
   if (optOf(c.d, "middlePoint")) out.push(poly(circle(m, 3, 12), { closed: true, fill: 1 }));
   if (optOf(c.d, "priceLabels")) {
@@ -537,10 +618,14 @@ function lineTool(c: Ctx): Shape[] {
       out.push(txt({ x: p.x, y: p.y + (above ? -12 : 12) }, c.fp(a.price), { align: "center", size: 11 }));
     }
   }
-  if (optOf(c.d, "stats")) {
-    const bars = c.barsBetween(pa.time, pb.time);
-    out.push(txt(m, `${c.fp(pb.price - pa.price)} (${pctStr(pa.price, pb.price)}) ${bars} bars`, { align: "center", bg: c.d.color, size: 11 }));
+  const stats = lineStats(c);
+  if (stats && (optOf(c.d, "alwaysShowStats") || c.hovered || c.selected)) {
+    const pos = optOf(c.d, "statsPosition");
+    const at = pos === "left" ? l.a : pos === "right" ? l.b : m;
+    const dx = pos === "left" ? -8 : pos === "right" ? 8 : 0;
+    out.push(txt({ x: at.x + dx, y: at.y }, stats, { align: pos === "left" ? "right" : pos === "right" ? "left" : "center", bg: c.d.color, size: 11 }));
   }
+  out.push(...lineText(c, l.a, l.b));
   return out;
 }
 
@@ -553,8 +638,14 @@ function rectangle(c: Ctx): Shape[] {
   const ext = String(optOf(c.d, "extend"));
   const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
   const left = ext === "left" || ext === "both" ? 0 : x0, right = ext === "right" || ext === "both" ? c.w : x1;
-  const out: Shape[] = [poly([{ x: left, y: a.y }, { x: right, y: a.y }, { x: right, y: b.y }, { x: left, y: b.y }], { closed: true, fill: optOf(c.d, "background") ? 0.15 : 0 })];
+  const box = [{ x: left, y: a.y }, { x: right, y: a.y }, { x: right, y: b.y }, { x: left, y: b.y }];
+  const bg = String(optOf(c.d, "backgroundColor") || c.d.color);
+  const out: Shape[] = [];
+  // nền màu riêng (như TV "Background") rồi mới tới viền
+  if (optOf(c.d, "background")) out.push(poly(box, { closed: true, fill: 0.15, noStroke: true, color: bg }));
+  out.push(poly(box, { closed: true }));
   if (optOf(c.d, "middleLine")) out.push(seg({ x: left, y: (a.y + b.y) / 2 }, { x: right, y: (a.y + b.y) / 2 }, { dash: 1, w: 1 }));
+  out.push(...boxText(c, left, a.y, right, b.y));
   return out;
 }
 
@@ -566,10 +657,10 @@ const span = (c: Ctx) => ({ t0: Math.min(pt(c, 0).time, pt(c, 1).time), t1: Math
 export const TOOLS: ToolSpec[] = [
   // Lines
   // Như TV: trend line, ray, extended, info line, arrow là cùng 1 loại, chỉ khác default
-  { id: "trendline", label: "Trend line", n: 2, build: (c) => lineTool(c), options: lineOptions("none", false) },
-  { id: "ray", label: "Ray", n: 2, build: (c) => lineTool(c), options: lineOptions("right", false) },
-  { id: "infoline", label: "Info line", n: 2, build: (c) => lineTool(c), options: lineOptions("none", true) },
-  { id: "extended", label: "Extended line", n: 2, build: (c) => lineTool(c), options: lineOptions("both", false) },
+  { id: "trendline", label: "Trend line", n: 2, build: lineTool, options: lineOptions("none", false), text: LINE_TEXT },
+  { id: "ray", label: "Ray", n: 2, build: lineTool, options: lineOptions("right", false), text: LINE_TEXT },
+  { id: "infoline", label: "Info line", n: 2, build: lineTool, options: lineOptions("none", true), text: LINE_TEXT },
+  { id: "extended", label: "Extended line", n: 2, build: lineTool, options: lineOptions("both", false), text: LINE_TEXT },
   {
     id: "trendangle", label: "Trend angle", n: 2,
     build: (c) => {
@@ -580,12 +671,15 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     id: "hline", label: "Horizontal line", n: 1, axes: "price", options: [{ key: "showPrice", label: "Price label", def: true }],
-    build: (c) => [seg({ x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y }), ...priceLabel(c)],
+    text: { kind: "line", size: 12, v: "top", h: "center" },
+    build: (c) => [seg({ x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y }), ...priceLabel(c), ...lineText(c, { x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y })],
     handles: (c) => [{ x: c.w / 2, y: c.p[0].y }],
   },
   {
     id: "hray", label: "Horizontal ray", n: 1, options: [{ key: "showPrice", label: "Price label", def: true }],
-    build: (c) => [seg(c.p[0], { x: c.w, y: c.p[0].y }), ...priceLabel(c)],
+    // TV: Text alignment default Bottom / Center
+    text: { kind: "line", size: 12, v: "bottom", h: "center" },
+    build: (c) => [seg(c.p[0], { x: c.w, y: c.p[0].y }), ...priceLabel(c), ...lineText(c, c.p[0], { x: c.w, y: c.p[0].y })],
   },
   {
     id: "vline", label: "Vertical line", n: 1, axes: "time",
@@ -949,7 +1043,7 @@ export const TOOLS: ToolSpec[] = [
       return [poly([a, add(hb, mul(n, 3)), add(hb, mul(n, 9)), b, sub(hb, mul(n, 9)), sub(hb, mul(n, 3))], { closed: true, fill: 1 })];
     },
   },
-  { id: "arrow", label: "Arrow", n: 2, build: (c) => [...lineTool(c), head(c.p[0], c.p[1], 10 + c.d.width * 2)], options: lineOptions("none", false) },
+  { id: "arrow", label: "Arrow", n: 2, build: lineTool, options: lineOptions("none", false, "arrow"), text: LINE_TEXT },
   {
     id: "arrowup", label: "Arrow mark up", n: 1, style: { color: "#089981" },
     build: (c) => {
@@ -971,7 +1065,9 @@ export const TOOLS: ToolSpec[] = [
       { key: "extend", label: "Extend", def: "none", choices: EXTEND },
       { key: "middleLine", label: "Middle line", def: false },
       { key: "background", label: "Background", def: true },
+      { key: "backgroundColor", label: "Background color", def: "", color: true },
     ],
+    text: { kind: "box", size: 14, v: "middle", h: "center" },
     handles: rectHandles,
     moveHandle: moveRectHandle,
   },

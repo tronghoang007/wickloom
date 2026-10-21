@@ -17,7 +17,19 @@ export type Shape =
       color?: string;
     }
   | { k: "axis"; y: number; text: string; bg: string; color: string; always?: boolean } // always: hiện cả khi không chọn
-  | { k: "text"; at: Pt; text: string; size?: number; color?: string; bg?: string; border?: string; align?: "left" | "center" | "right" };
+  | {
+      k: "text";
+      at: Pt;
+      text: string;
+      size?: number;
+      color?: string;
+      bg?: string;
+      border?: string;
+      align?: "left" | "center" | "right";
+      bold?: boolean;
+      italic?: boolean;
+      angle?: number; // radian, xoay quanh at (chữ chạy dọc theo trend line như TV)
+    };
 
 const HIT = 6;
 const TEXT_PAD = 3; // dung sai click quanh hộp chữ
@@ -44,9 +56,11 @@ function textWidth(text: string, font: string, size: number) {
   return measurer.measureText(text).width;
 }
 
-export function textBox(s: Extract<Shape, { k: "text" }>) {
+type TextShape = Extract<Shape, { k: "text" }>;
+
+export function textBox(s: TextShape) {
   const size = s.size ?? 12;
-  const font = `${size}px sans-serif`;
+  const font = `${s.italic ? "italic " : ""}${s.bold ? "bold " : ""}${size}px sans-serif`;
   const lines = s.text.split("\n");
   const lh = size * 1.3;
   const w = Math.max(...lines.map((l) => textWidth(l, font, size)));
@@ -120,26 +134,32 @@ export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], d: Dr
         ctx.stroke();
       }
     } else if (s.k === "text") {
-      const b = textBox(s);
+      // chữ xoay: vẽ trong hệ tọa độ gốc tại at
+      const t = s.angle ? { ...s, at: { x: 0, y: 0 } } : s;
+      if (s.angle) {
+        ctx.translate(s.at.x, s.at.y);
+        ctx.rotate(s.angle);
+      }
+      const b = textBox(t);
       ctx.font = b.font;
-      if (s.bg) {
-        ctx.fillStyle = s.bg;
+      if (t.bg) {
+        ctx.fillStyle = t.bg;
         ctx.beginPath();
         ctx.roundRect(b.x, b.y, b.w, b.h, 4);
         ctx.fill();
       }
-      if (s.border) {
-        ctx.strokeStyle = s.border;
+      if (t.border) {
+        ctx.strokeStyle = t.border;
         ctx.lineWidth = 1;
         ctx.setLineDash([]);
         ctx.beginPath();
         ctx.roundRect(b.x, b.y, b.w, b.h, 4);
         ctx.stroke();
       }
-      ctx.fillStyle = s.color ?? (s.bg ? "#fff" : d.textColor ?? d.color);
+      ctx.fillStyle = t.color ?? (t.bg ? "#fff" : d.textColor ?? d.color);
       ctx.textBaseline = "middle";
-      ctx.textAlign = s.align === "center" ? "center" : "left";
-      const tx = s.align === "center" ? b.tx + b.tw / 2 : b.tx;
+      ctx.textAlign = t.align === "center" ? "center" : "left";
+      const tx = t.align === "center" ? b.tx + b.tw / 2 : b.tx;
       b.lines.forEach((line, i) => ctx.fillText(line, tx, b.top + b.lh * (i + 0.5)));
     }
     ctx.restore();
@@ -175,8 +195,14 @@ export function hitShapes(shapes: Shape[], p: Pt): boolean {
       }
       if (s.fill && s.closed && inPoly(p, s.pts)) return true;
     } else if (s.k === "text") {
-      const b = textBox(s);
-      if (p.x >= b.x - TEXT_PAD && p.x <= b.x + b.w + TEXT_PAD && p.y >= b.y - TEXT_PAD && p.y <= b.y + b.h + TEXT_PAD) return true;
+      // chữ xoay: đưa điểm click về hệ tọa độ của chữ
+      let q = p;
+      if (s.angle) {
+        const dx = p.x - s.at.x, dy = p.y - s.at.y, c = Math.cos(-s.angle), sn = Math.sin(-s.angle);
+        q = { x: dx * c - dy * sn, y: dx * sn + dy * c };
+      }
+      const b = textBox(s.angle ? { ...s, at: { x: 0, y: 0 } } : s);
+      if (q.x >= b.x - TEXT_PAD && q.x <= b.x + b.w + TEXT_PAD && q.y >= b.y - TEXT_PAD && q.y <= b.y + b.h + TEXT_PAD) return true;
     }
   }
   return false;

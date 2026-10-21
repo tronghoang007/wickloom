@@ -53,7 +53,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
   const isPos = spec.panel === "position";
   const isVol = spec.panel === "volume";
   const [d, setD] = useState<Drawing>(() => structuredClone(init));
-  const [tab, setTab] = useState<"inputs" | "style" | "coords" | "visibility">(
+  const [tab, setTab] = useState<"inputs" | "style" | "text" | "coords" | "visibility">(
     isPos || isVol ? "inputs" : "style",
   );
   const [templateMenu, setTemplateMenu] = useState(false);
@@ -77,6 +77,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
   const tabs = [
     ...(isPos || isVol ? [["inputs", "Inputs"] as const] : []),
     ["style", "Style"] as const,
+    ...(spec.text ? [["text", "Text"] as const] : []),
     ["coords", "Coordinates"] as const,
     ["visibility", "Visibility"] as const,
   ];
@@ -258,14 +259,21 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   onChange={(e) => setOpt("lot", num(e.target.value, o.lot))}
                 />
               </Row>
-              <Row label="Risk (%)">
-                <input
-                  className={input}
-                  type="number"
-                  step="0.1"
-                  value={o.risk}
-                  onChange={(e) => setOpt("risk", num(e.target.value, o.risk))}
-                />
+              <Row label="Risk">
+                <span className="flex items-center gap-2">
+                  <input
+                    className={`${input} w-24`}
+                    type="number"
+                    step="0.1"
+                    value={o.risk}
+                    onChange={(e) => setOpt("risk", num(e.target.value, o.risk))}
+                  />
+                  {/* như TV: rủi ro theo % tài khoản hoặc theo số tiền */}
+                  <select className={`${input} w-20`} value={o.riskMode} onChange={(e) => setOpt("riskMode", e.target.value)}>
+                    <option value="percent" className="text-black">%</option>
+                    <option value="money" className="text-black">$</option>
+                  </select>
+                </span>
               </Row>
               <Row label="Entry price">
                 <input
@@ -394,15 +402,17 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   </option>
                 </select>
               </Row>
-              <Row label="Text color">
-                <input
-                  type="color"
-                  value={d.textColor ?? d.color}
-                  onChange={(e) => setD({ ...d, textColor: e.target.value })}
-                  className="h-8 w-14 cursor-pointer bg-transparent"
-                />
-              </Row>
-              {(spec.prompt || d.text !== undefined) && (
+              {!spec.text && (
+                <Row label="Text color">
+                  <input
+                    type="color"
+                    value={d.textColor ?? d.color}
+                    onChange={(e) => setD({ ...d, textColor: e.target.value })}
+                    className="h-8 w-14 cursor-pointer bg-transparent"
+                  />
+                </Row>
+              )}
+              {!spec.text && (spec.prompt || d.text !== undefined) && (
                 <Row label="Text">
                   <input
                     className={input}
@@ -412,9 +422,20 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                 </Row>
               )}
               {/* tùy chọn riêng của tool (spec.options), tên theo TV */}
-              {spec.options?.map((o) => (
-                <Row key={o.key} label={o.label}>
-                  {"choices" in o ? (
+              {spec.options?.map((o, i, all) => (
+                <div key={o.key}>
+                  {o.section && o.section !== all[i - 1]?.section && (
+                    <div className="pb-1 pt-3 text-[11px] font-semibold tracking-wide text-[var(--muted)]">{o.section}</div>
+                  )}
+                <Row label={o.label}>
+                  {"color" in o ? (
+                    <input
+                      type="color"
+                      value={String(optOf(d, o.key) || d.color).slice(0, 7)}
+                      onChange={(e) => setOpt(o.key, e.target.value)}
+                      className="h-8 w-14 cursor-pointer bg-transparent"
+                    />
+                  ) : "choices" in o ? (
                     <select className={input} value={String(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.value)}>
                       {o.choices.map(([v, label]) => (
                         <option key={v} value={v} className="text-black">{label}</option>
@@ -424,8 +445,60 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                     <input type="checkbox" className="h-4 w-4" checked={Boolean(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.checked)} />
                   )}
                 </Row>
+                </div>
               ))}
               {d.type === "fib" && <FibLevels levels={fibLevelsOf(d)} onChange={(lv) => setOpt("levels", encodeFibLevels(lv))} />}
+            </>
+          )}
+
+          {/* Tab Text như TV: (màu) <cỡ> B I · textarea · căn lề dọc / ngang */}
+          {tab === "text" && spec.text && (
+            <>
+              <div className="flex items-center gap-2 py-2">
+                <input
+                  type="color"
+                  value={(d.textColor ?? d.color).slice(0, 7)}
+                  onChange={(e) => setD({ ...d, textColor: e.target.value })}
+                  className="h-8 w-12 cursor-pointer bg-transparent"
+                />
+                <select className={`${input} w-20`} value={Number(optOf(d, "fontSize"))} onChange={(e) => setOpt("fontSize", Number(e.target.value))}>
+                  {[10, 11, 12, 14, 16, 20, 24, 28, 32, 40].map((v) => (
+                    <option key={v} value={v} className="text-black">{v}</option>
+                  ))}
+                </select>
+                {(["bold", "italic"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    className={`h-8 w-8 rounded border border-[var(--border)] text-sm ${optOf(d, k) ? "bg-[var(--fg)] text-[var(--bg)]" : ""}`}
+                    style={{ fontWeight: k === "bold" ? 700 : 400, fontStyle: k === "italic" ? "italic" : "normal" }}
+                    onClick={() => setOpt(k, !optOf(d, k))}
+                  >
+                    {k === "bold" ? "B" : "I"}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                className="w-full resize-y rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                rows={4}
+                placeholder="Add text"
+                value={d.text ?? ""}
+                onChange={(e) => setD({ ...d, text: e.target.value })}
+              />
+              <Row label="Text alignment">
+                <span className="flex gap-2">
+                  <select className={`${input} w-24`} value={String(optOf(d, "vAlign"))} onChange={(e) => setOpt("vAlign", e.target.value)}>
+                    {[["top", "Top"], ["middle", spec.text.kind === "box" ? "Middle" : "Center"], ["bottom", "Bottom"]].map(([v, l]) => (
+                      <option key={v} value={v} className="text-black">{l}</option>
+                    ))}
+                  </select>
+                  <select className={`${input} w-24`} value={String(optOf(d, "hAlign"))} onChange={(e) => setOpt("hAlign", e.target.value)}>
+                    {[["left", "Left"], ["center", "Center"], ["right", "Right"]].map(([v, l]) => (
+                      <option key={v} value={v} className="text-black">{l}</option>
+                    ))}
+                  </select>
+                </span>
+              </Row>
             </>
           )}
 
