@@ -20,27 +20,7 @@ const TITLES: Record<string, string> = {
   atr: "Average true range",
 };
 
-type Tab =
-  | "fav"
-  | "scripts"
-  | "purchased"
-  | "tech"
-  | "fund"
-  | "picks"
-  | "top"
-  | "trending"
-  | "market"
-  | "onchart";
-
-const EMPTY: Partial<Record<Tab, string>> = {
-  scripts: "Chưa có script. Pine editor sẽ thêm ở phase sau.",
-  purchased: "Không áp dụng (chạy local).",
-  fund: "Chưa hỗ trợ dữ liệu fundamentals.",
-  picks: "Không áp dụng (chạy local).",
-  top: "Không áp dụng (chạy local).",
-  trending: "Không áp dụng (chạy local).",
-  market: "Không áp dụng (chạy local).",
-};
+type Tab = "fav" | "tech" | "onchart";
 
 function Ico({ children }: { children: ReactNode }) {
   return <Svg>{children}</Svg>;
@@ -62,26 +42,6 @@ const NAV: {
           </Ico>
         ),
       },
-      {
-        id: "scripts",
-        label: "My scripts",
-        icon: (
-          <Ico>
-            <circle cx="12" cy="8" r="4" />
-            <path d="M4 21c1-5 4-7 8-7s7 2 8 7" />
-          </Ico>
-        ),
-      },
-      {
-        id: "purchased",
-        label: "Purchased",
-        icon: (
-          <Ico>
-            <rect x="3" y="6" width="18" height="14" rx="2" />
-            <path d="M3 10h18M16 15h2" />
-          </Ico>
-        ),
-      },
     ],
   },
   {
@@ -96,60 +56,6 @@ const NAV: {
           </Ico>
         ),
       },
-      {
-        id: "fund",
-        label: "Fundamentals",
-        icon: (
-          <Ico>
-            <rect x="4" y="12" width="4" height="8" />
-            <rect x="10" y="8" width="4" height="12" />
-            <rect x="16" y="4" width="4" height="16" />
-          </Ico>
-        ),
-      },
-    ],
-  },
-  {
-    title: "COMMUNITY",
-    items: [
-      {
-        id: "picks",
-        label: "Editors' picks",
-        icon: (
-          <Ico>
-            <path d="M6 3h12v18l-6-4-6 4z" />
-          </Ico>
-        ),
-      },
-      {
-        id: "top",
-        label: "Top",
-        icon: (
-          <Ico>
-            <rect x="4" y="12" width="4" height="8" />
-            <rect x="10" y="8" width="4" height="12" />
-            <path d="M17 4l3 3-3 3" />
-          </Ico>
-        ),
-      },
-      {
-        id: "trending",
-        label: "Trending",
-        icon: (
-          <Ico>
-            <path d="M12 3c1 4 5 5 5 10a5 5 0 01-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-5 1-9z" />
-          </Ico>
-        ),
-      },
-      {
-        id: "market",
-        label: "Marketplace",
-        icon: (
-          <Ico>
-            <path d="M4 8h16l-1 12H5zM8 8V6a4 4 0 018 0v2" />
-          </Ico>
-        ),
-      },
     ],
   },
 ];
@@ -159,7 +65,8 @@ const field =
 
 function OnChart() {
   const { list, remove, update } = useIndicatorStore();
-  if (list.length === 0)
+  const volOn = useVolumeStore((s) => !s.s.removed);
+  if (list.length === 0 && !volOn)
     return (
       <div className="px-4 py-6 text-sm text-[var(--muted)]">
         Chưa có indicator nào trên chart.
@@ -167,6 +74,20 @@ function OnChart() {
     );
   return (
     <div className="space-y-2 p-3">
+      {/* Volume không nằm trong indicator store (có store riêng) nên liệt kê riêng */}
+      {volOn && (
+        <div className="rounded border border-[var(--border)] p-3">
+          <div className="flex items-center justify-between text-sm font-semibold">
+            {TITLES.volume}
+            <button
+              className="text-xs text-red-400"
+              onClick={() => useVolumeStore.getState().set({ removed: true })}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
       {list.map((inst) => {
         const def = byId(inst.id);
         return (
@@ -255,6 +176,7 @@ export default function IndicatorsDialog({
   const [tab, setTab] = useState<Tab>("fav");
   const [q, setQ] = useState("");
   const { list, favorites, add, toggleFavorite } = useIndicatorStore();
+  const volOn = useVolumeStore((s) => !s.s.removed);
 
   const query = q.trim().toLowerCase();
   const rows = INDICATORS.filter((d) => {
@@ -266,8 +188,9 @@ export default function IndicatorsDialog({
     if (tab === "fav") return favorites.includes(d.id);
     return tab === "tech";
   });
-  const count = (id: string) => list.filter((x) => x.id === id).length;
-  const showRows = query || tab === "fav" || tab === "tech";
+  const count = (id: string) =>
+    id === "volume" ? (volOn ? 1 : 0) : list.filter((x) => x.id === id).length;
+  const onChartTotal = list.length + (volOn ? 1 : 0);
 
   return (
     <>
@@ -341,7 +264,7 @@ export default function IndicatorsDialog({
                 >
                   On chart{" "}
                   <span className="text-xs text-[var(--muted)]">
-                    {list.length}
+                    {onChartTotal}
                   </span>
                 </button>
               </nav>
@@ -349,7 +272,7 @@ export default function IndicatorsDialog({
               <div className="min-w-0 flex-1 overflow-y-auto pr-3">
                 {tab === "onchart" && !query ? (
                   <OnChart />
-                ) : showRows ? (
+                ) : (
                   <>
                     <div className="grid grid-cols-[1fr_120px_80px] px-3 pb-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
                       <span className="pl-8">NAME</span>
@@ -401,10 +324,6 @@ export default function IndicatorsDialog({
                       </div>
                     ))}
                   </>
-                ) : (
-                  <div className="px-4 py-6 text-sm text-[var(--muted)]">
-                    {EMPTY[tab]}
-                  </div>
                 )}
               </div>
             </div>

@@ -54,7 +54,8 @@ type Fmt = { precision: number };
 // Màu nến/bar + nhãn giá cuối theo Settings (Symbol / Scales and lines).
 function seriesStyle(cs: ChartSettings, type: ChartType) {
   const label = {
-    lastValueVisible: cs.symbolLabel === "value_line" || cs.symbolLabel === "value",
+    // Nhãn giá cuối tự vẽ (xem effect "last price label") nên tắt nhãn của lightweight-charts.
+    lastValueVisible: false,
     priceLineVisible: cs.symbolLabel === "value_line" || cs.symbolLabel === "line",
   };
   if (type === "bars") return { ...label, upColor: cs.bodyUp, downColor: cs.bodyDown };
@@ -253,7 +254,9 @@ export default function Chart() {
   const legendCollapsed = useIndicatorStore((s) => s.collapsed);
   const [legend, setLegend] = useState<Legend | null>(null);
   const [countdown, setCountdown] = useState("");
-  const cdRef = useRef<HTMLDivElement>(null);
+  const lblRef = useRef<HTMLDivElement>(null);
+  const lblBoxRef = useRef<HTMLDivElement>(null);
+  const lblPriceRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState("");
   const [showLatestButton, setShowLatestButton] = useState(false);
   const [clock, setClock] = useState("");
@@ -1115,31 +1118,58 @@ export default function Chart() {
     refreshExtras();
   }, [indicators]);
 
-  // Đếm ngược đóng nến nằm ngay dưới nhãn giá cuối trên trục giá (như TradingView): theo
-  // sát giá khi kéo/zoom trục -> cập nhật vị trí mỗi frame, chỉ đụng style (không setState).
+  // Nhãn giá cuối trên trục giá như TradingView: khối liền (giá + đếm ngược đóng nến bên dưới),
+  // chữ canh trái. Thay hẳn nhãn của lightweight-charts (chữ canh giữa, không nối được với đếm
+  // ngược), nên series đặt lastValueVisible=false. Kích thước đo từ canvas TV: khối rộng
+  // = trục − 6 (cách mép trái 1px), chữ cách mép 9px, bo 3px bên phải, hàng giá cao fontSize+4,
+  // hàng đếm ngược fontSize+3. Theo sát giá khi kéo/zoom trục -> cập nhật mỗi frame, chỉ đụng
+  // style/textContent (không setState).
   useEffect(() => {
     let raf = 0;
     const frame = () => {
       raf = requestAnimationFrame(frame);
-      const el = cdRef.current;
+      const el = lblRef.current;
+      const box = lblBoxRef.current;
+      const txt = lblPriceRef.current;
       const chart = chartRef.current;
       const series = seriesRef.current;
       const bars = barsRef.current;
       const last = bars[bars.length - 1];
-      const y = el && series && last ? series.priceToCoordinate(last.c) : null;
-      if (!el || !chart || y === null || !last) {
+      const st = useSettingsStore.getState().s;
+      const shown = st.symbolLabel === "value_line" || st.symbolLabel === "value";
+      const y = shown && series && last ? series.priceToCoordinate(last.c) : null;
+      if (!el || !box || !txt || !chart || y === null || !last) {
         if (el) el.style.display = "none";
         return;
       }
-      const st = useSettingsStore.getState().s;
+      const scale = chart.priceScale("right");
       const up = isUp(last, bars[bars.length - 2]?.c, st);
-      const labelH = st.fontSize + 8; // chiều cao nhãn giá cuối của lightweight-charts
-      el.style.display = "flex";
-      el.style.width = `${chart.priceScale("right").width()}px`;
-      el.style.height = `${labelH}px`;
-      el.style.transform = `translateY(${Math.round(y + labelH / 2)}px)`;
-      el.style.background = up ? st.bodyUp : st.bodyDown;
-      el.style.fontSize = `${st.fontSize}px`;
+      const priceH = st.fontSize + 4;
+      const total = priceH + (box.childElementCount > 1 ? st.fontSize + 3 : 0);
+      const paneH = chart.paneSize(0).height;
+      let top = y - priceH / 2;
+      if (paneH > total) top = Math.min(Math.max(top, 0), paneH - total);
+
+      // Chế độ % của trục: nhãn là % so với giá đóng của nến đầu tiên đang thấy (như lightweight-charts).
+      let text: string;
+      if (useChartStore.getState().scaleMode === "percent") {
+        const from = Math.max(0, Math.ceil(chart.timeScale().getVisibleLogicalRange()?.from ?? 0));
+        const base = (bars[Math.min(from, bars.length - 1)] ?? last).c;
+        text = `${(((last.c - base) / Math.abs(base)) * 100).toFixed(2)}%`;
+      } else {
+        text = series!.priceFormatter().format(last.c);
+      }
+      if (txt.textContent !== text) txt.textContent = text;
+
+      el.style.display = "block";
+      el.style.width = `${scale.width()}px`;
+      el.style.transform = `translateY(${Math.round(top)}px)`;
+      box.style.width = `${scale.width() - 6}px`;
+      box.style.background = up ? st.bodyUp : st.bodyDown;
+      box.style.fontSize = `${st.fontSize}px`;
+      txt.style.height = `${priceH}px`;
+      const cd = box.children[1] as HTMLElement | undefined;
+      if (cd) cd.style.height = `${st.fontSize + 3}px`;
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
@@ -1374,14 +1404,20 @@ export default function Chart() {
           )}
           {status && <div className="mt-1 text-[var(--muted)]">{status}</div>}
         </div>
-        {cs.countdown && countdown && (cs.symbolLabel === "value_line" || cs.symbolLabel === "value") && (
+        <div ref={lblRef} className="pointer-events-none absolute right-0 top-0 z-10 hidden">
           <div
-            ref={cdRef}
-            className="pointer-events-none absolute right-0 top-0 z-10 hidden items-center justify-center text-white"
+            ref={lblBoxRef}
+            className="ml-px overflow-hidden whitespace-nowrap rounded-r-[3px] text-white"
           >
-            {countdown}
+            <div ref={lblPriceRef} className="flex items-center pl-2" />
+            {cs.countdown && countdown && (
+              // TV đặt số đếm ngược sát hàng giá hơn là canh giữa hàng của nó: kéo lên 2px cho khớp
+              <div className="flex items-center pl-2">
+                <span className="-translate-y-[2px]">{countdown}</span>
+              </div>
+            )}
           </div>
-        )}
+        </div>
         <FavoritesBar />
         <StylePanel />
         <InlineTextEditor />
@@ -1390,16 +1426,26 @@ export default function Chart() {
         {selecting && (
           <div
             className="absolute inset-y-0 left-0 z-30 cursor-pointer"
-            style={{ right: 70 }}
+            style={{ right: chartRef.current?.priceScale("right").width() ?? 70 }}
             onMouseMove={onSelectMove}
             onMouseLeave={() => setHover(null)}
             onClick={() => hover && startReplay(hover.idx)}
           >
             {hover && (
               <>
+                {/* Như TV (đo canvas): vùng sau thanh cắt phủ màu nền 70%, thanh dọc 2px #2962ff;
+                    cả hai chỉ ở các pane, không đè lên trục thời gian (nơi có nhãn "Re: ..."). */}
                 <div
-                  className="absolute inset-y-0 w-px bg-[#2962ff]"
-                  style={{ left: hover.x }}
+                  className="absolute right-0 top-0"
+                  style={{
+                    left: hover.x + 1,
+                    bottom: chartRef.current?.timeScale().height() ?? 0,
+                    background: `color-mix(in srgb, ${cs.bg ?? CHART_THEMES[theme].bg} 70%, transparent)`,
+                  }}
+                />
+                <div
+                  className="absolute top-0 w-[2px] bg-[#2962ff]"
+                  style={{ left: hover.x - 1, bottom: chartRef.current?.timeScale().height() ?? 0 }}
                 />
                 <svg
                   className="absolute text-[#2962ff]"

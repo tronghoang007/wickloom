@@ -83,7 +83,9 @@ export default function SymbolSearchDialog({
   onPick?: (name: string) => void;
 }) {
   const { symbol, symbols, set } = useChartStore();
-  const [q, setQ] = useState("");
+  // Như TV: mở từ nút symbol thì input đã có symbol hiện tại (bôi đen sẵn để gõ đè);
+  // dialog "thêm vào watchlist" (có onPick) không liên quan symbol đang xem nên để rỗng.
+  const [q, setQ] = useState(onPick ? "" : symbol);
   const [type, setType] = useState("all");
   const [sel, setSel] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
