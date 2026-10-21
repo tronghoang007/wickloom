@@ -111,8 +111,8 @@ Thiết kế đợt này chừa sẵn chỗ để thêm trade không phải đ�
 | 0 | Thử 2 cửa sổ MT5 chạy song song, whitelist socket, đo tài nguyên | Biết chắc hướng A khả thi hay không |
 | 1 | EA v2.10 (login/mode/balance) + backend multi-source + migration + `/accounts` + test trong `backend/tests` | 2 EA 2 account cùng đẩy data, không trộn bar; restart backend không mất cache |
 | 2 | Web: store account, avatar + popup, truyền `account` qua api/WS/Chart/Watchlist/SymbolSearch | Chuyển account trên avatar, chart + watchlist đổi đúng |
-| 3 | Hoàn thiện: watchlist theo account, xem cache khi offline, màu/tên tuỳ chỉnh, balance/equity | Dùng hằng ngày không vướng |
-| 4 | Trade (plan riêng) | — |
+| 3 | Phần trade cần: watchlist theo account, màu/tên tuỳ chỉnh, balance/equity. Xem cache khi offline để sau | Dùng hằng ngày không vướng |
+| 4 | Trade demo + real (plan riêng, ưu tiên ngay sau Phase 2 — xem mục 8) | — |
 
 ## 7. Rủi ro / câu hỏi mở
 
@@ -120,4 +120,24 @@ Thiết kế đợt này chừa sẵn chỗ để thêm trade không phải đ�
 - 2 account cùng server nhưng khác loại (Standard/Pro) có symbol khác nhau → symbols theo account là đúng, bar theo server là đúng.
 - Broker đóng kết nối khi 1 account đăng nhập ở 2 nơi: cửa sổ MT5 + app mobile cùng lúc có thể đá nhau (tuỳ broker).
 - Mỗi cửa sổ MT5 + tick stream của nhiều account làm backend nặng hơn; cần theo dõi CPU (từng có sự cố 94% CPU do tick history, xem `tvbridge-socket-gotchas`).
-- Bạn muốn dùng nhiều account để: xem giá nhiều broker, hay giữ vài demo/real để trade? (ảnh hưởng mức ưu tiên Phase 3–4)
+- ~~Dùng nhiều account để làm gì?~~ **Đã chốt (2026-10-21): giữ cả demo và real để trade**, không phải để xem giá nhiều broker. Hệ quả ở mục 8.
+
+## 8. Hệ quả của việc dùng demo + real để trade
+
+- **Trade là mục đích chính, không phải phần phụ**: Phase 4 được ưu tiên ngay sau Phase 2. Phase 3 chỉ giữ
+  phần trade cần (balance/equity, màu/tên account, watchlist theo account); "xem cache khi offline" để sau.
+- **Phân biệt demo/real làm ngay từ Phase 2**, không đợi tới lúc có trade: EA gửi `mode` từ Phase 1,
+  avatar viền đỏ/xanh, popup có nhãn Demo/Real. Mọi chỗ hiện account (ticket, danh sách lệnh) đều kèm nhãn này.
+- **Lệnh luôn gắn `account_id` tường minh** (account đang hiện trên ticket), không dùng "account đang chọn"
+  ngầm: bấm gửi lệnh đúng lúc đổi account thì lệnh vẫn đi đúng account ban đầu hoặc bị từ chối, không bao giờ
+  rơi sang account khác. Account đích offline → từ chối, không xếp hàng chờ.
+- **Real cần thêm lớp an toàn so với demo**: `TradingEnabled` ở EA real mặc định tắt và phải bật tay; ticket
+  real có xác nhận (hiện tên + login + lot + SL/TP); giới hạn lot/lỗ-ngày cấu hình riêng từng account (demo
+  thoáng hơn, real chặt).
+- **Không có "gửi 1 lệnh cho nhiều account"** (copy trade demo → real) ở đợt này: dễ đặt nhầm lên real. Nếu
+  sau này cần thì làm riêng, mặc định demo-only.
+- **Panel trade theo account**: vị trí đang mở, lệnh chờ, lịch sử, balance/equity của account đang chọn (TV có
+  panel "Paper Trading" ở đáy chart làm mẫu); đổi account thì panel đổi theo. Vị trí của account khác không
+  lẫn vào.
+- Plan trade chi tiết: `docs/trade-plan.md` (loại lệnh như MT5 + tự chuyển Limit/Stop, kéo SL/TP, set lot).
+  Còn thiếu: mức giới hạn lot/lỗ-ngày cho real.
