@@ -3,6 +3,7 @@
 import { DrawingManager } from "@/drawings/manager";
 import { AlertI, Chevron, ResetViewI, SettingsI, SkipToLatest } from "../icons";
 import { useDrawingStore } from "@/drawings/store";
+import { overridePoint } from "@/indicators/candleColors";
 import { IndicatorManager } from "@/indicators/manager";
 
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
@@ -126,7 +127,13 @@ function isUp(b: Bar, prevC: number | undefined, cs: ChartSettings) {
   return cs.colorByPrevClose && prevC !== undefined ? b.c >= prevC : b.c >= b.o;
 }
 
-function toPoint(b: Bar, type: ChartType, prevC?: number) {
+/** `color`: màu ghi đè của indicator Color Candles (nếu có) cho nến này. */
+function toPoint(b: Bar, type: ChartType, prevC?: number, color?: string) {
+  const p = basePoint(b, type, prevC);
+  return color ? overridePoint(p, type, color, useSettingsStore.getState().s.body) : p;
+}
+
+function basePoint(b: Bar, type: ChartType, prevC?: number) {
   const time = b.t as UTCTimestamp;
   if (type === "line" || type === "area") return { time, value: b.c };
   const point = { time, open: b.o, high: b.h, low: b.l, close: b.c };
@@ -264,6 +271,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const drawingCount = usePaneState(pane.draw, (s) => s.drawings.length);
   const indRef = useRef<IndicatorManager | null>(null);
+  const candleColorRef = useRef<Map<number, string> | null>(null); // màu nến do indicator Color Candles ghi đè, theo thời gian nến
   const drawRef = useRef<DrawingManager | null>(null);
   const indicators = usePaneState(pane.indicators, (s) => s.list);
   const removeIndicator = pane.indicators.getState().remove;
@@ -328,7 +336,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       barsRef.current = [...byTime.values()].sort((a, b) => a.t - b.t);
     }
     seriesRef.current?.setData(
-      display().map((b, i, a) => toPoint(b, typeRef.current, a[i - 1]?.c)) as never,
+      display().map((b, i, a) => toPoint(b, typeRef.current, a[i - 1]?.c, candleColorRef.current?.get(b.t))) as never,
     );
     renderVol();
     updateTitle();
@@ -454,7 +462,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       vis[old.length - 1]?.t === old[old.length - 1].t;
     if (incremental) {
       for (let i = old.length - 1; i < vis.length; i++) {
-        seriesRef.current?.update(toPoint(vis[i], typeRef.current, vis[i - 1]?.c) as never);
+        seriesRef.current?.update(toPoint(vis[i], typeRef.current, vis[i - 1]?.c, candleColorRef.current?.get(vis[i].t)) as never);
         updateVol(vis, i);
       }
     } else render();
@@ -641,7 +649,20 @@ export default function Chart({ paneId }: { paneId: string }) {
       .priceScale("vol")
       .applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-    indRef.current = new IndicatorManager(chart, () => setIndVer((n) => n + 1));
+    indRef.current = new IndicatorManager(
+      chart,
+      () => setIndVer((n) => n + 1),
+      (colors, from) => {
+        candleColorRef.current = colors;
+        const bars = display();
+        // from = null: dựng lại cả series; không thì chỉ vẽ lại các nến từ mốc đó (nến cuối đổi màu theo tick)
+        const start = from === null ? 0 : bars.findIndex((b) => b.t >= from);
+        if (start < 0) return;
+        const pts = bars.slice(start).map((b, k) => toPoint(b, typeRef.current, bars[start + k - 1]?.c, colors?.get(b.t)));
+        if (from === null) seriesRef.current?.setData(pts as never);
+        else for (const pt of pts) seriesRef.current?.update(pt as never);
+      },
+    );
     drawRef.current = new DrawingManager({
       pane,
       chart,
@@ -1184,7 +1205,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       else if (!last || last.t < b.t) arr.push(b);
       else return;
       if (typeRef.current === "heikin") render();
-      else seriesRef.current?.update(toPoint(b, typeRef.current, arr[arr.length - 2]?.c) as never);
+      else seriesRef.current?.update(toPoint(b, typeRef.current, arr[arr.length - 2]?.c, candleColorRef.current?.get(b.t)) as never);
       updateVol(arr, arr.length - 1);
       updateLines();
       refreshExtras();

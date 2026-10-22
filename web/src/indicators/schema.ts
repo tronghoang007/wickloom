@@ -48,6 +48,16 @@ export type FillDef = { id: string; title: string; between: [FillRef, FillRef]; 
 export type PlotData = { values: Num; colors?: string[]; candle?: { o: Num; h: Num; l: Num } };
 export type Computed = Record<string, PlotData>;
 
+// Lớp object kiểu Pine (line / label / box). Toạ độ x là chỉ số nến (có thể lẻ, âm, hoặc vượt nến cuối = vùng tương lai) trong
+// mảng `bars` của compute (đã gồm lịch sử nạp ngầm); y là giá. Mốc thời gian đổi sang chỉ số bằng `indexAtTime` (objects.ts).
+export type ObjLine = { x1: number; y1: number; x2: number; y2: number; color: string; width?: number; style?: LineStyleName; extend?: "none" | "left" | "right" | "both" };
+/** Vị trí bubble so với điểm neo, như `label.style_label_*` của Pine: up = bubble nằm dưới điểm, down = nằm trên, left = nằm bên phải, right = bên trái. */
+export type LabelStyle = "none" | "up" | "down" | "left" | "right" | "center";
+export type LabelSize = "tiny" | "small" | "normal" | "large" | "huge";
+export type ObjLabel = { x: number; y: number; text: string; color: string; bg?: string; style?: LabelStyle; size?: LabelSize };
+export type ObjBox = { x1: number; y1: number; x2: number; y2: number; bg?: string; border?: string; borderWidth?: number; borderStyle?: LineStyleName; extendRight?: boolean };
+export type ObjectSet = { lines: ObjLine[]; labels: ObjLabel[]; boxes: ObjBox[] };
+
 export type Ctx = {
   bars: Bar[]; // đã gồm cả lịch sử nạp ngầm phía trước (xem engine)
   inputs: Inputs; // đã điền mặc định + ép kiểu
@@ -70,6 +80,10 @@ export type IndicatorDef = {
   /** Cần mốc ngày của broker (VWAP, Pivot...): nạp thêm D1 để ranh giới phiên đúng qua DST. */
   needsCalendar?: boolean;
   compute: (ctx: Ctx) => Record<string, Num | PlotData>;
+  /** Line/label/box của indicator (SMC: BOS/CHoCH, order block, FVG...). Dựng bằng `ObjectBuilder` để có giới hạn 500/loại như Pine. */
+  objects?: (ctx: Ctx) => ObjectSet;
+  /** Ghi đè màu nến của chart chính (plotcandle "Color Candles"): mỗi nến một màu, "" = giữ màu mặc định. Dài đúng `bars.length`. */
+  candleColors?: (ctx: Ctx) => string[];
 };
 
 export const num = (inputs: Inputs, key: string): number => inputs[key] as number;

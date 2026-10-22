@@ -1,7 +1,8 @@
 import type { Bar } from "@/lib/api";
 import type { CalendarOpts } from "./calendar";
 import { resolveInputs, type IndicatorInstance } from "./instance";
-import type { Computed, IndicatorDef, PlotData } from "./schema";
+import { sanitizeObjects } from "./objects";
+import type { Computed, Ctx, IndicatorDef, ObjectSet, PlotData } from "./schema";
 import { nan, source, type Num } from "./ta";
 
 /** Dịch `a` sang phải `offset` phần tử (âm = sang trái); dương thì mảng dài thêm `offset` (vùng tương lai). Chỗ trống là `fill`. */
@@ -18,16 +19,21 @@ export function shiftBy<T>(a: T[], offset: number, fill: T): T[] {
 /** Mốc thời gian của `count` nến tương lai nối tiếp `last`, mỗi nến cách `step` giây (xấp xỉ: không nhảy cuối tuần/nghỉ). */
 export const futureTimes = (last: number, count: number, step: number): number[] => Array.from({ length: count }, (_, k) => last + (k + 1) * step);
 
-/** Tính mọi plot của 1 instance trên `bars` (đã gồm lịch sử nạp ngầm). Luôn trả đủ plot của def; mỗi plot dài bars.length, cộng thêm offset nếu offset dương. */
-export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts): Computed {
+function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts): Ctx {
   const memo = new Map<string, Num>();
   const src = (name: string) => {
     let s = memo.get(name);
     if (!s) memo.set(name, (s = source(bars, name)));
     return s;
   };
-  const inputs = resolveInputs(def, inst.inputs);
-  const raw = def.compute({ bars, inputs, src, calendar });
+  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar };
+}
+
+/** Tính mọi plot của 1 instance trên `bars` (đã gồm lịch sử nạp ngầm). Luôn trả đủ plot của def; mỗi plot dài bars.length, cộng thêm offset nếu offset dương. */
+export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts): Computed {
+  const ctx = makeCtx(def, inst, bars, calendar);
+  const { inputs } = ctx;
+  const raw = def.compute(ctx);
   const out: Computed = {};
   for (const p of def.plots) {
     const r = raw[p.id];
@@ -46,6 +52,17 @@ export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars
           };
   }
   return out;
+}
+
+/** Phần không phải chuỗi theo nến: object line/label/box và màu ghi đè nến chart chính (null = def không có / trả sai độ dài). */
+export type Extras = { objects: ObjectSet | null; candleColors: string[] | null };
+
+export function computeExtras(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts): Extras {
+  if (!def.objects && !def.candleColors) return { objects: null, candleColors: null };
+  const ctx = makeCtx(def, inst, bars, calendar);
+  const objects = def.objects ? sanitizeObjects(def.objects(ctx)) : null;
+  const colors = def.candleColors?.(ctx);
+  return { objects, candleColors: colors && colors.length === bars.length ? colors : null };
 }
 
 /** Bỏ `cut` nến đầu (lịch sử nạp ngầm): chỉ phần trùng với nến chart mới được vẽ, để trục thời gian của chart không đổi. */

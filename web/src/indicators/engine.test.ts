@@ -1,8 +1,9 @@
 import type { Bar } from "@/lib/api";
 import { describe, expect, it } from "vitest";
 import { INDICATORS, byId } from "./catalog";
-import { computeInstance, futureTimes, historyTarget, shiftBy, trimPlot } from "./engine";
+import { computeExtras, computeInstance, futureTimes, historyTarget, shiftBy, trimPlot } from "./engine";
 import { newInstance, type IndicatorInstance } from "./instance";
+import { ObjectBuilder } from "./objects";
 import type { IndicatorDef } from "./schema";
 import { plotStyle } from "./style";
 import * as ta from "./ta";
@@ -203,5 +204,40 @@ describe("plot candles", () => {
   it("kiểu candles cố định; có màu lên/xuống; volume format", () => {
     expect(plotStyle({ ...inst, style: { plots: { cvd: { type: "line" } } } }, candleDef.plots[0])).toMatchObject({ type: "candles", color: "#089981", colorDown: "#f23645" });
     expect(plotStyle(inst, { ...candleDef.plots[0], colorDown: undefined }).colorDown).toBe("#089981");
+  });
+});
+
+describe("computeExtras (object + màu nến)", () => {
+  const bars = mk(30);
+  const base: IndicatorDef = { id: "xtest", name: "X", title: "X", overlay: true, inputs: [], plots: [], warmup: () => 0, compute: () => ({}) };
+  const inst = newInstance("xtest");
+  const cal = { offset: 0 };
+
+  it("def không có object / màu nến: null cả hai", () => {
+    expect(computeExtras(base, inst, bars, cal)).toEqual({ objects: null, candleColors: null });
+  });
+
+  it("object dựng bằng ObjectBuilder, lọc toạ độ na", () => {
+    const def: IndicatorDef = {
+      ...base,
+      objects: ({ bars: b }) => {
+        const o = new ObjectBuilder();
+        o.line({ x1: 0, y1: b[0].h, x2: b.length - 1, y2: b[0].h, color: "#fff", extend: "right" });
+        o.label({ x: NaN, y: 1, text: "bad", color: "#fff" });
+        o.box({ x1: 2, y1: 5, x2: 9, y2: 1, bg: "#2962ff33" });
+        return o.set;
+      },
+    };
+    const { objects } = computeExtras(def, inst, bars, cal);
+    expect(objects!.lines).toHaveLength(1);
+    expect(objects!.labels).toHaveLength(0);
+    expect(objects!.boxes).toHaveLength(1);
+  });
+
+  it("màu nến: đúng độ dài thì giữ, sai độ dài thì bỏ (không ném lỗi)", () => {
+    const ok = computeExtras({ ...base, candleColors: ({ bars: b }) => b.map((x) => (x.c >= x.o ? "#089981" : "")) }, inst, bars, cal);
+    expect(ok.candleColors).toHaveLength(30);
+    const bad = computeExtras({ ...base, candleColors: () => ["#fff"] }, inst, bars, cal);
+    expect(bad.candleColors).toBeNull();
   });
 });

@@ -1,12 +1,15 @@
 import { TF_SECONDS, fetchBars, fetchBrokerOffset, type Bar } from "@/lib/api";
 import type { IChartApi, IPriceLine, ISeriesApi, SeriesType, UTCTimestamp } from "lightweight-charts";
 import { byId } from "./catalog";
+import { mergeCandleColors, planCandleColors } from "./candleColors";
 import { BarHistory, CalendarFeed, HISTORY_BARS } from "./data";
 import { planUpdate, type Snap } from "./diff";
-import { computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
+import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
 import { instanceShown, plotColor, showsPriceLabel, type IndicatorInstance } from "./instance";
 import { effectiveScale, paneIndices, paneKeyOf } from "./layout";
+import { trimObjects } from "./objects";
 import { FillPrimitive, type FillEdge } from "./render/fill";
+import { ObjectsPrimitive } from "./render/objects";
 import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions, scaleId } from "./render/series";
 import type { IndicatorDef, PlotData } from "./schema";
 import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
@@ -18,6 +21,8 @@ type Live = {
   anchor: ISeriesApi<SeriesType> | null; // giữ levels + fills
   lines: IPriceLine[]; // theo def.levels
   fills: FillPrimitive[]; // theo def.fills
+  objects: ObjectsPrimitive | null; // line/label/box của def.objects
+  candleColors: string[] | null; // màu ghi đè nến chart chính (đã cắt theo nến chart), null = không tô
   snaps: (Snap | null)[];
   data: PlotData[]; // giá trị đã tính (đã cắt theo nến chart) cho legend
   styleKey: string;
@@ -25,6 +30,9 @@ type Live = {
 };
 
 export type FeedKey = { symbol: string; tf: string };
+
+/** Màu ghi đè nến chart chính theo thời gian nến ("" / vắng = màu mặc định) và, nếu chỉ đổi phần cuối, nến đầu tiên cần vẽ lại; `from` null = vẽ lại tất cả. */
+export type CandleColorSink = (colors: Map<number, string> | null, from: number | null) => void;
 
 /** Giá trị 1 plot ở một nến, cho legend. Plot candles cho 4 giá trị (O, H, L, C), cùng `plot` = id plot. */
 export type PlotValue = { id: string; plot: string; title: string; value: number; color: string };
@@ -69,8 +77,10 @@ export class IndicatorManager {
     () => this.schedule(),
   );
 
-  /** `onSync`: báo sau mỗi lần tính lại để legend đọc giá trị mới. */
-  constructor(private chart: IChartApi, private onSync: () => void = () => {}) {}
+  private prevColors: string[] | null = null;
+
+  /** `onSync`: báo sau mỗi lần tính lại để legend đọc giá trị mới. `onCandleColors`: báo khi indicator (Color Candles) đổi màu nến chart. */
+  constructor(private chart: IChartApi, private onSync: () => void = () => {}, private onCandleColors: CandleColorSink = () => {}) {}
 
   // Tính lại tối đa ~4 lần/giây để realtime không tốn CPU
   update(list: IndicatorInstance[], bars: Bar[], feed: FeedKey) {
@@ -131,7 +141,7 @@ export class IndicatorManager {
       const paneIndex = indices[n];
       const sid = scaleId(effectiveScale(inst, def, keys[n]), inst.uid);
       const series = def.plots.map((p, k) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, k === 0 ? def.name : "", sid));
-      const hasAnchor = !!(def.levels?.length || def.fills?.length);
+      const hasAnchor = !!(def.levels?.length || def.fills?.length || def.objects);
       const anchor = hasAnchor ? addAnchorSeries(this.chart, paneIndex, sid) : null;
       if (sid === "left") this.chart.priceScale("left", paneIndex).applyOptions({ visible: true });
       else if (sid !== "right") this.chart.priceScale(sid, paneIndex).applyOptions({ visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } });
@@ -143,7 +153,12 @@ export class IndicatorManager {
         anchor!.attachPrimitive(prim);
         return prim;
       });
-      this.live.push({ inst, def, series, anchor, lines, fills, snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
+      let objects: ObjectsPrimitive | null = null;
+      if (def.objects) {
+        objects = new ObjectsPrimitive();
+        anchor!.attachPrimitive(objects);
+      }
+      this.live.push({ inst, def, series, anchor, lines, fills, objects, candleColors: null, snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
     });
   }
 
@@ -174,10 +189,11 @@ export class IndicatorManager {
     });
   }
 
-  private applyFills(l: Live) {
+  // LWC vẫn vẽ primitive của series đã ẩn, nên indicator ẩn / ngoài khung hiện thì phải xoá dữ liệu của fill và object
+  private applyFills(l: Live, shown: boolean) {
     const { inst, def } = l;
     (def.fills ?? []).forEach((f, k) => {
-      if (!fillShown(inst, def, f)) return l.fills[k].set(null);
+      if (!shown || !fillShown(inst, def, f)) return l.fills[k].set(null);
       const edge = (r: (typeof f.between)[number]): FillEdge => {
         if ("plot" in r) return l.data[def.plots.findIndex((p) => p.id === r.plot)]?.values ?? [];
         const lv = def.levels?.find((x) => x.id === r.level);
@@ -207,6 +223,7 @@ export class IndicatorManager {
       this.build();
     }
     if (this.live.length === 0 || this.bars.length === 0) {
+      this.pushCandleColors();
       this.onSync();
       return;
     }
@@ -244,8 +261,26 @@ export class IndicatorManager {
         l.anchor.setData(times.map((t) => ({ time: t as UTCTimestamp, value: 0 })) as never);
         l.anchorKey = anchorKey;
       }
-      this.applyFills(l);
+      const shown = instanceShown(l.inst, tf);
+      this.applyFills(l, shown);
+      if (l.objects || l.def.candleColors) {
+        const ex = shown ? computeExtras(l.def, l.inst, all, cal ?? { offset: 0 }) : { objects: null, candleColors: null };
+        l.objects?.set(ex.objects ? trimObjects(ex.objects, cut) : null);
+        l.candleColors = ex.candleColors ? ex.candleColors.slice(cut) : null;
+      }
     }
+    this.pushCandleColors();
     this.onSync();
+  }
+
+  // Color Candles: gộp màu của các indicator đang hiện rồi báo chart chính tô lại phần đã đổi
+  private pushCandleColors() {
+    const shown = this.live.filter((l) => instanceShown(l.inst, this.feed.tf));
+    const next = mergeCandleColors(shown.map((l) => l.candleColors));
+    const patch = planCandleColors(this.prevColors, next);
+    this.prevColors = next;
+    if (patch.kind === "none") return;
+    const map = next ? new Map(this.times.map((t, i) => [t, next[i] ?? ""] as const)) : null;
+    this.onCandleColors(map, patch.kind === "tail" ? this.times[patch.from] ?? null : null);
   }
 }
