@@ -6,10 +6,10 @@ describe("resolveInputs", () => {
   const sma = byId("sma");
 
   it("thiếu / sai kiểu -> mặc định; số nguyên được làm tròn và chặn min", () => {
-    expect(resolveInputs(sma, undefined)).toEqual({ length: 20, src: "close" });
-    expect(resolveInputs(sma, { length: "9", src: "nope" })).toEqual({ length: 20, src: "close" });
-    expect(resolveInputs(sma, { length: 9.6, src: "hl2" })).toEqual({ length: 10, src: "hl2" });
-    expect(resolveInputs(sma, { length: -5 })).toEqual({ length: 1, src: "close" });
+    expect(resolveInputs(sma, undefined)).toEqual({ length: 20, src: "close", offset: 0 });
+    expect(resolveInputs(sma, { length: "9", src: "nope" })).toEqual({ length: 20, src: "close", offset: 0 });
+    expect(resolveInputs(sma, { length: 9.6, src: "hl2" })).toEqual({ length: 10, src: "hl2", offset: 0 });
+    expect(resolveInputs(sma, { length: -5, offset: 9999 })).toEqual({ length: 1, src: "close", offset: 500 });
   });
 
   it("bool và select", () => {
@@ -81,6 +81,7 @@ describe("plotColor / withPlotColor / inputsText", () => {
 
   it("legend: giá trị đã điền mặc định, bool không hiện", () => {
     expect(inputsText(def, inst)).toBe("14 close");
+    expect(inputsText(byId("sma"), newInstance("sma"))).toBe("20 close 0");
     expect(inputsText(byId("vwap"), { ...newInstance("vwap"), inputs: { anchor: "Week" } })).toBe("Week hlc3");
   });
 });
@@ -125,5 +126,30 @@ describe("trạng thái hiển thị của instance", () => {
     expect(showsPriceLabel(inst, byId("sma"))).toBe(false);
     expect(showsPriceLabel(newInstance("rsi"), byId("rsi"))).toBe(true);
     expect(showsPriceLabel({ ...inst, priceLabel: true }, byId("sma"))).toBe(true);
+  });
+});
+
+describe("style đã lưu (nét, độ dày, kiểu, levels, fills)", () => {
+  it("đi vòng lưu/đọc", () => {
+    const a = {
+      ...newInstance("rsi"),
+      uid: "r",
+      style: {
+        plots: { rsi: { color: "#112233", width: 3, lineStyle: "dotted" as const, type: "step" as const } },
+        levels: { upper: { value: 80, color: "#ff0000", visible: false as const, width: 2, lineStyle: "solid" as const } },
+        fills: { band: { color: "#00ff0033", visible: false as const } },
+      },
+    };
+    expect(migrateInstance(JSON.parse(JSON.stringify(a)))).toEqual(a);
+  });
+
+  it("giá trị lạ bị bỏ; plot perBar không đổi được kiểu; level/fill không còn trong def bị bỏ", () => {
+    const m = migrateInstance({
+      uid: "m", id: "macd",
+      style: { plots: { hist: { type: "line", width: 9 }, macd: { type: "bogus", lineStyle: "wavy", width: 2 } }, levels: { zero: { value: 1 } }, fills: { x: { color: "#fff" } } },
+    });
+    expect(m?.style).toEqual({ plots: { macd: { width: 2 } } });
+    const r = migrateInstance({ uid: "r", id: "rsi", style: { levels: { upper: { value: "x", color: "red" }, nope: { value: 1 } } } });
+    expect(r?.style).toBeUndefined();
   });
 });

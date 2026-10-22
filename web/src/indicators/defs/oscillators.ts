@@ -6,7 +6,11 @@ export const rsi: IndicatorDef = {
   id: "rsi", name: "RSI", title: "Relative strength index", overlay: false,
   inputs: [length(14), SRC],
   plots: [{ id: "rsi", title: "RSI", type: "line", color: "#7e57c2" }],
-  levels: [30, 70],
+  levels: [
+    { id: "upper", title: "Upper Band", value: 70, color: "#787b86" },
+    { id: "lower", title: "Lower Band", value: 30, color: "#787b86" },
+  ],
+  fills: [{ id: "band", title: "Background", between: [{ level: "upper" }, { level: "lower" }], color: "#7e57c21a" }],
   warmup: (i) => warm(10, num(i, "length")),
   compute: ({ inputs, src }) => ({ rsi: ta.rsi(src(str(inputs, "src")), num(inputs, "length")) }),
 };
@@ -41,7 +45,11 @@ export const stoch: IndicatorDef = {
     { id: "k", title: "%K", type: "line", color: "#2962ff" },
     { id: "d", title: "%D", type: "line", color: "#ff6d00" },
   ],
-  levels: [20, 80],
+  levels: [
+    { id: "upper", title: "Upper Band", value: 80, color: "#787b86" },
+    { id: "lower", title: "Lower Band", value: 20, color: "#787b86" },
+  ],
+  fills: [{ id: "band", title: "Background", between: [{ level: "upper" }, { level: "lower" }], color: "#2196f31a" }],
   warmup: (i) => num(i, "k") + num(i, "smooth") + num(i, "d"),
   compute: ({ bars, inputs }) => {
     const hh = ta.highest(bars.map((x) => x.h), num(inputs, "k")), ll = ta.lowest(bars.map((x) => x.l), num(inputs, "k"));

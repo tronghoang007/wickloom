@@ -1,7 +1,7 @@
 import type { Bar } from "@/lib/api";
 import { describe, expect, it } from "vitest";
 import { INDICATORS, byId } from "./catalog";
-import { computeInstance, historyTarget, trimPlot } from "./engine";
+import { computeInstance, futureTimes, historyTarget, shiftBy, trimPlot } from "./engine";
 import { newInstance, type IndicatorInstance } from "./instance";
 import * as ta from "./ta";
 
@@ -116,5 +116,44 @@ describe("trimPlot / historyTarget", () => {
     const big = { ...newInstance("rsi"), inputs: { length: 900 } };
     expect(historyTarget(defs, [a, big], 500, 5000)).toBe(900 * 10 + 500);
     expect(historyTarget(defs, [], 500, 5000)).toBe(5000);
+  });
+});
+
+describe("offset", () => {
+  it("shiftBy: dương = sang phải và dài thêm, âm = sang trái giữ độ dài", () => {
+    expect(shiftBy([1, 2, 3], 0, NaN)).toEqual([1, 2, 3]);
+    expect(shiftBy([1, 2, 3], 2, NaN)).toEqual([NaN, NaN, 1, 2, 3]);
+    expect(shiftBy([1, 2, 3], -1, NaN)).toEqual([2, 3, NaN]);
+    expect(shiftBy(["a", "b"], 1, "")).toEqual(["", "a", "b"]);
+    expect(shiftBy([1, 2], -5, NaN)).toEqual([NaN, NaN]);
+  });
+
+  it("futureTimes nối tiếp theo bước khung", () => {
+    expect(futureTimes(1000, 3, 900)).toEqual([1900, 2800, 3700]);
+    expect(futureTimes(1000, 0, 900)).toEqual([]);
+  });
+
+  const bars = mk(60);
+  it("MA có offset: dài thêm offset nến, giá trị trễ đúng số nến", () => {
+    const base = run("sma", { length: 5 }, bars).sma.values;
+    const off = run("sma", { length: 5, offset: 3 }, bars).sma.values;
+    expect(off).toHaveLength(63);
+    expect(off[10 + 3]).toBeCloseTo(base[10], 9);
+    expect(off[62]).toBeCloseTo(base[59], 9);
+    expect(off[2]).toBeNaN();
+  });
+
+  it("offset âm: dịch sang trái, đuôi là na", () => {
+    const base = run("sma", { length: 5 }, bars).sma.values;
+    const off = run("sma", { length: 5, offset: -2 }, bars).sma.values;
+    expect(off).toHaveLength(60);
+    expect(off[10]).toBeCloseTo(base[12], 9);
+    expect(off[59]).toBeNaN();
+    expect(off[58]).toBeNaN();
+  });
+
+  it("trimPlot sau offset giữ phần tương lai", () => {
+    const off = run("ema", { length: 5, offset: 4 }, bars).ema;
+    expect(trimPlot(off, 20).values).toHaveLength(44);
   });
 });

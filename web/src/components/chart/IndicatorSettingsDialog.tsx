@@ -1,8 +1,9 @@
 "use client";
 
 import { byId } from "@/indicators/catalog";
-import { plotColor, plotShown, resolveInputs, showsPriceLabel, type IndicatorInstance } from "@/indicators/instance";
-import type { InputDef } from "@/indicators/schema";
+import { resolveInputs, showsPriceLabel, type IndicatorInstance } from "@/indicators/instance";
+import type { InputDef, LineStyleName, PlotType } from "@/indicators/schema";
+import { LINE_STYLES, PLOT_TYPES, WIDTHS, fillStyle, levelStyle, plotStyle } from "@/indicators/style";
 import { SOURCES } from "@/indicators/ta";
 import { useIndicatorStore } from "@/indicators/store";
 import { useRef } from "react";
@@ -41,6 +42,19 @@ function InputRow({ def, value, onChange }: { def: InputDef; value: number | str
   );
 }
 
+// Ô chọn gọn cho hàng style (kiểu nét / độ dày / kiểu plot)
+function Pick({ value, options, onChange, disabled }: { value: string; options: { id: string; label: string }[]; onChange: (v: string) => void; disabled?: boolean }) {
+  return (
+    <select className={`${field} h-7 px-1 text-[12px]`} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function Dialog({ uid }: { uid: string }) {
   const inst = useIndicatorStore((st) => st.list.find((i) => i.uid === uid));
   const update = useIndicatorStore((st) => st.update);
@@ -54,22 +68,18 @@ function Dialog({ uid }: { uid: string }) {
   if (!inst) return null; // đã bị gỡ (vd đổi layout) trong lúc mở
   const def = byId(inst.id);
   const inputs = resolveInputs(def, inst.inputs);
-  const setPlot = (id: string, patch: { color?: string; visible?: boolean }) =>
-    update(uid, {
-      style: {
-        ...inst.style,
-        plots: {
-          ...inst.style?.plots,
-          // bật lại plot thì bỏ khoá `visible` (mặc định = hiện) cho gọn dữ liệu lưu
-          [id]: Object.fromEntries(Object.entries({ ...inst.style?.plots?.[id], ...patch }).filter(([k, v]) => !(k === "visible" && v === true))),
-        },
-      },
-    });
+  // Đổi style của 1 plot / level / fill; bỏ field rỗng và `visible: true` (mặc định) cho gọn dữ liệu lưu
+  const setStyle = (group: "plots" | "levels" | "fills", id: string, patch: Record<string, unknown>) => {
+    const cur = (inst.style?.[group] ?? {}) as Record<string, Record<string, unknown>>;
+    const next = Object.fromEntries(Object.entries({ ...cur[id], ...patch }).filter(([k, v]) => v !== undefined && !(k === "visible" && v === true)));
+    update(uid, { style: { ...inst.style, [group]: { ...cur, [id]: next } } });
+  };
 
   return (
     <SettingsFrame
       title={def.name}
       label={`${def.name} settings`}
+      width={420}
       onCancel={cancel}
       onOk={close}
       // trả về mặc định nhưng giữ trạng thái ẩn
@@ -88,14 +98,65 @@ function Dialog({ uid }: { uid: string }) {
 
           {tab === "style" && (
             <>
-              {def.plots.map((p) => (
-                <div key={p.id} className="flex items-center justify-between">
-                  <Check label={p.title} checked={plotShown(inst, p.id)} onChange={(visible) => setPlot(p.id, { visible })} />
-                  {!p.perBar && (
-                    <ColorPicker value={plotColor(inst, def, p.id)} onChange={(color) => setPlot(p.id, { color })} className="h-7 w-12 p-1" />
-                  )}
-                </div>
-              ))}
+              {def.plots.map((p) => {
+                const st = plotStyle(inst, p);
+                const isLine = st.type !== "histogram";
+                return (
+                  <div key={p.id} className="flex items-center gap-1.5">
+                    <Check className="min-w-0 flex-1 whitespace-nowrap" label={p.title} checked={st.visible} onChange={(visible) => setStyle("plots", p.id, { visible })} />
+                    {!p.perBar && (
+                      <>
+                        <ColorPicker value={st.color} onChange={(color) => setStyle("plots", p.id, { color })} className="h-7 w-10 p-1" />
+                        <Pick value={st.lineStyle} disabled={!isLine} options={LINE_STYLES} onChange={(v) => setStyle("plots", p.id, { lineStyle: v as LineStyleName })} />
+                        <Pick value={String(st.width)} disabled={!isLine} options={WIDTHS.map((w) => ({ id: String(w), label: `${w}px` }))} onChange={(v) => setStyle("plots", p.id, { width: Number(v) })} />
+                        <Pick value={st.type} options={PLOT_TYPES} onChange={(v) => setStyle("plots", p.id, { type: v as PlotType })} />
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+
+              {def.levels && (
+                <>
+                  <Section>Levels</Section>
+                  {def.levels.map((l) => {
+                    const st = levelStyle(inst, l);
+                    return (
+                      <div key={l.id} className="flex items-center gap-1.5">
+                        <Check className="min-w-0 flex-1 whitespace-nowrap" label={l.title} checked={st.visible} onChange={(visible) => setStyle("levels", l.id, { visible })} />
+                        <input
+                          className={`${field} h-7 w-16`}
+                          type="number"
+                          step="any"
+                          value={st.value}
+                          onChange={(e) => {
+                            const n = num(e.target.value, NaN);
+                            if (Number.isFinite(n)) setStyle("levels", l.id, { value: n });
+                          }}
+                        />
+                        <ColorPicker value={st.color} onChange={(color) => setStyle("levels", l.id, { color })} className="h-7 w-10 p-1" />
+                        <Pick value={st.lineStyle} options={LINE_STYLES} onChange={(v) => setStyle("levels", l.id, { lineStyle: v as LineStyleName })} />
+                        <Pick value={String(st.width)} options={WIDTHS.map((w) => ({ id: String(w), label: `${w}px` }))} onChange={(v) => setStyle("levels", l.id, { width: Number(v) })} />
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
+              {def.fills && (
+                <>
+                  <Section>Background</Section>
+                  {def.fills.map((f) => {
+                    const st = fillStyle(inst, f);
+                    return (
+                      <div key={f.id} className="flex items-center justify-between">
+                        <Check label={f.title} checked={st.visible} onChange={(visible) => setStyle("fills", f.id, { visible })} />
+                        <ColorPicker value={st.color} onChange={(color) => setStyle("fills", f.id, { color })} className="h-7 w-10 p-1" />
+                      </div>
+                    );
+                  })}
+                </>
+              )}
 
               <Section>Output values</Section>
               <label className="flex items-center justify-between py-1.5">

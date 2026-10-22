@@ -82,10 +82,12 @@ export function SettingsFrame({
   onCancel,
   onOk,
   onReset,
+  width = 312,
   children,
 }: {
   title: string;
   label: string;
+  width?: number;
   onCancel: () => void;
   onOk: () => void;
   onReset: () => void;
@@ -105,7 +107,8 @@ export function SettingsFrame({
       <div
         role="dialog"
         aria-label={label}
-        className="flex max-h-[85vh] w-[min(312px,96vw)] flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[13px] text-[var(--fg)] shadow-2xl"
+        style={{ width: `min(${width}px, 96vw)` }}
+        className="flex max-h-[85vh] flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[13px] text-[var(--fg)] shadow-2xl"
       >
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <h2 className="text-lg font-semibold">{title}</h2>

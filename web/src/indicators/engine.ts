@@ -4,7 +4,21 @@ import { resolveInputs, type IndicatorInstance } from "./instance";
 import type { Computed, IndicatorDef, PlotData } from "./schema";
 import { nan, source, type Num } from "./ta";
 
-/** Tính mọi plot của 1 instance trên `bars` (đã gồm lịch sử nạp ngầm). Luôn trả đủ plot của def, mỗi plot dài đúng bars.length. */
+/** Dịch `a` sang phải `offset` phần tử (âm = sang trái); dương thì mảng dài thêm `offset` (vùng tương lai). Chỗ trống là `fill`. */
+export function shiftBy<T>(a: T[], offset: number, fill: T): T[] {
+  if (offset === 0) return a;
+  const out = new Array<T>(a.length + Math.max(0, offset)).fill(fill);
+  for (let i = 0; i < a.length; i++) {
+    const j = i + offset;
+    if (j >= 0 && j < out.length) out[j] = a[i];
+  }
+  return out;
+}
+
+/** Mốc thời gian của `count` nến tương lai nối tiếp `last`, mỗi nến cách `step` giây (xấp xỉ: không nhảy cuối tuần/nghỉ). */
+export const futureTimes = (last: number, count: number, step: number): number[] => Array.from({ length: count }, (_, k) => last + (k + 1) * step);
+
+/** Tính mọi plot của 1 instance trên `bars` (đã gồm lịch sử nạp ngầm). Luôn trả đủ plot của def; mỗi plot dài bars.length, cộng thêm offset nếu offset dương. */
 export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts): Computed {
   const memo = new Map<string, Num>();
   const src = (name: string) => {
@@ -12,12 +26,15 @@ export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars
     if (!s) memo.set(name, (s = source(bars, name)));
     return s;
   };
-  const raw = def.compute({ bars, inputs: resolveInputs(def, inst.inputs), src, calendar });
+  const inputs = resolveInputs(def, inst.inputs);
+  const raw = def.compute({ bars, inputs, src, calendar });
   const out: Computed = {};
   for (const p of def.plots) {
     const r = raw[p.id];
     const d: PlotData | undefined = Array.isArray(r) ? { values: r } : r;
-    out[p.id] = d && d.values.length === bars.length ? d : { values: nan(bars.length) };
+    const ok: PlotData = d && d.values.length === bars.length ? d : { values: nan(bars.length) };
+    const offset = p.offset ? Number(inputs[p.offset]) || 0 : 0;
+    out[p.id] = offset === 0 ? ok : { values: shiftBy(ok.values, offset, NaN), ...(ok.colors ? { colors: shiftBy(ok.colors, offset, "") } : {}) };
   }
   return out;
 }

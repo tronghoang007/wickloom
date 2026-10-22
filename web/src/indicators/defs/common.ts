@@ -10,3 +10,6 @@ export const length = (d: number, key = "length", label = "Length"): InputDef =>
 export const warm = (k: number, ...ns: number[]) => Math.ceil(k * Math.max(...ns));
 
 export const withColors = (values: Num, colors: string[]): PlotData => ({ values, colors });
+
+/** Offset của MA: dịch plot theo số nến (dương = sang phải, vào vùng tương lai). */
+export const offsetInput = (): InputDef => ({ key: "offset", label: "Offset", type: "int", default: 0, min: -500, max: 500 });

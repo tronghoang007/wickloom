@@ -1,11 +1,13 @@
 import { UNITS, visibleOn, type Visibility } from "@/drawings/visibility";
 import { findDef } from "./catalog";
-import type { IndicatorDef, InputDef, InputValue, Inputs } from "./schema";
+import type { IndicatorDef, InputDef, InputValue, Inputs, LineStyleName, PlotType } from "./schema";
 import { SOURCES } from "./ta";
 
 export const INSTANCE_V = 1;
 
-export type PlotStyle = { color?: string; visible?: boolean };
+export type PlotStyle = { color?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName; type?: PlotType };
+export type LevelStyle = { value?: number; color?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName };
+export type FillStyle = { color?: string; visible?: boolean };
 
 /** Một indicator đang dùng trên chart (lưu trong layout). Mọi field ngoài định danh chỉ chứa phần user đã đặt; còn lại theo def. */
 export type IndicatorInstance = {
@@ -13,7 +15,7 @@ export type IndicatorInstance = {
   uid: string;
   id: string;
   inputs: Inputs;
-  style?: { plots?: Record<string, PlotStyle> };
+  style?: { plots?: Record<string, PlotStyle>; levels?: Record<string, LevelStyle>; fills?: Record<string, FillStyle> };
   hidden?: boolean; // nút mắt
   visibility?: Visibility; // hiện theo khung thời gian
   precision?: number; // số chữ số của giá trị (không đặt = mặc định)
@@ -80,23 +82,14 @@ export function migrateInstance(raw: unknown): IndicatorInstance | null {
       if (v !== undefined) inputs[i.key] = v;
     }
 
-  const plots: Record<string, PlotStyle> = {};
-  const style = isRecord(raw.style) && isRecord(raw.style.plots) ? raw.style.plots : null;
-  def.plots.forEach((p, k) => {
-    const saved = style && isRecord(style[p.id]) ? (style[p.id] as Record<string, unknown>) : null;
-    const color = saved ? saved.color : Array.isArray(raw.colors) ? raw.colors[k] : undefined; // dạng cũ: colors[k]
-    const ps: PlotStyle = {};
-    if (typeof color === "string" && color) ps.color = color;
-    if (saved?.visible === false) ps.visible = false;
-    if (Object.keys(ps).length) plots[p.id] = ps;
-  });
+  const style = sanitizeStyle(raw, def);
 
   return {
     v: INSTANCE_V,
     uid: typeof raw.uid === "string" && raw.uid ? raw.uid : crypto.randomUUID(),
     id: def.id,
     inputs,
-    ...(Object.keys(plots).length ? { style: { plots } } : {}),
+    ...(style ? { style } : {}),
     ...(raw.hidden === true ? { hidden: true } : {}),
     ...(sanitizeVisibility(raw.visibility) ? { visibility: sanitizeVisibility(raw.visibility) } : {}),
     ...(typeof raw.precision === "number" && Number.isInteger(raw.precision) && raw.precision >= 0 && raw.precision <= 8 ? { precision: raw.precision } : {}),
@@ -104,6 +97,57 @@ export function migrateInstance(raw: unknown): IndicatorInstance | null {
     ...(raw.statusValues === false ? { statusValues: false } : {}),
     ...(raw.statusInputs === false ? { statusInputs: false } : {}),
   };
+}
+
+const LINE_STYLE_IDS: readonly string[] = ["solid", "dashed", "dotted"];
+const PLOT_TYPE_IDS: readonly string[] = ["line", "step", "histogram", "area", "circles"];
+const colorOf = (v: unknown): string | undefined =>
+  typeof v === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6}([0-9a-f]{2})?)$/i.test(v.trim()) ? v.trim() : undefined;
+const widthOf = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 4 ? v : undefined);
+const lineStyleOf = (v: unknown): LineStyleName | undefined => (typeof v === "string" && LINE_STYLE_IDS.includes(v) ? (v as LineStyleName) : undefined);
+
+/** Style đã lưu -> chỉ phần hợp lệ của plot/level/fill mà def còn có (dạng cũ: `colors[k]` = màu plot thứ k). */
+function sanitizeStyle(raw: Record<string, unknown>, def: IndicatorDef): IndicatorInstance["style"] {
+  const src = isRecord(raw.style) ? raw.style : {};
+  const sub = (k: string) => (isRecord(src[k]) ? (src[k] as Record<string, unknown>) : {});
+  const plots: Record<string, PlotStyle> = {};
+  def.plots.forEach((p, k) => {
+    const s = isRecord(sub("plots")[p.id]) ? (sub("plots")[p.id] as Record<string, unknown>) : null;
+    const ps: PlotStyle = {};
+    const color = colorOf(s ? s.color : Array.isArray(raw.colors) ? raw.colors[k] : undefined);
+    if (color) ps.color = color;
+    if (s?.visible === false) ps.visible = false;
+    if (widthOf(s?.width)) ps.width = widthOf(s?.width);
+    if (lineStyleOf(s?.lineStyle)) ps.lineStyle = lineStyleOf(s?.lineStyle);
+    if (!p.perBar && typeof s?.type === "string" && PLOT_TYPE_IDS.includes(s.type)) ps.type = s.type as PlotType;
+    if (Object.keys(ps).length) plots[p.id] = ps;
+  });
+  const levels: Record<string, LevelStyle> = {};
+  for (const l of def.levels ?? []) {
+    const s = isRecord(sub("levels")[l.id]) ? (sub("levels")[l.id] as Record<string, unknown>) : null;
+    if (!s) continue;
+    const ls: LevelStyle = {};
+    if (typeof s.value === "number" && Number.isFinite(s.value)) ls.value = s.value;
+    if (colorOf(s.color)) ls.color = colorOf(s.color);
+    if (s.visible === false) ls.visible = false;
+    if (widthOf(s.width)) ls.width = widthOf(s.width);
+    if (lineStyleOf(s.lineStyle)) ls.lineStyle = lineStyleOf(s.lineStyle);
+    if (Object.keys(ls).length) levels[l.id] = ls;
+  }
+  const fills: Record<string, FillStyle> = {};
+  for (const f of def.fills ?? []) {
+    const s = isRecord(sub("fills")[f.id]) ? (sub("fills")[f.id] as Record<string, unknown>) : null;
+    if (!s) continue;
+    const fs: FillStyle = {};
+    if (colorOf(s.color)) fs.color = colorOf(s.color);
+    if (s.visible === false) fs.visible = false;
+    if (Object.keys(fs).length) fills[f.id] = fs;
+  }
+  const out: NonNullable<IndicatorInstance["style"]> = {};
+  if (Object.keys(plots).length) out.plots = plots;
+  if (Object.keys(levels).length) out.levels = levels;
+  if (Object.keys(fills).length) out.fills = fills;
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Chỉ nhận đơn vị đã biết với {on, from, to} hợp lệ; rỗng -> undefined (= hiện ở mọi khung). */

@@ -1,27 +1,26 @@
-import { fetchBars, fetchBrokerOffset, type Bar } from "@/lib/api";
-import {
-    HistogramSeries,
-    LineSeries,
-    LineStyle,
-    type IChartApi,
-    type ISeriesApi,
-    type SeriesType,
-    type UTCTimestamp,
-} from "lightweight-charts";
+import { TF_SECONDS, fetchBars, fetchBrokerOffset, type Bar } from "@/lib/api";
+import type { IChartApi, IPriceLine, ISeriesApi, SeriesType, UTCTimestamp } from "lightweight-charts";
 import { byId } from "./catalog";
 import { BarHistory, CalendarFeed, HISTORY_BARS } from "./data";
 import { planUpdate, type Snap } from "./diff";
-import { computeInstance, historyTarget, trimPlot } from "./engine";
-import { instanceShown, plotColor, plotShown, showsPriceLabel, type IndicatorInstance } from "./instance";
+import { computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
+import { instanceShown, plotColor, showsPriceLabel, type IndicatorInstance } from "./instance";
+import { FillPrimitive, type FillEdge } from "./render/fill";
+import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions } from "./render/series";
 import type { IndicatorDef, PlotData } from "./schema";
+import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
 
 type Live = {
   inst: IndicatorInstance;
   def: IndicatorDef;
-  series: ISeriesApi<SeriesType>[];
+  series: ISeriesApi<SeriesType>[]; // một series mỗi plot
+  anchor: ISeriesApi<SeriesType> | null; // giữ levels + fills
+  lines: IPriceLine[]; // theo def.levels
+  fills: FillPrimitive[]; // theo def.fills
   snaps: (Snap | null)[];
   data: PlotData[]; // giá trị đã tính (đã cắt theo nến chart) cho legend
   styleKey: string;
+  anchorKey: string; // dữ liệu series neo đang giữ (nến đầu + số nến)
 };
 
 export type FeedKey = { symbol: string; tf: string };
@@ -42,6 +41,10 @@ function indexOfTime(times: number[], t: number): number {
   }
   return times[lo] === t ? lo : -1;
 }
+
+/** Khoá "cấu trúc" của một instance: đổi khoá = phải dựng lại series (thêm/gỡ indicator, đổi kiểu plot). */
+const structKey = (inst: IndicatorInstance): string =>
+  `${inst.uid}:${inst.id}:${byId(inst.id).plots.map((p) => plotStyle(inst, p).type).join("/")}`;
 
 export class IndicatorManager {
   private live: Live[] = [];
@@ -82,7 +85,7 @@ export class IndicatorManager {
       id: p.id,
       title: p.title,
       value: l.data[k].values[i] ?? NaN,
-      color: l.data[k].colors?.[i] ?? plotColor(l.inst, l.def, p.id),
+      color: l.data[k].colors?.[i] || plotColor(l.inst, l.def, p.id),
     }));
   }
 
@@ -101,7 +104,7 @@ export class IndicatorManager {
   }
 
   private clear() {
-    for (const l of this.live) for (const s of l.series) {
+    for (const l of this.live) for (const s of [...l.series, ...(l.anchor ? [l.anchor] : [])]) {
       try { this.chart.removeSeries(s); } catch { /* chart đã bị huỷ */ }
     }
     this.live = [];
@@ -113,36 +116,54 @@ export class IndicatorManager {
     for (const inst of this.list) {
       const def = byId(inst.id);
       const paneIndex = def.overlay ? 0 : ++pane;
-      const series = def.plots.map((p, k) => {
-        const common = { priceLineVisible: false, title: k === 0 ? def.name : "" };
-        const s = p.type === "histogram"
-          ? this.chart.addSeries(HistogramSeries, { ...common, priceFormat: { type: "volume" } }, paneIndex)
-          : this.chart.addSeries(LineSeries, { ...common, lineWidth: 1 }, paneIndex);
-        return s as ISeriesApi<SeriesType>;
-      });
-      def.levels?.forEach((price) =>
-        series[0]?.createPriceLine({ price, color: "#787b86", lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false, title: "" }),
+      const series = def.plots.map((p, k) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, k === 0 ? def.name : ""));
+      const hasAnchor = !!(def.levels?.length || def.fills?.length);
+      const anchor = hasAnchor ? addAnchorSeries(this.chart, paneIndex) : null;
+      const lines = (def.levels ?? []).map((l) =>
+        anchor!.createPriceLine({ price: l.value, color: l.color, lineStyle: LWC_LINE_STYLE[l.lineStyle ?? "dashed"], lineWidth: 1, axisLabelVisible: false, title: "" }),
       );
-      this.live.push({ inst, def, series, snaps: def.plots.map(() => null), data: [], styleKey: "" });
+      const fills = (def.fills ?? []).map(() => {
+        const prim = new FillPrimitive();
+        anchor!.attachPrimitive(prim);
+        return prim;
+      });
+      this.live.push({ inst, def, series, anchor, lines, fills, snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
     }
   }
 
-  // Phần hiển thị (màu, ẩn, nhãn, số chữ số) đổi bằng applyOptions: series giữ nguyên nên xem trước trong Settings không nháy
+  // Phần hiển thị (màu, nét, độ dày, ẩn, nhãn, số chữ số, levels) đổi bằng applyOptions: series giữ nguyên nên xem trước trong Settings không nháy
   private applyStyle(l: Live) {
     const { inst, def } = l;
     const shown = instanceShown(inst, this.feed.tf);
-    const key = JSON.stringify([shown, def.plots.map((p) => [plotColor(inst, def, p.id), plotShown(inst, p.id)]), showsPriceLabel(inst, def), inst.precision ?? null]);
+    const plots = def.plots.map((p) => plotStyle(inst, p));
+    const levels = (def.levels ?? []).map((lv) => levelStyle(inst, lv));
+    const key = JSON.stringify([shown, plots, levels, showsPriceLabel(inst, def), inst.precision ?? null]);
     if (key === l.styleKey) return;
     l.styleKey = key;
     def.plots.forEach((p, k) => {
-      const opts: Record<string, unknown> = {
-        visible: shown && plotShown(inst, p.id),
-        color: plotColor(inst, def, p.id),
-        lastValueVisible: showsPriceLabel(inst, def),
-      };
-      if (p.type !== "histogram")
+      const st = plots[k];
+      const opts: Record<string, unknown> = { ...plotOptions(st), visible: shown && st.visible, lastValueVisible: showsPriceLabel(inst, def) };
+      if (st.type !== "histogram")
         opts.priceFormat = inst.precision === undefined ? DEFAULT_FORMAT : { type: "price", precision: inst.precision, minMove: 10 ** -inst.precision };
       l.series[k].applyOptions(opts);
+    });
+    l.anchor?.applyOptions({ visible: shown });
+    l.lines.forEach((line, k) => {
+      const st = levels[k];
+      line.applyOptions({ price: st.value, color: st.color, lineWidth: st.width as 1 | 2 | 3 | 4, lineStyle: LWC_LINE_STYLE[st.lineStyle], lineVisible: st.visible });
+    });
+  }
+
+  private applyFills(l: Live) {
+    const { inst, def } = l;
+    (def.fills ?? []).forEach((f, k) => {
+      if (!fillShown(inst, def, f)) return l.fills[k].set(null);
+      const edge = (r: (typeof f.between)[number]): FillEdge => {
+        if ("plot" in r) return l.data[def.plots.findIndex((p) => p.id === r.plot)]?.values ?? [];
+        const lv = def.levels?.find((x) => x.id === r.level);
+        return lv ? levelStyle(inst, lv).value : NaN;
+      };
+      l.fills[k].set({ a: edge(f.between[0]), b: edge(f.between[1]), color: fillStyle(inst, f).color });
     });
   }
 
@@ -150,11 +171,11 @@ export class IndicatorManager {
     const v = d.values[i];
     const t = time as UTCTimestamp;
     if (v === undefined || Number.isNaN(v)) return { time: t };
-    return d.colors ? { time: t, value: v, color: d.colors[i] } : { time: t, value: v };
+    return d.colors?.[i] ? { time: t, value: v, color: d.colors[i] } : { time: t, value: v };
   }
 
   private sync() {
-    const sig = this.list.map((i) => `${i.uid}:${i.id}`).join(",");
+    const sig = this.list.map(structKey).join(",");
     if (sig !== this.sig) {
       this.sig = sig;
       this.build();
@@ -171,6 +192,7 @@ export class IndicatorManager {
     const cal = this.live.some((l) => l.def.needsCalendar) ? this.calendar.get(symbol) : { offset: 0 };
     const times = this.bars.map((b) => b.t);
     this.times = times;
+    const step = TF_SECONDS[tf] ?? 60;
 
     for (const l of this.live) {
       this.applyStyle(l);
@@ -178,15 +200,25 @@ export class IndicatorManager {
       const out = computeInstance(l.def, l.inst, all, cal ?? { offset: 0 });
       l.data = l.def.plots.map((p, k) => {
         const d = trimPlot(out[p.id], cut);
-        const next: Snap = { times, values: d.values, colors: d.colors };
+        // offset dương: plot dài hơn nến chart, phần thừa nằm ở vùng tương lai (mốc thời gian suy ra theo khung)
+        const ts = d.values.length > times.length ? times.concat(futureTimes(times[times.length - 1], d.values.length - times.length, step)) : times;
+        const next: Snap = { times: ts, values: d.values, colors: d.colors };
         const patch = planUpdate(l.snaps[k], next);
         l.snaps[k] = next;
         const s = l.series[k];
-        if (patch.kind === "all") s.setData(times.map((t, i) => this.point(t, d, i)) as never);
+        if (patch.kind === "all") s.setData(ts.map((t, i) => this.point(t, d, i)) as never);
         else if (patch.kind === "tail")
-          for (let i = patch.from; i < times.length; i++) s.update(this.point(times[i], d, i) as never);
+          for (let i = patch.from; i < ts.length; i++) s.update(this.point(ts[i], d, i) as never);
         return d;
       });
+      // LWC chỉ đổi giá ra toạ độ (price line, priceToCoordinate của fill) khi series có dữ liệu trong vùng đang nhìn:
+      // series neo phủ mọi nến với giá trị 0 (không ảnh hưởng thang giá nhờ autoscaleInfoProvider)
+      const anchorKey = `${times[0]}:${times.length}`;
+      if (l.anchor && l.anchorKey !== anchorKey) {
+        l.anchor.setData(times.map((t) => ({ time: t as UTCTimestamp, value: 0 })) as never);
+        l.anchorKey = anchorKey;
+      }
+      this.applyFills(l);
     }
     this.onSync();
   }
