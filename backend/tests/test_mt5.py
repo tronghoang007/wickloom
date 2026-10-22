@@ -162,3 +162,113 @@ def test_bad_token_does_not_register():
 
     asyncio.run(run())
     assert mt5.registry.snapshot() == []
+
+
+# --- T1: trạng thái giao dịch chỉ đọc -------------------------------------------------------------------------------------
+POS = {"ticket": 111, "symbol": "XAUUSDm", "type": "buy", "volume": 0.1, "price_open": 4100.5, "sl": 4090, "tp": 4120, "price_current": 4105.25,
+       "profit": 47.5, "swap": -0.3, "time": 1_700_000_000, "magic": 7, "comment": "tay"}
+ORD = {"ticket": 222, "symbol": "EURUSD", "type": "sell_limit", "volume": 0.2, "price_open": 1.1, "price_stoplimit": 0, "sl": 0, "tp": 0,
+       "time_setup": 1_700_000_100, "expiration": 0, "magic": 0, "comment": ""}
+DEAL = {"ticket": 333, "order": 111, "symbol": "XAUUSDm", "type": "buy", "entry": "in", "volume": 0.1, "price": 4100.5, "profit": 0, "commission": -0.7,
+        "swap": 0, "time": 1_700_000_000, "magic": 7, "comment": ""}
+
+
+def registered():
+    r = mt5.Mt5Registry(clock=lambda: 50.0)
+    w = W()
+    r.register(w, HELLO)
+    return r, w
+
+
+def test_trade_message_replaces_positions_and_orders():
+    r, w = registered()
+    assert r.trade("Exness-MT5Trial17:12345678")["updated_at"] is None  # chưa nhận gì
+    r.update_trade(w, {"type": "trade", "positions": [POS], "orders": [ORD]})
+    t = r.trade("Exness-MT5Trial17:12345678")
+    assert t["positions"] == [POS] and t["orders"] == [ORD] and t["updated_at"] == 50.0 and t["deals"] == []
+    r.update_trade(w, {"type": "trade", "positions": [], "orders": [ORD]})  # lệnh đóng → danh sách mới thay thế hẳn
+    assert r.trade("Exness-MT5Trial17:12345678")["positions"] == []
+    assert t["account"]["id"] == "Exness-MT5Trial17:12345678"
+
+
+def test_trade_rows_are_sanitized_and_capped():
+    r, w = registered()
+    junk = [{"ticket": 0, "symbol": "X", "type": "buy"}, {"ticket": 5, "symbol": "", "type": "buy"}, "x", None, {"ticket": 6, "symbol": "S", "type": "<b>",
+            "volume": float("nan"), "profit": "abc", "comment": "c" * 200, "evil": "drop me"}]
+    r.update_trade(w, {"type": "trade", "positions": junk, "orders": "không phải list"})
+    t = r.trade("Exness-MT5Trial17:12345678")
+    assert t["orders"] == [] and len(t["positions"]) == 1  # ticket 0, symbol rỗng, không phải dict bị bỏ
+    p = t["positions"][0]
+    assert p["type"] == "other" and p["volume"] == 0.0 and p["profit"] == 0.0 and len(p["comment"]) == 64 and "evil" not in p
+    many = [{**POS, "ticket": i + 1} for i in range(mt5.MAX_ROWS + 50)]
+    r.update_trade(w, {"type": "trade", "positions": many, "orders": []})
+    assert len(r.trade("Exness-MT5Trial17:12345678")["positions"]) == mt5.MAX_ROWS
+
+
+def test_deals_sorted_newest_first_and_independent_of_trade_message():
+    r, w = registered()
+    old = {**DEAL, "ticket": 1, "time": 100}
+    bal = {"ticket": 2, "type": "balance", "entry": "", "profit": 10000.0, "time": 300, "symbol": ""}
+    r.update_trade(w, {"type": "deals", "deals": [old, DEAL, bal, {**DEAL, "ticket": 9, "type": "weird", "entry": "weird"}]})
+    d = r.trade("Exness-MT5Trial17:12345678")["deals"]
+    assert [x["ticket"] for x in d] == [333, 9, 2, 1]  # mới nhất trước; cùng giờ giữ thứ tự EA gửi
+    assert next(x for x in d if x["ticket"] == 9)["type"] == "other" and next(x for x in d if x["ticket"] == 9)["entry"] == ""
+    r.update_trade(w, {"type": "trade", "positions": [POS], "orders": []})
+    assert len(r.trade("Exness-MT5Trial17:12345678")["deals"]) == 4  # trade không xoá deals
+
+
+def test_trade_unknown_account_and_unregistered_writer():
+    r, w = registered()
+    assert r.trade("nope") is None
+    r.update_trade(W(), {"type": "trade", "positions": [POS], "orders": []})  # chưa đăng ký: bỏ
+    assert r.trade("Exness-MT5Trial17:12345678")["positions"] == []
+
+
+def test_account_message_margin_and_permissions():
+    r, w = registered()
+    r.update(w, {"balance": 1, "margin": 20.5, "margin_level": 4800.0, "margin_mode": "hedging", "trade_allowed": True, "terminal_trade_allowed": False})
+    a = r.snapshot()[0]
+    assert a["margin"] == 20.5 and a["margin_level"] == 4800.0 and a["margin_mode"] == "hedging"
+    assert a["trade_allowed"] is True and a["terminal_trade_allowed"] is False
+    r.update(w, {"margin_mode": "<x>", "trade_allowed": "yes"})  # giá trị lạ: giữ nguyên bản cũ
+    a = r.snapshot()[0]
+    assert a["margin_mode"] == "hedging" and a["trade_allowed"] is True
+
+
+def test_trade_endpoint_needs_login_404_and_is_read_only():
+    c = TestClient(app, headers=ORIGIN)
+    aid = mt5.registry.register(W(), HELLO)
+    assert c.get(f"/accounts/{aid}/trade").status_code == 401  # có vị thế + số dư: khách không xem được
+    assert c.post("/auth/register", json={"email": "t@example.com", "password": "correct horse"}).status_code == 201
+    assert c.get("/accounts/khong-co/trade").status_code == 404
+    body = c.get(f"/accounts/{aid}/trade").json()
+    assert body["account"]["id"] == aid and body["positions"] == [] and body["orders"] == [] and body["deals"] == []
+    for method in ("post", "put", "patch", "delete"):  # T1 không có đường nào để gửi/sửa lệnh
+        assert getattr(c, method)(f"/accounts/{aid}/trade").status_code in (404, 405)
+        assert getattr(c, method)(f"/accounts/{aid}/orders").status_code in (404, 405)
+
+
+def test_tcp_ea_sends_trade_state_end_to_end():
+    async def run():
+        server = await tcp_server.start_server(host="127.0.0.1", port=0)
+        port = server.sockets[0].getsockname()[1]
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        send = lambda m: writer.write((json.dumps(m) + "\n").encode())
+        send({"type": "hello", "token": EA_TOKEN, **HELLO})
+        send({"type": "account", "balance": 100, "margin": 5, "margin_level": 2000, "margin_mode": "netting", "trade_allowed": True})
+        send({"type": "trade", "positions": [POS], "orders": [ORD]})
+        send({"type": "deals", "deals": [DEAL]})
+        await writer.drain()
+        for _ in range(100):
+            t = mt5.registry.trade("Exness-MT5Trial17:12345678")
+            if t and t["positions"] and t["deals"]:
+                break
+            await asyncio.sleep(0.02)
+        t = mt5.registry.trade("Exness-MT5Trial17:12345678")
+        assert [p["ticket"] for p in t["positions"]] == [111] and [o["ticket"] for o in t["orders"]] == [222] and [d["ticket"] for d in t["deals"]] == [333]
+        assert t["account"]["margin_mode"] == "netting" and t["account"]["online"] is True
+        writer.close()
+        server.close()
+        await server.wait_closed()
+
+    asyncio.run(run())

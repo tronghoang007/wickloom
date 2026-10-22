@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TVBridge.mq5 - đẩy symbol/tick/bar sang backend qua TCP socket   |
-//| VERSION: 2.10 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
+//| VERSION: 2.11 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
 //| EnsureConnected() để biết bản đang chạy có phải bản mới nhất)    |
 //| - 2.00: chuyển từ WebRequest sang TCP socket                     |
 //| - 2.01: fix SendLine coi SocketSend=0 (buffer đầy) là lỗi fatal  |
@@ -31,14 +31,19 @@
 //|   currency/leverage và thông điệp "account" (balance/equity/     |
 //|   margin_free/profit) mỗi 5s - web hiện Trading accounts +       |
 //|   huy hiệu Demo/Real. Backend cũ bỏ qua các trường/thông điệp này|
+//| - 2.11: CHỈ ĐỌC trạng thái giao dịch (docs/trade-plan.md T1):    |
+//|   "trade" (vị thế + lệnh chờ, gửi khi đổi / mỗi 1-5s),           |
+//|   "deals" (lịch sử khớp lệnh DealsDays ngày, tối đa MaxDeals),   |
+//|   "account" thêm margin/margin_level/margin_mode/trade_allowed.  |
+//|   KHÔNG có code gửi/sửa/đóng lệnh trong EA                       |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.10"
+#property version "2.11"
 
-#define EA_VERSION "2.10"
+#define EA_VERSION "2.11"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -46,12 +51,19 @@ input string Token = "dev-token";
 input int TimerMs = 300;
 input int BackfillChunk = 5000;
 input int MaxTicksPerCall = 2000;
+input int DealsDays = 30;  // lich su deal gui len web (chi doc)
+input int MaxDeals = 200;
 
 int g_sock = INVALID_HANDLE;
 string g_rx = "";
 ulong g_lastConnectTryMs = 0;
 ulong g_lastPingMs = 0;
 ulong g_backoffUntilMs = 0; // server tu choi (token sai / dang nhan EA khac) -> cho lau hon
+
+string g_lastTradeSig = ""; // chu ky cau truc cua vi the/lenh cho: doi -> gui ngay
+ulong g_lastTradeMs = 0;
+bool g_dealsDirty = true;
+ulong g_lastDealsMs = 0;
 
 string g_subs[];
 ulong g_lastMsc[];
@@ -63,6 +75,9 @@ string Esc(string s)
 {
   StringReplace(s, "\\", "\\\\");
   StringReplace(s, "\"", "\\\"");
+  StringReplace(s, "\r", " ");  // comment cua lenh co the chua xuong dong/tab -> JSON hong
+  StringReplace(s, "\n", " ");
+  StringReplace(s, "\t", " ");
   return s;
 }
 
@@ -155,6 +170,9 @@ bool EnsureConnected()
   if (!SendLine(hello))
     return false;
   PostAccount();
+  g_lastTradeSig = ""; // vừa (re)connect: gửi ngay vị thế/lệnh/deal ở OnTimer kế tiếp
+  g_dealsDirty = true;
+  g_lastDealsMs = 0;
   PostSymbols(); // luôn gửi lại symbols mỗi lần (re)connect - không chờ server hỏi need_symbols
   PrintFormat("TVBridge v%s: da ket noi %s:%d", EA_VERSION, ServerHost, ServerPort);
   return true;
@@ -175,14 +193,205 @@ string AccountMode()
   return "";
 }
 
-// Số dư account (chỉ đọc) - backend giữ bản mới nhất để web hiện trong dropdown avatar
+string MarginMode()
+{
+  switch ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE))
+  {
+    case ACCOUNT_MARGIN_MODE_RETAIL_NETTING:
+      return "netting";
+    case ACCOUNT_MARGIN_MODE_RETAIL_HEDGING:
+      return "hedging";
+    case ACCOUNT_MARGIN_MODE_EXCHANGE:
+      return "exchange";
+  }
+  return "";
+}
+
+string JsonBool(bool v) { return v ? "true" : "false"; }
+
+// Số dư account (chỉ đọc) - backend giữ bản mới nhất để web hiện trong dropdown avatar + panel Trading
 void PostAccount()
 {
   string js = "{\"type\":\"account\",\"balance\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2)
             + ",\"equity\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2)
+            + ",\"margin\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN), 2)
             + ",\"margin_free\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2)
-            + ",\"profit\":" + DoubleToString(AccountInfoDouble(ACCOUNT_PROFIT), 2) + "}";
+            + ",\"margin_level\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_LEVEL), 2)
+            + ",\"profit\":" + DoubleToString(AccountInfoDouble(ACCOUNT_PROFIT), 2)
+            + ",\"margin_mode\":\"" + MarginMode() + "\""
+            + ",\"trade_allowed\":" + JsonBool(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) != 0)
+            + ",\"terminal_trade_allowed\":" + JsonBool(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) != 0) + "}";
   SendLine(js);
+}
+
+//--- trang thai giao dich (CHI DOC: khong co code gui/sua/dong lenh) ---------
+int PriceDigits(string sym)
+{
+  return (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+}
+
+// Vi the dang mo; `sig` = chu ky cau truc (ticket/volume/sl/tp) de biet khi nao phai gui ngay
+string PositionsJson(string &sig)
+{
+  string js = "[";
+  int n = PositionsTotal();
+  for (int i = 0; i < n; i++)
+  {
+    ulong tk = PositionGetTicket(i); // chon vi the thu i
+    if (tk == 0)
+      continue;
+    string sym = PositionGetString(POSITION_SYMBOL);
+    int dg = PriceDigits(sym);
+    double vol = PositionGetDouble(POSITION_VOLUME);
+    double sl = PositionGetDouble(POSITION_SL);
+    double tp = PositionGetDouble(POSITION_TP);
+    if (js != "[")
+      js += ",";
+    js += "{\"ticket\":" + IntegerToString((long)tk) + ",\"symbol\":\"" + Esc(sym) + "\""
+        + ",\"type\":\"" + (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "buy" : "sell") + "\""
+        + ",\"volume\":" + DoubleToString(vol, 8)
+        + ",\"price_open\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), dg)
+        + ",\"sl\":" + DoubleToString(sl, dg) + ",\"tp\":" + DoubleToString(tp, dg)
+        + ",\"price_current\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT), dg)
+        + ",\"profit\":" + DoubleToString(PositionGetDouble(POSITION_PROFIT), 2)
+        + ",\"swap\":" + DoubleToString(PositionGetDouble(POSITION_SWAP), 2)
+        + ",\"time\":" + IntegerToString((long)PositionGetInteger(POSITION_TIME))
+        + ",\"magic\":" + IntegerToString((long)PositionGetInteger(POSITION_MAGIC))
+        + ",\"comment\":\"" + Esc(PositionGetString(POSITION_COMMENT)) + "\"}";
+    sig += IntegerToString((long)tk) + ":" + DoubleToString(vol, 8) + ":" + DoubleToString(sl, dg) + ":" + DoubleToString(tp, dg) + ";";
+  }
+  return js + "]";
+}
+
+string OrderTypeStr(long t)
+{
+  switch ((int)t)
+  {
+    case ORDER_TYPE_BUY_LIMIT:
+      return "buy_limit";
+    case ORDER_TYPE_SELL_LIMIT:
+      return "sell_limit";
+    case ORDER_TYPE_BUY_STOP:
+      return "buy_stop";
+    case ORDER_TYPE_SELL_STOP:
+      return "sell_stop";
+    case ORDER_TYPE_BUY_STOP_LIMIT:
+      return "buy_stop_limit";
+    case ORDER_TYPE_SELL_STOP_LIMIT:
+      return "sell_stop_limit";
+  }
+  return "";
+}
+
+// Lenh cho (pending) dang co
+string OrdersJson(string &sig)
+{
+  string js = "[";
+  int n = OrdersTotal();
+  for (int i = 0; i < n; i++)
+  {
+    ulong tk = OrderGetTicket(i); // chon lenh thu i
+    if (tk == 0)
+      continue;
+    string sym = OrderGetString(ORDER_SYMBOL);
+    int dg = PriceDigits(sym);
+    double vol = OrderGetDouble(ORDER_VOLUME_CURRENT);
+    double price = OrderGetDouble(ORDER_PRICE_OPEN);
+    double sl = OrderGetDouble(ORDER_SL);
+    double tp = OrderGetDouble(ORDER_TP);
+    if (js != "[")
+      js += ",";
+    js += "{\"ticket\":" + IntegerToString((long)tk) + ",\"symbol\":\"" + Esc(sym) + "\""
+        + ",\"type\":\"" + OrderTypeStr(OrderGetInteger(ORDER_TYPE)) + "\""
+        + ",\"volume\":" + DoubleToString(vol, 8)
+        + ",\"price_open\":" + DoubleToString(price, dg)
+        + ",\"price_stoplimit\":" + DoubleToString(OrderGetDouble(ORDER_PRICE_STOPLIMIT), dg)
+        + ",\"sl\":" + DoubleToString(sl, dg) + ",\"tp\":" + DoubleToString(tp, dg)
+        + ",\"time_setup\":" + IntegerToString((long)OrderGetInteger(ORDER_TIME_SETUP))
+        + ",\"expiration\":" + IntegerToString((long)OrderGetInteger(ORDER_TIME_EXPIRATION))
+        + ",\"magic\":" + IntegerToString((long)OrderGetInteger(ORDER_MAGIC))
+        + ",\"comment\":\"" + Esc(OrderGetString(ORDER_COMMENT)) + "\"}";
+    sig += IntegerToString((long)tk) + ":" + DoubleToString(vol, 8) + ":" + DoubleToString(price, dg) + ":" + DoubleToString(sl, dg) + ":" + DoubleToString(tp, dg) + ";";
+  }
+  return js + "]";
+}
+
+// Vi the + lenh cho: gui khi cau truc doi (mo/dong/sua SL-TP), con lai moi 1s (co vi the: P/L doi theo gia) hoac 5s (khong co gi)
+void PostTrade(bool force)
+{
+  string sigP = "";
+  string sigO = "";
+  string pos = PositionsJson(sigP);
+  string ord = OrdersJson(sigO);
+  string sig = sigP + "|" + sigO;
+  ulong now = GetTickCount64();
+  ulong every = (sigP != "" || sigO != "") ? 1000 : 5000;
+  if (!force && sig == g_lastTradeSig && now - g_lastTradeMs < every)
+    return;
+  if (SendLine("{\"type\":\"trade\",\"positions\":" + pos + ",\"orders\":" + ord + "}"))
+  {
+    g_lastTradeSig = sig;
+    g_lastTradeMs = now;
+  }
+}
+
+string DealTypeStr(long t)
+{
+  if (t == DEAL_TYPE_BUY)
+    return "buy";
+  if (t == DEAL_TYPE_SELL)
+    return "sell";
+  if (t == DEAL_TYPE_BALANCE)
+    return "balance";
+  return "";
+}
+
+string DealEntryStr(long e)
+{
+  if (e == DEAL_ENTRY_IN)
+    return "in";
+  if (e == DEAL_ENTRY_OUT || e == DEAL_ENTRY_OUT_BY)
+    return "out";
+  if (e == DEAL_ENTRY_INOUT)
+    return "inout";
+  return "";
+}
+
+// Lich su khop lenh DealsDays ngay gan nhat (toi da MaxDeals, moi nhat truoc)
+void PostDeals()
+{
+  g_dealsDirty = false;
+  g_lastDealsMs = GetTickCount64();
+  datetime to = TimeCurrent();
+  datetime from = (datetime)((long)to - (long)DealsDays * 86400);
+  if (!HistorySelect(from, to))
+    return;
+  int total = HistoryDealsTotal();
+  int stop = MathMax(0, total - MaxDeals);
+  string js = "[";
+  for (int i = total - 1; i >= stop; i--)
+  {
+    ulong tk = HistoryDealGetTicket(i);
+    if (tk == 0)
+      continue;
+    string sym = HistoryDealGetString(tk, DEAL_SYMBOL);
+    int dg = sym == "" ? 2 : PriceDigits(sym);
+    if (js != "[")
+      js += ",";
+    js += "{\"ticket\":" + IntegerToString((long)tk) + ",\"order\":" + IntegerToString((long)HistoryDealGetInteger(tk, DEAL_ORDER))
+        + ",\"symbol\":\"" + Esc(sym) + "\""
+        + ",\"type\":\"" + DealTypeStr(HistoryDealGetInteger(tk, DEAL_TYPE)) + "\""
+        + ",\"entry\":\"" + DealEntryStr(HistoryDealGetInteger(tk, DEAL_ENTRY)) + "\""
+        + ",\"volume\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_VOLUME), 8)
+        + ",\"price\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_PRICE), dg)
+        + ",\"profit\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_PROFIT), 2)
+        + ",\"commission\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_COMMISSION), 2)
+        + ",\"swap\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_SWAP), 2)
+        + ",\"time\":" + IntegerToString((long)HistoryDealGetInteger(tk, DEAL_TIME))
+        + ",\"magic\":" + IntegerToString((long)HistoryDealGetInteger(tk, DEAL_MAGIC))
+        + ",\"comment\":\"" + Esc(HistoryDealGetString(tk, DEAL_COMMENT)) + "\"}";
+  }
+  SendLine("{\"type\":\"deals\",\"deals\":" + js + "]}");
 }
 
 string SymbolType(string s)
@@ -536,12 +745,24 @@ void OnDeinit(const int reason)
   CloseSocket();
 }
 
+// Co giao dich xay ra (mo/dong/sua lenh, tu MT5 hay tay): gui lai vi the + deal ngay lan OnTimer ke tiep
+void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)
+{
+  g_lastTradeSig = "";
+  if (trans.type == TRADE_TRANSACTION_DEAL_ADD || trans.type == TRADE_TRANSACTION_HISTORY_ADD)
+    g_dealsDirty = true;
+}
+
 void OnTimer()
 {
   if (!EnsureConnected())
     return;
   PumpRx();
   PumpTicks();
+  PostTrade(false);
+  ulong nowMs = GetTickCount64();
+  if ((g_dealsDirty && nowMs - g_lastDealsMs >= 1000) || nowMs - g_lastDealsMs >= 60000)
+    PostDeals();
   // Heartbeat: chua subscribe symbol nao thi khong co gi de gui -> khong bao gio phat
   // hien socket da chet. Ping dinh ky de SendLine that bai -> tu reconnect.
   ulong now = GetTickCount64();

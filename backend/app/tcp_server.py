@@ -145,6 +145,8 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
                     _handle_bars(BarsIn.model_validate(msg))
                 elif mtype == "account":
                     mt5.registry.update(writer, msg)
+                elif mtype in ("trade", "deals"):
+                    mt5.registry.update_trade(writer, msg)
             except Exception as exc:
                 print(f"TVBridge {peer}: loi xu ly '{mtype}': {exc}")
     except (asyncio.IncompleteReadError, ConnectionResetError):

@@ -11,6 +11,8 @@ import { useChartStore } from "@/store/chart";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import { usePaneState } from "@/store/compose";
 import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
+import { tradeLines } from "@/trading/format";
+import { useTradeStore } from "@/trading/store";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
@@ -957,6 +959,34 @@ export default function Chart({ paneId }: { paneId: string }) {
     render();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartType]);
+
+  // Vị thế / lệnh chờ của account MT5 trên symbol này (CHỈ ĐỌC, docs/trade-plan.md T1): entry kèm lot + P/L, SL đỏ, TP xanh lá, lệnh chờ vàng.
+  // Chỉ cập nhật đường đã có (không tạo lại mỗi lần hỏi backend nên không nhấp nháy); dữ liệu cũ / đang Replay thì không vẽ.
+  const tradeData = useTradeStore((s) => s.data);
+  const tradeLinesRef = useRef<{ series: ISeriesApi<SeriesType> | null; lines: Map<string, IPriceLine> }>({ series: null, lines: new Map() });
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+    const st = tradeLinesRef.current;
+    if (st.series !== series) {
+      st.series = series; // series mới (đổi loại nến): price line cũ đã mất cùng series cũ
+      st.lines = new Map();
+    }
+    const want = replayActive ? [] : tradeLines(tradeData, symbol, Date.now() / 1000);
+    const keep = new Set(want.map((w) => w.key));
+    for (const [k, l] of st.lines) {
+      if (!keep.has(k)) {
+        series.removePriceLine(l);
+        st.lines.delete(k);
+      }
+    }
+    for (const w of want) {
+      const opts = { price: w.price, color: w.color, lineWidth: 1 as const, lineStyle: w.dashed ? LineStyle.Dashed : LineStyle.Solid, axisLabelVisible: true, title: w.title };
+      const cur = st.lines.get(w.key);
+      if (cur) cur.applyOptions(opts);
+      else st.lines.set(w.key, series.createPriceLine(opts));
+    }
+  }, [tradeData, symbol, chartType, replayActive]);
 
   // price precision
   useEffect(() => {

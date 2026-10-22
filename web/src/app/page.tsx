@@ -9,6 +9,7 @@ import SettingsDialog from "@/components/chart/SettingsDialog";
 import VolumeSettingsDialog from "@/components/chart/VolumeSettingsDialog";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
 import RightRail from "@/components/chart/RightRail";
+import TradingPanel from "@/components/chart/TradingPanel";
 import Toolbar from "@/components/chart/Toolbar";
 import { drawingGlobal } from "@/drawings/store";
 import { useAuthStore } from "@/store/auth";
@@ -60,6 +61,7 @@ export default function Page() {
         </main>
         <RightRail />
       </div>
+      <TradingPanel />
       {/* hộp thoại dùng chung: một bản cho cả trang, nhắm vào chart đang active */}
       <SettingsDialog />
       <VolumeSettingsDialog />
