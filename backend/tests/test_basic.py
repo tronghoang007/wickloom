@@ -198,3 +198,43 @@ def test_tick_at_bar_start_does_not_request_seed():
     agg.watch("FRESH", "M15")
     agg.tick("FRESH", 9000 * 1000, 100.0, 1, 0)  # đúng giây đầu của nến
     assert seeds == []
+
+
+def test_tick_gap_reports_gap_but_first_tick_and_short_pauses_do_not():
+    from app.aggregator import GAP_SECONDS, Aggregator
+
+    gaps = []
+    agg = Aggregator(lambda s, tf: None, lambda *_: None, lambda *_: None, None, lambda s, g: gaps.append((s, g)))
+    agg.tick("GAP", 1000 * 1000, 100.0, 1, 0)  # tick đầu: không có gì để so
+    agg.tick("GAP", (1000 + GAP_SECONDS) * 1000, 100.5, 1, 0)  # im đúng ngưỡng: chưa tính là đứt
+    assert gaps == []
+    agg.tick("GAP", (1000 + GAP_SECONDS + 600) * 1000, 101.0, 1, 0)  # im 10 phút
+    assert gaps == [("GAP", 600)]
+    agg.tick("GAP", (1000 + GAP_SECONDS + 500) * 1000, 100.0, 1, 0)  # tick cũ đến muộn: không đẩy mốc lùi, không báo đứt
+    assert gaps == [("GAP", 600)]
+
+
+def test_tick_gap_requests_backfill_sized_to_the_gap_and_not_repeatedly():
+    state.pending_backfill.clear()
+    state._gap_seeding.clear()
+    state.aggregator.tfs["GAPSYM"] = {"M1", "M15"}
+    state._on_gap("GAPSYM", 3600)
+    cmds = {(c["tf"]): c["count"] for c in state.pending_backfill if c["symbol"] == "GAPSYM"}
+    assert cmds == {"M1": 63, "M15": 7}  # 3600s = 60 nến M1 / 4 nến M15, cộng 3
+    state._on_gap("GAPSYM", 3600)  # tick kế tiếp ngay sau đó: không xin lại
+    assert len([c for c in state.pending_backfill if c["symbol"] == "GAPSYM"]) == 2
+    state._gap_seeding.clear()
+    state.pending_backfill.clear()  # (lệnh trùng khoá đang chờ thì không xếp thêm)
+    state._on_gap("GAPSYM", 10 * 86400)  # đứt qua cuối tuần: trần 500 nến
+    assert max(c["count"] for c in state.pending_backfill if c["symbol"] == "GAPSYM") == 500
+    state.pending_backfill.clear()
+    state.aggregator.tfs.pop("GAPSYM", None)
+
+
+def test_catchup_refreshes_last_bars_even_when_cache_is_not_stale():
+    state.pending_backfill.clear()
+    now = int(time.time()) // 900 * 900
+    state.bars.upsert("FRESHSYM", "M15", [{"t": now, "o": 1.0, "h": 1.0, "l": 1.0, "c": 1.0, "v": 1.0}])
+    state.request_catchup("FRESHSYM", "M15")
+    assert [(c["tf"], c["count"]) for c in state.pending_backfill if c["symbol"] == "FRESHSYM"] == [("M15", 3)]
+    state.pending_backfill.clear()

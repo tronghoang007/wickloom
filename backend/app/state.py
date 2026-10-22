@@ -45,7 +45,21 @@ def _on_unseeded(symbol: str, tf: str) -> None:
     request_catchup(symbol, tf)
 
 
-aggregator = Aggregator(bars.last, _on_update, _on_close, _on_unseeded)
+_gap_seeding: Dict[tuple, float] = {}
+
+
+def _on_gap(symbol: str, gap_seconds: int) -> None:
+    """Luồng tick vừa đứt `gap_seconds` giây rồi nối lại -> xin EA nến chuẩn cho đúng khoảng đó ở mọi TF đang xem (cache ghi đè bằng nến MT5, nến đang gom `merge` lại).
+    Số nến = số nến khoảng đứt trải qua + 3, tối đa 500; chặn gửi lặp cùng (symbol, tf) trong 30s."""
+    now = time.time()
+    for tf in sorted(aggregator.tfs.get(symbol, {"M1"})):
+        if now - _gap_seeding.get((symbol, tf), 0) < 30:
+            continue
+        _gap_seeding[(symbol, tf)] = now
+        request_backfill(symbol, tf, min(500, gap_seconds // TF_SECONDS[tf] + 3))
+
+
+aggregator = Aggregator(bars.last, _on_update, _on_close, _on_unseeded, _on_gap)
 
 
 class EaHub:
@@ -122,6 +136,8 @@ def request_catchup(symbol: str, tf: str) -> None:
     last = bars.last(symbol, tf)
     last_t = last["t"] if last else None
     if not is_stale(last_t, tf):
+        # Chưa cũ thì không cần nối thêm, nhưng 3 nến cuối có thể đóng dở (EA / backend tắt giữa nến, nến cuối chưa bị coi là cũ): lấy lại của MT5, rẻ
+        request_backfill(symbol, tf, 3)
         return
     count = 500
     if last_t is not None:
@@ -163,6 +179,7 @@ def resync_after_broker_switch() -> Optional[Path]:
     meta.clear("symbols")
     symbols.clear()
     aggregator.cur.clear()
+    aggregator.last_tick.clear()
     pending_backfill.clear()  # lệnh neo theo dữ liệu của server cũ
     hub.broadcast({"type": "reset", "reason": "broker"})
     return archive_path
