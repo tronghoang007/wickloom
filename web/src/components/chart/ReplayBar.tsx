@@ -148,14 +148,14 @@ export default function ReplayBar({ onStep }: { onStep: () => void }) {
         className={btn}
         disabled={!active}
         title="Jump to realtime"
-        onClick={exitReplay}
+        onClick={() => exitReplay()}
       >
         <JumpIcon />
       </button>
       <button
         className="absolute right-3 flex h-[38px] w-[38px] items-center justify-center rounded hover:bg-[var(--hover)]"
         title="Close replay"
-        onClick={exitReplay}
+        onClick={() => exitReplay()}
       >
         <CloseIcon />
       </button>

@@ -5,13 +5,15 @@ import { AddOrderI, AlertI, BuyI, Chevron, ResetViewI, SellI, SettingsI, SkipToL
 import { useDrawingStore } from "@/drawings/store";
 import { IndicatorManager } from "@/indicators/manager";
 import { byId } from "@/indicators/registry";
-import { useIndicatorStore } from "@/indicators/store";
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
-import { SPEEDS, exitReplay, useReplayStore } from "@/replay/store";
-import { useChartStore, type ChartType, type ScaleMode } from "@/store/chart";
+import { SPEEDS, exitReplay } from "@/replay/store";
+import { useChartStore } from "@/store/chart";
+import { isActivePane, useLayoutStore } from "@/store/layout";
+import { usePaneState } from "@/store/compose";
+import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
-import { fmtVol, useVolumeStore, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
+import { fmtVol, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
 import {
   AreaSeries,
   BarSeries,
@@ -131,9 +133,8 @@ function toPoint(b: Bar, type: ChartType, prevC?: number) {
   };
 }
 
-const volPoint = (b: Bar, prevC?: number) => {
+const volPoint = (b: Bar, prevC: number | undefined, vs: VolumeSettings) => {
   const cs = useSettingsStore.getState().s;
-  const vs = useVolumeStore.getState().s;
   return { time: b.t as UTCTimestamp, value: b.v, color: volColor(vs, cs, volUp(b, prevC, vs)) };
 };
 
@@ -216,18 +217,21 @@ function mergeBars(cur: Bar[], add: Bar[], liveT: number) {
   return [...m.values()].sort((a, b) => a.t - b.t);
 }
 
-export default function Chart() {
-  const { symbol, tf, chartType, scaleMode, theme, set } = useChartStore();
+export default function Chart({ paneId }: { paneId: string }) {
+  // Chart gắn thẳng vào store của pane mình (không qua facade "pane đang active" của UI ngoài)
+  const pane = useLayoutStore((s) => s.panes[paneId]);
+  const { symbol, tf, chartType, scaleMode } = usePaneState(pane.chart);
+  const theme = useChartStore((s) => s.theme);
   const symDigits = useChartStore(
-    (s) => s.symbols.find((x) => x.name === s.symbol)?.digits ?? 5,
+    (s) => s.symbols.find((x) => x.name === symbol)?.digits ?? 5,
   );
   const cs = useSettingsStore((s) => s.s);
   const symbolDesc = useChartStore(
-    (s) => s.symbols.find((x) => x.name === s.symbol)?.description ?? "",
+    (s) => s.symbols.find((x) => x.name === symbol)?.description ?? "",
   );
-  const symType = useChartStore((s) => s.symbols.find((x) => x.name === s.symbol)?.type);
+  const symType = useChartStore((s) => s.symbols.find((x) => x.name === symbol)?.type);
   const broker = useChartStore((s) => {
-    const b = s.symbols.find((x) => x.name === s.symbol)?.broker;
+    const b = s.symbols.find((x) => x.name === symbol)?.broker;
     return b ? b.split(" ")[0] : "";
   });
   const digits = cs.precision ?? symDigits;
@@ -246,12 +250,12 @@ export default function Chart() {
   const linesRef = useRef<Partial<Record<"prev" | "hi" | "lo" | "bid" | "ask", IPriceLine>>>({});
   const tickRef = useRef<{ bid: number; ask: number } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
-  const drawingCount = useDrawingStore((s) => s.drawings.length);
+  const drawingCount = usePaneState(pane.draw, (s) => s.drawings.length);
   const indRef = useRef<IndicatorManager | null>(null);
   const drawRef = useRef<DrawingManager | null>(null);
-  const indicators = useIndicatorStore((s) => s.list);
-  const removeIndicator = useIndicatorStore((s) => s.remove);
-  const legendCollapsed = useIndicatorStore((s) => s.collapsed);
+  const indicators = usePaneState(pane.indicators, (s) => s.list);
+  const removeIndicator = pane.indicators.getState().remove;
+  const legendCollapsed = usePaneState(pane.indicators, (s) => s.collapsed);
   const [legend, setLegend] = useState<Legend | null>(null);
   const [countdown, setCountdown] = useState("");
   const lblRef = useRef<HTMLDivElement>(null);
@@ -272,11 +276,11 @@ export default function Chart() {
     idx: number;
     label: string;
   } | null>(null);
-  const selecting = useReplayStore((s) => s.selecting);
-  const replayActive = useReplayStore((s) => s.active);
-  const playing = useReplayStore((s) => s.playing);
-  const speed = useReplayStore((s) => s.speed);
-  const interval = useReplayStore((s) => s.interval);
+  const selecting = usePaneState(pane.replay, (s) => s.selecting);
+  const replayActive = usePaneState(pane.replay, (s) => s.active);
+  const playing = usePaneState(pane.replay, (s) => s.playing);
+  const speed = usePaneState(pane.replay, (s) => s.speed);
+  const interval = usePaneState(pane.replay, (s) => s.interval);
 
   const legendAt = (i: number): Legend | null => {
     const bars = barsRef.current;
@@ -290,12 +294,14 @@ export default function Chart() {
   // Histogram volume + đường MA của nó (cùng thang "vol")
   const renderVol = () => {
     const bars = barsRef.current;
-    volRef.current?.setData(bars.map((b, i, a) => volPoint(b, a[i - 1]?.c)));
-    volMaRef.current?.setData(volMaData(bars, useVolumeStore.getState().s.maLength));
+    const vs = pane.volume.getState().s;
+    volRef.current?.setData(bars.map((b, i, a) => volPoint(b, a[i - 1]?.c, vs)));
+    volMaRef.current?.setData(volMaData(bars, vs.maLength));
   };
   const updateVol = (bars: Bar[], i: number) => {
-    volRef.current?.update(volPoint(bars[i], bars[i - 1]?.c));
-    const ma = volMaAt(bars, i, useVolumeStore.getState().s.maLength);
+    const vs = pane.volume.getState().s;
+    volRef.current?.update(volPoint(bars[i], bars[i - 1]?.c, vs));
+    const ma = volMaAt(bars, i, vs.maLength);
     if (ma !== null) volMaRef.current?.update({ time: bars[i].t as UTCTimestamp, value: ma });
   };
   const render = () => {
@@ -314,12 +320,14 @@ export default function Chart() {
   // Tiêu đề tab kiểu TradingView: "XAUUSDm 4,122.741 ▼ −0.05%" (% so với giá đóng cửa
   // phiên D1 trước).
   const updateTitle = () => {
-    const st = useChartStore.getState();
+    if (!isActivePane(paneId)) return; // tiêu đề tab theo chart đang active
+    const { symbols } = useChartStore.getState();
+    const sym = pane.chart.getState().symbol;
     const last = barsRef.current[barsRef.current.length - 1];
     let title = "Wickloom";
     if (last) {
-      const d = st.symbols.find((x) => x.name === st.symbol)?.digits ?? digitsRef.current;
-      title = `${st.symbol} ${last.c.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+      const d = symbols.find((x) => x.name === sym)?.digits ?? digitsRef.current;
+      title = `${sym} ${last.c.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`;
       const prev = prevCloseRef.current;
       if (prev) {
         const pct = ((last.c - prev) / prev) * 100;
@@ -368,7 +376,7 @@ export default function Chart() {
   };
 
   const refreshExtras = () => {
-    indRef.current?.update(useIndicatorStore.getState().list, barsRef.current);
+    indRef.current?.update(pane.indicators.getState().list, barsRef.current);
     drawRef.current?.refresh();
   };
 
@@ -394,7 +402,7 @@ export default function Chart() {
   // --- replay ---
   const buildVisible = (cursorT: number): Bar[] => {
     const full = fullRef.current;
-    const tfs = TF_SECONDS[useChartStore.getState().tf];
+    const tfs = TF_SECONDS[pane.chart.getState().tf];
     let n = 0;
     while (n < full.length && full[n].t + tfs <= cursorT) n++;
     const out = full.slice(0, n);
@@ -437,13 +445,13 @@ export default function Chart() {
   };
 
   const wantM1 = () => {
-    const iv = useReplayStore.getState().interval;
-    return !!iv && TF_SECONDS[iv] < TF_SECONDS[useChartStore.getState().tf];
+    const iv = pane.replay.getState().interval;
+    return !!iv && TF_SECONDS[iv] < TF_SECONDS[pane.chart.getState().tf];
   };
 
   const loadM1 = async (from: number) => {
     m1Ref.current = await fetchBars(
-      useChartStore.getState().symbol,
+      pane.chart.getState().symbol,
       "M1",
       undefined,
       50000,
@@ -452,9 +460,9 @@ export default function Chart() {
   };
 
   const stepReplay = (): boolean => {
-    const st = useReplayStore.getState();
+    const st = pane.replay.getState();
     if (!st.active) return false;
-    const tfs = TF_SECONDS[useChartStore.getState().tf];
+    const tfs = TF_SECONDS[pane.chart.getState().tf];
     let t = cursorRef.current;
     if (!wantM1() || m1Ref.current.length === 0) {
       const next = fullRef.current.find((b) => b.t + tfs > t);
@@ -474,9 +482,9 @@ export default function Chart() {
     const bars = barsRef.current;
     const b = bars[idx];
     if (!b) return;
-    if (!useReplayStore.getState().active) fullRef.current = [...bars];
-    cursorRef.current = b.t + TF_SECONDS[useChartStore.getState().tf];
-    useReplayStore.setState({ selecting: false, active: true, playing: false });
+    if (!pane.replay.getState().active) fullRef.current = [...bars];
+    cursorRef.current = b.t + TF_SECONDS[pane.chart.getState().tf];
+    pane.replay.setState({ selecting: false, active: true, playing: false });
     setHover(null);
     if (wantM1()) await loadM1(b.t);
     applyVisible(buildVisible(cursorRef.current));
@@ -553,7 +561,7 @@ export default function Chart() {
         const symbolInfo = useChartStore
           .getState()
           .symbols.find(
-            (item) => item.name === useChartStore.getState().symbol,
+            (item) => item.name === pane.chart.getState().symbol,
           );
         const minSpan = Math.max(
           symbolInfo?.tick_size ?? 10 ** -digitsRef.current,
@@ -615,16 +623,17 @@ export default function Chart() {
 
     indRef.current = new IndicatorManager(chart);
     drawRef.current = new DrawingManager({
+      pane,
       chart,
       container: boxRef.current!,
       getBars: () => barsRef.current,
       getDisplayBars: display,
-      getTf: () => useChartStore.getState().tf,
+      getTf: () => pane.chart.getState().tf,
       getDigits: () => digitsRef.current,
       getTickSize: () =>
         useChartStore
           .getState()
-          .symbols.find((item) => item.name === useChartStore.getState().symbol)
+          .symbols.find((item) => item.name === pane.chart.getState().symbol)
           ?.tick_size ?? 10 ** -digitsRef.current,
     });
 
@@ -648,21 +657,21 @@ export default function Chart() {
       const awayFromLatest =
         !!range && bars.length > 0 && range.to < bars.length - 1;
       setShowLatestButton(
-        awayFromLatest && !useReplayStore.getState().selecting,
+        awayFromLatest && !pane.replay.getState().selecting,
       );
       if (
         !range ||
         range.from > 50 ||
         loadingRef.current ||
         exhaustedRef.current ||
-        useReplayStore.getState().active
+        pane.replay.getState().active
       )
         return;
       const first = barsRef.current[0];
       if (!first) return;
       loadingRef.current = true;
-      const curSym = useChartStore.getState().symbol;
-      const curTf = useChartStore.getState().tf;
+      const curSym = pane.chart.getState().symbol;
+      const curTf = pane.chart.getState().tf;
       const key = `${curSym}|${curTf}`;
       fetchBars(
         curSym,
@@ -673,7 +682,7 @@ export default function Chart() {
         .then(async (older) => {
           if (
             key !==
-              `${useChartStore.getState().symbol}|${useChartStore.getState().tf}` ||
+              `${pane.chart.getState().symbol}|${pane.chart.getState().tf}` ||
             barsRef.current[0] !== first // "bars_loaded" đã ghép đoạn này trước
           )
             return;
@@ -771,7 +780,7 @@ export default function Chart() {
   }, [cs, chartType]);
 
   // Volume theo Settings riêng của nó (hiện/ẩn, nhãn trục, độ chính xác, màu, MA); chỉnh là áp ngay
-  const vs = useVolumeStore((st) => st.s);
+  const vs = usePaneState(pane.volume, (st) => st.s);
   useEffect(() => {
     volRef.current?.applyOptions({
       visible: volShown(vs, tf),
@@ -780,6 +789,7 @@ export default function Chart() {
     });
     volMaRef.current?.applyOptions({ visible: volMaShown(vs, tf), color: vs.maColor });
     renderVol();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vs, tf, cs.bodyUp, cs.bodyDown]);
 
   // cursor mode + screenshot
@@ -794,18 +804,20 @@ export default function Chart() {
 
   useEffect(() => {
     const shot = () => {
+      if (!isActivePane(paneId)) return; // chụp chart đang active
       const canvas = chartRef.current?.takeScreenshot();
       canvas?.toBlob((b) => {
         if (!b) return;
         const a = document.createElement("a");
         a.href = URL.createObjectURL(b);
-        a.download = `${useChartStore.getState().symbol}-${Date.now()}.png`;
+        a.download = `${pane.chart.getState().symbol}-${Date.now()}.png`;
         a.click();
         URL.revokeObjectURL(a.href);
       });
     };
     window.addEventListener("tv-screenshot", shot);
     return () => window.removeEventListener("tv-screenshot", shot);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // price scale mode
@@ -845,9 +857,10 @@ export default function Chart() {
   useEffect(() => {
     if (prevSymbolRef.current !== symbol) {
       prevSymbolRef.current = symbol;
-      exitReplay();
+      exitReplay(pane.replay);
     }
-    useReplayStore.setState({ interval: "" });
+    pane.replay.setState({ interval: "" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, tf]);
 
   // leaving replay reloads live data
@@ -860,7 +873,7 @@ export default function Chart() {
   useEffect(() => {
     if (!playing) return;
     const id = setInterval(() => {
-      if (!stepReplay()) useReplayStore.setState({ playing: false });
+      if (!stepReplay()) pane.replay.setState({ playing: false });
     }, SPEEDS[speed]);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -868,11 +881,11 @@ export default function Chart() {
 
   // changing the update interval
   useEffect(() => {
-    if (!useReplayStore.getState().active) return;
+    if (!pane.replay.getState().active) return;
     (async () => {
       if (wantM1())
         await loadM1(
-          cursorRef.current - TF_SECONDS[useChartStore.getState().tf],
+          cursorRef.current - TF_SECONDS[pane.chart.getState().tf],
         );
       applyVisible(buildVisible(cursorRef.current));
     })();
@@ -882,6 +895,7 @@ export default function Chart() {
   // ⌥R = Reset chart view (e.code: trên macOS Option+R ra ký tự "®")
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!isActivePane(paneId)) return;
       const el = e.target as HTMLElement;
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return;
       if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.code === "KeyR") {
@@ -891,16 +905,18 @@ export default function Chart() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Esc cancels bar selection
   useEffect(() => {
     if (!selecting) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") useReplayStore.setState({ selecting: false });
+      if (e.key === "Escape") pane.replay.setState({ selecting: false });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selecting]);
 
   // giá đóng cửa phiên D1 trước cho % thay đổi trên tiêu đề tab
@@ -923,9 +939,20 @@ export default function Chart() {
     return () => {
       alive = false;
       clearInterval(id);
-      setTabTitle("Wickloom");
+      if (isActivePane(paneId)) setTabTitle("Wickloom");
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
+
+  // đổi chart active -> tiêu đề tab đổi theo chart mới
+  useEffect(
+    () =>
+      useLayoutStore.subscribe((s, prev) => {
+        if (s.activeId !== prev.activeId && s.activeId === paneId) updateTitle();
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [paneId],
+  );
 
   // data + realtime
   useEffect(() => {
@@ -942,7 +969,7 @@ export default function Chart() {
     refreshExtras();
 
     const load = async () => {
-      const replayActiveNow = useReplayStore.getState().active;
+      const replayActiveNow = pane.replay.getState().active;
       // Đang replay (đã "cắt" tại 1 mốc thời gian) -> đổi symbol/tf vẫn phải neo đúng
       // mốc đó, không load "mới nhất" của tf mới.
       const anchor = replayActiveNow ? cursorRef.current : undefined;
@@ -1026,7 +1053,7 @@ export default function Chart() {
         }
         if (m.symbol !== symbol) return;
         if (m.type === "bars_loaded" && m.tf === tf) {
-          if (useReplayStore.getState().active) {
+          if (pane.replay.getState().active) {
             // EA vừa nạp xong đoạn thiếu cho mốc cắt hiện tại -> load() lại để fill
             // fullRef.current/áp dụng visible range đúng mốc.
             load();
@@ -1071,7 +1098,7 @@ export default function Chart() {
             });
           }
         }
-        else if (useReplayStore.getState().active) {
+        else if (pane.replay.getState().active) {
           // Đang replay: bỏ qua realtime (bar_update/bar_close/tick), chỉ xử lý
           // bars_loaded ở trên.
         }
@@ -1116,6 +1143,7 @@ export default function Chart() {
   // indicators
   useEffect(() => {
     refreshExtras();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indicators]);
 
   // Nhãn giá cuối trên trục giá như TradingView: khối liền (giá + đếm ngược đóng nến bên dưới),
@@ -1152,7 +1180,7 @@ export default function Chart() {
 
       // Chế độ % của trục: nhãn là % so với giá đóng của nến đầu tiên đang thấy (như lightweight-charts).
       let text: string;
-      if (useChartStore.getState().scaleMode === "percent") {
+      if (pane.chart.getState().scaleMode === "percent") {
         const from = Math.max(0, Math.ceil(chart.timeScale().getVisibleLogicalRange()?.from ?? 0));
         const base = (bars[Math.min(from, bars.length - 1)] ?? last).c;
         text = `${(((last.c - base) / Math.abs(base)) * 100).toFixed(2)}%`;
@@ -1173,6 +1201,7 @@ export default function Chart() {
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // countdown + clock
@@ -1198,7 +1227,7 @@ export default function Chart() {
   const scaleBtn = (m: ScaleMode, label: string) => (
     <button
       key={m}
-      onClick={() => set({ scaleMode: scaleMode === m ? "normal" : m })}
+      onClick={() => pane.chart.setState({ scaleMode: scaleMode === m ? "normal" : m })}
       className={`rounded px-1.5 py-0.5 hover:bg-[var(--hover)] ${scaleMode === m ? "text-[var(--accent)]" : ""}`}
     >
       {label}
@@ -1223,7 +1252,7 @@ export default function Chart() {
       return;
     }
     // Chuột phải lên cột volume: menu của indicator Volume (như TV)
-    if (volShown(useVolumeStore.getState().s, tf)) {
+    if (volShown(pane.volume.getState().s, tf)) {
       const logical = chart.timeScale().coordinateToLogical(x);
       const bar = logical === null ? undefined : barsRef.current[Math.round(logical)];
       const top = bar ? volRef.current?.priceToCoordinate(bar.v) : null;
@@ -1272,7 +1301,7 @@ export default function Chart() {
     if (indicators.length > 0)
       removals.push({
         label: `Remove ${indicators.length} indicator${indicators.length > 1 ? "s" : ""}`,
-        onSelect: () => useIndicatorStore.setState({ list: [] }),
+        onSelect: () => pane.indicators.setState({ list: [] }),
       });
     if (removals.length) items.push("sep", ...removals);
     items.push("sep", {
@@ -1284,7 +1313,11 @@ export default function Chart() {
   };
 
   return (
-    <div className="flex h-full w-full flex-col">
+    <div
+      className="flex h-full w-full flex-col"
+      // bấm vào chart nào thì chart đó active TRƯỚC khi DrawingManager xử lý, để công cụ đang chọn vẽ đúng chart vừa bấm
+      onPointerDownCapture={() => useLayoutStore.getState().setActive(paneId)}
+    >
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
         <SettingsDialog />
@@ -1394,7 +1427,7 @@ export default function Chart() {
               type="button"
               aria-label={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
               title={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
-              onClick={() => useIndicatorStore.getState().setCollapsed(!legendCollapsed)}
+              onClick={() => pane.indicators.getState().setCollapsed(!legendCollapsed)}
               className="pointer-events-auto mt-1 flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] text-[var(--fg)] hover:bg-[var(--hover)]"
             >
               <span className={legendCollapsed ? "" : "rotate-180"}>

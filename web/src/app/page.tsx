@@ -6,9 +6,11 @@ import Chart from "@/components/chart/Chart";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
 import RightRail from "@/components/chart/RightRail";
 import Toolbar from "@/components/chart/Toolbar";
-import { useDrawingStore } from "@/drawings/store";
+import { drawingGlobal } from "@/drawings/store";
 import { useAuthStore } from "@/store/auth";
-import { useChartStore } from "@/store/chart";
+import { chartGlobal, useChartStore } from "@/store/chart";
+import { PRIMARY_PANE_ID, getPane } from "@/store/layout";
+import { bindPanePersistence, loadPaneInit } from "@/store/paneStorage";
 import { useEffect, useState } from "react";
 
 export default function Page() {
@@ -21,14 +23,24 @@ export default function Page() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      useChartStore.persist.rehydrate(),
-      useDrawingStore.persist.rehydrate(),
-    ]).then(() => {
-      if (active) setPrefsReady(true);
+    let unbind: (() => void) | null = null;
+    // Đọc state chart đã lưu (kể cả key cũ cần migrate) TRƯỚC khi các store chung rehydrate: chúng ghi lại các key cũ
+    const init = loadPaneInit(localStorage);
+    Promise.all([chartGlobal.persist.rehydrate(), drawingGlobal.persist.rehydrate()]).then(() => {
+      if (!active) return;
+      // chart chính (symbol, tf, indicator, volume...) nạp từ localStorage rồi tự lưu khi đổi
+      unbind = bindPanePersistence(getPane(PRIMARY_PANE_ID), localStorage, {
+        init,
+        onUnload: (flush) => {
+          window.addEventListener("pagehide", flush);
+          return () => window.removeEventListener("pagehide", flush);
+        },
+      });
+      setPrefsReady(true);
     });
     return () => {
       active = false;
+      unbind?.();
     };
   }, []);
 
@@ -45,7 +57,7 @@ export default function Page() {
       <div className="flex min-h-0 flex-1">
         <DrawingToolbar />
         <main className="min-w-0 flex-1">
-          <Chart />
+          <Chart paneId={PRIMARY_PANE_ID} />
         </main>
         <RightRail />
       </div>

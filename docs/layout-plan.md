@@ -7,6 +7,31 @@ Ngày viết: 2026-10-22 (sau commit 8635bdd). CHỈ LÀ PLAN, chưa code gì ch
 layout** như menu layout của TV. Layout **lưu theo tài khoản Wickloom** (đăng ký/đăng nhập riêng của app, chốt 2026-10-22,
 xem `docs/auth-plan.md`), **không** theo account MT5 (account MT5 chỉ để trade). Chưa login thì bấm Save sẽ bắt đăng nhập.
 
+## 0. Trạng thái (cập nhật 2026-10-22)
+
+**Phase 1 (tách state theo pane) đã code, chưa commit**; vẫn 1 ô, hành vi không đổi (190 test web xanh; kiểm tay trên Chrome: migrate localStorage,
+đổi khung/symbol từ toolbar và watchlist, thêm indicator, vẽ + Cmd+Z, Replay chọn nến → chạy → thoát, reload khôi phục). Phase 0 (chụp tham chiếu TV) và
+Phase 2 (lưới) chưa làm. Cách làm khác chút so với §5.1 để giảm số chỗ phải sửa (~100 điểm gọi store trong ~15 file):
+
+- `store/paneStores.ts`: 5 store vanilla cho MỘT chart — `chart` (symbol/tf/chartType/scaleMode), `indicators` (list + legend thu gọn), `volume`, `replay`,
+  `draw` (drawings, selectedId, editing, settingsOpen, api). `createPane(id, init)`, `snapshotPane`, `applyPaneInit`. Không import facade nào (tránh vòng phụ thuộc).
+- `store/layout.ts`: `useLayoutStore` {order, panes, activeId, setActive/add/remove}; `getPane/activePane/allPanes/isActivePane/flushAllDrawings`. Pane chính `p1`.
+- `store/compose.ts`: `composeStore` tạo **facade** giữ nguyên tên cũ `useChartStore/useIndicatorStore/useVolumeStore/useReplayStore/useDrawingStore`:
+  state = phần chung (theme, favTfs, symbols, yêu thích indicator, công cụ vẽ...) + phần của **pane đang active**; `setState` chia patch theo khoá; hook
+  `useSyncExternalStore` có cache theo (global, pane). Nhờ vậy UI ngoài chart (toolbar, tìm symbol, watchlist, thanh vẽ, dialog) **không phải sửa** và tự nhắm vào
+  pane active như TV. Cạm bẫy đã gặp: store không có phần chung phải dùng cùng một `{}` hằng, nếu không cache không trúng → vòng lặp vô hạn.
+- `Chart({paneId})` và `DrawingManager({pane,...})` gắn thẳng vào store của pane mình (`usePaneState(pane.xxx)`, `pane.xxx.getState()`), không qua facade.
+  `pointerdown` (capture) trên chart → `setActive(paneId)` trước khi DrawingManager xử lý. Listener `window` đã lọc theo pane active: phím tắt của DrawingManager
+  (Esc/Delete/Ctrl+Z/Y), Alt+R, `tv-screenshot`, tiêu đề tab. Đăng xuất/đăng nhập dùng `flushAllDrawings()` (mọi pane).
+- Lưu tạm: `store/paneStorage.ts` — key `wickloom-pane1` {chart, indicators, legendCollapsed, volume}, debounce 300ms + flush `pagehide`; lần đầu migrate từ
+  `invest-chart-prefs` + `tv-indicators` + `tv-volume` (đọc TRƯỚC khi các store chung rehydrate vì chúng ghi đè key cũ chỉ còn phần chung). Phase 3 thay bằng layout lưu server.
+
+**Việc phải làm ở Phase 2 (đã thấy khi làm Phase 1):**
+1. `Chart` hiện tự render `SettingsDialog`, `VolumeSettingsDialog`, `DrawingSettings`, `StylePanel`, `FavoritesBar`, `InlineTextEditor` — nhiều chart thì mỗi chart một bản
+   (Settings dialog mở N lần). Chỉ render ở pane active, hoặc đưa các dialog toàn cục ra `page.tsx`.
+2. Mỗi `Chart` mở WS riêng và `Chart` đọc `useChartStore.symbols` chung: ổn. `DrawingDoc` dùng chung khi 2 ô cùng symbol (§5.3) vẫn chưa làm.
+3. `Toolbar` nút Undo/Redo, Replay dùng facade → tác động pane active (đúng ý), nhưng ReplayBar của ô không active vẫn hiện: cần kiểm khi có nhiều ô.
+
 ## 1. Hiện trạng (đọc từ code)
 
 - Chỉ có **1 chart**: `app/page.tsx` → `<Chart/>` (`components/chart/Chart.tsx`, 1505 dòng).
@@ -205,7 +230,7 @@ Không cần bảng mới, nhưng **không dùng CRUD generic `/layouts`** nữa
 | Phase | Việc | Xong khi |
 |---|---|---|
 | 0 | Chụp tham chiếu TV: popup layout (danh sách mẫu, nhãn sync), menu Save/Rename/Copy/Open, dialog Open, viền active, Maximize, hành vi Time vs Date range. Ghi `docs/tv-layout-reference.md` | Có tài liệu số đo + nhãn thật, các mục "chưa đối chiếu" ở §2 được xác nhận hoặc sửa |
-| 1 | Tách state theo pane (§5.1), vẫn 1 ô + migration state cũ (§4.4) | Hành vi y hệt trước: vẽ/undo/indicator/volume/replay/đổi symbol-khung chạy như cũ; `tsc`, lint, vitest xanh |
+| 1 ✅ | Tách state theo pane (§5.1), vẫn 1 ô + migration state cũ (§4.4) | Hành vi y hệt trước: vẽ/undo/indicator/volume/replay/đổi symbol-khung chạy như cũ; `tsc`, lint, vitest xanh |
 | 2 | Cây chia ô + template + popup chọn + splitter + active pane + Maximize + `DrawingDoc` dùng chung (§5.2–5.3) | 2×2 mỗi ô symbol/khung riêng; vẽ ở ô A hiện ở ô B cùng symbol, undo chung, không mất hình; phím tắt/chụp ảnh chỉ tác động ô active |
 | 3 | Lưu/mở layout: `store/layout.ts`, `LayoutSync`, menu + dialog Open, autosave, Ctrl+S, khôi phục khi mở app, drawings theo layout (§4.3, §5.5), scope = user qua `/me/layouts`, chặn khách bằng `requireLogin` (= `auth-plan` U4). **Cần `auth-plan` U1–U3 xong trước** | Reload giữ nguyên bố cục + indicator; copy/xoá layout kèm drawings; tắt backend rồi reload không mất layout; khách bấm Save → popup → lưu đúng tài khoản; user B không thấy layout của A |
 | 4 | Sync in layout: symbol, interval, crosshair, time, date range (§5.4) | Mỗi công tắc chạy đúng và lưu theo layout; không vòng lặp, không kích backfill hàng loạt |

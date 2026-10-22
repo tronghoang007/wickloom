@@ -1,6 +1,6 @@
 import * as authApi from "@/lib/authApi";
 import { apiFetch } from "@/lib/api";
-import { useDrawingStore } from "@/drawings/store";
+import { getPane } from "@/store/layout";
 import { guestDocs, memoryFetch } from "@/drawings/guest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "./auth";
@@ -142,12 +142,13 @@ describe("logout", () => {
   it("lưu nốt hình vẽ TRƯỚC khi xoá cookie (PUT cuối không bị 401)", async () => {
     useAuthStore.setState({ status: "user", user: me });
     const order: string[] = [];
-    vi.spyOn(useDrawingStore, "getState").mockReturnValue({
-      api: { flushSave: async () => { await Promise.resolve(); order.push("flush"); } },
-    } as never);
+    getPane("p1").draw.setState({
+      api: { flushSave: async () => { await Promise.resolve(); order.push("flush"); } } as never,
+    });
     vi.mocked(authApi.authLogout).mockImplementation(async () => { order.push("logout"); return { ok: true }; });
     await auth().logout();
     expect(order).toEqual(["flush", "logout"]);
+    getPane("p1").draw.setState({ api: null });
     expect(auth()).toMatchObject({ status: "guest", user: null });
   });
 

@@ -1,6 +1,6 @@
+import { composeStore } from "@/store/compose";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { DrawingManager } from "./manager";
 import { DEFAULT_FAVORITES } from "./tools";
 import type { Drawing, DrawingType } from "./types";
 
@@ -9,7 +9,9 @@ export type MagnetMode = "weak" | "strong"; // yếu: chỉ hút khi gần OHLC;
 
 export type DrawingDefaults = Partial<Pick<Drawing, "color" | "width" | "dash" | "textColor" | "opts">>;
 
-type State = {
+// Công cụ vẽ và tuỳ chọn dùng chung toàn app. Danh sách hình vẽ, hình đang chọn, hộp thoại, DrawingManager là của TỪNG
+// chart (pane): xem DrawPane trong store/paneStores.ts.
+export type DrawingGlobal = {
   tool: DrawingType | null;
   cursor: CursorMode;
   magnet: boolean;
@@ -22,18 +24,13 @@ type State = {
   favoritesPos: { x: number; y: number };
   lastTool: Record<string, string>; // tool gần nhất của mỗi nhóm
   toolDefaults: Record<string, DrawingDefaults>; // lưu setting vẽ cho lần sau (như TradingView)
-  drawings: Drawing[];
-  selectedId: string | null;
-  settingsOpen: boolean;
-  editing: { id: string; isNew: boolean; cell?: [number, number] } | null; // đang sửa text inline trên chart (cell: ô của Table)
-  api: DrawingManager | null;
   setToolDefault: (type: string, defs: DrawingDefaults) => void;
   resetToolDefault: (type: string) => void;
 };
 
-export const useDrawingStore = create<State>()(
+export const drawingGlobal = create<DrawingGlobal>()(
   persist(
-    (set): State => ({
+    (set): DrawingGlobal => ({
       tool: null,
       cursor: "cross",
       magnet: false,
@@ -46,11 +43,6 @@ export const useDrawingStore = create<State>()(
       favoritesPos: { x: 0, y: 0 },
       lastTool: {},
       toolDefaults: {},
-      drawings: [],
-      selectedId: null,
-      settingsOpen: false,
-      editing: null,
-      api: null,
       setToolDefault: (type, defs) => {
         set((s) => ({
           toolDefaults: {
@@ -91,6 +83,16 @@ export const useDrawingStore = create<State>()(
     },
   ),
 );
+
+/** Các khoá của `useDrawingStore` thuộc về từng pane (DrawPane); còn lại là chung toàn app. */
+export const DRAW_PANE_KEYS = ["drawings", "selectedId", "settingsOpen", "editing", "api"] as const;
+
+/** Cho UI ngoài chart: công cụ vẽ chung + hình vẽ / hình đang chọn / DrawingManager của pane ĐANG ACTIVE. */
+export const useDrawingStore = composeStore({
+  global: drawingGlobal,
+  pane: (p) => p.draw,
+  paneKeys: DRAW_PANE_KEYS,
+});
 
 export function toggleFavorite(id: string) {
   const { favorites } = useDrawingStore.getState();

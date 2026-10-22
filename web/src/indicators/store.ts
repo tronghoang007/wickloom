@@ -1,43 +1,36 @@
+import { composeStore } from "@/store/compose";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { byId } from "./registry";
 
-export type IndicatorInstance = {
-  uid: string;
-  id: string;
-  inputs: Record<string, number | string>;
-  colors: string[];
-};
+export type { IndicatorInstance } from "@/store/paneStores";
 
-type State = {
-  list: IndicatorInstance[];
+// Danh sách indicator đang dùng + legend thu gọn là của TỪNG chart (store/paneStores.ts); ở đây chỉ còn "yêu thích".
+type Global = {
   favorites: string[];
-  collapsed: boolean; // nút chevron trên legend: ẩn/hiện các hàng indicator (như TV)
-  setCollapsed: (v: boolean) => void;
-  add: (id: string) => void;
-  remove: (uid: string) => void;
-  update: (uid: string, patch: Partial<Pick<IndicatorInstance, "inputs" | "colors">>) => void;
   toggleFavorite: (id: string) => void;
 };
 
-export const useIndicatorStore = create<State>()(
+export const indicatorGlobal = create<Global>()(
   persist(
-    (set) => ({
-      list: [],
+    (set): Global => ({
       favorites: ["sma", "ema", "wma", "macd", "rsi", "volume", "vwap"],
-      collapsed: false,
-      setCollapsed: (collapsed) => set({ collapsed }),
-      add: (id) =>
-        set((s) => {
-          const def = byId(id);
-          const inputs = Object.fromEntries(def.inputs.map((i) => [i.key, i.default]));
-          return { list: [...s.list, { uid: crypto.randomUUID(), id, inputs, colors: [...def.colors] }] };
-        }),
-      remove: (uid) => set((s) => ({ list: s.list.filter((x) => x.uid !== uid) })),
-      update: (uid, patch) => set((s) => ({ list: s.list.map((x) => (x.uid === uid ? { ...x, ...patch } : x)) })),
       toggleFavorite: (id) =>
         set((s) => ({ favorites: s.favorites.includes(id) ? s.favorites.filter((x) => x !== id) : [...s.favorites, id] })),
     }),
-    { name: "tv-indicators" },
+    {
+      name: "tv-indicators", // key này từng chứa cả `list` của chart: chỉ nhận `favorites`
+      partialize: (s) => ({ favorites: s.favorites }),
+      merge: (saved, cur) => {
+        const f = (saved as Partial<Global> | undefined)?.favorites;
+        return { ...cur, ...(Array.isArray(f) ? { favorites: f } : {}) };
+      },
+    },
   ),
 );
+
+/** Cho UI ngoài chart: indicator của pane ĐANG ACTIVE + danh sách yêu thích chung. */
+export const useIndicatorStore = composeStore({
+  global: indicatorGlobal,
+  pane: (p) => p.indicators,
+  paneKeys: ["list", "collapsed"],
+});

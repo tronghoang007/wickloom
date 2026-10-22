@@ -1,71 +1,14 @@
 import type { UTCTimestamp } from "lightweight-charts";
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { visibleOn, type Visibility } from "@/drawings/visibility";
+import { visibleOn } from "@/drawings/visibility";
 import type { Bar } from "@/lib/api";
+import { composeStore } from "./compose";
+import { DEFAULT_VOLUME, type VolumeSettings } from "./paneStores";
 import type { ChartSettings } from "./settings";
 
-// Volume là 1 indicator như TV ("Vol · Ticks"): có hàng legend, menu và Settings riêng.
-// Màu `null` = theo màu nến tăng/giảm (40%), đúng như trước khi có Settings riêng.
-export type VolumeSettings = {
-  removed: boolean; // nút thùng rác: bỏ khỏi chart, thêm lại từ Indicators
-  hidden: boolean; // nút mắt
-  visibility?: Visibility; // hiện theo khung thời gian
-  // Inputs
-  maLength: number;
-  colorByPrevClose: boolean;
-  // Style
-  show: boolean;
-  growing: string | null;
-  falling: string | null;
-  maOn: boolean;
-  maColor: string;
-  precision: number | null; // null = mặc định (2 chữ số)
-  priceLabel: boolean; // nhãn volume cuối trên trục giá
-  statusValues: boolean;
-  statusInputs: boolean;
-};
+export { DEFAULT_VOLUME, type VolumeSettings };
 
-export const DEFAULT_VOLUME: VolumeSettings = {
-  removed: false,
-  hidden: false,
-  visibility: undefined,
-  maLength: 20,
-  colorByPrevClose: false,
-  show: true,
-  growing: null,
-  falling: null,
-  maOn: false,
-  maColor: "#2962ff",
-  precision: null,
-  priceLabel: true,
-  statusValues: true,
-  statusInputs: true,
-};
-
-type State = {
-  s: VolumeSettings;
-  open: boolean; // dialog Settings
-  set: (patch: Partial<VolumeSettings>) => void;
-  replace: (s: VolumeSettings) => void;
-};
-
-export const useVolumeStore = create<State>()(
-  persist(
-    (set) => ({
-      s: DEFAULT_VOLUME,
-      open: false,
-      set: (patch) => set((st) => ({ s: { ...st.s, ...patch } })),
-      replace: (s) => set({ s }),
-    }),
-    {
-      name: "tv-volume",
-      partialize: (st) => ({ s: st.s }),
-      // thêm field mới vào DEFAULT_VOLUME không làm mất setting đã lưu
-      merge: (saved, cur) => ({ ...cur, s: { ...DEFAULT_VOLUME, ...(saved as Partial<State>)?.s } }),
-    },
-  ),
-);
+/** Cho UI ngoài chart: Volume của pane ĐANG ACTIVE. Chart gắn thẳng vào `pane.volume`. */
+export const useVolumeStore = composeStore({ pane: (p) => p.volume, paneKeys: ["s", "open"] });
 
 /** Cột volume tăng: so với giá mở (mặc định) hoặc giá đóng nến trước ("Color based on previous close"). */
 export function volUp(b: Bar, prevC: number | undefined, v: VolumeSettings) {

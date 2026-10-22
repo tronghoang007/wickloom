@@ -16,13 +16,16 @@ import type {
 import { PriceScaleMode } from "lightweight-charts";
 import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } from "./coords";
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
-import { useDrawingStore, type MagnetMode } from "./store";
+import { isActivePane } from "@/store/layout";
+import type { DrawPane, Pane } from "@/store/paneStores";
+import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
 import { DrawingSync } from "./sync";
 import { visibleOn } from "./visibility";
 import { defaultOpts, GROUPS, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, type Ctx, type OneClickView } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
 
 type Opts = {
+  pane: Pane; // chart (pane) mà manager này vẽ lên: hình vẽ, hình đang chọn, hộp thoại nằm trong pane.draw
   chart: IChartApi;
   container: HTMLElement;
   getBars: () => Bar[];
@@ -79,6 +82,25 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   });
   private unsub: () => void;
   private unsubAuth: () => void;
+  private stCache: { g: unknown; p: unknown; v: DrawingGlobal & DrawPane } | null = null;
+
+  // Trạng thái công cụ dùng chung (tool, magnet...) gộp với trạng thái của pane này (hình đang chọn...): cùng hình dạng
+  // với store trước khi tách theo pane. Cache theo tham chiếu nên gọi trong pointermove không cấp phát lại.
+  private get st(): DrawingGlobal & DrawPane {
+    const g = drawingGlobal.getState();
+    const p = this.o.pane.draw.getState();
+    if (!this.stCache || this.stCache.g !== g || this.stCache.p !== p) this.stCache = { g, p, v: { ...g, ...p } };
+    return this.stCache.v;
+  }
+
+  private setSt(patch: Partial<DrawingGlobal & DrawPane>) {
+    const keys = new Set<string>(DRAW_PANE_KEYS);
+    const paneP: Record<string, unknown> = {};
+    const globalP: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) (keys.has(k) ? paneP : globalP)[k] = v;
+    if (Object.keys(paneP).length) this.o.pane.draw.setState(paneP as Partial<DrawPane>);
+    if (Object.keys(globalP).length) drawingGlobal.setState(globalP as Partial<DrawingGlobal>);
+  }
 
   constructor(private o: Opts) {
     o.container.addEventListener("pointerdown", this.onDown, true);
@@ -88,8 +110,13 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     window.addEventListener("pointerup", this.onUp);
     window.addEventListener("pointercancel", this.onUp);
     window.addEventListener("keydown", this.onKey);
-    useDrawingStore.setState({ api: this });
-    this.unsub = useDrawingStore.subscribe(() => this.refresh());
+    o.pane.draw.setState({ api: this });
+    const offGlobal = drawingGlobal.subscribe(() => this.refresh());
+    const offPane = o.pane.draw.subscribe(() => this.refresh());
+    this.unsub = () => {
+      offGlobal();
+      offPane();
+    };
     // Đổi nơi lưu (khách ↔ user, hoặc sang user khác): nạp lại hình của symbol đang mở từ nơi mới
     let who = authKey();
     this.unsubAuth = useAuthStore.subscribe(() => {
@@ -112,7 +139,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.unsubAuth();
     this.unlockChart();
     this.sync.close();
-    useDrawingStore.setState({ api: null, drawings: [], selectedId: null });
+    this.o.pane.draw.setState({ api: null, drawings: [], selectedId: null });
   }
 
   // --- primitive ---
@@ -130,7 +157,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.axis = [];
     this.timeAxis = [];
     this.bands = { price: null, time: null };
-    const st = useDrawingStore.getState();
+    const st = this.st;
     if (st.hideAll || !this.series) return;
     const v = this.view();
     // Nhãn trục luôn hiện (vd "Price label" của Horizontal line/ray), kể cả hình không chọn
@@ -212,7 +239,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       draw: (target) => {
         // Bitmap space: shapes.ts bắt nét ngang/dọc vào lưới pixel thiết bị (nét 1px không nhòe)
         target.useBitmapCoordinateSpace(({ context, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
-          const st = useDrawingStore.getState();
+          const st = this.st;
           if (st.hideAll) return;
           context.save();
           context.scale(hpr, vpr);
@@ -319,7 +346,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
         return a;
       }
     }
-    const st = useDrawingStore.getState();
+    const st = this.st;
     return this.fromPx(p, st.magnet !== (e.ctrlKey || e.metaKey) ? st.magnetMode : null);
   }
 
@@ -392,7 +419,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       profileStep: this.profileBars.get(d.id)?.step,
       tickSize: this.o.getTickSize(),
       hovered: d.id === this.hoveredId,
-      selected: d.id === useDrawingStore.getState().selectedId,
+      selected: d.id === this.st.selectedId,
       dragging: this.dragging(d),
       step,
       barsBetween: (t0, t1) => barsBetween(bars, step, t0, t1),
@@ -415,7 +442,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   // Shape của drawing đã lưu chỉ build lại khi drawing / khung nhìn / hover / chọn đổi.
   // Trước đây mỗi frame và mỗi lần di chuột đều build lại tất cả (VP, VWAP lặp toàn bộ nến).
   private built(d: Drawing, v: View): Built | null {
-    const key = `${v.key}|${d.id === this.hoveredId}|${d.id === useDrawingStore.getState().selectedId}|${this.dragging(d)}`;
+    const key = `${v.key}|${d.id === this.hoveredId}|${d.id === this.st.selectedId}|${this.dragging(d)}`;
     const hit = this.cache.get(d);
     if (hit?.key === key) return hit;
     const c = this.ctx(d, v);
@@ -461,7 +488,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   }
 
   private hitAt(p: Pt): { d: Drawing; hit: Hit } | null {
-    const st = useDrawingStore.getState();
+    const st = this.st;
     if (st.hideAll) return null;
     const v = this.view();
     const sel = this.selected();
@@ -501,7 +528,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
 
   private newDraft(type: DrawingType): Drawing {
     const st = SPEC[type].style ?? {};
-    const saved = useDrawingStore.getState().toolDefaults[type] ?? {};
+    const saved = this.st.toolDefaults[type] ?? {};
     return {
       id: crypto.randomUUID(),
       type,
@@ -521,7 +548,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (e.button !== 0) return;
     const p = this.rel(e);
     if (!this.inPane(p)) return;
-    const st = useDrawingStore.getState();
+    const st = this.st;
     const tool = st.tool;
 
     if (tool === "eraser") {
@@ -589,7 +616,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (m.k === "idle") {
       // double-click vào hình có text: sửa text tại chỗ
       const p = this.rel(e);
-      const f = useDrawingStore.getState().tool ? null : this.hitAt(p);
+      const f = this.st.tool ? null : this.hitAt(p);
       if (f && SPEC[f.d.type].prompt && !f.d.locked) {
         this.consume(e);
         this.startEdit(f.d.id, false);
@@ -626,7 +653,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     const spec = SPEC[draft.type];
     this.mode = { k: "idle" };
     let d: Drawing = { ...draft, points };
-    const st = useDrawingStore.getState();
+    const st = this.st;
     if (spec.init) {
       const c = this.ctx(d, this.view());
       if (c) d = spec.init(d, c);
@@ -636,7 +663,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       const ts = this.o.chart.timeScale();
       const xs = points.map((a) => this.timeToLogical(a.time)).filter((v): v is number => v !== null);
       if (xs.length === 2 && Math.abs(xs[0] - xs[1]) > 1) ts.setVisibleLogicalRange({ from: Math.min(...xs), to: Math.max(...xs) });
-      if (!st.stay) useDrawingStore.setState({ tool: null });
+      if (!st.stay) this.setSt({ tool: null });
       this.refresh();
       return;
     }
@@ -646,7 +673,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (!spec.ephemeral) this.pushUndo(); // Measure không vào undo
     this.drawings.push(d);
     this.prefetchProfileBars(d);
-    if (!st.stay) useDrawingStore.setState({ tool: null });
+    if (!st.stay) this.setSt({ tool: null });
     this.select(d.id);
     this.commit();
     if (spec.prompt) this.startEdit(d.id, true);
@@ -705,7 +732,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       }
       return;
     }
-    const st = useDrawingStore.getState();
+    const st = this.st;
     const hit = this.inPane(p) ? this.hitAt(p) : null;
     const hoveredId = hit?.d.id ?? null;
     if (hoveredId !== this.hoveredId) {
@@ -753,13 +780,14 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   };
 
   private onKey = (e: KeyboardEvent) => {
+    if (!isActivePane(this.o.pane.id)) return; // phím tắt chỉ tác động chart đang active
     const el = e.target as HTMLElement;
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return;
     const mod = e.metaKey || e.ctrlKey;
     const m = this.mode;
     if (e.key === "Escape") {
       this.cancelDraft();
-      useDrawingStore.setState({ tool: null });
+      this.setSt({ tool: null });
       this.select(null);
     } else if (e.key === "Enter" && m.k === "drafting" && SPEC[m.d.type].n === 0) {
       this.finishMulti(m.d, m.d.points.slice(0, m.placed));
@@ -780,13 +808,13 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.pendingText = text;
     const patch: { tool: DrawingType | null; lastTool?: Record<string, string> } = { tool };
     const g = tool && GROUPS.find((x) => x.sections.some((s) => s.ids.includes(tool)));
-    if (g && tool) patch.lastTool = { ...useDrawingStore.getState().lastTool, [g.id]: tool };
-    useDrawingStore.setState(patch);
+    if (g && tool) patch.lastTool = { ...this.st.lastTool, [g.id]: tool };
+    this.setSt(patch);
     this.refresh();
   }
 
   private selected() {
-    const id = useDrawingStore.getState().selectedId;
+    const id = this.st.selectedId;
     return id === null ? undefined : this.drawings.find((d) => d.id === id);
   }
 
@@ -800,9 +828,9 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     const stale = this.drawings.filter((d) => SPEC[d.type]?.ephemeral && d.id !== id);
     if (stale.length) {
       this.drawings = this.drawings.filter((d) => !stale.includes(d));
-      useDrawingStore.setState({ drawings: [...this.drawings] });
+      this.setSt({ drawings: [...this.drawings] });
     }
-    useDrawingStore.setState({ selectedId: id });
+    this.setSt({ selectedId: id });
     this.refresh();
   }
 
@@ -816,7 +844,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.commit();
 
     // Lưu setting làm mặc định cho các lần vẽ tiếp theo của tool này (giống TradingView)
-    const { setToolDefault } = useDrawingStore.getState();
+    const { setToolDefault } = this.st;
     const savePatch: Partial<Pick<Drawing, "color" | "width" | "dash" | "textColor" | "opts">> = {};
     if (patch.color !== undefined) savePatch.color = patch.color;
     if (patch.width !== undefined) savePatch.width = patch.width;
@@ -832,7 +860,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   preview(next: Drawing) {
     if (!this.drawings.some((x) => x.id === next.id)) return;
     this.put(next);
-    useDrawingStore.setState({ drawings: [...this.drawings] });
+    this.setSt({ drawings: [...this.drawings] });
     this.refresh();
   }
 
@@ -853,7 +881,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.commit();
 
     // Lưu setting làm mặc định cho các lần vẽ tiếp theo của tool này
-    const { setToolDefault } = useDrawingStore.getState();
+    const { setToolDefault } = this.st;
     setToolDefault(next.type, {
       color: next.color,
       width: next.width,
@@ -895,7 +923,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   // --- sửa text inline ---
   startEdit(id: string, isNew: boolean, cell?: [number, number]) {
     this.select(id);
-    useDrawingStore.setState({ editing: { id, isNew, cell } });
+    this.setSt({ editing: { id, isNew, cell } });
   }
 
   // Góc trên-trái ô sửa text (tọa độ chart): điểm mang text của hình; Table: giữa cạnh trái của ô
@@ -903,7 +931,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     const d = this.drawings.find((x) => x.id === id);
     const b = d && this.built(d, this.view());
     if (!d || !b) return null;
-    const cell = useDrawingStore.getState().editing?.cell;
+    const cell = this.st.editing?.cell;
     if (cell) {
       const rh = tableRowH(d), o = b.c.p[0];
       return { x: o.x + TABLE_COL_W * cell[1] + 4, y: o.y + rh * cell[0] + rh / 2 };
@@ -913,9 +941,9 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
 
   // text = null: hủy (Esc). Hình mới tạo mà hủy / để trống thì bỏ luôn, kể cả bước undo lúc tạo.
   endEdit(text: string | null) {
-    const ed = useDrawingStore.getState().editing;
+    const ed = this.st.editing;
     if (!ed) return;
-    useDrawingStore.setState({ editing: null });
+    this.setSt({ editing: null });
     const d = this.drawings.find((x) => x.id === ed.id);
     if (!d) return;
     if (ed.cell) {
@@ -933,7 +961,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (!value && d.type === "text") {
       if (ed.isNew) this.undoStack.pop(); else this.pushUndo();
       this.drawings = this.drawings.filter((x) => x !== d);
-      useDrawingStore.setState({ selectedId: null });
+      this.setSt({ selectedId: null });
       this.commit();
       return;
     }
@@ -948,7 +976,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (!d) return;
     this.pushUndo();
     this.drawings = this.drawings.filter((x) => x !== d);
-    useDrawingStore.setState({ selectedId: null });
+    this.setSt({ selectedId: null });
     this.commit();
   }
 
@@ -956,7 +984,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     if (this.drawings.length === 0) return;
     this.pushUndo();
     this.drawings = [];
-    useDrawingStore.setState({ selectedId: null });
+    this.setSt({ selectedId: null });
     this.commit();
   }
 
@@ -967,7 +995,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     // như TV: bản sao nằm đúng chỗ bản gốc (trước đây dịch giá ×0.999)
     const c: Drawing = { ...d, id: crypto.randomUUID(), points: d.points.map((p) => ({ ...p })) };
     this.drawings.push(c);
-    useDrawingStore.setState({ selectedId: c.id });
+    this.setSt({ selectedId: c.id });
     this.commit();
   }
 
@@ -1010,7 +1038,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   }
   private restore(json: string) {
     this.drawings = JSON.parse(json);
-    if (!this.selected()) useDrawingStore.setState({ selectedId: null });
+    if (!this.selected()) this.setSt({ selectedId: null });
     this.commit();
   }
   undo() {
@@ -1028,7 +1056,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
 
   // --- lưu trữ ---
   private commit() {
-    useDrawingStore.setState({ drawings: [...this.drawings] });
+    this.setSt({ drawings: [...this.drawings] });
     this.refresh();
     this.sync.schedule();
     noteGuestDrawing();
@@ -1050,7 +1078,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.redoStack = [];
     this.mode = { k: "idle" };
     this.unlockChart();
-    useDrawingStore.setState({ drawings: [], selectedId: null });
+    this.setSt({ drawings: [], selectedId: null });
     this.sync.open(symbol);
     this.refresh();
   }
@@ -1110,7 +1138,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.unlockChart();
     this.undoStack = [];
     this.redoStack = [];
-    useDrawingStore.setState({ drawings: [], selectedId: null });
+    this.setSt({ drawings: [], selectedId: null });
     this.refresh();
   }
 
@@ -1129,7 +1157,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     this.undoStack = [];
     this.redoStack = [];
     for (const d of known) this.prefetchProfileBars(d);
-    useDrawingStore.setState({ drawings: [...this.drawings] });
+    this.setSt({ drawings: [...this.drawings] });
     this.refresh();
   }
 }

@@ -1,4 +1,3 @@
-import { useDrawingStore } from "@/drawings/store";
 import { adoptGuestDrawings, guestDocs } from "@/drawings/guest";
 import { setUnauthorizedHandler } from "@/lib/api";
 import {
@@ -11,6 +10,7 @@ import {
   type User,
 } from "@/lib/authApi";
 import { create } from "zustand";
+import { flushAllDrawings } from "./layout";
 import { toast } from "./toast";
 
 export type DialogState = { mode: "login" | "register"; reason?: string } | null;
@@ -72,7 +72,7 @@ export const useAuthStore = create<State>()((set, get) => {
     let adopted = 0;
     if (fromGuest) {
       try {
-        await useDrawingStore.getState().api?.flushSave();
+        await flushAllDrawings();
         adopted = await adoptGuestDrawings();
       } catch {
         /* không chặn đăng nhập vì chuyển hình lỗi; hình còn trong bộ nhớ */
@@ -128,7 +128,7 @@ export const useAuthStore = create<State>()((set, get) => {
 
     logout: async () => {
       // Lưu nốt hình vẽ khi còn cookie; cookie xoá trước thì PUT cuối cùng sẽ bị 401.
-      await useDrawingStore.getState().api?.flushSave();
+      await flushAllDrawings();
       await authLogout(); // lỗi thì ném ra: vẫn đăng nhập, UI báo cho người dùng
       writeHint(null);
       guestDocs.clear();
