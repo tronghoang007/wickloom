@@ -4,7 +4,7 @@ import { NO_SYNC, buildDoc } from "./layoutDoc";
 import { buildTemplate } from "./layoutTree";
 import { DEFAULT_CHART, createPane } from "./paneStores";
 import {
-  barIndexAt, indexAt, isSyncedRange, registerPaneView, startPaneSync, syncCrosshair, syncRange, timeAt,
+  barIndexAt, indexAt, isSyncedRange, registerPaneView, startPaneSync, syncCrosshair, syncRange, syncTime, timeAt,
   type LogicalRange, type PaneRange, type PaneView,
 } from "./paneSync";
 
@@ -57,7 +57,7 @@ describe("symbol / interval sync", () => {
   let stop: () => void;
   const chart = (id: string) => getPane(id).chart;
   beforeEach(() => {
-    L().setTemplate("3-cols");
+    L().setTemplate("3h");
     L().setSync(NO_SYNC);
     for (const id of L().order) chart(id).setState({ ...DEFAULT_CHART, symbol: id === "p1" ? "XAUUSDm" : "EURUSD", tf: id === "p3" ? "H1" : "M5" });
     stop = startPaneSync();
@@ -66,7 +66,7 @@ describe("symbol / interval sync", () => {
     stop();
     L().setSync(NO_SYNC);
     L().setActive(PRIMARY_PANE_ID);
-    L().setTemplate("1");
+    L().setTemplate("s");
     chart(PRIMARY_PANE_ID).setState(DEFAULT_CHART);
   });
 
@@ -115,7 +115,7 @@ describe("symbol / interval sync", () => {
   });
 
   it("pane thêm bằng đổi mẫu cũng được theo dõi", () => {
-    L().setTemplate("4-grid");
+    L().setTemplate("4");
     L().setSync({ symbol: true });
     chart("p4").setState({ symbol: "AUDUSD" });
     expect(chart("p1").getState().symbol).toBe("AUDUSD");
@@ -124,7 +124,7 @@ describe("symbol / interval sync", () => {
   it("mở layout khác: công tắc lấy từ layout, symbol các chart giữ như đã lưu (không bị ép về chart active)", () => {
     const panes = { p1: createPane("p1", { chart: { symbol: "AAA" } }), p2: createPane("p2", { chart: { symbol: "BBB" } }) };
     const doc = buildDoc({
-      name: "x", templateId: "2-cols", tree: buildTemplate("2-cols", ["p1", "p2"]), order: ["p1", "p2"], panes, activeId: "p1",
+      name: "x", templateId: "2h", tree: buildTemplate("2h", ["p1", "p2"]), order: ["p1", "p2"], panes, activeId: "p1",
       sync: { ...NO_SYNC, symbol: true },
     });
     L().applyLayout(doc, "other");
@@ -133,22 +133,31 @@ describe("symbol / interval sync", () => {
     expect(chart("p2").getState().symbol).toBe("BBB");
     chart("p2").setState({ symbol: "CCC" }); // nhưng đổi sau đó thì đi theo
     expect(chart("p1").getState().symbol).toBe("CCC");
-    L().applyLayout(buildDoc({ name: "d", templateId: "1", tree: buildTemplate("1", ["p1"]), order: ["p1"], panes: { p1: createPane("p1") }, activeId: "p1" }), "default");
+    L().applyLayout(buildDoc({ name: "d", templateId: "s", tree: buildTemplate("s", ["p1"]), order: ["p1"], panes: { p1: createPane("p1") }, activeId: "p1" }), "default");
   });
 });
 
 describe("range / crosshair sync", () => {
-  type Fake = PaneView & { range: PaneRange | null; sets: [number, number | undefined][]; cross: (number | null)[]; hover: boolean; span: number };
-  const fake = (init: { from: number; to: number; span?: number; clamp?: (r: LogicalRange) => LogicalRange }): Fake => {
+  type Fake = PaneView & {
+    range: PaneRange | null; sets: [number, number][]; shows: [number, number][]; cross: (number | null)[]; hover: boolean;
+  };
+  const fake = (init: { from: number; to: number; clamp?: (r: LogicalRange) => LogicalRange }): Fake => {
     const f: Fake = {
       range: { from: init.from, to: init.to, lf: init.from / 100, lt: init.to / 100 },
-      sets: [], cross: [], hover: false, span: init.span ?? 10,
+      sets: [], shows: [], cross: [], hover: false,
       getRange: () => f.range,
       setRange: (to, from) => {
         f.sets.push([to, from]);
-        const lf = (from ?? to - f.range!.to + f.range!.from) / 100;
-        const r = { lf, lt: to / 100 };
+        const r = { lf: from / 100, lt: to / 100 };
         const res = init.clamp?.(r) ?? r;
+        f.range = { from: res.lf * 100, to: res.lt * 100, ...res };
+        return res;
+      },
+      showTime: (t, frac) => {
+        f.shows.push([t, frac]);
+        const span = f.range!.lt - f.range!.lf;
+        const lf = t / 100 - frac * span;
+        const res = { lf, lt: lf + span };
         f.range = { from: res.lf * 100, to: res.lt * 100, ...res };
         return res;
       },
@@ -161,13 +170,13 @@ describe("range / crosshair sync", () => {
   const reg = (id: string, f: Fake) => offs.push(registerPaneView(id, f));
   beforeEach(() => {
     offs = [];
-    L().setTemplate("3-cols");
+    L().setTemplate("3h");
     L().setSync(NO_SYNC);
   });
   afterEach(() => {
     offs.forEach((o) => o());
     L().setSync(NO_SYNC);
-    L().setTemplate("1");
+    L().setTemplate("s");
   });
 
   it("tắt hết thì không làm gì", () => {
@@ -176,13 +185,15 @@ describe("range / crosshair sync", () => {
     reg("p1", a);
     reg("p2", b);
     syncRange("p1");
+    syncTime("p1", 100, 0.5);
     syncCrosshair("p1", 100);
     expect(b.sets).toEqual([]);
+    expect(b.shows).toEqual([]);
     expect(b.cross).toEqual([]);
   });
 
-  it("Time: các chart khác dời mép phải về cùng thời gian, giữ nguyên số nến đang hiện (from = undefined)", () => {
-    L().setSync({ time: true });
+  it("Date range: các chart khác hiện cùng khoảng [from, to]; nguồn không bị đặt lại", () => {
+    L().setSync({ dateRange: true });
     const a = fake({ from: 400, to: 1000 });
     const b = fake({ from: 0, to: 500 });
     const c = fake({ from: 0, to: 500 });
@@ -190,29 +201,63 @@ describe("range / crosshair sync", () => {
     reg("p2", b);
     reg("p3", c);
     syncRange("p1");
-    expect(a.sets).toEqual([]); // nguồn không bị đặt lại
-    expect(b.sets).toEqual([[1000, undefined]]);
-    expect(c.sets).toEqual([[1000, undefined]]);
+    expect(a.sets).toEqual([]);
+    expect(b.sets).toEqual([[1000, 400]]);
+    expect(c.sets).toEqual([[1000, 400]]);
   });
 
-  it("Date range: đặt cả hai mép", () => {
-    L().setSync({ dateRange: true });
+  it("Time: cuộn/zoom KHÔNG lan (chỉ lan khi bấm)", () => {
+    L().setSync({ time: true });
     const a = fake({ from: 400, to: 1000 });
     const b = fake({ from: 0, to: 500 });
     reg("p1", a);
     reg("p2", b);
     syncRange("p1");
-    expect(b.sets).toEqual([[1000, 400]]);
+    expect(b.sets).toEqual([]);
+    expect(b.shows).toEqual([]);
   });
 
-  it("Time + Date range cùng bật: dùng cả khoảng", () => {
+  it("Time: bấm vào chart → các chart khác cuộn tới cùng thời điểm, cùng vị trí ngang, giữ số nến đang hiện", () => {
+    L().setSync({ time: true });
+    const a = fake({ from: 400, to: 1000 });
+    const b = fake({ from: 0, to: 500 });
+    const c = fake({ from: 0, to: 500 });
+    reg("p1", a);
+    reg("p2", b);
+    reg("p3", c);
+    syncTime("p1", 700, 0.25);
+    expect(a.shows).toEqual([]);
+    expect(b.shows).toEqual([[700, 0.25]]);
+    expect(c.shows).toEqual([[700, 0.25]]);
+    expect(b.range!.lt - b.range!.lf).toBeCloseTo(5); // span 500/100 giữ nguyên
+    expect(b.range!.lf).toBeCloseTo(7 - 0.25 * 5);
+  });
+
+  it("Time: tắt thì bấm không làm gì; vị trí ngang ngoài 0..1 được kẹp; chart chưa có dữ liệu bị bỏ qua", () => {
+    const a = fake({ from: 400, to: 1000 });
+    const b = fake({ from: 0, to: 500 });
+    const c = fake({ from: 0, to: 500 });
+    c.showTime = () => null;
+    reg("p1", a);
+    reg("p2", b);
+    reg("p3", c);
+    syncTime("p1", 700, 0.5);
+    expect(b.shows).toEqual([]);
+    L().setSync({ time: true });
+    syncTime("p1", 700, 1.7);
+    syncTime("p1", 700, -3);
+    expect(b.shows).toEqual([[700, 1], [700, 0]]);
+  });
+
+  it("Time + Date range cùng bật: bấm đặt echo, nên chart vừa được cuộn không kéo ngược nguồn", () => {
     L().setSync({ time: true, dateRange: true });
     const a = fake({ from: 400, to: 1000 });
     const b = fake({ from: 0, to: 500 });
     reg("p1", a);
     reg("p2", b);
-    syncRange("p1");
-    expect(b.sets).toEqual([[1000, 400]]);
+    syncTime("p1", 700, 0.5);
+    syncRange("p2"); // sự kiện dội lại của b (b vẫn đúng góc nhìn do đồng bộ đặt)
+    expect(a.sets).toEqual([]);
   });
 
   it("sự kiện dội lại từ chart vừa được đặt bị bỏ qua (không kéo nguồn quay lại)", () => {
@@ -247,7 +292,7 @@ describe("range / crosshair sync", () => {
   });
 
   it("chart chưa có dữ liệu (setRange → null) bị bỏ qua, chart khác vẫn được đặt", () => {
-    L().setSync({ time: true });
+    L().setSync({ dateRange: true });
     const a = fake({ from: 400, to: 1000 });
     const b = fake({ from: 0, to: 500 });
     const c = fake({ from: 0, to: 500 });
@@ -256,12 +301,12 @@ describe("range / crosshair sync", () => {
     reg("p2", b);
     reg("p3", c);
     syncRange("p1");
-    expect(c.sets).toEqual([[1000, undefined]]);
+    expect(c.sets).toEqual([[1000, 400]]);
     expect(isSyncedRange("p2", { lf: 0, lt: 5 })).toBe(false);
   });
 
   it("nguồn chưa có góc nhìn (đang tải) → không đồng bộ", () => {
-    L().setSync({ time: true });
+    L().setSync({ dateRange: true });
     const a = fake({ from: 0, to: 10 });
     const b = fake({ from: 0, to: 500 });
     a.range = null;
@@ -272,7 +317,7 @@ describe("range / crosshair sync", () => {
   });
 
   it("đang đặt hộ thì sự kiện lồng nhau (đồng bộ) bị bỏ qua", () => {
-    L().setSync({ time: true });
+    L().setSync({ dateRange: true });
     const a = fake({ from: 400, to: 1000 });
     const b = fake({ from: 0, to: 500 });
     const orig = b.setRange;

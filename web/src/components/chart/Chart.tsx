@@ -11,7 +11,7 @@ import { useChartStore } from "@/store/chart";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import { usePaneState } from "@/store/compose";
 import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
-import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, timeAt, type PaneView } from "@/store/paneSync";
+import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
 import { fmtVol, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
@@ -687,10 +687,26 @@ export default function Chart({ paneId }: { paneId: string }) {
         const bars = barsRef.current;
         if (!cur || !bars.length) return null;
         const lt = indexAt(bars, tfSec(), to);
-        const lf = from === undefined ? (lt === null ? null : lt - (cur.to - cur.from)) : indexAt(bars, tfSec(), from);
+        const lf = indexAt(bars, tfSec(), from);
         if (lt === null || lf === null || !(lt - lf > 0.5)) return null;
         if (Math.abs(lt - cur.to) > 1e-4 || Math.abs(lf - cur.from) > 1e-4) {
           ts.setVisibleLogicalRange({ from: lf, to: lt });
+          if (remoteT !== null) setCross(remoteT);
+        }
+        const after = ts.getVisibleLogicalRange();
+        return after && { lf: after.from, lt: after.to };
+      },
+      showTime: (t, frac) => {
+        const ts = chart.timeScale();
+        const cur = ts.getVisibleLogicalRange();
+        const bars = barsRef.current;
+        if (!cur || !bars.length) return null;
+        const idx = indexAt(bars, tfSec(), t);
+        if (idx === null) return null;
+        const span = cur.to - cur.from;
+        const lf = idx - frac * span;
+        if (Math.abs(lf - cur.from) > 1e-4) {
+          ts.setVisibleLogicalRange({ from: lf, to: lf + span });
           if (remoteT !== null) setCross(remoteT);
         }
         const after = ts.getVisibleLogicalRange();
@@ -709,6 +725,20 @@ export default function Chart({ paneId }: { paneId: string }) {
     };
     box.addEventListener("mouseenter", onEnter);
     box.addEventListener("mouseleave", onLeave);
+
+    // "Sync in layout › Time": bấm vào chart thì các chart khác cuộn tới đúng thời điểm của cây nến vừa bấm, cùng vị trí ngang
+    chart.subscribeClick((p) => {
+      const ts = chart.timeScale();
+      const w = ts.width();
+      if (!p.point || w <= 0 || p.point.x < 0 || p.point.x > w) return;
+      const idx = ts.coordinateToLogical(p.point.x);
+      const bars = barsRef.current;
+      if (idx === null || !bars.length) return;
+      const i = Math.round(idx);
+      const t = timeAt(bars, tfSec(), i);
+      const x = ts.logicalToCoordinate(i as never);
+      if (t !== null && x !== null) syncTime(paneId, t, x / w);
+    });
 
     chart.subscribeCrosshairMove((p) => {
       const bars = barsRef.current;

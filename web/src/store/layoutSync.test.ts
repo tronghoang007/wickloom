@@ -9,7 +9,7 @@ function fixture() {
   const cur = { name: "L", symbol: "XAUUSDm", active: "p1" };
   const snapshot = (): LayoutDoc => {
     const panes = { p1: createPane("p1", { chart: { symbol: cur.symbol } }) };
-    return buildDoc({ name: cur.name, templateId: "1", tree: buildTemplate("1", ["p1"]), order: ["p1"], panes, activeId: cur.active });
+    return buildDoc({ name: cur.name, templateId: "s", tree: buildTemplate("s", ["p1"]), order: ["p1"], panes, activeId: cur.active });
   };
   return { cur, snapshot, baseline: snapshot() };
 }

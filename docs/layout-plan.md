@@ -66,10 +66,18 @@ xoá layout đang mở → mở layout còn lại, không tạo lại bản vừ
 - `LayoutDoc.sync: {symbol, interval, crosshair, time, dateRange}` (boolean, thêm vào doc v1 mà không đổi `LAYOUT_VERSION`; doc cũ không có / hỏng → tắt hết, `parseSync`); `useLayoutStore.sync` + `setSync(patch)`; lưu cùng layout (nằm trong `docKey` nên đổi công tắc = autosave). Khách không lưu (như lưới).
 - `store/paneSync.ts`: **Symbol/Interval** — `startPaneSync()` (gọi ở `ChartGrid`) nghe store `chart` của từng pane, đổi ở pane nào thì ghi vào các pane khác CHỈ khi đang khác giá trị (không vòng lặp); vừa bật công tắc thì các pane khác lấy ngay symbol/khung của pane ACTIVE (không áp khi mở layout khác: `revision` đổi).
   **Crosshair / Time / Date range** — mỗi `Chart` đăng ký một `PaneView` {getRange, setRange, setCrosshair, hovered}; thời gian (giây) là đơn vị chung giữa các khung (`timeAt`/`indexAt`: chỉ số logic ↔ thời gian, nội suy qua lỗ cuối tuần, ngoại suy theo độ dài 1 nến ngoài hai đầu).
-  *Time* = dời mép phải của các chart khác về cùng thời gian, giữ số nến đang hiện (kéo/cuộn có tác dụng, zoom thì không — mép phải đứng yên); *Date range* = đặt cả hai mép (zoom cũng lan). Định nghĩa Time vs Date range là **đoán** (chưa đối chiếu TV, Phase 0).
+  **Sửa sau Phase 0:** *Date range* = cuộn/zoom ở một chart thì các chart khác hiện cùng khoảng (đặt cả hai mép); *Time* = **bấm** vào một chart (`subscribeClick`) thì các chart khác cuộn tới đúng thời điểm của cây nến vừa bấm, cùng vị trí ngang (`syncTime`/`PaneView.showTime`), cuộn/zoom thì KHÔNG lan — đúng tooltip của TV (căn giữa hay cùng vị trí ngang thì chưa đo được, `tv-layout-reference.md` §7). Mặc định `DEFAULT_SYNC` = chỉ Crosshair bật (cho layout mới, doc cũ không có `sync`, popup lúc đầu).
 - Chống vòng lặp: `applying` (sự kiện lồng nhau) + `echo` (góc nhìn do đồng bộ vừa đặt cho một chart thì sự kiện dội lại bị bỏ qua) + chỉ đặt khi khác > 1e-4 nến. Chart không có dữ liệu trong khoảng đó thì để trống: `isSyncedRange` cho handler "cuộn tới đầu dữ liệu" của Chart bỏ qua nên **không kích backfill hàng loạt**.
 - Crosshair: chỉ pane có chuột (`hoverRef`) là nguồn và không nhận; `setCrosshairPosition` của LWC không bắn lại sự kiện (đã đọc mã nguồn) nên không vòng lặp. Chart nhận ẩn đường ngang (không có giá), cập nhật legend theo nến đó, **vẽ lại sau mỗi lần dời góc nhìn** (LWC giữ crosshair giả theo pixel) và **không vẽ khi nến nằm ngoài vùng đang hiện** (LWC kẹp vào mép với nhãn giờ sai). Khác khung: lấy nến chứa thời gian đó (`barIndexAt`).
-- UI: khối "Sync in layout" (5 checkbox, mờ khi chỉ 1 chart) trong popup `LayoutMenu`. Mặc định tắt hết (TV có thể bật sẵn một vài mục — chưa đối chiếu).
+- UI: khối "Sync in layout" (5 toggle switch, mờ khi chỉ 1 chart, tooltip nguyên văn của TV) trong popup `LayoutMenu`.
+
+**Sau Phase 0 (2026-10-22) đã chỉnh theo TV** (chưa commit; 319 test web xanh, `tsc`/`next build` sạch; kiểm tay trên Chrome với backend scratch: popup, 2-2-r, Time bấm, Date range, menu RECENTLY USED, dialog Layouts, công tắc lưu lên server sau reload):
+
+- `store/layoutTree.ts`: `TEMPLATES` = **42 mẫu 1–8 ô của TV** (id TV: `s`, `2h`/`2v`, `3h`/`3v`/`3s`/`3r`/`2-1`/`1-2`, `4`, `4v`, `4h`, `4s`, `4s-l`, `1-3`, `3-1`, `2-2-l`, `2-2-r`, `2-2`, 5 ô ×10, 6 ô ×6, 7 ô ×3, 8 ô ×4; 9–16 ô chờ nâng `MAX_PANES`). `canonicalTemplateId` đổi id cũ của bản trước (`2-cols`, `4-grid`...) sang id TV khi `setTemplate`/`applyLayout`/`parseLayoutDoc`, nên layout đã lưu vẫn tô đúng mẫu.
+- `LayoutMenu`: popup như TV (428px, không tiêu đề, hàng 41px, nút 29×27, icon khung + đường chia vẽ từ cây, mẫu đang chọn nền sáng, nhãn SYNC IN LAYOUT, toggle switch).
+- `LayoutBar`: menu theo thứ tự của TV — Save layout · Make a copy… · Rename… · Create new layout… · **RECENTLY USED** (4 layout sửa gần nhất, "SYMBOL, khung", chỉ khi đã đăng nhập) · Open layout… · Delete layout… (app giữ thêm Delete; không có toggle Autosave vì app luôn autosave).
+- `OpenLayoutDialog`: tiêu đề "Layouts", 480×540, sắp xếp 4 kiểu (mặc định ngày ↓), dòng 2 = tóm tắt + "(Oct 22, 2026, 10:14)", thùng rác khi rê chuột. Chưa làm: ngôi sao yêu thích.
+- Chưa làm: Alt+Enter / Alt+Click = Maximize, Tab đổi chart active; mẫu 9–16 ô; nhóm emoji sync symbol/interval.
 
 **Chưa có / giới hạn đã biết:** layout không đọc được chỉ hiện trong danh sách, chưa mở/sửa được; hai tab cùng mở: last-write-wins; Chart không tự nạp lại dữ liệu
 giá nếu backend tắt lúc mở trang (có sẵn từ trước: `load()` không retry lỗi mạng); Ctrl+S chưa thử trên trình duyệt thật (chỉ code review: `preventDefault` + `save()`);
@@ -102,6 +110,9 @@ vị trí nút Maximize và danh sách mẫu vẫn là đoán theo TV (Phase 0).
 - Toolbar: nút `LayoutI` đang `disabled` và khối "Default / Save / chevron" chỉ là placeholder.
 
 ## 2. TV làm gì (đích parity) — **viết từ trí nhớ, chưa đối chiếu, xem Phase 0**
+
+> **Đã đối chiếu một phần (Phase 0, 2026-10-22) — số đo đầy đủ ở `docs/tv-layout-reference.md`.** Đúng: các mẫu 1–3 ô, 5 công tắc sync và thứ tự của chúng, Make a copy / Rename / Create new / Open layout, dialog Layouts có tìm kiếm + xoá + giờ sửa.
+> **Sai / thiếu so với bản đoán dưới đây:** (1) TV có **55 mẫu** 1–16 ô (từ 4 ô trở lên nhiều hơn app: 4 ô có 10 mẫu, không phải 7); (2) **"Time" = bấm vào chart thì mọi chart hiện cùng thời điểm** (không phải cuộn đi theo; cuộn + zoom là "Date range"); (3) TV có toggle **Autosave** + mục "Save layout ⌘S" (xám khi autosave) + "Share layout" + "Download chart data…" + danh sách **RECENTLY USED**; (4) Crosshair **bật sẵn**, 4 công tắc kia tắt; (5) Maximize có nút + **Alt+Enter / Alt+Click**, **Tab** đổi chart active; (6) gói Basic chỉ 1 chart/tab nên **viền active, vị trí nút Maximize, splitter chưa đo được**.
 
 - Nút layout (góc phải toolbar) → popup lưới các mẫu: 1 chart; 2 (2 cột, 2 hàng); 3 (3 cột, 3 hàng, 1 trái + 2 phải,
   2 trái + 1 phải, 1 trên + 2 dưới, 2 trên + 1 dưới); 4 (2×2, 4 cột, 4 hàng, 1 + 3…); 5, 6, 8… (10/12/14/16 tuỳ gói).
@@ -272,7 +283,7 @@ Không cần bảng mới, nhưng **không dùng CRUD generic `/layouts`** nữa
 
 | Phase | Việc | Xong khi |
 |---|---|---|
-| 0 | Chụp tham chiếu TV: popup layout (danh sách mẫu, nhãn sync), menu Save/Rename/Copy/Open, dialog Open, viền active, Maximize, hành vi Time vs Date range. Ghi `docs/tv-layout-reference.md` | Có tài liệu số đo + nhãn thật, các mục "chưa đối chiếu" ở §2 được xác nhận hoặc sửa |
+| 0 ◐ | Chụp tham chiếu TV (làm 2026-10-22: popup, menu, dialog, tooltip sync đã đo; **phần ≥ 2 chart không đo được vì gói Basic** — xem `tv-layout-reference.md` §7): popup layout (danh sách mẫu, nhãn sync), menu Save/Rename/Copy/Open, dialog Open, viền active, Maximize, hành vi Time vs Date range. Ghi `docs/tv-layout-reference.md` | Có tài liệu số đo + nhãn thật, các mục "chưa đối chiếu" ở §2 được xác nhận hoặc sửa |
 | 1 ✅ | Tách state theo pane (§5.1), vẫn 1 ô + migration state cũ (§4.4) | Hành vi y hệt trước: vẽ/undo/indicator/volume/replay/đổi symbol-khung chạy như cũ; `tsc`, lint, vitest xanh |
 | 2 ✅ | Cây chia ô + template + popup chọn + splitter + active pane + Maximize + `DrawingDoc` dùng chung (§5.2–5.3) | 2×2 mỗi ô symbol/khung riêng; vẽ ở ô A hiện ở ô B cùng symbol, undo chung, không mất hình; phím tắt/chụp ảnh chỉ tác động ô active |
 | 3 ✅ | Lưu/mở layout: `store/layout.ts`, `LayoutSync`, menu + dialog Open, autosave, Ctrl+S, khôi phục khi mở app, drawings theo layout (§4.3, §5.5), scope = user qua `/me/layouts`, chặn khách bằng `requireLogin` (= `auth-plan` U4). **Cần `auth-plan` U1–U3 xong trước** | Reload giữ nguyên bố cục + indicator; copy/xoá layout kèm drawings; tắt backend rồi reload không mất layout; khách bấm Save → popup → lưu đúng tài khoản; user B không thấy layout của A |

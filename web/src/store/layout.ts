@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { NO_SYNC, buildDoc, cleanName, type LayoutDoc, type SyncFlags } from "./layoutDoc";
-import { buildTemplate, paneIds, retarget, templateById, withSizes, type Node } from "./layoutTree";
+import { DEFAULT_SYNC, buildDoc, cleanName, type LayoutDoc, type SyncFlags } from "./layoutDoc";
+import { buildTemplate, canonicalTemplateId, paneIds, retarget, templateById, withSizes, type Node } from "./layoutTree";
 import { createPane, type Pane } from "./paneStores";
 
 // Registry các chart (pane) đang có + pane active. Toolbar, thanh vẽ, hộp tìm symbol... luôn tác động lên pane active
@@ -45,12 +45,12 @@ export const useLayoutStore = create<State>()((set, get) => ({
   name: "Default",
   revision: 0,
   panes: { [PRIMARY_PANE_ID]: createPane(PRIMARY_PANE_ID) },
-  tree: buildTemplate("1", [PRIMARY_PANE_ID]),
+  tree: buildTemplate("s", [PRIMARY_PANE_ID]),
   order: [PRIMARY_PANE_ID],
-  templateId: "1",
+  templateId: "s",
   activeId: PRIMARY_PANE_ID,
   maximized: null,
-  sync: NO_SYNC,
+  sync: DEFAULT_SYNC,
 
   setSync: (patch) =>
     set((s) => {
@@ -65,8 +65,9 @@ export const useLayoutStore = create<State>()((set, get) => ({
     set({ activeId: id });
   },
 
-  setTemplate: (templateId) => {
+  setTemplate: (id) => {
     const { panes, order, activeId, templateId: cur } = get();
+    const templateId = canonicalTemplateId(id); // id cũ của bản app trước → id TV
     if (!templateById(templateId)) return;
     if (templateId === cur) return;
     const { ids, added, removed, tree } = retarget(order, templateId);
@@ -120,7 +121,7 @@ export const useLayoutStore = create<State>()((set, get) => ({
       panes,
       tree: doc.tree,
       order,
-      templateId: doc.templateId,
+      templateId: canonicalTemplateId(doc.templateId),
       activeId: order.includes(doc.active) ? doc.active : order[0],
       maximized: null,
       sync: doc.sync,

@@ -54,7 +54,7 @@ function fakeKv(init: Record<string, string> = {}) {
 }
 
 const docOf = (name: string, symbol: string, updatedAt: number, tf = "M5"): LayoutDoc =>
-  buildDoc({ name, templateId: "1", tree: buildTemplate("1", ["p1"]), order: ["p1"], panes: { p1: createPane("p1", { chart: { symbol, tf } }) }, activeId: "p1" }, updatedAt);
+  buildDoc({ name, templateId: "s", tree: buildTemplate("s", ["p1"]), order: ["p1"], panes: { p1: createPane("p1", { chart: { symbol, tf } }) }, activeId: "p1" }, updatedAt);
 
 let be: ReturnType<typeof makeBackend>;
 let kv: ReturnType<typeof fakeKv>;
@@ -228,7 +228,7 @@ describe("autosave", () => {
   it("đổi mẫu chia ô / thêm indicator / đổi tên đều lưu", async () => {
     startSession();
     await loginAs();
-    L().setTemplate("2-cols");
+    L().setTemplate("2h");
     await vi.advanceTimersByTimeAsync(1100);
     expect(Object.keys((be.layouts.get("default") as LayoutDoc).panes)).toEqual(["p1", "p2"]);
     getPane("p2").indicators.getState().add("sma");
@@ -494,8 +494,8 @@ describe("hook auth", () => {
 
   it("snapshotLayout phản ánh màn hình (dùng làm bản lưu)", async () => {
     startSession();
-    L().setTemplate("2-cols");
+    L().setTemplate("2h");
     expect(Object.keys(snapshotLayout().panes)).toEqual(["p1", "p2"]);
-    expect(docKey(snapshotLayout())).toContain("2-cols");
+    expect(docKey(snapshotLayout())).toContain("2h");
   });
 });

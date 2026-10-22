@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LAYOUT_VERSION, NO_SYNC, buildDoc, cleanName, docKey, parseLayoutDoc, summarizeDoc, tfShort, type LayoutDoc } from "./layoutDoc";
+import { DEFAULT_SYNC, LAYOUT_VERSION, NO_SYNC, buildDoc, cleanName, docKey, parseLayoutDoc, summarizeDoc, tfShort, type LayoutDoc } from "./layoutDoc";
 import { buildTemplate } from "./layoutTree";
 import { createPane } from "./paneStores";
 
@@ -12,13 +12,13 @@ function twoPaneDoc(): LayoutDoc {
   };
   panes.p1.indicators.getState().add("sma");
   panes.p2.volume.getState().set({ maOn: true });
-  return buildDoc({ name: "Scalp", templateId: "2-cols", tree: buildTemplate("2-cols", ids(2)), order: ["p1", "p2"], panes, activeId: "p2" }, 123);
+  return buildDoc({ name: "Scalp", templateId: "2h", tree: buildTemplate("2h", ids(2)), order: ["p1", "p2"], panes, activeId: "p2" }, 123);
 }
 
 describe("buildDoc", () => {
   it("chụp bố cục + state từng pane, không có replay/drawings", () => {
     const d = twoPaneDoc();
-    expect(d).toMatchObject({ version: LAYOUT_VERSION, name: "Scalp", templateId: "2-cols", active: "p2", updatedAt: 123 });
+    expect(d).toMatchObject({ version: LAYOUT_VERSION, name: "Scalp", templateId: "2h", active: "p2", updatedAt: 123 });
     expect(Object.keys(d.panes)).toEqual(["p1", "p2"]);
     expect(d.panes.p1.indicators).toHaveLength(1);
     expect(d.panes.p2.chart).toMatchObject({ symbol: "BTCUSDm", tf: "H1", chartType: "line" });
@@ -33,7 +33,7 @@ describe("docKey", () => {
     const a = twoPaneDoc();
     expect(docKey({ ...a, updatedAt: 999, active: "p1" })).toBe(docKey(a));
     expect(docKey({ ...a, name: "Khác" })).not.toBe(docKey(a));
-    expect(docKey({ ...a, tree: buildTemplate("2-rows", ids(2)) })).not.toBe(docKey(a));
+    expect(docKey({ ...a, tree: buildTemplate("2v", ids(2)) })).not.toBe(docKey(a));
   });
 });
 
@@ -48,21 +48,37 @@ describe("parseLayoutDoc", () => {
     }
   });
 
-  it("sync: doc cũ không có / hỏng → tắt hết; chỉ nhận đúng `true`; đổi công tắc là có thay đổi cần lưu", () => {
+  it("sync: doc cũ không có / hỏng → mặc định của TV (chỉ Crosshair); có object thì chỉ nhận đúng `true`; đổi công tắc là có thay đổi cần lưu", () => {
     const d = twoPaneDoc();
-    expect(d.sync).toEqual(NO_SYNC);
+    expect(d.sync).toEqual(DEFAULT_SYNC);
+    expect(DEFAULT_SYNC).toEqual({ ...NO_SYNC, crosshair: true });
     const parse = (sync: unknown) => {
       const r = parseLayoutDoc({ ...JSON.parse(JSON.stringify(d)), sync });
       if (!r.ok) throw new Error("parse failed");
       return r.doc;
     };
-    expect(parse(undefined).sync).toEqual(NO_SYNC);
-    expect(parse("symbol").sync).toEqual(NO_SYNC);
-    expect(parse({ symbol: 1, time: "true", dateRange: true, lạ: true }).sync).toEqual({ ...NO_SYNC, dateRange: true });
-    const on = { ...d, sync: { ...NO_SYNC, crosshair: true } };
+    expect(parse(undefined).sync).toEqual(DEFAULT_SYNC);
+    expect(parse("symbol").sync).toEqual(DEFAULT_SYNC);
+    expect(parse([true]).sync).toEqual(DEFAULT_SYNC);
+    expect(parse({ symbol: 1, time: "true", dateRange: true, lạ: true }).sync).toEqual({ ...NO_SYNC, dateRange: true }); // object: thiếu = tắt
+    const on = { ...d, sync: { ...NO_SYNC, symbol: true } };
     expect(docKey(on)).not.toBe(docKey(d));
     expect(parse(on.sync).sync).toEqual(on.sync);
     expect(docKey(parse(on.sync))).toBe(docKey(on)); // lưu rồi đọc lại: không bị coi là có thay đổi
+  });
+
+  it("templateId cũ của bản app trước được đổi sang id TV khi đọc; id lạ giữ nguyên", () => {
+    const raw = JSON.parse(JSON.stringify(twoPaneDoc()));
+    const id = (templateId: unknown) => {
+      const r = parseLayoutDoc({ ...raw, templateId });
+      if (!r.ok) throw new Error("parse failed");
+      return r.doc.templateId;
+    };
+    expect(id("2h")).toBe("2h");
+    expect(id("2-cols")).toBe("2h");
+    expect(id("4-grid")).toBe("4");
+    expect(id("từ-bản-khác")).toBe("từ-bản-khác");
+    expect(id(5)).toBe("");
   });
 
   it("version lạ (app mới hơn) → reason version; thiếu/sai kiểu → invalid", () => {
@@ -121,7 +137,7 @@ describe("summarizeDoc / tfShort / cleanName", () => {
   });
   it("nhiều hơn 4 chart thì '+N'", () => {
     const panes = Object.fromEntries(ids(6).map((id) => [id, createPane(id)]));
-    const d = buildDoc({ name: "x", templateId: "6-2x3", tree: buildTemplate("6-2x3", ids(6)), order: ids(6), panes, activeId: "p1" });
+    const d = buildDoc({ name: "x", templateId: "6", tree: buildTemplate("6", ids(6)), order: ids(6), panes, activeId: "p1" });
     expect(summarizeDoc(d)).toBe("XAUUSDm 5 · XAUUSDm 5 · XAUUSDm 5 · XAUUSDm 5 · +2");
   });
   it("nhãn khung", () => {

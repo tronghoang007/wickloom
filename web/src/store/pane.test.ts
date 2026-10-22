@@ -11,12 +11,12 @@ import { useVolumeStore } from "./volume";
 const p1 = () => getPane(PRIMARY_PANE_ID);
 
 beforeEach(() => {
-  useLayoutStore.getState().setTemplate("2-cols");
+  useLayoutStore.getState().setTemplate("2h");
   getPane("p2").chart.setState({ symbol: "EURUSD", tf: "H1" });
 });
 afterEach(() => {
   useLayoutStore.getState().setActive(PRIMARY_PANE_ID);
-  useLayoutStore.getState().setTemplate("1");
+  useLayoutStore.getState().setTemplate("s");
   p1().chart.setState(DEFAULT_CHART);
   p1().indicators.setState({ list: [], collapsed: false });
   p1().volume.setState({ s: DEFAULT_VOLUME });

@@ -4,7 +4,8 @@ import type { ChartPane, Pane } from "./paneStores";
 // "Sync in layout" (layout.sync): đổi ở một chart thì các chart còn lại đổi theo.
 //  - Symbol / Interval: lắng nghe store `chart` của từng pane (startPaneSync), chỉ ghi vào pane đang KHÁC giá trị nên không vòng lặp.
 //  - Crosshair / Time / Date range: Chart đăng ký một PaneView (góc nhìn + crosshair của nó), báo sự kiện qua syncCrosshair /
-//    syncRange; thời gian là đơn vị chung giữa các chart khác khung (chỉ số logic của mỗi chart khác nhau).
+//    syncTime / syncRange; thời gian là đơn vị chung giữa các chart khác khung (chỉ số logic của mỗi chart khác nhau).
+//    Theo TV: Time = BẤM vào một chart thì mọi chart hiện cùng thời điểm đó; Date range = cuộn/zoom thì mọi chart hiện cùng khoảng.
 // Chart không có dữ liệu trong khoảng đó thì chỉ để trống, KHÔNG kích backfill (isSyncedRange cho Chart biết để bỏ qua).
 
 type HasTime = { t: number };
@@ -55,8 +56,10 @@ export type PaneRange = LogicalRange & { from: number; to: number };
 
 export type PaneView = {
   getRange(): PaneRange | null;
-  /** Đặt mép phải về thời gian `to`; có `from` thì hiện đúng khoảng [from, to], không thì giữ số nến đang hiện. Trả về góc nhìn thực tế sau khi đặt. */
-  setRange(to: number, from?: number): LogicalRange | null;
+  /** Hiện đúng khoảng thời gian [from, to]. Trả về góc nhìn thực tế sau khi đặt (LWC có thể giới hạn lại). */
+  setRange(to: number, from: number): LogicalRange | null;
+  /** Cuộn để thời gian `t` nằm ở vị trí `frac` (0..1) theo bề ngang chart, giữ số nến đang hiện. Trả về góc nhìn thực tế. */
+  showTime(t: number, frac: number): LogicalRange | null;
   /** Vẽ crosshair dọc tại thời gian `t` (null = xoá). */
   setCrosshair(t: number | null): void;
   /** Chuột đang ở trong chart này: nó là nguồn crosshair, không nhận crosshair từ chart khác. */
@@ -84,10 +87,10 @@ export function isSyncedRange(id: string, r: LogicalRange): boolean {
   return !!e && sameRange(e, r);
 }
 
-/** Chart `sourceId` vừa đổi góc nhìn: đưa các chart còn lại về cùng mép phải (Time) hoặc cùng khoảng (Date range). */
+/** Chart `sourceId` vừa đổi góc nhìn (cuộn/zoom): với "Date range", đưa các chart còn lại về cùng khoảng thời gian. */
 export function syncRange(sourceId: string) {
   const { sync, order } = useLayoutStore.getState();
-  if (applying > 0 || !(sync.time || sync.dateRange)) return;
+  if (applying > 0 || !sync.dateRange) return;
   const r = views.get(sourceId)?.getRange();
   if (!r) return;
   if (isSyncedRange(sourceId, r)) return;
@@ -96,7 +99,23 @@ export function syncRange(sourceId: string) {
   try {
     for (const id of order) {
       if (id === sourceId) continue;
-      const res = views.get(id)?.setRange(r.to, sync.dateRange ? r.from : undefined);
+      const res = views.get(id)?.setRange(r.to, r.from);
+      if (res) echo.set(id, res);
+    }
+  } finally {
+    applying--;
+  }
+}
+
+/** Bấm vào chart `sourceId` ở thời gian `t` (tại vị trí ngang `frac`): với "Time", các chart còn lại cuộn tới cùng thời điểm đó, cùng vị trí ngang. */
+export function syncTime(sourceId: string, t: number, frac: number) {
+  const { sync, order } = useLayoutStore.getState();
+  if (applying > 0 || !sync.time) return;
+  applying++;
+  try {
+    for (const id of order) {
+      if (id === sourceId) continue;
+      const res = views.get(id)?.showTime(t, Math.min(1, Math.max(0, frac)));
       if (res) echo.set(id, res);
     }
   } finally {
@@ -155,7 +174,7 @@ export function startPaneSync(): () => void {
     if (on("symbol")) keys.push("symbol");
     if (on("interval")) keys.push("tf");
     if (keys.length) adopt(active, keys);
-    if (on("time") || on("dateRange")) syncRange(s.activeId);
+    if (on("dateRange")) syncRange(s.activeId);
   });
   return () => {
     offs.forEach((f) => f());

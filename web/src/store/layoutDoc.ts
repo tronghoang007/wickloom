@@ -1,5 +1,5 @@
 import { TF_SECONDS } from "@/lib/api";
-import { MAX_PANES, paneIds, type Node } from "./layoutTree";
+import { MAX_PANES, canonicalTemplateId, paneIds, type Node } from "./layoutTree";
 import { snapshotPane, type PaneInit } from "./paneStores";
 import { parsePaneInit } from "./paneStorage";
 import type { Pane } from "./paneStores";
@@ -14,10 +14,13 @@ export type PaneSaved = ReturnType<typeof snapshotPane>;
 export type SyncFlags = { symbol: boolean; interval: boolean; crosshair: boolean; time: boolean; dateRange: boolean };
 export const SYNC_KEYS = ["symbol", "interval", "crosshair", "time", "dateRange"] as const;
 export const NO_SYNC: SyncFlags = { symbol: false, interval: false, crosshair: false, time: false, dateRange: false };
+/** Mặc định của TV: chỉ Crosshair bật (đọc từ popup layout của TV, docs/tv-layout-reference.md §2). */
+export const DEFAULT_SYNC: SyncFlags = { ...NO_SYNC, crosshair: true };
 
-/** Doc cũ không có `sync` (thêm sau, vẫn version 1): thiếu/hỏng thì tắt hết. */
+/** Doc cũ không có `sync` (thêm sau, vẫn version 1) hoặc hỏng → mặc định; có object thì chỉ nhận đúng `true`. */
 export function parseSync(raw: unknown): SyncFlags {
-  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...DEFAULT_SYNC };
+  const o = raw as Record<string, unknown>;
   return Object.fromEntries(SYNC_KEYS.map((k) => [k, o[k] === true])) as SyncFlags;
 }
 
@@ -58,7 +61,7 @@ export function buildDoc(s: LayoutInput, now = Date.now()): LayoutDoc {
     tree: s.tree,
     active: s.activeId,
     panes: Object.fromEntries(s.order.map((id) => [id, snapshotPane(s.panes[id])])),
-    sync: { ...(s.sync ?? NO_SYNC) },
+    sync: { ...(s.sync ?? DEFAULT_SYNC) },
     updatedAt: now,
   };
 }
@@ -118,7 +121,7 @@ export function parseLayoutDoc(raw: unknown): ParsedDoc {
     doc: {
       version: LAYOUT_VERSION,
       name: cleanName(o.name),
-      templateId: typeof o.templateId === "string" ? o.templateId : "",
+      templateId: typeof o.templateId === "string" ? canonicalTemplateId(o.templateId) : "",
       tree,
       active: typeof o.active === "string" && order.includes(o.active) ? o.active : order[0],
       panes,

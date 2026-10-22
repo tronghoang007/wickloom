@@ -3,7 +3,9 @@
 import { appSession } from "@/store/appSession";
 import { useAuthStore } from "@/store/auth";
 import { useLayoutStore } from "@/store/layout";
-import { useSessionStore } from "@/store/layoutSession";
+import { tfShort } from "@/store/layoutDoc";
+import { paneIds } from "@/store/layoutTree";
+import { useSessionStore, type Entry } from "@/store/layoutSession";
 import { useEffect, useState } from "react";
 import { Chevron } from "../icons";
 import PromptDialog from "./PromptDialog";
@@ -11,15 +13,24 @@ import PromptDialog from "./PromptDialog";
 type Ask = { kind: "rename" | "copy" | "create" | "delete" } | null;
 const item = "flex w-full items-center justify-between gap-6 px-4 py-2 text-left text-sm hover:bg-[var(--hover)]";
 
-/** Khối tên layout + trạng thái lưu + menu (Save, Rename, Make a copy, Create new, Open, Delete) bên phải toolbar; Ctrl+S. */
+const RECENT = 4;
+// Dòng 2 của mục "recently used" như TV: "XAUUSD, 15" (symbol + khung của chart đầu)
+const recentSub = (e: Entry) => {
+  const first = e.doc ? e.doc.panes[paneIds(e.doc.tree)[0]]?.chart : null;
+  return first ? `${first.symbol}, ${tfShort(first.tf)}` : e.summary;
+};
+
+/** Khối tên layout + trạng thái lưu + menu (Save, Make a copy, Rename, Create new, RECENTLY USED, Open, Delete) bên phải toolbar; Ctrl+S. */
 export default function LayoutBar() {
   const name = useLayoutStore((s) => s.name);
   const layoutId = useLayoutStore((s) => s.layoutId);
   const saveState = useSessionStore((s) => s.saveState);
   const authStatus = useAuthStore((s) => s.status);
   const expired = useAuthStore((s) => s.expired);
+  const entries = useSessionStore((s) => s.entries);
   const [open, setOpen] = useState(false);
   const [ask, setAsk] = useState<Ask>(null);
+  const recent = authStatus === "user" ? (entries ?? []).filter((e) => e.doc).slice(0, RECENT) : [];
 
   // Ctrl/⌘+S = lưu layout ngay (khách: mời đăng nhập)
   useEffect(() => {
@@ -69,7 +80,15 @@ export default function LayoutBar() {
         <span className="max-w-[140px] truncate text-sm font-medium">{name}</span>
         <span className={`text-[10px] ${status.accent ? "text-[var(--accent)]" : "text-[var(--muted)]"}`}>{status.text}</span>
       </button>
-      <button className="flex h-[38px] w-6 items-center justify-center rounded hover:bg-[var(--hover)]" title="Layout menu" aria-label="Layout menu" onClick={() => setOpen(!open)}>
+      <button
+        className="flex h-[38px] w-6 items-center justify-center rounded hover:bg-[var(--hover)]"
+        title="Layout menu"
+        aria-label="Layout menu"
+        onClick={() => {
+          if (!open && authStatus === "user") void appSession().refreshEntries(); // danh sách "recently used" theo giờ sửa mới nhất
+          setOpen(!open);
+        }}
+      >
         <Chevron />
       </button>
       {open && (
@@ -77,12 +96,29 @@ export default function LayoutBar() {
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-10 z-40 min-w-[230px] rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl">
             <button className={item} onClick={() => { setOpen(false); void appSession().save(); }}>
-              Save <span className="text-xs text-[var(--muted)]">Ctrl S</span>
+              Save layout <span className="text-xs text-[var(--muted)]">Ctrl S</span>
             </button>
-            <div className="my-1 h-px bg-[var(--border)]" />
-            <button className={item} onClick={gated("Đăng nhập để đổi tên layout", "rename")}>Rename…</button>
             <button className={item} onClick={gated("Đăng nhập để sao chép layout", "copy")}>Make a copy…</button>
+            <button className={item} onClick={gated("Đăng nhập để đổi tên layout", "rename")}>Rename…</button>
+            <div className="my-1 h-px bg-[var(--border)]" />
             <button className={item} onClick={gated("Đăng nhập để tạo layout", "create")}>Create new layout…</button>
+            {recent.length > 0 && (
+              <>
+                <div className="my-1 h-px bg-[var(--border)]" />
+                <div className="px-4 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Recently used</div>
+                {recent.map((e) => (
+                  <button
+                    key={e.id}
+                    className={`mx-1 flex w-[calc(100%-8px)] flex-col rounded px-3 py-1.5 text-left ${e.id === layoutId ? "bg-[var(--fg)] text-[var(--bg)]" : "hover:bg-[var(--hover)]"}`}
+                    onClick={() => { setOpen(false); void appSession().open(e.id); }}
+                  >
+                    <span className="max-w-[210px] truncate text-sm">{e.name}</span>
+                    <span className={`text-xs ${e.id === layoutId ? "opacity-70" : "text-[var(--muted)]"}`}>{recentSub(e)}</span>
+                  </button>
+                ))}
+              </>
+            )}
+            <div className="my-1 h-px bg-[var(--border)]" />
             <button className={item} onClick={() => { setOpen(false); void appSession().openDialog(); }}>Open layout…</button>
             <div className="my-1 h-px bg-[var(--border)]" />
             <button className={`${item} text-[#f23645]`} onClick={gated("Đăng nhập để xoá layout", "delete")}>Delete layout…</button>

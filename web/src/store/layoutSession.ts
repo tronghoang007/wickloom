@@ -66,7 +66,7 @@ const sortEntries = (e: Entry[]) => [...e].sort((a, b) => b.updatedAt - a.update
 
 export function guestDoc(init: PaneInit): LayoutDoc {
   const pane = createPane(PRIMARY_PANE_ID, init);
-  return buildDoc({ name: "Default", templateId: "1", tree: buildTemplate("1", [PRIMARY_PANE_ID]), order: [PRIMARY_PANE_ID], panes: { [PRIMARY_PANE_ID]: pane }, activeId: PRIMARY_PANE_ID });
+  return buildDoc({ name: "Default", templateId: "s", tree: buildTemplate("s", [PRIMARY_PANE_ID]), order: [PRIMARY_PANE_ID], panes: { [PRIMARY_PANE_ID]: pane }, activeId: PRIMARY_PANE_ID });
 }
 
 export type Session = ReturnType<typeof createLayoutSession>;
@@ -397,7 +397,7 @@ export function createLayoutSession(
       const src = activePane().chart.getState();
       const pane = createPane(PRIMARY_PANE_ID, { chart: { symbol: src.symbol, tf: src.tf, chartType: src.chartType } });
       const doc = buildDoc(
-        { name: cleanName(name, "Unnamed layout"), templateId: "1", tree: buildTemplate("1", [PRIMARY_PANE_ID]), order: [PRIMARY_PANE_ID], panes: { [PRIMARY_PANE_ID]: pane }, activeId: PRIMARY_PANE_ID },
+        { name: cleanName(name, "Unnamed layout"), templateId: "s", tree: buildTemplate("s", [PRIMARY_PANE_ID]), order: [PRIMARY_PANE_ID], panes: { [PRIMARY_PANE_ID]: pane }, activeId: PRIMARY_PANE_ID },
         now(),
       );
       const id = crypto.randomUUID();
