@@ -9,6 +9,7 @@ import SettingsDialog from "@/components/chart/SettingsDialog";
 import VolumeSettingsDialog from "@/components/chart/VolumeSettingsDialog";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
 import RightRail from "@/components/chart/RightRail";
+import OrderTicket from "@/components/chart/OrderTicket";
 import TradingPanel from "@/components/chart/TradingPanel";
 import Toolbar from "@/components/chart/Toolbar";
 import { drawingGlobal } from "@/drawings/store";
@@ -67,6 +68,7 @@ export default function Page() {
       <VolumeSettingsDialog />
       <DrawingSettings />
       <OpenLayoutDialog />
+      <OrderTicket />
       <AuthDialog />
       <Toasts />
     </div>

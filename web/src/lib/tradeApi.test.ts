@@ -25,7 +25,7 @@ describe("sendMarketOrder", () => {
   it("sàn khớp → done/ok kèm giá, deal", async () => {
     apiFetch.mockResolvedValue(json(200, DONE));
     const o = await sendMarketOrder("S:1", { symbol: "X", side: "sell", volume: 1, clientId: "abc12345" });
-    expect(o).toEqual({ kind: "done", result: { ok: true, message: "", retcode: 10009, order: 5, deal: 7, price: 4131.25, volume: 0.1, duplicate: false } });
+    expect(o).toEqual({ kind: "done", result: { ok: true, message: "", retcode: 10009, order: 5, deal: 7, price: 4131.25, volume: 0.1, duplicate: false, orderType: "", typeChanged: false } });
   });
 
   it("sàn từ chối (HTTP 200, ok=false) → done kèm message tiếng Việt", async () => {

@@ -1,12 +1,15 @@
-import { sendClosePosition, sendMarketOrder, type TradeOutcome } from "@/lib/tradeApi";
+import { sendCancelOrder, sendClosePosition, sendMarketOrder, sendModifyOrder, sendPendingOrder, type PendingRequest, type TradeOutcome, type TradeResult } from "@/lib/tradeApi";
+import type { PendingOrder } from "@/lib/mt5Api";
 import { useAuthStore } from "@/store/auth";
 import { useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
 import { create } from "zustand";
 import { fmtLot, fmtPx } from "./format";
+import { isPendingType, pendingLabel, resolveOrderType, sideOfType } from "./orderType";
+import { useQuoteStore } from "./quote";
 import { useTradeStore } from "./store";
 
-// Hành động giao dịch của người dùng (docs/trade-plan.md T2): luôn qua requireLogin, mỗi lần chỉ một lệnh đang bay, kết quả báo bằng toast.
+// Hành động giao dịch của người dùng (docs/trade-plan.md T2-T3): luôn qua requireLogin, mỗi lần chỉ một lệnh đang bay, kết quả báo bằng toast.
 export const useOrderState = create<{ busy: boolean }>()(() => ({ busy: false }));
 
 /** Mỗi lần bấm một mã: backend dùng nó để không gửi lặp cùng một cú bấm. */
@@ -23,9 +26,10 @@ function refreshSoon() {
   for (const ms of [500, 1500]) setTimeout(() => void useTradeStore.getState().refresh(), ms);
 }
 
-function report(o: TradeOutcome, success: string): boolean {
+/** Báo kết quả bằng toast. `success` là câu cố định hoặc hàm của kết quả (vd chèn loại lệnh EA đã quyết). Trả true nếu sàn đã khớp / nhận lệnh. */
+function report(o: TradeOutcome, success: string | ((r: TradeResult) => string), quiet = false): boolean {
   if (o.kind === "done" && o.result.ok) {
-    toast(success, { ms: 4000 });
+    if (!quiet) toast(typeof success === "string" ? success : success(o.result), { ms: 4000 });
     refreshSoon();
     return true;
   }
@@ -38,17 +42,17 @@ function report(o: TradeOutcome, success: string): boolean {
   return false;
 }
 
-async function run(reason: string, task: (accountId: string) => Promise<void>): Promise<void> {
-  if (useOrderState.getState().busy) return;
+async function run<T>(reason: string, task: (accountId: string) => Promise<T>): Promise<T | undefined> {
+  if (useOrderState.getState().busy) return undefined;
   useOrderState.setState({ busy: true });
   try {
-    if (!(await useAuthStore.getState().requireLogin(reason))) return;
+    if (!(await useAuthStore.getState().requireLogin(reason))) return undefined;
     const acc = activeAccount();
     if (!acc) {
       toast("Chưa có account MT5 kết nối", { ms: 5000 });
-      return;
+      return undefined;
     }
-    await task(acc.id);
+    return await task(acc.id);
   } finally {
     useOrderState.setState({ busy: false });
   }
@@ -60,7 +64,7 @@ export function placeMarket(side: "buy" | "sell", symbol: string, volume: number
     const o = await sendMarketOrder(accountId, { symbol, side, volume, clientId: newClientId() });
     const price = o.kind === "done" && o.result.price > 0 ? ` @ ${fmtPx(o.result.price, digits)}` : "";
     report(o, `${side === "buy" ? "Buy" : "Sell"} ${fmtLot(volume)} ${symbol}${price}`);
-  });
+  }).then(() => undefined);
 }
 
 /** Đóng vị thế `ticket`; `volume` = 0 đóng hết, khác 0 đóng một phần. */
@@ -68,5 +72,67 @@ export function closeTrade(ticket: number, symbol: string, volume = 0): Promise<
   return run("Đăng nhập để giao dịch", async (accountId) => {
     const o = await sendClosePosition(accountId, ticket, volume);
     report(o, `Đã đóng ${volume > 0 ? `${fmtLot(volume)} lot của ` : ""}${symbol} #${ticket}`);
+  }).then(() => undefined);
+}
+
+export type PendingParams = Omit<PendingRequest, "clientId">;
+
+// Một lần đặt lệnh chờ (đã ở trong run). Giá nhảy làm EA chọn loại khác loại web hiển thị thì vẫn đặt (demo) và nói rõ trong toast.
+async function pendingCall(accountId: string, r: PendingParams, digits: number | undefined, quiet = false): Promise<boolean> {
+  const o = await sendPendingOrder(accountId, { ...r, clientId: newClientId() });
+  return report(
+    o,
+    (res) => {
+      const label = isPendingType(res.orderType) ? pendingLabel(res.orderType) : "Lệnh chờ";
+      const text = `${label} ${fmtLot(r.volume)} ${r.symbol} @ ${fmtPx(r.price, digits)}`;
+      return res.typeChanged ? `Đã đặt ${text} (giá nhảy: loại lệnh đã đổi so với dự kiến)` : text;
+    },
+    quiet,
+  );
+}
+
+/** Đặt lệnh chờ: người dùng chỉ chọn hướng + giá, EA quyết Limit/Stop. Trả true nếu sàn đã nhận lệnh. */
+export async function placePending(r: PendingParams, digits?: number): Promise<boolean> {
+  return (await run("Đăng nhập để giao dịch", (accountId) => pendingCall(accountId, r, digits))) === true;
+}
+
+/** Huỷ lệnh chờ `ticket`. */
+export async function cancelOrder(ticket: number, symbol: string): Promise<boolean> {
+  return (
+    (await run("Đăng nhập để giao dịch", async (accountId) => report(await sendCancelOrder(accountId, ticket), `Đã huỷ lệnh chờ ${symbol} #${ticket}`))) === true
+  );
+}
+
+/** Kéo lệnh chờ tới giá mới (docs/trade-plan.md mục 3.4). Cùng loại thì sửa giá. MT5 không cho đổi loại lệnh chờ: giá vượt qua thị trường thì ĐẶT LỆNH MỚI ĐÚNG LOẠI
+ *  TRƯỚC rồi mới xoá lệnh cũ; đặt mới lỗi thì giữ nguyên lệnh cũ. */
+export async function moveOrder(order: PendingOrder, price: number, digits?: number): Promise<boolean> {
+  const done = await run("Đăng nhập để giao dịch", async (accountId) => {
+    const q = useQuoteStore.getState().quotes[order.symbol];
+    const type = isPendingType(order.type) ? order.type : null;
+    const resolved = type && q ? resolveOrderType(sideOfType(type), price, q.bid, q.ask) : type;
+    if (!type || resolved === type) {
+      // cùng loại (hoặc chưa có giá để so: để EA quyết, nó từ chối nếu loại sẽ đổi)
+      return report(await sendModifyOrder(accountId, order.ticket, { price }), `Đã đổi giá ${order.symbol} #${order.ticket} → ${fmtPx(price, digits)}`);
+    }
+    if (!resolved) {
+      toast("Giá vào trùng giá thị trường: lệnh chờ không đặt được ở đó", { ms: 6000 });
+      return false;
+    }
+    const placed = await pendingCall(
+      accountId,
+      { symbol: order.symbol, side: sideOfType(type), volume: order.volume, price, sl: order.sl, tp: order.tp, expiration: order.expiration, expectedType: resolved },
+      digits,
+      true,
+    );
+    if (!placed) return false; // lệnh cũ còn nguyên
+    const del = await sendCancelOrder(accountId, order.ticket);
+    if (del.kind === "done" && del.result.ok) {
+      toast(`Đã chuyển lệnh #${order.ticket} thành ${pendingLabel(resolved)} ${fmtLot(order.volume)} ${order.symbol} @ ${fmtPx(price, digits)}`, { ms: 5000 });
+    } else {
+      toast(`Đã đặt ${pendingLabel(resolved)} mới nhưng chưa xoá được lệnh cũ #${order.ticket}: xoá tay ở tab Orders`, { ms: 12_000 });
+    }
+    refreshSoon();
+    return true;
   });
+  return done === true;
 }

@@ -48,8 +48,11 @@ export type LineSpec = { key: string; price: number; color: string; dashed: bool
 
 export const COLORS = { buy: "#2962ff", sell: "#ff9800", sl: "#f23645", tp: "#089981", order: "#d69a00" };
 
+/** Lệnh chờ đang kéo: vẽ ở giá xem trước, nhãn theo loại lệnh sẽ thành nếu thả tay ở đó (kéo qua giá thị trường thì Limit đổi thành Stop). */
+export type DragPreview = { ticket: number; price: number; label: string };
+
 /** Đường trên chart của symbol hiện tại: entry + SL + TP của vị thế, giá + SL + TP của lệnh chờ. Dữ liệu cũ thì không có đường nào. */
-export function tradeLines(data: TradeData | null, symbol: string, nowSec: number): LineSpec[] {
+export function tradeLines(data: TradeData | null, symbol: string, nowSec: number, drag?: DragPreview | null): LineSpec[] {
   if (!data || isStale(data, nowSec)) return [];
   const out: LineSpec[] = [];
   for (const p of data.positions) {
@@ -61,7 +64,11 @@ export function tradeLines(data: TradeData | null, symbol: string, nowSec: numbe
   }
   for (const o of data.orders) {
     if (o.symbol !== symbol || o.price_open <= 0) continue;
-    out.push({ key: `o:${o.ticket}`, price: o.price_open, color: COLORS.order, dashed: true, title: `${orderLabel(o.type).toUpperCase()} ${fmtLot(o.volume)}` });
+    const dragged = drag && drag.ticket === o.ticket ? drag : null;
+    out.push({
+      key: `o:${o.ticket}`, price: dragged ? dragged.price : o.price_open, color: COLORS.order, dashed: true,
+      title: `${(dragged ? dragged.label : orderLabel(o.type)).toUpperCase()} ${fmtLot(o.volume)}`,
+    });
     if (o.sl > 0) out.push({ key: `osl:${o.ticket}`, price: o.sl, color: COLORS.sl, dashed: true, title: "SL" });
     if (o.tp > 0) out.push({ key: `otp:${o.ticket}`, price: o.tp, color: COLORS.tp, dashed: true, title: "TP" });
   }

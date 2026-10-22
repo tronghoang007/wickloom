@@ -57,3 +57,7 @@ export function writeLot(accountId: string, symbol: string, lot: number): void {
     /* không nhớ được lot thì thôi */
   }
 }
+
+/** Lot sẽ dùng cho lệnh nhanh (menu chuột phải): lot đã nhớ của account × symbol, chuẩn hoá theo spec; chưa nhớ thì lot tối thiểu. */
+export const currentLot = (accountId: string | undefined, symbol: string, spec: LotSpec): number =>
+  normalizeLot((accountId ? readLot(accountId, symbol) : null) ?? spec.min, spec);

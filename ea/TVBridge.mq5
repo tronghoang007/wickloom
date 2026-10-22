@@ -43,14 +43,20 @@
 //|   Luôn OrderCheck trước OrderSend. "symbols" thêm volume_min/    |
 //|   max/step, contract_size, stops_level, freeze_level; "account"  |
 //|   thêm ea_trading/max_lot/ea_version                             |
+//| - 2.13: LỆNH CHỜ (docs/trade-plan.md T3): "order_pending" (web    |
+//|   gửi hướng + giá vào, EA tự quyết Limit/Stop theo Ask/Bid lúc    |
+//|   thực thi; account không phải demo mà loại lệnh khác expected_   |
+//|   type thì từ chối), "order_modify" (đổi giá/SL/TP/hết hạn, không |
+//|   đổi loại), "order_delete". Kiểm tra stops level. Thời gian      |
+//|   time/time_setup/expiration gửi lên là UTC (trước đây giờ server)|
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.12"
+#property version "2.13"
 
-#define EA_VERSION "2.12"
+#define EA_VERSION "2.13"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -84,6 +90,8 @@ ulong g_lastMsc[];
 
 //--- helpers ------------------------------------------------------
 int BrokerOffset() { return (int)(TimeTradeServer() - TimeGMT()); }
+// Gio server cua MT5 -> epoch UTC (0 = khong co: giu 0). Web hien moi thoi gian nhu UTC, giong cach nen da gui (rates.time - offset)
+long ToUtc(long serverTime) { return serverTime > 0 ? serverTime - BrokerOffset() : 0; }
 
 string Esc(string s)
 {
@@ -272,7 +280,7 @@ string PositionsJson(string &sig)
         + ",\"price_current\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT), dg)
         + ",\"profit\":" + DoubleToString(PositionGetDouble(POSITION_PROFIT), 2)
         + ",\"swap\":" + DoubleToString(PositionGetDouble(POSITION_SWAP), 2)
-        + ",\"time\":" + IntegerToString((long)PositionGetInteger(POSITION_TIME))
+        + ",\"time\":" + IntegerToString(ToUtc(PositionGetInteger(POSITION_TIME)))
         + ",\"magic\":" + IntegerToString((long)PositionGetInteger(POSITION_MAGIC))
         + ",\"comment\":\"" + Esc(PositionGetString(POSITION_COMMENT)) + "\"}";
     sig += IntegerToString((long)tk) + ":" + DoubleToString(vol, 8) + ":" + DoubleToString(sl, dg) + ":" + DoubleToString(tp, dg) + ";";
@@ -324,8 +332,8 @@ string OrdersJson(string &sig)
         + ",\"price_open\":" + DoubleToString(price, dg)
         + ",\"price_stoplimit\":" + DoubleToString(OrderGetDouble(ORDER_PRICE_STOPLIMIT), dg)
         + ",\"sl\":" + DoubleToString(sl, dg) + ",\"tp\":" + DoubleToString(tp, dg)
-        + ",\"time_setup\":" + IntegerToString((long)OrderGetInteger(ORDER_TIME_SETUP))
-        + ",\"expiration\":" + IntegerToString((long)OrderGetInteger(ORDER_TIME_EXPIRATION))
+        + ",\"time_setup\":" + IntegerToString(ToUtc(OrderGetInteger(ORDER_TIME_SETUP)))
+        + ",\"expiration\":" + IntegerToString(ToUtc(OrderGetInteger(ORDER_TIME_EXPIRATION)))
         + ",\"magic\":" + IntegerToString((long)OrderGetInteger(ORDER_MAGIC))
         + ",\"comment\":\"" + Esc(OrderGetString(ORDER_COMMENT)) + "\"}";
     sig += IntegerToString((long)tk) + ":" + DoubleToString(vol, 8) + ":" + DoubleToString(price, dg) + ":" + DoubleToString(sl, dg) + ":" + DoubleToString(tp, dg) + ";";
@@ -404,7 +412,7 @@ void PostDeals()
         + ",\"profit\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_PROFIT), 2)
         + ",\"commission\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_COMMISSION), 2)
         + ",\"swap\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_SWAP), 2)
-        + ",\"time\":" + IntegerToString((long)HistoryDealGetInteger(tk, DEAL_TIME))
+        + ",\"time\":" + IntegerToString(ToUtc(HistoryDealGetInteger(tk, DEAL_TIME)))
         + ",\"magic\":" + IntegerToString((long)HistoryDealGetInteger(tk, DEAL_MAGIC))
         + ",\"comment\":\"" + Esc(HistoryDealGetString(tk, DEAL_COMMENT)) + "\"}";
   }
@@ -717,9 +725,9 @@ double JsonDbl(string obj, string key)
 }
 
 // Ket qua cho backend: ok=true khi san da khop (retcode 10009/10010/10008); reason = ma loi cua EA (backend dich sang tieng Viet)
-void SendTradeResult(string req, bool ok, uint retcode, string reason, string comment, ulong order = 0, ulong deal = 0, double price = 0, double volume = 0)
+void SendTradeResult(string req, bool ok, uint retcode, string reason, string comment, ulong order = 0, ulong deal = 0, double price = 0, double volume = 0, string orderType = "")
 {
-  SendLine("{\"type\":\"trade_result\",\"req_id\":\"" + Esc(req) + "\",\"ok\":" + JsonBool(ok)
+  SendLine("{\"type\":\"trade_result\",\"req_id\":\"" + Esc(req) + "\",\"ok\":" + JsonBool(ok) + ",\"order_type\":\"" + orderType + "\""
            + ",\"retcode\":" + IntegerToString((long)retcode) + ",\"reason\":\"" + Esc(reason) + "\",\"comment\":\"" + Esc(comment) + "\""
            + ",\"order\":" + IntegerToString((long)order) + ",\"deal\":" + IntegerToString((long)deal)
            + ",\"price\":" + DoubleToString(price, 8) + ",\"volume\":" + DoubleToString(volume, 8) + "}");
@@ -768,26 +776,42 @@ string CheckVolume(string sym, double vol)
   return "";
 }
 
-// OrderCheck truoc OrderSend: bat loi margin/stops/volume ma khong gui lenh that
-void ExecuteRequest(string req, MqlTradeRequest &rq)
+// OrderCheck truoc OrderSend: bat loi margin/stops/volume ma khong gui lenh that. `check` = false cho sua/xoa lenh cho (OrderCheck khong dung cho
+// TRADE_ACTION_MODIFY/REMOVE). `orderType` = loai lenh cho da quyet (tra ve cho web)
+void ExecuteRequest(string req, MqlTradeRequest &rq, string orderType = "", bool check = true)
 {
-  MqlTradeCheckResult ck;
-  ZeroMemory(ck);
-  ResetLastError();
-  bool passed = OrderCheck(rq, ck);
-  if (!passed || (ck.retcode != 0 && ck.retcode != TRADE_RETCODE_DONE))
+  if (check)
   {
-    PrintFormat("TVBridge: [trade] OrderCheck tu choi %s %s %.2f: retcode %u (%s)", rq.symbol, EnumToString(rq.type), rq.volume, ck.retcode, ck.comment);
-    SendTradeResult(req, false, ck.retcode, "check_failed", ck.comment);
-    return;
+    MqlTradeCheckResult ck;
+    ZeroMemory(ck);
+    ResetLastError();
+    bool passed = OrderCheck(rq, ck);
+    if (!passed && ck.retcode == TRADE_RETCODE_INVALID_FILL) // kieu khop lenh khong duoc ho tro: thu cac kieu con lai
+    {
+      ENUM_ORDER_TYPE_FILLING alt[3] = {ORDER_FILLING_RETURN, ORDER_FILLING_IOC, ORDER_FILLING_FOK};
+      for (int i = 0; i < 3 && ck.retcode == TRADE_RETCODE_INVALID_FILL; i++)
+      {
+        if (alt[i] == rq.type_filling)
+          continue;
+        rq.type_filling = alt[i];
+        ZeroMemory(ck);
+        passed = OrderCheck(rq, ck);
+      }
+    }
+    if (!passed || (ck.retcode != 0 && ck.retcode != TRADE_RETCODE_DONE))
+    {
+      PrintFormat("TVBridge: [trade] OrderCheck tu choi %s %s %s %.2f: retcode %u (%s)", rq.symbol, EnumToString(rq.action), EnumToString(rq.type), rq.volume, ck.retcode, ck.comment);
+      SendTradeResult(req, false, ck.retcode, "check_failed", ck.comment, 0, 0, 0, 0, orderType);
+      return;
+    }
   }
   MqlTradeResult res;
   ZeroMemory(res);
   bool sent = OrderSend(rq, res);
   bool done = sent && (res.retcode == TRADE_RETCODE_DONE || res.retcode == TRADE_RETCODE_DONE_PARTIAL || res.retcode == TRADE_RETCODE_PLACED);
-  PrintFormat("TVBridge: [trade] %s %s %.2f -> retcode %u deal %I64u order %I64u price %.5f (%s)", rq.symbol, EnumToString(rq.type), rq.volume,
+  PrintFormat("TVBridge: [trade] %s %s %s %.2f -> retcode %u deal %I64u order %I64u price %.5f (%s)", rq.symbol, EnumToString(rq.action), EnumToString(rq.type), rq.volume,
               res.retcode, res.deal, res.order, res.price, res.comment);
-  SendTradeResult(req, done, res.retcode, done ? "" : "rejected", res.comment, res.order, res.deal, res.price, res.volume);
+  SendTradeResult(req, done, res.retcode, done ? "" : "rejected", res.comment, res.order, res.deal, res.price, res.volume, orderType);
 }
 
 void HandleOrderSend(string line)
@@ -893,6 +917,227 @@ void HandlePositionClose(string line)
   ExecuteRequest(req, rq);
 }
 
+//--- lenh cho (T3): dat / sua / xoa --------------------------------------
+// Loai lenh cho tu gia vao so voi gia thi truong LUC THUC THI (plan muc 3): Buy duoi Ask = Limit, tren Ask = Stop; Sell tren Bid = Limit, duoi Bid = Stop.
+// Bang gia thi truong thi khong dat duoc (tra false)
+bool ResolvePending(bool buy, double price, double bid, double ask, ENUM_ORDER_TYPE &ot)
+{
+  if (buy)
+  {
+    if (price < ask)
+      ot = ORDER_TYPE_BUY_LIMIT;
+    else if (price > ask)
+      ot = ORDER_TYPE_BUY_STOP;
+    else
+      return false;
+  }
+  else
+  {
+    if (price > bid)
+      ot = ORDER_TYPE_SELL_LIMIT;
+    else if (price < bid)
+      ot = ORDER_TYPE_SELL_STOP;
+    else
+      return false;
+  }
+  return true;
+}
+
+bool IsBuyType(ENUM_ORDER_TYPE ot) { return ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP; }
+
+// Gia vao qua gan gia thi truong (trong SYMBOL_TRADE_STOPS_LEVEL)? level la so diem broker bat buoc toi thieu
+bool TooClose(string sym, ENUM_ORDER_TYPE ot, double price, double bid, double ask)
+{
+  double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+  double lv = (double)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL) * point;
+  if (lv <= 0)
+    return false;
+  double d;
+  if (ot == ORDER_TYPE_BUY_LIMIT)
+    d = ask - price;
+  else if (ot == ORDER_TYPE_BUY_STOP)
+    d = price - ask;
+  else if (ot == ORDER_TYPE_SELL_LIMIT)
+    d = price - bid;
+  else
+    d = bid - price;
+  return d < lv - point / 2;
+}
+
+string StopsLevelPoints(string sym) { return IntegerToString((long)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL)); }
+
+void HandleOrderPending(string line)
+{
+  string req = JsonStr(line, "req_id");
+  string sym = JsonStr(line, "symbol");
+  string side = JsonStr(line, "side");
+  double price = JsonDbl(line, "price");
+  double vol = JsonDbl(line, "volume");
+  double sl = JsonDbl(line, "sl");
+  double tp = JsonDbl(line, "tp");
+  long expUtc = JsonInt(line, "expiration"); // epoch UTC; 0 = GTC
+  string expected = JsonStr(line, "expected_type");
+  string cid = JsonStr(line, "client_id");
+
+  string why = TradeGuard();
+  if (why != "")
+  {
+    SendTradeResult(req, false, 0, why, "");
+    return;
+  }
+  if ((side != "buy" && side != "sell") || sym == "" || price <= 0 || !SymbolSelect(sym, true))
+  {
+    SendTradeResult(req, false, 0, "bad_request", "");
+    return;
+  }
+  why = CheckVolume(sym, vol);
+  if (why != "")
+  {
+    SendTradeResult(req, false, 0, why, "");
+    return;
+  }
+  if (expUtc > 0 && expUtc <= (long)TimeGMT() + 60)
+  {
+    SendTradeResult(req, false, 0, "bad_expiration", "");
+    return;
+  }
+  MqlTick tick;
+  if (!SymbolInfoTick(sym, tick) || tick.ask <= 0 || tick.bid <= 0)
+  {
+    SendTradeResult(req, false, 0, "no_quote", "");
+    return;
+  }
+  int dg = PriceDigits(sym);
+  price = NormalizeDouble(price, dg);
+  ENUM_ORDER_TYPE ot;
+  if (!ResolvePending(side == "buy", price, tick.bid, tick.ask, ot))
+  {
+    SendTradeResult(req, false, 0, "too_close", StopsLevelPoints(sym));
+    return;
+  }
+  string resolved = OrderTypeStr(ot);
+  if (TooClose(sym, ot, price, tick.bid, tick.ask))
+  {
+    SendTradeResult(req, false, 0, "too_close", StopsLevelPoints(sym), 0, 0, 0, 0, resolved);
+    return;
+  }
+  // Gia nhay lam loai lenh doi so voi cai nguoi dung nhin thay (vd Buy Limit -> Buy Stop = mua hoi thanh mua breakout): demo van dat, account
+  // khac demo thi KHONG dat, web hien lai ticket voi loai moi de xac nhan lai
+  if (expected != "" && expected != resolved && (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE) != ACCOUNT_TRADE_MODE_DEMO)
+  {
+    SendTradeResult(req, false, 0, "type_changed", "", 0, 0, 0, 0, resolved);
+    return;
+  }
+  MqlTradeRequest rq;
+  ZeroMemory(rq);
+  rq.action = TRADE_ACTION_PENDING;
+  rq.symbol = sym;
+  rq.volume = vol;
+  rq.type = ot;
+  rq.price = price;
+  rq.sl = sl > 0 ? NormalizeDouble(sl, dg) : 0;
+  rq.tp = tp > 0 ? NormalizeDouble(tp, dg) : 0;
+  rq.magic = MagicNumber;
+  rq.comment = StringSubstr("wl:" + cid, 0, 31);
+  rq.type_filling = ORDER_FILLING_RETURN;
+  rq.type_time = expUtc > 0 ? ORDER_TIME_SPECIFIED : ORDER_TIME_GTC;
+  rq.expiration = expUtc > 0 ? (datetime)(expUtc + BrokerOffset()) : (datetime)0;
+  ExecuteRequest(req, rq, resolved);
+}
+
+// Sua gia / SL / TP / het han cua lenh cho (khong doi duoc loai: keo qua gia thi web dat lenh moi roi xoa lenh cu)
+void HandleOrderModify(string line)
+{
+  string req = JsonStr(line, "req_id");
+  ulong ticket = (ulong)JsonInt(line, "ticket");
+  double price = JsonDbl(line, "price");
+  double sl = JsonDbl(line, "sl");
+  double tp = JsonDbl(line, "tp");
+  long expUtc = JsonInt(line, "expiration");
+
+  string why = TradeGuard();
+  if (why != "")
+  {
+    SendTradeResult(req, false, 0, why, "");
+    return;
+  }
+  if (ticket == 0 || !OrderSelect(ticket))
+  {
+    SendTradeResult(req, false, 0, "no_order", "");
+    return;
+  }
+  string sym = OrderGetString(ORDER_SYMBOL);
+  ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+  if (price <= 0 || (ot != ORDER_TYPE_BUY_LIMIT && ot != ORDER_TYPE_SELL_LIMIT && ot != ORDER_TYPE_BUY_STOP && ot != ORDER_TYPE_SELL_STOP))
+  {
+    SendTradeResult(req, false, 0, "bad_request", "");
+    return;
+  }
+  if (expUtc > 0 && expUtc <= (long)TimeGMT() + 60)
+  {
+    SendTradeResult(req, false, 0, "bad_expiration", "");
+    return;
+  }
+  MqlTick tick;
+  if (!SymbolInfoTick(sym, tick) || tick.ask <= 0 || tick.bid <= 0)
+  {
+    SendTradeResult(req, false, 0, "no_quote", "");
+    return;
+  }
+  int dg = PriceDigits(sym);
+  price = NormalizeDouble(price, dg);
+  ENUM_ORDER_TYPE now;
+  if (!ResolvePending(IsBuyType(ot), price, tick.bid, tick.ask, now))
+  {
+    SendTradeResult(req, false, 0, "too_close", StopsLevelPoints(sym), 0, 0, 0, 0, OrderTypeStr(ot));
+    return;
+  }
+  if (now != ot)
+  {
+    SendTradeResult(req, false, 0, "type_would_change", "", 0, 0, 0, 0, OrderTypeStr(now));
+    return;
+  }
+  if (TooClose(sym, ot, price, tick.bid, tick.ask))
+  {
+    SendTradeResult(req, false, 0, "too_close", StopsLevelPoints(sym), 0, 0, 0, 0, OrderTypeStr(ot));
+    return;
+  }
+  MqlTradeRequest rq;
+  ZeroMemory(rq);
+  rq.action = TRADE_ACTION_MODIFY;
+  rq.order = ticket;
+  rq.symbol = sym;
+  rq.price = price;
+  rq.sl = sl > 0 ? NormalizeDouble(sl, dg) : 0;
+  rq.tp = tp > 0 ? NormalizeDouble(tp, dg) : 0;
+  rq.type_time = expUtc > 0 ? ORDER_TIME_SPECIFIED : ORDER_TIME_GTC;
+  rq.expiration = expUtc > 0 ? (datetime)(expUtc + BrokerOffset()) : (datetime)0;
+  ExecuteRequest(req, rq, OrderTypeStr(ot), false);
+}
+
+void HandleOrderDelete(string line)
+{
+  string req = JsonStr(line, "req_id");
+  ulong ticket = (ulong)JsonInt(line, "ticket");
+  string why = TradeGuard();
+  if (why != "")
+  {
+    SendTradeResult(req, false, 0, why, "");
+    return;
+  }
+  if (ticket == 0 || !OrderSelect(ticket))
+  {
+    SendTradeResult(req, false, 0, "no_order", "");
+    return;
+  }
+  MqlTradeRequest rq;
+  ZeroMemory(rq);
+  rq.action = TRADE_ACTION_REMOVE;
+  rq.order = ticket;
+  rq.symbol = OrderGetString(ORDER_SYMBOL);
+  ExecuteRequest(req, rq, OrderTypeStr(OrderGetInteger(ORDER_TYPE)), false);
+}
+
 //--- nhận lệnh từ backend ---------------------------------------------
 void HandleCommand(string line)
 {
@@ -903,6 +1148,12 @@ void HandleCommand(string line)
     HandleOrderSend(line);
   else if (type == "position_close")
     HandlePositionClose(line);
+  else if (type == "order_pending")
+    HandleOrderPending(line);
+  else if (type == "order_modify")
+    HandleOrderModify(line);
+  else if (type == "order_delete")
+    HandleOrderDelete(line);
   else if (type == "subscribe")
     ApplySubscribe(JsonArray(line, "symbols"));
   else if (type == "backfill")

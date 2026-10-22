@@ -1,11 +1,11 @@
 "use client";
 
 import { fmtMoney, MODE_COLOR, MODE_LABEL } from "@/lib/mt5Format";
-import type { Position, TradeData } from "@/lib/mt5Api";
+import type { PendingOrder, Position, TradeData } from "@/lib/mt5Api";
 import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
-import { closeTrade, useOrderState } from "@/trading/actions";
+import { cancelOrder, closeTrade, useOrderState } from "@/trading/actions";
 import { dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel, totalPnl } from "@/trading/format";
 import { tradeBlock, webTrading } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
@@ -207,29 +207,46 @@ function Orders({ data }: { data: TradeData }) {
     <table className="w-full text-xs tabular-nums">
       <thead>
         <tr>
-          {["Symbol", "Type", "Lot", "Price", "SL", "TP", "Placed", "Expires"].map((h) => (
-            <th key={h} className={th}>{h}</th>
+          {["Symbol", "Type", "Lot", "Price", "SL", "TP", "Placed", "Expires", ""].map((h, i) => (
+            <th key={i} className={th}>{h}</th>
           ))}
         </tr>
       </thead>
       <tbody>
-        {data.orders.map((o) => {
-          const d = digitsOf(o.symbol);
-          return (
-            <tr key={o.ticket} className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--hover)]" onClick={() => showSymbol(o.symbol)} title="Mở symbol này trên chart">
-              <td className={`${td} font-medium`}>{o.symbol}</td>
-              <td className={td}>{orderLabel(o.type)}</td>
-              <td className={td}>{fmtLot(o.volume)}</td>
-              <td className={td}>{fmtPx(o.price_open, d)}</td>
-              <td className={td}>{fmtPx(o.sl, d, true)}</td>
-              <td className={td}>{fmtPx(o.tp, d, true)}</td>
-              <td className={`${td} text-[var(--muted)]`}>{fmtTime(o.time_setup)}</td>
-              <td className={`${td} text-[var(--muted)]`}>{o.expiration ? fmtTime(o.expiration) : "GTC"}</td>
-            </tr>
-          );
-        })}
+        {data.orders.map((o) => (
+          <OrderRow key={o.ticket} o={o} account={data.account} />
+        ))}
       </tbody>
     </table>
+  );
+}
+
+// Một lệnh chờ + nút Cancel (huỷ ngay, chỉ account demo). Đổi giá bằng cách kéo đường lệnh trên chart.
+function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account"] }) {
+  const d = digitsOf(o.symbol);
+  const busy = useOrderState((s) => s.busy);
+  const block = tradeBlock({ replay: false, status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  return (
+    <tr className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--hover)]" onClick={() => showSymbol(o.symbol)} title="Mở symbol này trên chart">
+      <td className={`${td} font-medium`}>{o.symbol}</td>
+      <td className={td}>{orderLabel(o.type)}</td>
+      <td className={td}>{fmtLot(o.volume)}</td>
+      <td className={td}>{fmtPx(o.price_open, d)}</td>
+      <td className={td}>{fmtPx(o.sl, d, true)}</td>
+      <td className={td}>{fmtPx(o.tp, d, true)}</td>
+      <td className={`${td} text-[var(--muted)]`}>{fmtTime(o.time_setup)}</td>
+      <td className={`${td} text-[var(--muted)]`}>{o.expiration ? fmtTime(o.expiration) : "GTC"}</td>
+      <td className={td} onClick={(e) => e.stopPropagation()}>
+        <button
+          className="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)] disabled:opacity-40"
+          disabled={block !== null || busy}
+          title={block ?? "Huỷ lệnh chờ"}
+          onClick={() => void cancelOrder(o.ticket, o.symbol)}
+        >
+          Cancel
+        </button>
+      </td>
+    </tr>
   );
 }
 

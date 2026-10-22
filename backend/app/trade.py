@@ -1,4 +1,4 @@
-"""Gửi lệnh từ web xuống EA (docs/trade-plan.md T2): Buy/Sell market + đóng (một phần) vị thế. CHỈ account demo.
+"""Gửi lệnh từ web xuống EA (docs/trade-plan.md T2-T3): Buy/Sell market, đóng (một phần) vị thế, đặt / sửa / xoá lệnh chờ. CHỈ account demo.
 
 Mọi endpoint cần phiên đăng nhập Wickloom (OriginGuard chặn thêm Origin lạ trên POST/DELETE) và nhận `account_id` tường minh.
 Backend đẩy lệnh xuống đúng EA của account rồi ĐỢI `trade_result` theo `req_id`. Không tự gửi lại: quá hạn (EA không trả lời)
@@ -38,7 +38,15 @@ REASONS = {
     "lot_over_limit": "Khối lượng vượt MaxLotPerOrder của EA",
     "no_position": "Không còn vị thế này (đã đóng?)",
     "no_quote": "Chưa có giá của symbol này",
+    "too_close": "Giá vào quá gần giá thị trường",
+    "type_changed": "Loại lệnh đã đổi theo giá thị trường, xác nhận lại",
+    "type_would_change": "Giá mới đã vượt qua giá thị trường nên đổi loại lệnh",
+    "no_order": "Không còn lệnh chờ này (đã khớp hoặc bị huỷ?)",
+    "bad_expiration": "Thời điểm hết hạn không hợp lệ",
 }
+
+PENDING_TYPES = ("buy_limit", "sell_limit", "buy_stop", "sell_stop")
+ORDER_LABELS = {"buy_limit": "Buy limit", "sell_limit": "Sell limit", "buy_stop": "Buy stop", "sell_stop": "Sell stop"}
 
 # retcode của MT5 hay gặp (plan mục 6)
 RETCODES = {
@@ -67,17 +75,22 @@ RETCODES = {
 DONE_CODES = (10008, 10009, 10010)  # placed / done / done partial
 
 
-def result_message(ok: bool, retcode: int, reason: str, comment: str) -> str:
+def result_message(ok: bool, retcode: int, reason: str, comment: str, order_type: str = "") -> str:
     if ok:
         return ""
+    if reason == "too_close" and comment.isdigit() and int(comment) > 0:
+        return f"{REASONS[reason]} (tối thiểu {int(comment)} điểm)"
+    if reason in ("type_changed", "type_would_change") and order_type in ORDER_LABELS:
+        return f"{REASONS[reason]} (nay là {ORDER_LABELS[order_type]})"
     if reason in REASONS:
         return REASONS[reason]
     base = RETCODES.get(retcode) or f"Broker từ chối (mã {retcode})"
     return f"{base}: {comment}" if comment and retcode not in RETCODES else base
 
 
-def _clean_result(msg: Dict[str, Any]) -> Dict[str, Any]:
-    """Trả lời của EA -> dict chuẩn: ép kiểu, cắt chuỗi, ok chỉ đúng khi retcode là mã khớp lệnh."""
+def _clean_result(msg: Dict[str, Any], expected_type: Optional[str] = None) -> Dict[str, Any]:
+    """Trả lời của EA -> dict chuẩn: ép kiểu, cắt chuỗi, ok chỉ đúng khi retcode là mã khớp lệnh. `order_type` = loại lệnh chờ EA đã quyết;
+    `type_changed` = khác loại web kỳ vọng (giá nhảy giữa lúc bấm và lúc tới EA)."""
     def num(k: str) -> float:
         v = msg.get(k)
         return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else 0.0
@@ -86,9 +99,11 @@ def _clean_result(msg: Dict[str, Any]) -> Dict[str, Any]:
     reason = msg.get("reason") if isinstance(msg.get("reason"), str) else ""
     comment = msg.get("comment") if isinstance(msg.get("comment"), str) else ""
     ok = msg.get("ok") is True and retcode in DONE_CODES and not reason
+    otype = msg.get("order_type") if msg.get("order_type") in PENDING_TYPES else ""
     return {
-        "ok": ok, "retcode": retcode, "reason": reason[:32], "message": result_message(ok, retcode, reason[:32], comment[:120]),
+        "ok": ok, "retcode": retcode, "reason": reason[:32], "message": result_message(ok, retcode, reason[:32], comment[:120], otype),
         "comment": comment[:120], "order": int(num("order")), "deal": int(num("deal")), "price": num("price"), "volume": num("volume"),
+        "order_type": otype, "type_changed": bool(expected_type and otype and expected_type != otype),
     }
 
 
@@ -188,7 +203,7 @@ class TradeBroker:
             if isinstance(exc, asyncio.CancelledError):
                 raise
             raise HTTPException(504, f"EA không trả lời trong {self.timeout:.0f}s: lệnh có thể đã tới sàn, xem tab Positions trước khi gửi lại")
-        res = _clean_result(raw)
+        res = _clean_result(raw, cmd.get("expected_type"))
         self._finish(req_id, res)
         return {**res, "req_id": req_id}
 
@@ -233,6 +248,19 @@ class OrderBody(BaseModel):
     sl: float = Field(0, ge=0, allow_inf_nan=False)  # 0 = không đặt
     tp: float = Field(0, ge=0, allow_inf_nan=False)
     client_id: str = Field(pattern=CLIENT_ID_RE)  # web sinh một mã mỗi lần bấm
+    # Có `price` = lệnh chờ: web chỉ gửi ý định (hướng + giá vào), EA tự quyết Limit/Stop theo Ask/Bid lúc thực thi.
+    # `expected_type` = loại web đang hiển thị: EA đặt loại khác thì báo `type_changed` (account không phải demo thì từ chối)
+    price: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
+    expected_type: Optional[Literal["buy_limit", "sell_limit", "buy_stop", "sell_stop"]] = None
+    expiration: int = Field(0, ge=0)  # epoch UTC giây; 0 = đến khi huỷ (GTC). Chỉ cho lệnh chờ
+
+
+class OrderPatch(BaseModel):
+    """Sửa lệnh chờ: trường nào có thì đổi, trường vắng giữ nguyên (backend ghép với lệnh EA báo gần nhất rồi gửi đủ bộ xuống EA)."""
+    price: Optional[float] = Field(None, gt=0, allow_inf_nan=False)
+    sl: Optional[float] = Field(None, ge=0, allow_inf_nan=False)  # 0 = bỏ SL
+    tp: Optional[float] = Field(None, ge=0, allow_inf_nan=False)
+    expiration: Optional[int] = Field(None, ge=0)  # 0 = GTC
 
 
 def _ready(aid: str) -> Tuple[Dict[str, Any], Any]:
@@ -252,6 +280,24 @@ def _ready(aid: str) -> Tuple[Dict[str, Any], Any]:
     if info.get("trade_allowed") is False:
         raise HTTPException(409, REASONS["account_trade_off"])
     return info, writer
+
+
+def _version(v: Any) -> Tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except ValueError:
+        return ()
+
+
+def _need_ea(info: Dict[str, Any], minimum: str, what: str) -> None:
+    """EA cũ lờ đi lệnh nó không hiểu: không chặn ở đây thì người dùng chỉ thấy quá hạn 10s rồi 504."""
+    if _version(info.get("ea_version")) < _version(minimum):
+        raise HTTPException(409, f"{what} cần EA TVBridge >= {minimum} (đang chạy {info.get('ea_version') or 'bản cũ'}): biên dịch lại EA rồi gắn lại")
+
+
+def _check_expiration(expiration: int) -> None:
+    if expiration and expiration <= time.time() + 60:
+        raise HTTPException(422, REASONS["bad_expiration"])
 
 
 def _check_volume(volume: float, spec: Optional[Dict[str, Any]], max_lot: Optional[float]) -> None:
@@ -275,7 +321,17 @@ async def place_order(account_id: str, body: OrderBody, user=Depends(current_use
     if spec is None:
         raise HTTPException(404, "Symbol không có trong danh sách của account")
     _check_volume(body.volume, spec, info.get("max_lot"))
-    cmd = {"type": "order_send", "symbol": body.symbol, "side": body.side, "volume": body.volume, "sl": body.sl, "tp": body.tp, "client_id": body.client_id}
+    if body.price is None:
+        if body.expected_type is not None or body.expiration:
+            raise HTTPException(422, "expected_type / expiration chỉ dùng cho lệnh chờ (có price)")
+        cmd = {"type": "order_send", "symbol": body.symbol, "side": body.side, "volume": body.volume, "sl": body.sl, "tp": body.tp, "client_id": body.client_id}
+    else:
+        if body.expected_type is not None and not body.expected_type.startswith(body.side + "_"):
+            raise HTTPException(422, "expected_type không khớp hướng lệnh")
+        _need_ea(info, "2.13", "Lệnh chờ")
+        _check_expiration(body.expiration)
+        cmd = {"type": "order_pending", "symbol": body.symbol, "side": body.side, "volume": body.volume, "price": body.price, "sl": body.sl, "tp": body.tp,
+               "expiration": body.expiration, "expected_type": body.expected_type or "", "client_id": body.client_id}
     return await broker.run(account_id, writer, user["id"], cmd, body.client_id)
 
 
@@ -287,3 +343,45 @@ async def close_position(account_id: str, ticket: int, volume: float = Query(0, 
     info, writer = _ready(account_id)
     cmd = {"type": "position_close", "ticket": ticket, "volume": volume}
     return await broker.run(account_id, writer, user["id"], cmd, None)
+
+
+def _known_order(account_id: str, ticket: int) -> Dict[str, Any]:
+    """Lệnh chờ `ticket` theo bản EA báo gần nhất (để ghép các trường không đổi khi sửa)."""
+    t = registry.trade(account_id)
+    order = next((o for o in (t["orders"] if t else []) if o["ticket"] == ticket), None)
+    if order is None:
+        raise HTTPException(404, REASONS["no_order"])
+    return order
+
+
+@router.patch("/accounts/{account_id}/orders/{ticket}")
+async def modify_order(account_id: str, ticket: int, body: OrderPatch, user=Depends(current_user)):
+    """Sửa giá / SL / TP / hết hạn của lệnh chờ. Không đổi được loại lệnh: giá mới vượt qua giá thị trường thì EA từ chối (`type_would_change`);
+    web xử lý bằng cách đặt lệnh mới rồi mới xoá lệnh cũ."""
+    if ticket < 1:
+        raise HTTPException(422, "Ticket không hợp lệ")
+    if body.price is None and body.sl is None and body.tp is None and body.expiration is None:
+        raise HTTPException(422, "Không có gì để sửa")
+    info, writer = _ready(account_id)
+    _need_ea(info, "2.13", "Sửa lệnh chờ")
+    cur = _known_order(account_id, ticket)
+    if body.expiration:
+        _check_expiration(body.expiration)
+    cmd = {
+        "type": "order_modify", "ticket": ticket,
+        "price": body.price if body.price is not None else cur["price_open"],
+        "sl": body.sl if body.sl is not None else cur["sl"],
+        "tp": body.tp if body.tp is not None else cur["tp"],
+        "expiration": body.expiration if body.expiration is not None else cur["expiration"],
+    }
+    return await broker.run(account_id, writer, user["id"], cmd, None)
+
+
+@router.delete("/accounts/{account_id}/orders/{ticket}")
+async def delete_order(account_id: str, ticket: int, user=Depends(current_user)):
+    """Xoá lệnh chờ `ticket`."""
+    if ticket < 1:
+        raise HTTPException(422, "Ticket không hợp lệ")
+    info, writer = _ready(account_id)
+    _need_ea(info, "2.13", "Xoá lệnh chờ")
+    return await broker.run(account_id, writer, user["id"], {"type": "order_delete", "ticket": ticket}, None)

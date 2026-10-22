@@ -4,7 +4,16 @@ import type { TradeOutcome } from "@/lib/tradeApi";
 
 const sendOrder = vi.fn();
 const sendClose = vi.fn();
-vi.mock("@/lib/tradeApi", () => ({ sendMarketOrder: (...a: unknown[]) => sendOrder(...a), sendClosePosition: (...a: unknown[]) => sendClose(...a) }));
+const sendPending = vi.fn();
+const sendModify = vi.fn();
+const sendCancel = vi.fn();
+vi.mock("@/lib/tradeApi", () => ({
+  sendMarketOrder: (...a: unknown[]) => sendOrder(...a),
+  sendClosePosition: (...a: unknown[]) => sendClose(...a),
+  sendPendingOrder: (...a: unknown[]) => sendPending(...a),
+  sendModifyOrder: (...a: unknown[]) => sendModify(...a),
+  sendCancelOrder: (...a: unknown[]) => sendCancel(...a),
+}));
 const requireLogin = vi.fn();
 vi.mock("@/store/auth", () => ({ useAuthStore: { getState: () => ({ requireLogin }) } }));
 const toastMock = vi.fn();
@@ -13,16 +22,19 @@ const refresh = vi.fn();
 vi.mock("./store", () => ({ useTradeStore: { getState: () => ({ refresh }) } }));
 
 import { useMt5Store } from "@/store/mt5";
-import { closeTrade, newClientId, placeMarket, useOrderState } from "./actions";
+import type { PendingOrder } from "@/lib/mt5Api";
+import { cancelOrder, closeTrade, moveOrder, newClientId, placeMarket, placePending, useOrderState } from "./actions";
+import { useQuoteStore } from "./quote";
 
 const acc = { id: "S:1", server: "S", mode: "demo", online: true, active: true } as Mt5Account;
-const done = (o: Partial<{ ok: boolean; message: string; price: number }> = {}): TradeOutcome => ({
-  kind: "done", result: { ok: true, message: "", retcode: 10009, order: 1, deal: 2, price: 4131.25, volume: 0.1, ...o },
+const done = (o: Partial<{ ok: boolean; message: string; price: number; orderType: string; typeChanged: boolean }> = {}): TradeOutcome => ({
+  kind: "done", result: { ok: true, message: "", retcode: 10009, order: 1, deal: 2, price: 4131.25, volume: 0.1, orderType: "", typeChanged: false, ...o },
 });
 
 beforeEach(() => {
   vi.useFakeTimers();
-  for (const m of [sendOrder, sendClose, requireLogin, toastMock, refresh]) m.mockReset();
+  for (const m of [sendOrder, sendClose, sendPending, sendModify, sendCancel, requireLogin, toastMock, refresh]) m.mockReset();
+  useQuoteStore.setState({ quotes: { XAUUSDm: { bid: 4130, ask: 4130.2 } } });
   requireLogin.mockResolvedValue(true);
   useMt5Store.setState({ accounts: [acc], loaded: true });
   useOrderState.setState({ busy: false });
@@ -137,5 +149,120 @@ describe("newClientId", () => {
     vi.stubGlobal("crypto", {});
     expect(newClientId()).toMatch(/^[0-9a-f]{24}$/);
     vi.unstubAllGlobals();
+  });
+});
+
+const ord = (o: Partial<PendingOrder> = {}) =>
+  ({ ticket: 222, symbol: "XAUUSDm", type: "buy_limit", volume: 0.2, price_open: 4120, price_stoplimit: 0, sl: 4110, tp: 4150, time_setup: 1, expiration: 0, magic: 0, comment: "", ...o }) as PendingOrder;
+
+describe("placePending", () => {
+  const req = { symbol: "XAUUSDm", side: "buy" as const, volume: 0.1, price: 4120, sl: 4110, tp: 4140, expectedType: "buy_limit" as const };
+
+  it("gửi ý định (hướng + giá) cùng loại web đang hiển thị, mỗi lần một client_id", async () => {
+    sendPending.mockResolvedValue(done({ orderType: "buy_limit" }));
+    expect(await placePending(req, 3)).toBe(true);
+    await placePending(req, 3);
+    const [id, o1] = sendPending.mock.calls[0];
+    expect(id).toBe("S:1");
+    expect(o1).toMatchObject({ symbol: "XAUUSDm", side: "buy", volume: 0.1, price: 4120, sl: 4110, tp: 4140, expectedType: "buy_limit" });
+    expect(o1.clientId).not.toBe(sendPending.mock.calls[1][1].clientId);
+    expect(toastMock.mock.calls[0][0]).toBe("Buy limit 0.10 XAUUSDm @ 4120.000");
+  });
+
+  it("giá nhảy làm EA chọn loại khác: vẫn đặt (demo) nhưng toast nói rõ", async () => {
+    sendPending.mockResolvedValue(done({ orderType: "buy_stop", typeChanged: true }));
+    expect(await placePending(req, 3)).toBe(true);
+    expect(toastMock.mock.calls[0][0]).toMatch(/^Đã đặt Buy stop 0\.10 XAUUSDm @ 4120\.000 \(giá nhảy/);
+  });
+
+  it("sàn từ chối → toast message, trả false", async () => {
+    sendPending.mockResolvedValue(done({ ok: false, message: "Giá vào quá gần giá thị trường (tối thiểu 30 điểm)" }));
+    expect(await placePending(req)).toBe(false);
+    expect(toastMock.mock.calls[0][0]).toMatch(/tối thiểu 30/);
+  });
+
+  it("khách đóng popup đăng nhập → không gửi, false", async () => {
+    requireLogin.mockResolvedValue(false);
+    expect(await placePending(req)).toBe(false);
+    expect(sendPending).not.toHaveBeenCalled();
+  });
+});
+
+describe("cancelOrder", () => {
+  it("gọi huỷ đúng ticket và báo", async () => {
+    sendCancel.mockResolvedValue(done());
+    expect(await cancelOrder(222, "XAUUSDm")).toBe(true);
+    expect(sendCancel).toHaveBeenCalledWith("S:1", 222);
+    expect(toastMock.mock.calls[0][0]).toBe("Đã huỷ lệnh chờ XAUUSDm #222");
+  });
+  it("lỗi → false", async () => {
+    sendCancel.mockResolvedValue(done({ ok: false, message: "Không còn lệnh chờ này" }));
+    expect(await cancelOrder(222, "XAUUSDm")).toBe(false);
+  });
+});
+
+describe("moveOrder", () => {
+  it("cùng loại (vẫn dưới Ask) → chỉ sửa giá", async () => {
+    sendModify.mockResolvedValue(done());
+    expect(await moveOrder(ord(), 4115.5, 3)).toBe(true);
+    expect(sendModify).toHaveBeenCalledWith("S:1", 222, { price: 4115.5 });
+    expect(sendPending).not.toHaveBeenCalled();
+    expect(sendCancel).not.toHaveBeenCalled();
+    expect(toastMock.mock.calls[0][0]).toBe("Đã đổi giá XAUUSDm #222 → 4115.500");
+  });
+
+  it("kéo qua giá thị trường: ĐẶT LỆNH MỚI đúng loại TRƯỚC, rồi mới xoá lệnh cũ, mang theo lot/SL/TP/hết hạn", async () => {
+    const order: string[] = [];
+    sendPending.mockImplementation(async () => (order.push("place"), done({ orderType: "buy_stop" })));
+    sendCancel.mockImplementation(async () => (order.push("cancel"), done()));
+    expect(await moveOrder(ord({ expiration: 1_900_000_000 }), 4150, 3)).toBe(true); // Buy Limit kéo lên trên Ask → Buy Stop
+    expect(order).toEqual(["place", "cancel"]);
+    expect(sendModify).not.toHaveBeenCalled();
+    expect(sendPending.mock.calls[0][1]).toMatchObject({ symbol: "XAUUSDm", side: "buy", volume: 0.2, price: 4150, sl: 4110, tp: 4150, expiration: 1_900_000_000, expectedType: "buy_stop" });
+    expect(sendCancel).toHaveBeenCalledWith("S:1", 222);
+    expect(toastMock).toHaveBeenCalledTimes(1); // một toast tổng kết, không hai
+    expect(toastMock.mock.calls[0][0]).toMatch(/Đã chuyển lệnh #222 thành Buy stop 0\.20 XAUUSDm @ 4150\.000/);
+  });
+
+  it("đặt lệnh mới lỗi → giữ nguyên lệnh cũ (không xoá), trả false", async () => {
+    sendPending.mockResolvedValue(done({ ok: false, message: "SL/TP không hợp lệ (quá gần giá)" }));
+    expect(await moveOrder(ord(), 4150, 3)).toBe(false);
+    expect(sendCancel).not.toHaveBeenCalled();
+    expect(toastMock.mock.calls[0][0]).toMatch(/SL\/TP/);
+  });
+
+  it("đặt mới được nhưng xoá cũ lỗi → cảnh báo to rõ để người dùng xoá tay", async () => {
+    sendPending.mockResolvedValue(done({ orderType: "buy_stop" }));
+    sendCancel.mockResolvedValue({ kind: "error", status: 504, message: "EA không trả lời", unknown: true } satisfies TradeOutcome);
+    expect(await moveOrder(ord(), 4150, 3)).toBe(true);
+    expect(toastMock).toHaveBeenLastCalledWith(expect.stringMatching(/chưa xoá được lệnh cũ #222/), { ms: 12_000 });
+  });
+
+  it("sell stop kéo lên trên Bid → sell limit mới", async () => {
+    sendPending.mockResolvedValue(done({ orderType: "sell_limit" }));
+    sendCancel.mockResolvedValue(done());
+    await moveOrder(ord({ type: "sell_stop", price_open: 4100 }), 4160, 3);
+    expect(sendPending.mock.calls[0][1]).toMatchObject({ side: "sell", price: 4160, expectedType: "sell_limit" });
+  });
+
+  it("đúng giá thị trường → báo, không gọi gì", async () => {
+    expect(await moveOrder(ord(), 4130.2, 3)).toBe(false);
+    expect(sendModify).not.toHaveBeenCalled();
+    expect(sendPending).not.toHaveBeenCalled();
+    expect(toastMock.mock.calls[0][0]).toMatch(/trùng giá thị trường/);
+  });
+
+  it("chưa có giá thị trường → gửi sửa giá, để EA quyết (EA từ chối nếu loại sẽ đổi)", async () => {
+    useQuoteStore.setState({ quotes: {} });
+    sendModify.mockResolvedValue(done({ ok: false, message: "Giá mới đã vượt qua giá thị trường nên đổi loại lệnh (nay là Buy stop)" }));
+    expect(await moveOrder(ord(), 4150, 3)).toBe(false);
+    expect(sendModify).toHaveBeenCalledWith("S:1", 222, { price: 4150 });
+  });
+
+  it("lệnh stop-limit (không hỗ trợ) → sửa giá thẳng, không đoán loại", async () => {
+    sendModify.mockResolvedValue(done());
+    await moveOrder(ord({ type: "buy_stop_limit" }), 4150, 3);
+    expect(sendModify).toHaveBeenCalled();
+    expect(sendPending).not.toHaveBeenCalled();
   });
 });

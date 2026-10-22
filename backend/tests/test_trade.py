@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 import httpx
 import pytest
@@ -59,7 +60,7 @@ class FakeEA:
 
 def online(ea, **info):
     aid = mt5.registry.register(ea, HELLO)
-    mt5.registry.update(ea, {"ea_trading": True, "max_lot": 1.0, "trade_allowed": True, "terminal_trade_allowed": True, **info})
+    mt5.registry.update(ea, {"ea_trading": True, "max_lot": 1.0, "trade_allowed": True, "terminal_trade_allowed": True, "ea_version": "2.13", **info})
     return aid
 
 
@@ -389,3 +390,166 @@ def test_end_to_end_http_to_tcp_ea_and_back():
         await server.wait_closed()
 
     asyncio.run(run())
+
+
+# --- T3: lệnh chờ ---------------------------------------------------------------------------------------------------------------
+def pending(**kw):
+    return {"symbol": "XAUUSDm", "side": "buy", "volume": 0.1, "price": 4120.5, "sl": 4110, "tp": 4140, "client_id": CID, "expected_type": "buy_limit", **kw}
+
+
+def placed(otype="buy_limit", **kw):
+    return {**OK, "order_type": otype, "deal": 0, "retcode": 10009, **kw}
+
+
+def test_pending_order_sends_intent_and_reports_type():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea)
+    r = c.post(f"/accounts/{aid}/orders", json=pending()).json()
+    assert r["ok"] is True and r["order_type"] == "buy_limit" and r["type_changed"] is False
+    [cmd] = ea.sent
+    # web chỉ gửi ý định (hướng + giá): KHÔNG gửi loại lệnh, EA tự quyết lúc thực thi
+    assert cmd["type"] == "order_pending" and cmd["side"] == "buy" and cmd["price"] == 4120.5 and cmd["sl"] == 4110 and cmd["tp"] == 4140
+    assert cmd["expected_type"] == "buy_limit" and cmd["expiration"] == 0 and "order_type" not in cmd and "type" in cmd
+
+
+def test_price_jump_changes_the_type_and_is_flagged():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed("buy_stop"))  # giá nhảy: Buy Limit biến thành Buy Stop
+    aid = online(ea)
+    r = c.post(f"/accounts/{aid}/orders", json=pending()).json()
+    assert r["ok"] is True and r["order_type"] == "buy_stop" and r["type_changed"] is True
+    # không có expected_type thì không có gì để so
+    r2 = c.post(f"/accounts/{aid}/orders", json=pending(expected_type=None, client_id="click-0002-abcd")).json()
+    assert r2["type_changed"] is False
+
+
+def test_type_changed_rejection_names_the_new_type():
+    c = logged_in()
+    aid = online(FakeEA(lambda m: {"type": "trade_result", "ok": False, "retcode": 0, "reason": "type_changed", "order_type": "buy_stop"}))
+    r = c.post(f"/accounts/{aid}/orders", json=pending()).json()
+    assert r["ok"] is False and "Buy stop" in r["message"] and r["order_type"] == "buy_stop" and r["type_changed"] is True
+
+
+def test_too_close_message_carries_the_stops_level():
+    assert "tối thiểu 30 điểm" in trade.result_message(False, 0, "too_close", "30")
+    assert trade.result_message(False, 0, "too_close", "0") == trade.REASONS["too_close"]
+    assert trade.result_message(False, 0, "too_close", "abc") == trade.REASONS["too_close"]
+    assert "Sell limit" in trade.result_message(False, 0, "type_would_change", "", "sell_limit")
+    assert trade.result_message(False, 0, "no_order", "") == trade.REASONS["no_order"]
+
+
+def test_pending_validation():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea)
+    url = f"/accounts/{aid}/orders"
+    assert c.post(url, json=pending(price=0)).status_code == 422
+    assert c.post(url, json=pending(price=-1)).status_code == 422
+    assert c.post(url, json=pending(expected_type="sell_limit")).status_code == 422  # trái hướng
+    assert c.post(url, json=pending(expected_type="buy_stop_limit")).status_code == 422
+    assert c.post(url, json=pending(expiration=int(time.time()) - 5)).status_code == 422  # hết hạn trong quá khứ
+    assert c.post(url, json=pending(expiration=int(time.time()) + 30)).status_code == 422  # sát hiện tại
+    assert c.post(url, json=pending(volume=2)).status_code == 422  # MaxLotPerOrder
+    assert c.post(url, json=order(expected_type="buy_limit")).status_code == 422  # lệnh market không có expected_type
+    assert c.post(url, json=order(expiration=int(time.time()) + 9999)).status_code == 422
+    assert ea.sent == []
+    assert c.post(url, json=pending(expiration=int(time.time()) + 3600)).status_code == 200
+    assert ea.sent[0]["expiration"] > time.time()
+
+
+def test_pending_is_demo_only_like_market():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea)
+    mt5.registry.clear()
+    mt5.registry.register(ea, {**HELLO, "mode": "real"})
+    assert c.post(f"/accounts/{aid}/orders", json=pending()).status_code == 403
+    assert c.patch(f"/accounts/{aid}/orders/5", json={"price": 1}).status_code == 403
+    assert c.delete(f"/accounts/{aid}/orders/5").status_code == 403
+    assert ea.sent == []
+
+
+def known_order(ea, **kw):
+    mt5.registry.update_trade(ea, {"type": "trade", "positions": [], "orders": [{
+        "ticket": 222, "symbol": "XAUUSDm", "type": "buy_limit", "volume": 0.2, "price_open": 4110.0, "price_stoplimit": 0, "sl": 4100.0, "tp": 4140.0,
+        "time_setup": 1_700_000_000, "expiration": 0, "magic": 0, "comment": "", **kw}]})
+
+
+def test_modify_merges_with_the_known_order():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea)
+    known_order(ea)
+    url = f"/accounts/{aid}/orders/222"
+    assert c.patch(url, json={"price": 4112.5}).json()["ok"] is True
+    cmd = ea.sent[0]
+    assert cmd["type"] == "order_modify" and cmd["ticket"] == 222 and cmd["price"] == 4112.5 and cmd["sl"] == 4100.0 and cmd["tp"] == 4140.0 and cmd["expiration"] == 0
+    c.patch(url, json={"sl": 0, "tp": 4150})  # sl = 0 là bỏ SL (khác với vắng mặt = giữ nguyên)
+    cmd = ea.sent[1]
+    assert cmd["price"] == 4110.0 and cmd["sl"] == 0 and cmd["tp"] == 4150
+
+
+def test_modify_validation():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea)
+    known_order(ea)
+    assert c.patch(f"/accounts/{aid}/orders/222", json={}).status_code == 422  # không có gì để sửa
+    assert c.patch(f"/accounts/{aid}/orders/999", json={"price": 1}).status_code == 404  # không có lệnh này
+    assert c.patch(f"/accounts/{aid}/orders/0", json={"price": 1}).status_code == 422
+    assert c.patch(f"/accounts/{aid}/orders/222", json={"price": -3}).status_code == 422
+    assert c.patch(f"/accounts/{aid}/orders/222", json={"sl": -1}).status_code == 422
+    assert c.patch(f"/accounts/{aid}/orders/222", json={"expiration": int(time.time()) - 1000}).status_code == 422
+    assert c.patch(f"/accounts/{aid}/orders/abc", json={"price": 1}).status_code == 422
+    assert ea.sent == []
+    assert c.patch(f"/accounts/{aid}/orders/222", json={"expiration": int(time.time()) + 3600}).status_code == 200
+
+
+def test_modify_that_would_change_type_is_refused_by_the_ea():
+    c = logged_in()
+    aid = online(FakeEA(lambda m: {"type": "trade_result", "ok": False, "retcode": 0, "reason": "type_would_change", "order_type": "buy_stop"}))
+    known_order(next(iter(mt5.registry._by_writer)))
+    r = c.patch(f"/accounts/{aid}/orders/222", json={"price": 4200}).json()
+    assert r["ok"] is False and "Buy stop" in r["message"]
+
+
+def test_delete_order():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed(deal=0))
+    aid = online(ea)
+    assert c.delete(f"/accounts/{aid}/orders/222").json()["ok"] is True
+    assert ea.sent[0]["type"] == "order_delete" and ea.sent[0]["ticket"] == 222
+    assert c.delete(f"/accounts/{aid}/orders/0").status_code == 422
+    assert c.delete(f"/accounts/{aid}/orders/abc").status_code == 422
+    mt5.registry.clear()
+    bad = online(FakeEA(lambda m: {"type": "trade_result", "ok": False, "retcode": 0, "reason": "no_order"}))
+    assert "đã khớp hoặc bị huỷ" in c.delete(f"/accounts/{bad}/orders/222").json()["message"]
+
+
+def test_pending_commands_are_logged_with_their_action():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea)
+    known_order(ea)
+    c.post(f"/accounts/{aid}/orders", json=pending())
+    c.patch(f"/accounts/{aid}/orders/222", json={"price": 4111})
+    c.delete(f"/accounts/{aid}/orders/222")
+    assert [r["action"] for r in trade.broker.log.rows()] == ["order_pending", "order_modify", "order_delete"]
+
+
+def test_old_ea_cannot_take_pending_commands_but_market_still_works():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea, ea_version="2.12")
+    known_order(ea)
+    for call in (lambda: c.post(f"/accounts/{aid}/orders", json=pending()), lambda: c.patch(f"/accounts/{aid}/orders/222", json={"price": 4111}),
+                 lambda: c.delete(f"/accounts/{aid}/orders/222")):
+        r = call()
+        assert r.status_code == 409 and "2.13" in r.json()["detail"] and "2.12" in r.json()["detail"]
+    assert ea.sent == []  # không gửi lệnh EA không hiểu rồi chờ 10s
+    assert c.post(f"/accounts/{aid}/orders", json=order()).status_code == 200  # market chạy từ 2.12
+    mt5.registry.clear()
+    online(FakeEA(lambda m: placed()), ea_version="")  # không báo version
+    assert c.post(f"/accounts/{aid}/orders", json=pending(client_id="click-0009-abcd")).status_code == 409
+    assert trade._version("2.13") > trade._version("2.9") and trade._version("garbage") == ()

@@ -1,7 +1,7 @@
 "use client";
 
 import { DrawingManager } from "@/drawings/manager";
-import { AddOrderI, AlertI, BuyI, Chevron, ResetViewI, SellI, SettingsI, SkipToLatest } from "../icons";
+import { AlertI, Chevron, ResetViewI, SettingsI, SkipToLatest } from "../icons";
 import { useDrawingStore } from "@/drawings/store";
 import { IndicatorManager } from "@/indicators/manager";
 import { byId } from "@/indicators/registry";
@@ -11,7 +11,8 @@ import { useChartStore } from "@/store/chart";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import { usePaneState } from "@/store/compose";
 import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
-import { tradeLines } from "@/trading/format";
+import { createOrderDrag } from "@/trading/chartOrders";
+import { tradeLines, type DragPreview } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
 import { useTradeStore } from "@/trading/store";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
@@ -49,6 +50,7 @@ import ReplayBar from "./ReplayBar";
 import { SymbolBadge } from "./SymbolSearchDialog";
 import StylePanel from "./StylePanel";
 import TradeWidget from "./TradeWidget";
+import { tradeMenuItems } from "./tradeMenu";
 import VolumeLegend, { volumeMenuItems } from "./VolumeLegend";
 import { heikinAshi } from "./transform";
 
@@ -965,6 +967,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   // Vị thế / lệnh chờ của account MT5 trên symbol này (CHỈ ĐỌC, docs/trade-plan.md T1): entry kèm lot + P/L, SL đỏ, TP xanh lá, lệnh chờ vàng.
   // Chỉ cập nhật đường đã có (không tạo lại mỗi lần hỏi backend nên không nhấp nháy); dữ liệu cũ / đang Replay thì không vẽ.
   const tradeData = useTradeStore((s) => s.data);
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null); // lệnh chờ đang kéo (docs/trade-plan.md T3)
   const tradeLinesRef = useRef<{ series: ISeriesApi<SeriesType> | null; lines: Map<string, IPriceLine> }>({ series: null, lines: new Map() });
   useEffect(() => {
     const series = seriesRef.current;
@@ -974,7 +977,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       st.series = series; // series mới (đổi loại nến): price line cũ đã mất cùng series cũ
       st.lines = new Map();
     }
-    const want = replayActive ? [] : tradeLines(tradeData, symbol, Date.now() / 1000);
+    const want = replayActive ? [] : tradeLines(tradeData, symbol, Date.now() / 1000, dragPreview);
     const keep = new Set(want.map((w) => w.key));
     for (const [k, l] of st.lines) {
       if (!keep.has(k)) {
@@ -988,7 +991,26 @@ export default function Chart({ paneId }: { paneId: string }) {
       if (cur) cur.applyOptions(opts);
       else st.lines.set(w.key, series.createPriceLine(opts));
     }
-  }, [tradeData, symbol, chartType, replayActive]);
+  }, [tradeData, symbol, chartType, replayActive, dragPreview]);
+
+  // Kéo lệnh chờ để đổi giá: nghe chuột ở phần tử bao quanh chart, trước DrawingManager
+  useEffect(() => {
+    const chart = chartRef.current;
+    const box = boxRef.current;
+    if (!chart || !box?.parentElement) return;
+    const drag = createOrderDrag({
+      chart,
+      container: box,
+      listenOn: box.parentElement,
+      getSeries: () => seriesRef.current,
+      getSymbol: () => pane.chart.getState().symbol,
+      getDigits: () => digitsRef.current,
+      isReplay: () => pane.replay.getState().active,
+      setPreview: setDragPreview,
+    });
+    return () => drag.destroy();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // price precision
   useEffect(() => {
@@ -1416,7 +1438,6 @@ export default function Chart({ paneId }: { paneId: string }) {
         ? ""
         : price.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
     const last = barsRef.current[barsRef.current.length - 1]?.c;
-    const above = price !== null && last !== undefined && price >= last;
     const items: MenuItem[] = [
       { label: "Reset chart view", icon: <ResetViewI />, shortcut: "⌥ R", onSelect: resetView },
       "sep",
@@ -1428,9 +1449,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       { label: "Paste", shortcut: "⌘ V", disabled: true },
       "sep",
       { label: `Add alert on ${symbol} at ${p}`, icon: <AlertI />, shortcut: "⌥ A", disabled: true },
-      { label: `${above ? "Sell" : "Buy"} 1 ${symbol} @ ${p} limit`, icon: above ? <SellI /> : <BuyI />, shortcut: "⌥ ⇧ S", disabled: true },
-      { label: `${above ? "Buy" : "Sell"} 1 ${symbol} @ ${p} stop`, icon: above ? <BuyI /> : <SellI />, disabled: true },
-      { label: `Add order on ${symbol} at ${p}`, icon: <AddOrderI />, shortcut: "⇧ T", disabled: true },
+      ...tradeMenuItems(symbol, price, digits, last, replayActive),
       "sep",
       { label: "Lock vertical cursor line by time", disabled: true },
       "sep",

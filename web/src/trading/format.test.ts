@@ -79,6 +79,14 @@ describe("tradeLines", () => {
     expect(tradeLines(data({ positions: [pos({ symbol: "EURUSD" })], orders: [] }), "XAUUSDm", 1000)).toEqual([]);
   });
 
+  it("lệnh chờ đang kéo: giá xem trước + nhãn loại mới, lệnh khác và SL/TP không đổi", () => {
+    const l = tradeLines(data({ positions: [] }), "XAUUSDm", 1000, { ticket: 2, price: 4150.5, label: "Buy stop" });
+    expect(l[0]).toMatchObject({ key: "o:2", price: 4150.5, title: "BUY STOP 0.20" });
+    expect(l[1]).toMatchObject({ key: "otp:2", price: 4150 }); // TP không đi theo
+    const other = tradeLines(data({ positions: [] }), "XAUUSDm", 1000, { ticket: 99, price: 1, label: "Sell stop" });
+    expect(other[0]).toMatchObject({ price: 4080, title: "BUY LIMIT 0.20" }); // ticket khác: không ảnh hưởng
+  });
+
   it("dữ liệu cũ hoặc không có → không vẽ đường nào (tránh đường vị thế đã đóng)", () => {
     expect(tradeLines(null, "XAUUSDm", 1000)).toEqual([]);
     expect(tradeLines(data(), "XAUUSDm", 5000)).toEqual([]);
