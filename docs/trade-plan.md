@@ -1,8 +1,8 @@
 # Kế hoạch: trade từ web (demo + real) giống MT5
 
 Ngày viết: 2026-10-22. CHỈ LÀ PLAN, chưa code. Phụ thuộc `docs/multi-account-plan.md`
-(Phase 1–2: account + avatar + EA gửi `login/mode/balance`). Trade luôn chạy **trên account đang chọn**
-qua EA `TVBridge` của account đó.
+(Phase 1–2: account + avatar + EA gửi `login/mode/balance`) và `docs/auth-plan.md` (phải **đăng nhập tài khoản Wickloom** mới
+trade được). Trade luôn chạy **trên account MT5 đang chọn** (dropdown avatar) qua EA `TVBridge` của account đó.
 
 ## 1. Yêu cầu (bạn chốt 2026-10-22)
 
@@ -115,11 +115,13 @@ Móc vào chỗ đã có:
   đọc: `GET …/positions|orders|history`.
 - Gửi lệnh = đẩy xuống đúng EA + **đợi `trade_result` theo `req_id`** (timeout ~10s). Account offline thì từ
   chối ngay, không xếp hàng.
-- **Xác thực**: mọi endpoint ghi yêu cầu token riêng trong header (khác `TV_TOKEN` của EA). CORS không
-  chặn được POST từ trang web khác vào `127.0.0.1`, nên không có token thì không trade.
+- **Xác thực**: mọi endpoint trade (đọc lẫn ghi) yêu cầu **phiên đăng nhập Wickloom** (`Depends(current_user)`, cookie HttpOnly) và
+  middleware chặn `Origin` lạ trên POST/PUT/PATCH/DELETE (khác `TV_TOKEN` của EA). CORS không chặn được POST từ trang web
+  khác vào `127.0.0.1`, nên không có phiên + Origin hợp lệ thì không trade. Khách bấm Buy/Sell chỉ ra popup đăng nhập
+  (`requireLogin`). Chi tiết: `docs/auth-plan.md` §5.4. `orders_log` ghi thêm `user_id`.
 - **Chống gửi lặp**: `client_id` gắn vào comment lệnh (MT5 giới hạn 31 ký tự) cùng magic; timeout/mất kết
   nối thì **hỏi lại trạng thái trước khi thử lại**, không tự gửi lại lệnh trên real.
-- Bảng `orders_log` (meta): mọi yêu cầu + kết quả + account + thời điểm, để truy vết.
+- Bảng `orders_log` (meta): mọi yêu cầu + kết quả + account MT5 + user Wickloom + thời điểm, để truy vết.
 - Đẩy `positions/orders/account` tới web qua WS theo account.
 
 ### Web

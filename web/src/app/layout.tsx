@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Invest Charts",
+  title: "Wickloom",
   description: "Personal charting platform",
 };
 

@@ -3,6 +3,10 @@
 Ngày viết: 2026-10-21 (sau commit 46ed76e). CHỈ LÀ PLAN, chưa code gì. Mục đích: chuyển qua lại giữa
 nhiều account MT5 như app MT5 mobile, và về sau dùng chính cơ chế này để **trade** từ web.
 
+> **Cập nhật 2026-10-22 (`docs/auth-plan.md`)**: app có **tài khoản Wickloom riêng** (đăng ký/đăng nhập bằng popup). Avatar góc trái
+> trên là **người dùng Wickloom**; account MT5 **chỉ dùng để trade/nguồn giá** và được chuyển trong **dropdown của avatar**. Watchlist,
+> layout, drawings thuộc user Wickloom, không thuộc account MT5. Các mục §4.2/§4.3 bên dưới đã sửa theo đó.
+
 ## 1. Hiện trạng (đọc từ code)
 
 - Dữ liệu đi 1 đường: **EA `TVBridge` trong 1 cửa sổ MT5 → TCP :8001 → backend**. Một cửa sổ MT5 chỉ
@@ -68,24 +72,30 @@ Hướng A chỉ đi được nếu chạy được 2 cửa sổ MT5 cùng lúc 
   `(account, symbol, tf)`.
 - Bảng meta mới `accounts` (thêm vào `TABLES` ở `store.py`): nhớ account đã từng thấy, tên/màu tuỳ
   chỉnh, thứ tự. Account offline vẫn hiện trong danh sách.
-- Watchlist theo account: `watchlists/<account_id>` (tên symbol khác nhau giữa broker).
-  Drawings/layouts giữ nguyên toàn cục (gắn với tên symbol, broker khác tên khác nên tự tách).
-  **Quyết định cần bạn xác nhận.**
+- Watchlist, layouts, drawings **thuộc user Wickloom** (`/me/watchlist`, `/me/layouts`, `/me/drawings`; xem `docs/auth-plan.md`
+  §5.3 và `docs/layout-plan.md`), **không** theo account MT5. Đổi account MT5 không đổi chúng; symbol không có trên account MT5
+  đang chọn thì Chart/Watchlist đánh dấu "không có trên account MT5 hiện tại" (tên symbol khác nhau giữa broker; demo/real cùng
+  broker thường trùng tên nên chấp nhận, map tên chuẩn hoá để sau).
+- Account MT5 chưa gán cho user: mọi user đăng nhập trên máy này thấy mọi account có EA kết nối (`auth-plan` §4.6).
 
 ### 4.3 Web
-- Store mới `store/account.ts` (persist): `accountId`, danh sách `accounts` poll 10s như `symbols`.
-- `lib/api.ts`: mọi hàm fetch + WS truyền `account`.
+- Store mới `store/account.ts` (persist): `accountId` (**account MT5 đang chọn**), danh sách `accounts` poll 10s như `symbols`.
+  Tách khỏi `store/auth.ts` (user Wickloom) để hai khái niệm không lẫn nhau.
+- `lib/api.ts`: mọi hàm fetch + WS truyền `account` (MT5).
 - **Avatar góc trái trên cùng** (giống avatar tròn của TV): ô rộng 52px bằng cột `DrawingToolbar`, nằm
-  đầu `Toolbar.tsx`, trước ô tìm symbol. Hình tròn ~30px, chữ cái đầu của tên account trên nền màu của
-  account. Viền **đỏ = account real, xanh lá = demo** để không nhầm khi trade. Chấm trạng thái online/offline.
-- Bấm avatar → popup (kiểu menu account của TV):
-  - Đầu popup: account đang dùng (tên, login, server, nhãn Demo/Real, balance/equity).
-  - Danh sách account, mỗi dòng: avatar nhỏ, tên, server, chấm online/offline, balance. Bấm để chuyển.
-  - Cuối popup: "Add account…" (mở hướng dẫn: mở thêm 1 cửa sổ MT5, đăng nhập, gắn EA TVBridge) và
-    "Edit" (đổi tên/màu, ẩn account).
-- Khi chuyển account: `set({accountId})` → nếu symbol hiện tại không có ở account mới thì lấy symbol đầu
-  tiên hoặc `XAUUSD*` → WS subscribe lại → xoá bar trong bộ nhớ (dùng lại cơ chế `reset` đã có) → thoát
-  Replay nếu đang bật → tải watchlist của account.
+  đầu `Toolbar.tsx`, trước ô tìm symbol. Hình tròn ~30px = **người dùng Wickloom** (chữ cái đầu; khách = icon người xám).
+  **Huy hiệu 10px góc dưới phải = account MT5 đang chọn**: đỏ = Real, xanh lá = Demo, xám = offline/chưa có — để không nhầm khi trade.
+  Component: `AccountMenu.tsx` (chi tiết ở `auth-plan` §6.4).
+- Bấm avatar → dropdown:
+  - Đầu: người dùng Wickloom (tên, email) hoặc, nếu là khách, nút **Sign in / Create account**.
+  - Khối **Trading accounts (MT5)** — chỉ khi đã đăng nhập. Mỗi dòng: tên, login, server, chấm online/offline, nhãn Demo/Real,
+    balance/equity; bấm để chuyển; dấu ✓ ở account đang chọn.
+  - "Add MT5 account…" (hướng dẫn: mở thêm 1 cửa sổ MT5, đăng nhập, gắn EA TVBridge) và "Edit" (đổi tên/màu, ẩn account MT5).
+  - Cuối: Account settings…, Sign out.
+- Khi chuyển account MT5: `set({accountId})` → nếu symbol hiện tại không có ở account mới thì báo "không có trên account MT5
+  hiện tại" (không tự đổi symbol đã lưu trong layout; chỉ khi người dùng đang ở layout 1 ô chưa lưu mới nhảy sang symbol đầu tiên
+  hoặc `XAUUSD*`) → WS subscribe lại → xoá bar trong bộ nhớ (dùng lại cơ chế `reset` đã có) → thoát Replay nếu đang bật.
+  Watchlist/layout **không** tải lại (thuộc user, không phụ thuộc account MT5).
 - Account **offline**: vẫn xem được chart từ cache, hiện thanh "Offline — dữ liệu cũ"; không backfill, không trade.
 
 ## 5. Chuẩn bị cho trade (chưa làm ở đợt này)
@@ -100,7 +110,8 @@ Thiết kế đợt này chừa sẵn chỗ để thêm trade không phải đ�
   - `client_order_id` chống gửi lặp, giới hạn lot tối đa và lỗ tối đa/ngày theo account, nút kill-switch
     đóng hết lệnh của app, bảng log `orders_log` trong meta.
   - **Xác thực endpoint trade**: backend nghe 127.0.0.1 nhưng CORS không chặn được POST từ trang web
-    khác trong trình duyệt của bạn → endpoint trade cần token riêng (header) ngoài `TV_TOKEN` của EA.
+    khác trong trình duyệt của bạn → endpoint trade yêu cầu **phiên đăng nhập Wickloom** (cookie) + chặn `Origin` lạ
+    (`auth-plan` §5.4), ngoài `TV_TOKEN` của EA. Khách không trade được.
   - Không cho trade khi đang Replay; đổi account thì đóng ticket đang mở.
 - Plan chi tiết cho trade sẽ viết riêng khi bắt đầu.
 
@@ -110,8 +121,8 @@ Thiết kế đợt này chừa sẵn chỗ để thêm trade không phải đ�
 |---|---|---|
 | 0 | Thử 2 cửa sổ MT5 chạy song song, whitelist socket, đo tài nguyên | Biết chắc hướng A khả thi hay không |
 | 1 | EA v2.10 (login/mode/balance) + backend multi-source + migration + `/accounts` + test trong `backend/tests` | 2 EA 2 account cùng đẩy data, không trộn bar; restart backend không mất cache |
-| 2 | Web: store account, avatar + popup, truyền `account` qua api/WS/Chart/Watchlist/SymbolSearch | Chuyển account trên avatar, chart + watchlist đổi đúng |
-| 3 | Phần trade cần: watchlist theo account, màu/tên tuỳ chỉnh, balance/equity. Xem cache khi offline để sau | Dùng hằng ngày không vướng |
+| 2 | Web: store account MT5, khối **Trading accounts** trong dropdown avatar (avatar/dropdown/đăng nhập đã có từ `auth-plan` U2), truyền `account` qua api/WS/Chart/SymbolSearch (= `auth-plan` U5) | Chuyển account MT5 trong dropdown, chart + symbols đổi đúng; watchlist/layout giữ nguyên |
+| 3 | Phần trade cần: màu/tên tuỳ chỉnh account MT5, balance/equity. Xem cache khi offline để sau | Dùng hằng ngày không vướng |
 | 4 | Trade demo + real (plan riêng, ưu tiên ngay sau Phase 2 — xem mục 8) | — |
 
 ## 7. Rủi ro / câu hỏi mở
@@ -127,7 +138,7 @@ Thiết kế đợt này chừa sẵn chỗ để thêm trade không phải đ�
 - **Trade là mục đích chính, không phải phần phụ**: Phase 4 được ưu tiên ngay sau Phase 2. Phase 3 chỉ giữ
   phần trade cần (balance/equity, màu/tên account, watchlist theo account); "xem cache khi offline" để sau.
 - **Phân biệt demo/real làm ngay từ Phase 2**, không đợi tới lúc có trade: EA gửi `mode` từ Phase 1,
-  avatar viền đỏ/xanh, popup có nhãn Demo/Real. Mọi chỗ hiện account (ticket, danh sách lệnh) đều kèm nhãn này.
+  huy hiệu đỏ/xanh trên avatar, dropdown có nhãn Demo/Real. Mọi chỗ hiện account (ticket, danh sách lệnh) đều kèm nhãn này.
 - **Lệnh luôn gắn `account_id` tường minh** (account đang hiện trên ticket), không dùng "account đang chọn"
   ngầm: bấm gửi lệnh đúng lúc đổi account thì lệnh vẫn đi đúng account ban đầu hoặc bị từ chối, không bao giờ
   rơi sang account khác. Account đích offline → từ chối, không xếp hàng chờ.

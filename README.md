@@ -1,4 +1,4 @@
-# Invest Charts
+# Wickloom
 
 Chart kiểu TradingView chạy local, dữ liệu lấy từ MetaTrader 5.
 

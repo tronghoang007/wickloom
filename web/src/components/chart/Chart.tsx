@@ -316,7 +316,7 @@ export default function Chart() {
   const updateTitle = () => {
     const st = useChartStore.getState();
     const last = barsRef.current[barsRef.current.length - 1];
-    let title = "Invest Charts";
+    let title = "Wickloom";
     if (last) {
       const d = st.symbols.find((x) => x.name === st.symbol)?.digits ?? digitsRef.current;
       title = `${st.symbol} ${last.c.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`;
@@ -923,7 +923,7 @@ export default function Chart() {
     return () => {
       alive = false;
       clearInterval(id);
-      setTabTitle("Invest Charts");
+      setTabTitle("Wickloom");
     };
   }, [symbol]);
 
