@@ -56,6 +56,9 @@ export type ChartSettings = {
   // One-click trading (như TradingView): tắt (mặc định) = đóng vị thế hỏi bằng hộp thoại, kéo SL/TP / lệnh chờ đã đặt dừng ở giá mới chờ bấm ✓ trên thẻ;
   // bật = làm ngay, không hỏi
   oneClick: boolean;
+  // Events: biểu tượng sự kiện kinh tế (lịch MT5 qua EA) ngay trên chart, ở sát trục thời gian
+  showEvents: boolean;
+  eventsMinImportance: 1 | 2 | 3;
 };
 
 export const DATE_FORMATS = [
@@ -123,6 +126,8 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   marginBottom: 25,
   rightOffset: 8,
   oneClick: false,
+  showEvents: true,
+  eventsMinImportance: 2,
 };
 
 /** Setting đã lưu + mặc định cho field mới. `confirmClose` (bản thử trước, đã gộp vào One-click trading): ai đã tắt xác nhận đóng thì giữ ý đó. */

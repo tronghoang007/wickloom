@@ -11,7 +11,7 @@ export const useToastStore = create<State>()((set) => ({
 
 let seq = 0;
 
-/** Thông báo nhỏ góc dưới trái, tự tắt sau `ms`. */
+/** Thông báo nhỏ góc trên phải, tự tắt sau `ms`. */
 export function toast(text: string, opts: { action?: ToastItem["action"]; ms?: number } = {}) {
   const id = ++seq;
   useToastStore.setState((s) => ({ items: [...s.items.slice(-2), { id, text, action: opts.action }] }));

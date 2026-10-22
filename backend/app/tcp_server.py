@@ -3,7 +3,7 @@ import json
 import time
 from typing import Any, Dict
 
-from . import mt5, state, trade
+from . import economic, mt5, state, trade
 from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN
 from .models import BarsIn, SymbolsIn, TicksIn
 
@@ -145,6 +145,8 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
                     _handle_bars(BarsIn.model_validate(msg))
                 elif mtype == "account":
                     mt5.registry.update(writer, msg)
+                elif mtype == "calendar":
+                    economic.ingest(msg)
                 elif mtype in ("trade", "deals"):
                     mt5.registry.update_trade(writer, msg)
                 elif mtype == "trade_result":

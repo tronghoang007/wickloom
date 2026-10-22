@@ -4,6 +4,7 @@ import { fetchSymbols } from "@/lib/api";
 import { useChartStore } from "@/store/chart";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ClearX, Close, Search } from "../icons";
+import { SymbolBadge } from "../SymbolIcon";
 
 const TYPE_LABEL: Record<string, string> = {
   forex: "forex",
@@ -21,44 +22,6 @@ const CHIPS: { id: string; label: string }[] = [
   { id: "stocks", label: "Stocks" },
   { id: "other", label: "Other" },
 ];
-const COLORS: Record<string, string> = {
-  forex: "#2962ff",
-  metal: "#d4a017",
-  index: "#9c27b0",
-  crypto: "#f7931a",
-  stocks: "#089981",
-  other: "#787b86",
-};
-
-const isGold = (name: string) => /^(XAU|GOLD)/i.test(name);
-
-// Thỏi vàng như logo vàng của TV: nền vàng #D69A00, 3 thỏi trắng hình thang xếp chồng
-function Bar({ x, y }: { x: number; y: number }) {
-  return <path d={`M${x + 1.3} ${y}h5.4l1.3 5.3H${x}z`} fill="#fff" />;
-}
-
-/** Icon symbol dùng chung (dialog tìm kiếm + watchlist): vòng tròn màu theo loại, 2 chữ đầu của tên;
- *  vàng (XAU…) là 3 thỏi vàng xếp chồng. */
-export function SymbolBadge({ name, type, size = 24 }: { name: string; type?: string; size?: number }) {
-  if (isGold(name))
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" className="shrink-0" aria-hidden>
-        <circle cx="12" cy="12" r="12" fill="#d69a00" />
-        <Bar x={3.5} y={12.4} />
-        <Bar x={12.5} y={12.4} />
-        <Bar x={8} y={6.6} />
-      </svg>
-    );
-  return (
-    <span
-      className="flex shrink-0 items-center justify-center rounded-full font-bold text-white"
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.42), background: COLORS[type ?? "other"] ?? COLORS.other }}
-    >
-      {name.slice(0, 2)}
-    </span>
-  );
-}
-
 function Highlight({ text, q }: { text: string; q: string }) {
   const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
   if (i < 0) return <>{text}</>;

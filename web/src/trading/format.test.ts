@@ -159,6 +159,27 @@ describe("thẻ trên chart (kiểu TradingView)", () => {
     expect(l.find((x) => x.key === "ptp:1")?.tag?.pending).toBeUndefined();
     expect(tradeLines(data({ orders: [] }), "XAUUSDm", 1000, { key: "psl:1", price: 4085, title: "SL" })[1].tag?.pending).toBeUndefined();
   });
+  it("nhiều đường chờ xác nhận cùng lúc (SL và TP của một vị thế): cả hai giữ giá mới và cờ pending, đường khác không đổi", () => {
+    const l = tradeLines(data({ orders: [] }), "XAUUSDm", 1000, [
+      { key: "psl:1", price: 4085, title: "SL -15.00 USD", pending: true },
+      { key: "ptp:1", price: 4130, title: "TP +30.00 USD", pending: true },
+    ]);
+    expect(l.find((x) => x.key === "psl:1")).toMatchObject({ price: 4085, tag: { kind: "sl", label: "-15.00 USD", pending: true } });
+    expect(l.find((x) => x.key === "ptp:1")).toMatchObject({ price: 4130, tag: { kind: "tp", label: "+30.00 USD", pending: true } });
+    expect(l.find((x) => x.key === "p:1")).toMatchObject({ price: 4100.5 });
+  });
+  it("trùng khoá thì xem trước cuối danh sách thắng (đang kéo đè lên cái đang chờ)", () => {
+    const l = tradeLines(data({ orders: [] }), "XAUUSDm", 1000, [
+      { key: "psl:1", price: 4085, title: "SL", pending: true },
+      { key: "psl:1", price: 4070, title: "SL" },
+    ]);
+    const sl = l.find((x) => x.key === "psl:1");
+    expect(sl?.price).toBe(4070);
+    expect(sl?.tag?.pending).toBeUndefined();
+  });
+  it("danh sách rỗng = không có xem trước", () => {
+    expect(tradeLines(data({ orders: [] }), "XAUUSDm", 1000, [])).toEqual(tradeLines(data({ orders: [] }), "XAUUSDm", 1000));
+  });
   it("kéo lệnh chờ: chữ trên thẻ đổi theo loại lệnh sẽ thành", () => {
     const l = tradeLines(data({ positions: [] }), "XAUUSDm", 1000, { key: "o:2", price: 4150, title: "BUY STOP 0.20", label: "Buy stop" });
     expect(l[0].tag?.label).toBe("Buy stop");

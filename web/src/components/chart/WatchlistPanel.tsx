@@ -6,7 +6,8 @@ import { useChartStore } from "@/store/chart";
 import { useSettingsStore } from "@/store/settings";
 import { useEffect, useRef, useState } from "react";
 import { Chevron, Close, Plus } from "../icons";
-import SymbolSearchDialog, { SymbolBadge } from "./SymbolSearchDialog";
+import { SymbolBadge } from "../SymbolIcon";
+import SymbolSearchDialog from "./SymbolSearchDialog";
 
 // Quote của 1 symbol: nến D1 mới nhất (mở/cao/thấp/giá hiện tại) + đóng cửa phiên trước. Chg =
 // giá hiện tại - đóng cửa phiên trước, giống cột Chg/Chg% của watchlist TradingView.

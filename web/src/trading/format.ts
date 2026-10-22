@@ -93,12 +93,13 @@ export const stopLabel = (title: string) => title.replace(/^(SL|TP)\s+/, "") || 
 /** Nút "TP" / "SL" mờ trên thẻ lệnh cho những mức chưa đặt. */
 export const ghostsFor = (sl: number, tp: number): ("tp" | "sl")[] => [...(tp > 0 ? [] : (["tp"] as const)), ...(sl > 0 ? [] : (["sl"] as const))];
 
-/** Đường trên chart của symbol hiện tại: entry + SL + TP của vị thế, giá + SL + TP của lệnh chờ. Dữ liệu cũ thì không có đường nào. `drag` đè giá + nhãn của một đường đang kéo
- *  (đường SL/TP chưa tồn tại mà đang được kéo ra từ nút mờ thì được dựng tạm). `ccy` = đơn vị tiền của account, ghi sau số lãi/lỗ của vị thế. */
-export function tradeLines(data: TradeData | null, symbol: string, nowSec: number, drag?: DragPreview | null, stopTitle: StopTitleFn = plainStop, ccy = ""): LineSpec[] {
+/** Đường trên chart của symbol hiện tại: entry + SL + TP của vị thế, giá + SL + TP của lệnh chờ. Dữ liệu cũ thì không có đường nào. `drag` đè giá + nhãn của các đường đang kéo
+ *  hoặc chờ xác nhận (đường SL/TP chưa tồn tại mà đang được kéo ra từ nút mờ thì được dựng tạm). `ccy` = đơn vị tiền của account, ghi sau số lãi/lỗ của vị thế. */
+export function tradeLines(data: TradeData | null, symbol: string, nowSec: number, drag?: DragPreview | DragPreview[] | null, stopTitle: StopTitleFn = plainStop, ccy = ""): LineSpec[] {
   if (!data || isStale(data, nowSec)) return [];
   const out: LineSpec[] = [];
-  const pending = (key: string, v: number) => (v > 0 ? v : drag?.key === key ? drag.price : 0); // SL/TP chưa có nhưng đang được kéo ra
+  const drags = new Map((Array.isArray(drag) ? drag : drag ? [drag] : []).map((d) => [d.key, d] as const)); // nhiều đường cùng lúc (SL + TP chờ xác nhận); trùng khoá thì cái sau thắng
+  const pending = (key: string, v: number) => (v > 0 ? v : (drags.get(key)?.price ?? 0)); // SL/TP chưa có nhưng đang được kéo ra
   const stops = (prefix: "p" | "o", owner: TagOwner, ticket: number, side: "buy" | "sell", lot: number, entry: number, slv: number, tpv: number) => {
     for (const [kind, v, color] of [["sl", slv, COLORS.sl], ["tp", tpv, COLORS.tp]] as const) {
       if (!(v > 0)) continue;
@@ -140,9 +141,10 @@ export function tradeLines(data: TradeData | null, symbol: string, nowSec: numbe
     });
     stops("o", owner, o.ticket, side, o.volume, o.price_open, sl, tp);
   }
-  if (!drag) return out;
+  if (drags.size === 0) return out;
   return out.map((l) => {
-    if (l.key !== drag.key) return l;
+    const drag = drags.get(l.key);
+    if (!drag) return l;
     const label = drag.label ?? (l.tag && l.tag.kind !== "entry" ? stopLabel(drag.title) : l.tag?.label);
     const tag = l.tag && { ...l.tag, ...(label !== undefined ? { label } : {}), ...(drag.pending ? { pending: true } : {}) };
     return { ...l, price: drag.price, title: drag.title, tag };

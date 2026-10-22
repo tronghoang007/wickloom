@@ -25,7 +25,7 @@ vi.mock("./store", () => ({ useTradeStore: { getState: () => ({ refresh }) } }))
 
 import { useMt5Store } from "@/store/mt5";
 import type { PendingOrder } from "@/lib/mt5Api";
-import { cancelOrder, closeTrade, moveOrder, moveStop, newClientId, placeMarket, placePending, useOrderState } from "./actions";
+import { cancelOrder, closeTrade, moveOrder, moveStop, moveStops, newClientId, placeMarket, placePending, useOrderState } from "./actions";
 import { useQuoteStore } from "./quote";
 
 const acc = { id: "S:1", server: "S", mode: "demo", online: true, active: true } as Mt5Account;
@@ -266,6 +266,75 @@ describe("moveOrder", () => {
     await moveOrder(ord({ type: "buy_stop_limit" }), 4150, 3);
     expect(sendModify).toHaveBeenCalled();
     expect(sendPending).not.toHaveBeenCalled();
+  });
+});
+
+describe("moveOrder kèm SL/TP", () => {
+  it("cùng loại: giá + SL + TP đi chung MỘT yêu cầu sửa lệnh", async () => {
+    sendModify.mockResolvedValue(done());
+    expect(await moveOrder(ord(), 4115.5, 3, { sl: 4100, tp: 4160 })).toBe(true);
+    expect(sendModify).toHaveBeenCalledOnce();
+    expect(sendModify).toHaveBeenCalledWith("S:1", 222, { price: 4115.5, sl: 4100, tp: 4160 });
+  });
+  it("đổi loại (đặt lệnh mới): mang theo SL/TP mới, mức không đổi thì giữ của lệnh cũ", async () => {
+    sendPending.mockResolvedValue(done({ orderType: "buy_stop" }));
+    sendCancel.mockResolvedValue(done());
+    await moveOrder(ord(), 4150, 3, { sl: 4120 });
+    expect(sendPending.mock.calls[0][1]).toMatchObject({ price: 4150, sl: 4120, tp: 4150 });
+  });
+});
+
+describe("moveStops", () => {
+  const t = { target: "position" as const, ticket: 111, symbol: "XAUUSDm" };
+  const both = [
+    { field: "sl" as const, from: 4115, to: 4118.5 },
+    { field: "tp" as const, from: 4140, to: 4150 },
+  ];
+
+  it("SL và TP đổi cùng lúc: MỘT yêu cầu mang cả hai trường (backend ghép trường vắng với số liệu cũ nên hai yêu cầu sẽ đè nhau)", async () => {
+    sendModifyPos.mockResolvedValue(done());
+    expect(await moveStops(t, both, 3)).toBe(true);
+    expect(sendModifyPos).toHaveBeenCalledOnce();
+    expect(sendModifyPos).toHaveBeenCalledWith("S:1", 111, { sl: 4118.5, tp: 4150 });
+    const [text, opts] = toastMock.mock.calls[0];
+    expect(text).toBe("Đã đổi SL & TP XAUUSDm #111: SL → 4118.500, TP → 4150.000");
+    expect(opts.action.label).toBe("Hoàn tác");
+  });
+
+  it("cả hai mức đều mới (kéo nút TP/SL mờ ra): toast nói đặt, không phải đổi; Hoàn tác = bỏ cả hai", async () => {
+    sendModifyPos.mockResolvedValue(done());
+    await moveStops(t, [{ field: "sl", from: 0, to: 4100 }, { field: "tp", from: 0, to: 4150 }], 3);
+    expect(toastMock.mock.calls[0][0]).toBe("Đã đặt SL & TP XAUUSDm #111: SL → 4100.000, TP → 4150.000");
+    toastMock.mock.calls[0][1].action.run();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendModifyPos).toHaveBeenLastCalledWith("S:1", 111, { sl: 0, tp: 0 });
+  });
+
+  it("Hoàn tác trả cả hai mức về giá cũ trong một yêu cầu", async () => {
+    sendModifyPos.mockResolvedValue(done());
+    await moveStops(t, both, 3);
+    toastMock.mock.calls[0][1].action.run();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendModifyPos).toHaveBeenLastCalledWith("S:1", 111, { sl: 4115, tp: 4140 });
+    expect(toastMock).toHaveBeenLastCalledWith("Đã hoàn tác SL & TP XAUUSDm #111", { ms: 4000 });
+  });
+
+  it("lệnh chờ: đi qua API sửa lệnh; một mức bỏ (to = 0) được ghi là bỏ", async () => {
+    sendModify.mockResolvedValue(done());
+    await moveStops({ target: "order", ticket: 222, symbol: "XAUUSDm" }, [{ field: "sl", from: 4100, to: 0 }, { field: "tp", from: 4150, to: 4160 }], 3);
+    expect(sendModify).toHaveBeenCalledWith("S:1", 222, { sl: 0, tp: 4160 });
+    expect(toastMock.mock.calls[0][0]).toBe("Đã đổi SL & TP XAUUSDm #222: bỏ SL, TP → 4160.000");
+  });
+
+  it("không có thay đổi nào → không gửi gì", async () => {
+    expect(await moveStops(t, [], 3)).toBe(false);
+    expect(sendModifyPos).not.toHaveBeenCalled();
+  });
+
+  it("sàn từ chối → một toast lỗi, không có Hoàn tác, false", async () => {
+    sendModifyPos.mockResolvedValue(done({ ok: false, message: "SL/TP không hợp lệ (quá gần giá)" }));
+    expect(await moveStops(t, both, 3)).toBe(false);
+    expect(toastMock.mock.calls).toEqual([["SL/TP không hợp lệ (quá gần giá)", { ms: 7000 }]]);
   });
 });
 

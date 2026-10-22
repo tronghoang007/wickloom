@@ -6,7 +6,7 @@ import { placeMarket, placePending, useOrderState } from "./actions";
 import { defaultStop, parseNum, type TicketMode } from "./draft";
 import { draftError, type DraftEnv } from "./draftCheck";
 import { lotSpec, normalizeLot, writeLot } from "./lot";
-import { resolveOrderType, snapPrice } from "./orderType";
+import { resolveOrderType, snapPrice, type Side } from "./orderType";
 import { useQuoteStore } from "./quote";
 import { useTicketStore } from "./ticket";
 
@@ -22,7 +22,16 @@ function env(symbol: string): DraftEnv {
   };
 }
 
-/** Gửi bản nháp: lỗi thì báo bằng toast và không gửi gì, thành công thì đóng bản nháp. Trả true nếu sàn đã nhận lệnh. */
+/** Gợi ý giá vào cho lệnh chờ chưa có giá: một mức phía Limit (Buy dưới thị trường, Sell trên); chưa có giá thị trường thì để trống. */
+function seedPendingPrice(symbol: string, side: Side): string {
+  const e = env(symbol);
+  const q = e.quote;
+  const digits = e.sym?.digits ?? 5;
+  const tick = e.sym?.tick_size || 10 ** -digits;
+  return q ? defaultStop("sl", side, side === "buy" ? q.ask : q.bid, tick, digits, e.sym?.stops_level).toFixed(digits) : "";
+}
+
+/** Gửi bản nháp: lỗi thì báo bằng toast và không gửi gì, thành công thì bản nháp bỏ đi nhưng bảng đặt lệnh (thanh bên phải) KHÔNG đóng: nó ở trạng thái chờ như TradingView (`useTicketStore.settle`) tới khi bấm Sell / Buy. Trả true nếu sàn đã nhận lệnh. */
 export async function submitDraft(): Promise<boolean> {
   const d = useTicketStore.getState().draft;
   if (!d || useOrderState.getState().busy) return false;
@@ -50,7 +59,7 @@ export async function submitDraft(): Promise<boolean> {
     const expectedType = e.quote ? resolveOrderType(d.side, price, e.quote.bid, e.quote.ask) : null;
     ok = await placePending({ symbol: d.symbol, side: d.side, volume, price, sl, tp, expiration, expectedType }, digits);
   }
-  if (ok) useTicketStore.getState().close();
+  if (ok && useTicketStore.getState().draft) useTicketStore.getState().settle({ side: d.side, mode: d.mode }); // người dùng đã đóng bảng trong lúc lệnh đang bay thì không mở lại
   return ok;
 }
 
@@ -58,11 +67,7 @@ export async function submitDraft(): Promise<boolean> {
 export function setDraftMode(mode: TicketMode): void {
   const { draft, patch } = useTicketStore.getState();
   if (!draft || mode === draft.mode) return;
-  const e = env(draft.symbol);
-  const digits = e.sym?.digits ?? 5;
-  const tick = e.sym?.tick_size || 10 ** -digits;
-  const q = e.quote;
-  const seed = !draft.price && q ? defaultStop("sl", draft.side, draft.side === "buy" ? q.ask : q.bid, tick, digits, e.sym?.stops_level).toFixed(digits) : draft.price;
+  const seed = draft.price || seedPendingPrice(draft.symbol, draft.side);
   patch({ mode, price: seed });
 }
 

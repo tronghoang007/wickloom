@@ -6,8 +6,9 @@ export default function Toasts() {
   const items = useToastStore((s) => s.items);
   const dismiss = useToastStore((s) => s.dismiss);
   if (items.length === 0) return null;
+  // góc trên phải: dưới thanh công cụ, chừa cột icon của thanh bên phải
   return (
-    <div className="pointer-events-none fixed bottom-4 left-16 z-[80] flex flex-col gap-2">
+    <div className="pointer-events-none fixed right-14 top-12 z-[80] flex max-w-[min(480px,calc(100vw-120px))] flex-col items-end gap-2">
       {items.map((t) => (
         <div
           key={t.id}

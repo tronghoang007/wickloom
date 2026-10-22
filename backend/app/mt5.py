@@ -2,7 +2,7 @@
 (balance/equity/margin) và trạng thái giao dịch (`trade`: vị thế + lệnh chờ, `deals`: lịch sử khớp lệnh). Gửi lệnh xuống EA nằm ở
 trade.py (T2). Chỉ lưu trong bộ nhớ: EA tự báo lại mỗi lần kết nối. Không bao giờ có mật khẩu account. (docs/trade-plan.md T1-T2)
 
-Backend hiện chỉ có MỘT nguồn dữ liệu một lúc (`state.ea_hub` từ chối EA thứ 2 khác server) nên danh sách thường có đúng 1 account;
+Backend hiện chỉ có MỘT nguồn dữ liệu một lúc (`state.ea_hub` từ chối EA thứ 2 khác server) nên danh sách thường có đúng 1 account (account cũ đang offline bị bỏ khi account mới kết nối);
 registry khoá theo `server:login` để khi backend đa nguồn (docs/multi-account-plan.md Phase 1) thì không phải đổi hình dạng dữ liệu.
 """
 import math
@@ -104,7 +104,16 @@ class Mt5Registry:
         )
         self._info[aid] = info
         self._by_writer[writer] = aid
+        self._forget_offline_except(aid)
         return aid
+
+    def _forget_offline_except(self, keep: str) -> None:
+        """Một account vừa kết nối: các account KHÁC đang offline là account cũ của cửa sổ MT5 này (đã đăng nhập sang account khác, hoặc đã xoá khỏi MT5; EA không báo được việc
+        xoá) nên bỏ khỏi danh sách cùng trạng thái giao dịch của chúng. Account offline cuối cùng (không có account nào khác kết nối) vẫn được giữ để UI hiện "offline"."""
+        online = set(self._by_writer.values())
+        for aid in [a for a in self._info if a != keep and a not in online]:
+            del self._info[aid]
+            self._trade.pop(aid, None)
 
     def update(self, writer: Any, msg: Dict[str, Any]) -> None:
         """Thông điệp `account` định kỳ của EA: số dư. Giá trị lạ (NaN, sai kiểu) bị bỏ qua."""

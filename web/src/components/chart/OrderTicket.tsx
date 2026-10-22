@@ -2,18 +2,18 @@
 
 import { fmtMoney, MODE_COLOR, MODE_LABEL } from "@/lib/mt5Format";
 import { useAuthStore } from "@/store/auth";
-import { chartGlobal } from "@/store/chart";
+import { chartGlobal, useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { useOrderState } from "@/trading/actions";
 import { parseNum, type Draft } from "@/trading/draft";
 import { draftError } from "@/trading/draftCheck";
 import { fmtLot } from "@/trading/format";
-import { fmtLotValue, lotSpec, normalizeLot, stepLot, writeLot } from "@/trading/lot";
+import { currentLot, fmtLotValue, lotSpec, normalizeLot, stepLot, writeLot } from "@/trading/lot";
 import { pendingLabel, resolveOrderType, snapPrice } from "@/trading/orderType";
 import { estimatePnl, pnlSpec, pointsBetween, priceForPnl, priceFromPoints, type PnlSpec } from "@/trading/pnl";
 import { spreadPips, useQuoteStore } from "@/trading/quote";
 import { seedDraftStop, setDraftMode, submitDraft } from "@/trading/submit";
-import { useTicketStore } from "@/trading/ticket";
+import { useTicketStore, type TicketRest } from "@/trading/ticket";
 import { useEffect, useState } from "react";
 import { Close } from "../icons";
 import PriceText from "./PriceText";
@@ -26,8 +26,23 @@ const px = (v: number, digits: number) => v.toLocaleString("en-US", { minimumFra
  *  + Lãi/Lỗ theo tiền account (sửa ô nào hai ô kia tính lại), R:R và mức rủi ro. Entry / SL / TP của bản nháp hiện trên chart thành đường kéo được, kéo thì ô nhập đổi theo (và ngược lại). */
 export default function OrderTicket() {
   const draft = useTicketStore((s) => s.draft);
+  const rest = useTicketStore((s) => s.rest);
   const id = useTicketStore((s) => s.id);
-  return draft ? <TicketPanel key={id} d={draft} /> : <div className="px-4 py-6 text-sm text-[var(--muted)]">Bấm SELL / BUY trên chart để đặt lệnh.</div>;
+  if (draft) return <TicketPanel key={id} d={draft} />;
+  if (rest) return <RestPanel rest={rest} />;
+  return <div className="px-4 py-6 text-sm text-[var(--muted)]">Bấm SELL / BUY trên chart để đặt lệnh.</div>;
+}
+
+/** Sau khi đặt xong bảng KHÔNG đóng mà ở trạng thái chờ như TradingView ("Start creating order"): vẫn hiện symbol đang xem và giá Sell / Buy, các ô còn lại mờ + không bấm được;
+ *  bấm Sell / Buy hoặc nút dưới đáy mới bắt đầu bản nháp mới (và lúc đó mới có đường entry / SL / TP trên chart). */
+function RestPanel({ rest }: { rest: TicketRest }) {
+  const symbol = useChartStore((s) => s.symbol);
+  const sym = chartGlobal((s) => s.symbols.find((x) => x.name === symbol));
+  const account = useMt5Store((s) => s.accounts.find((a) => a.active));
+  const spec = lotSpec(sym, account?.max_lot);
+  const lot = spec ? fmtLotValue(currentLot(account?.id, symbol, spec), spec) : "";
+  const d: Draft = { symbol, side: rest.side, mode: rest.mode, price: "", sl: "", tp: "", lot, until: false, untilText: "" };
+  return <TicketPanel d={d} rest={rest} />;
 }
 
 // Ô nhập hiển thị giá trị TÍNH TỪ bản nháp; đang gõ thì giữ đúng chữ người dùng gõ (không bị làm tròn giữa chừng), rời ô thì quay về giá trị tính được.
@@ -125,8 +140,10 @@ function StopRow({ kind, d, entry, lot, digits, tick, spec, ccy }: StopProps) {
   );
 }
 
-function TicketPanel({ d }: { d: Draft }) {
+function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
   const { patch, close } = useTicketStore.getState();
+  const idle = rest !== undefined; // trạng thái chờ: xem `RestPanel`
+  const start = (side: "buy" | "sell") => useTicketStore.getState().open({ symbol: d.symbol, side, mode: d.mode });
   const sym = chartGlobal((s) => s.symbols.find((x) => x.name === d.symbol));
   const quote = useQuoteStore((s) => s.quotes[d.symbol]);
   const status = useAuthStore((s) => s.status);
@@ -159,7 +176,7 @@ function TicketPanel({ d }: { d: Draft }) {
   const bid = quote?.bid ?? 0;
   const ask = quote?.ask ?? 0;
   const type = !market && quote && price > 0 ? resolveOrderType(d.side, price, bid, ask) : null;
-  const err = draftError(d, { sym, quote, account, status, loaded, nowSec: now });
+  const err = idle ? null : draftError(d, { sym, quote, account, status, loaded, nowSec: now });
 
   // Giá vào để đo điểm và lãi/lỗi: giá vào của lệnh chờ, hoặc giá khớp market (Buy mua ở Ask, Sell bán ở Bid)
   const entry = market ? (buy ? ask : bid) : price;
@@ -172,7 +189,7 @@ function TicketPanel({ d }: { d: Draft }) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    void submitDraft();
+    if (!idle) void submitDraft();
   };
 
   const accent = buy ? "#2962ff" : "#f23645";
@@ -201,14 +218,14 @@ function TicketPanel({ d }: { d: Draft }) {
         {/* Sell | Buy như TV: ô đang chọn tô màu, ô kia xám; chip spread (pip) nằm giữa */}
         <div className="relative mb-4 grid grid-cols-2 gap-1.5">
           {(["sell", "buy"] as const).map((s) => {
-            const on = d.side === s;
+            const on = !idle && d.side === s; // đang chờ: chưa chọn hướng nào
             const sell = s === "sell";
             return (
               <button
                 key={s}
                 type="button"
                 aria-pressed={on}
-                onClick={() => patch({ side: s })}
+                onClick={() => (idle ? start(s) : patch({ side: s }))}
                 className={`flex h-[60px] cursor-pointer flex-col justify-center rounded-lg px-3.5 transition ${sell ? "items-start" : "items-end"} ${on ? "text-white" : "bg-[var(--hover)] text-[var(--fg)] hover:brightness-110"}`}
                 style={on ? { background: sell ? "#f23645" : "#2962ff" } : undefined}
               >
@@ -226,6 +243,8 @@ function TicketPanel({ d }: { d: Draft }) {
           </span>
         </div>
 
+        {/* đang chờ: phần dưới mờ đi và không tương tác (inert) tới khi bắt đầu lệnh mới */}
+        <div inert={idle} className={idle ? "opacity-40" : ""}>
         <div className="mb-4 grid grid-cols-2 border-b border-[var(--border)] text-sm">
           {(["market", "pending"] as const).map((m) => (
             <button
@@ -323,6 +342,7 @@ function TicketPanel({ d }: { d: Draft }) {
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* nút đặt lệnh dính ở đáy: luôn thấy dù bảng dài */}
@@ -330,10 +350,16 @@ function TicketPanel({ d }: { d: Draft }) {
         <div className="mb-1.5 min-h-[16px] truncate text-xs text-[#f23645]" role="alert" title={err ?? undefined}>
           {err}
         </div>
-        <button type="submit" disabled={!!err || busy} className="flex h-12 w-full cursor-pointer flex-col items-center justify-center rounded-lg text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50" style={{ background: accent }}>
-          <span className="text-sm font-semibold leading-tight">{submitTitle}</span>
-          <span className="text-[11px] leading-tight text-white/80">{submitSub}</span>
-        </button>
+        {idle ? (
+          <button type="button" onClick={() => start(rest.side)} className="flex h-12 w-full cursor-pointer items-center justify-center rounded-lg bg-[var(--hover)] text-sm font-semibold text-[var(--fg)] transition hover:brightness-125">
+            Start creating order
+          </button>
+        ) : (
+          <button type="submit" disabled={!!err || busy} className="flex h-12 w-full cursor-pointer flex-col items-center justify-center rounded-lg text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50" style={{ background: accent }}>
+            <span className="text-sm font-semibold leading-tight">{submitTitle}</span>
+            <span className="text-[11px] leading-tight text-white/80">{submitSub}</span>
+          </button>
+        )}
       </div>
     </form>
   );

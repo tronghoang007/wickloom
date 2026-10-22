@@ -105,15 +105,15 @@ export async function cancelOrder(ticket: number, symbol: string): Promise<boole
 }
 
 /** Kéo lệnh chờ tới giá mới (docs/trade-plan.md mục 3.4). Cùng loại thì sửa giá. MT5 không cho đổi loại lệnh chờ: giá vượt qua thị trường thì ĐẶT LỆNH MỚI ĐÚNG LOẠI
- *  TRƯỚC rồi mới xoá lệnh cũ; đặt mới lỗi thì giữ nguyên lệnh cũ. */
-export async function moveOrder(order: PendingOrder, price: number, digits?: number): Promise<boolean> {
+ *  TRƯỚC rồi mới xoá lệnh cũ; đặt mới lỗi thì giữ nguyên lệnh cũ. `stops` = SL/TP đổi cùng lúc (gửi chung một yêu cầu, lệnh mới mang theo). */
+export async function moveOrder(order: PendingOrder, price: number, digits?: number, stops: { sl?: number; tp?: number } = {}): Promise<boolean> {
   const done = await run("Đăng nhập để giao dịch", async (accountId) => {
     const q = useQuoteStore.getState().quotes[order.symbol];
     const type = isPendingType(order.type) ? order.type : null;
     const resolved = type && q ? resolveOrderType(sideOfType(type), price, q.bid, q.ask) : type;
     if (!type || resolved === type) {
       // cùng loại (hoặc chưa có giá để so: để EA quyết, nó từ chối nếu loại sẽ đổi)
-      return report(await sendModifyOrder(accountId, order.ticket, { price }), `Đã đổi giá ${order.symbol} #${order.ticket} → ${fmtPx(price, digits)}`);
+      return report(await sendModifyOrder(accountId, order.ticket, { price, ...stops }), `Đã đổi giá ${order.symbol} #${order.ticket} → ${fmtPx(price, digits)}`);
     }
     if (!resolved) {
       toast("Giá vào trùng giá thị trường: lệnh chờ không đặt được ở đó", { ms: 6000 });
@@ -121,7 +121,7 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
     }
     const placed = await pendingCall(
       accountId,
-      { symbol: order.symbol, side: sideOfType(type), volume: order.volume, price, sl: order.sl, tp: order.tp, expiration: order.expiration, expectedType: resolved },
+      { symbol: order.symbol, side: sideOfType(type), volume: order.volume, price, sl: stops.sl ?? order.sl, tp: stops.tp ?? order.tp, expiration: order.expiration, expectedType: resolved },
       digits,
       true,
     );
@@ -138,28 +138,44 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
   return done === true;
 }
 
-export type StopTarget = { target: "position" | "order"; ticket: number; symbol: string; field: "sl" | "tp"; from: number };
+export type StopsTarget = { target: "position" | "order"; ticket: number; symbol: string };
+export type StopChange = { field: "sl" | "tp"; from: number; to: number };
+export type StopTarget = StopsTarget & { field: "sl" | "tp"; from: number };
 
-/** Kéo SL/TP của vị thế / lệnh chờ tới `price` (0 = bỏ SL/TP, như bấm × trên thẻ). Thành công thì toast kèm nút "Hoàn tác" (đặt lại mức cũ; mức cũ 0 thì hoàn tác = bỏ).
- *  `pnlText` = " (+78.30 USD)" nếu biết lãi/lỗi tại mức mới. */
-export async function moveStop(t: StopTarget, price: number, digits?: number, pnlText = ""): Promise<boolean> {
-  const name = t.field.toUpperCase();
+/** Đổi SL và/hoặc TP của một vị thế / lệnh chờ trong MỘT yêu cầu (backend ghép trường vắng với số liệu EA báo lần cuối, nên hai yêu cầu liền nhau sẽ đè nhau). `to` 0 = bỏ.
+ *  Thành công thì toast kèm nút "Hoàn tác" (đặt lại các mức cũ; mức cũ 0 thì hoàn tác = bỏ). `pnlText` = " (+78.30 USD)" nếu biết lãi/lỗi tại mức mới (chỉ khi đổi một mức). */
+export async function moveStops(t: StopsTarget, changes: StopChange[], digits?: number, pnlText = ""): Promise<boolean> {
+  if (changes.length === 0) return false;
+  const names = changes.map((c) => c.field.toUpperCase()).join(" & ");
   const where = `${t.symbol} #${t.ticket}`;
-  const call = (accountId: string, p: number) =>
-    t.target === "position" ? sendModifyPosition(accountId, t.ticket, { [t.field]: p }) : sendModifyOrder(accountId, t.ticket, { [t.field]: p });
+  const patch = (pick: (c: StopChange) => number) => Object.fromEntries(changes.map((c) => [c.field, pick(c)])) as { sl?: number; tp?: number };
+  const call = (accountId: string, p: { sl?: number; tp?: number }) =>
+    t.target === "position" ? sendModifyPosition(accountId, t.ticket, p) : sendModifyOrder(accountId, t.ticket, p);
   const undo = () =>
     void run("Đăng nhập để giao dịch", async (accountId) => {
-      report(await call(accountId, t.from), t.from > 0 ? `Đã hoàn tác ${name} ${where} → ${fmtPx(t.from, digits)}` : `Đã bỏ ${name} ${where}`);
+      const back = changes.length === 1 && changes[0].from > 0 ? `Đã hoàn tác ${names} ${where} → ${fmtPx(changes[0].from, digits)}` : changes.length === 1 ? `Đã bỏ ${names} ${where}` : `Đã hoàn tác ${names} ${where}`;
+      report(await call(accountId, patch((c) => c.from)), back);
     });
   const done = await run("Đăng nhập để giao dịch", async (accountId) => {
-    const o = await call(accountId, price);
+    const o = await call(accountId, patch((c) => c.to));
     if (o.kind === "done" && o.result.ok) {
-      const text = price > 0 ? `Đã ${t.from > 0 ? "đổi" : "đặt"} ${name} ${where} → ${fmtPx(price, digits)}${pnlText}` : `Đã bỏ ${name} ${where}`;
-      toast(text, { ms: 8000, action: t.from !== price ? { label: "Hoàn tác", run: undo } : undefined });
+      const one = changes[0];
+      const text =
+        changes.length > 1
+          ? `Đã ${changes.every((c) => c.from === 0) ? "đặt" : "đổi"} ${names} ${where}: ${changes.map((c) => (c.to > 0 ? `${c.field.toUpperCase()} → ${fmtPx(c.to, digits)}` : `bỏ ${c.field.toUpperCase()}`)).join(", ")}`
+          : one.to > 0
+            ? `Đã ${one.from > 0 ? "đổi" : "đặt"} ${names} ${where} → ${fmtPx(one.to, digits)}${pnlText}`
+            : `Đã bỏ ${names} ${where}`;
+      toast(text, { ms: 8000, action: changes.some((c) => c.from !== c.to) ? { label: "Hoàn tác", run: undo } : undefined });
       refreshSoon();
       return true;
     }
     return report(o, "");
   });
   return done === true;
+}
+
+/** Kéo SL/TP của vị thế / lệnh chờ tới `price` (0 = bỏ SL/TP, như bấm × trên thẻ): một mức, xem `moveStops`. */
+export function moveStop(t: StopTarget, price: number, digits?: number, pnlText = ""): Promise<boolean> {
+  return moveStops({ target: t.target, ticket: t.ticket, symbol: t.symbol }, [{ field: t.field, from: t.from, to: price }], digits, pnlText);
 }

@@ -52,14 +52,20 @@
 //| - 2.14: "symbols" thêm tick_value / tick_value_loss (giá trị một   |
 //|   tick theo tiền account, để web tính lãi/lỗi dự kiến của SL/TP);  |
 //|   "position_modify" (đổi SL/TP của vị thế đang mở, kéo trên chart) |
+//| - 2.15: "calendar": doc lich kinh te CO SAN cua MT5 (CalendarValue-  |
+//|   History: su kien, quoc gia/tien te, muc quan trong, thuc te/du   |
+//|   bao/ky truoc) gui len backend moi CalendarRefreshSec giay, ca    |
+//|   cua so [CalendarDaysBack, CalendarDaysAhead] ngay - web ve bang   |
+//|   lich + bieu tuong su kien tren chart, khong phu thuoc mang ngoai  |
+//|   (docs/calendar-plan.md). Tat bang SendCalendar=false              |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.14"
+#property version "2.15"
 
-#define EA_VERSION "2.14"
+#define EA_VERSION "2.15"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -77,6 +83,12 @@ input int MagicNumber = 20261022;    // magic cua lenh do app dat (phan biet voi
 input double MaxLotPerOrder = 1.0;   // EA tu choi lenh lon hon, ke ca khi web gui sai
 input int Deviation = 100;           // truot gia toi da (diem) cho lenh market
 
+input group "Lich kinh te (doc tu lich co san cua MT5)"
+input bool SendCalendar = true;      // gui lich kinh te cua MT5 len web
+input int CalendarDaysBack = 1;      // lay tu may ngay truoc (web chi ve lich sap toi; giu 1 ngay de backend nhan ra su kien bi huy/doi)
+input int CalendarDaysAhead = 14;    // toi may ngay sau
+input int CalendarRefreshSec = 300;  // lam moi dinh ky (so thuc te / du bao thay doi moi khi co cong bo)
+
 int g_sock = INVALID_HANDLE;
 string g_rx = "";
 ulong g_lastConnectTryMs = 0;
@@ -87,6 +99,13 @@ string g_lastTradeSig = ""; // chu ky cau truc cua vi the/lenh cho: doi -> gui n
 ulong g_lastTradeMs = 0;
 bool g_dealsDirty = true;
 ulong g_lastDealsMs = 0;
+ulong g_lastCalendarMs = 0;
+bool g_calendarOk = false;      // da gui duoc it nhat mot lan: tu do lam moi theo CalendarRefreshSec (chua duoc thi thu lai moi 30s)
+bool g_calendarWarned = false;  // chi log loi lich mot lan cho den khi gui duoc
+bool g_calendarLogged = false;
+long g_calCountryId[];          // cache quoc gia (id -> ma nuoc / tien te) de khong goi CalendarCountryById cho tung su kien
+string g_calCountryCode[];
+string g_calCountryCur[];
 
 string g_subs[];
 ulong g_lastMsc[];
@@ -198,6 +217,7 @@ bool EnsureConnected()
   g_lastTradeSig = ""; // vừa (re)connect: gửi ngay vị thế/lệnh/deal ở OnTimer kế tiếp
   g_dealsDirty = true;
   g_lastDealsMs = 0;
+  g_lastCalendarMs = 0; // gui lich ngay o OnTimer ke tiep
   PostSymbols(); // luôn gửi lại symbols mỗi lần (re)connect - không chờ server hỏi need_symbols
   PrintFormat("TVBridge v%s: da ket noi %s:%d", EA_VERSION, ServerHost, ServerPort);
   return true;
@@ -461,6 +481,99 @@ void PostSymbols()
   }
   js += "]}";
   SendLine(js);
+}
+
+// Ma nuoc + tien te cua mot country_id (cache). Su kien toan cau khong co quoc gia thi de rong.
+bool CalendarCountry(long id, string &code, string &cur)
+{
+  int sz = ArraySize(g_calCountryId);
+  for (int i = 0; i < sz; i++)
+  {
+    if (g_calCountryId[i] == id)
+    {
+      code = g_calCountryCode[i];
+      cur = g_calCountryCur[i];
+      return true;
+    }
+  }
+  MqlCalendarCountry c;
+  if (!CalendarCountryById(id, c))
+    return false;
+  ArrayResize(g_calCountryId, sz + 1);
+  ArrayResize(g_calCountryCode, sz + 1);
+  ArrayResize(g_calCountryCur, sz + 1);
+  g_calCountryId[sz] = id;
+  g_calCountryCode[sz] = c.code;
+  g_calCountryCur[sz] = c.currency;
+  code = c.code;
+  cur = c.currency;
+  return true;
+}
+
+string CalNum(bool has, double v) { return has ? DoubleToString(v, 6) : "null"; }
+
+// Lich kinh te co san cua MT5 -> "calendar" (ca cua so [from, to]; backend thay the sach su kien trong cua so do). Thoi gian la gio server MT5 -> doi sang UTC
+// nhu moi thoi gian khac. Lan dau tren terminal moi lich co the chua dong bo (tra false / rong): KHONG gui gi (de backend khong xoa nham), thu lai sau 30s.
+bool PostCalendar()
+{
+  g_lastCalendarMs = GetTickCount64();
+  datetime from = (datetime)((long)TimeCurrent() - (long)CalendarDaysBack * 86400);
+  datetime to = (datetime)((long)TimeCurrent() + (long)CalendarDaysAhead * 86400);
+  MqlCalendarValue values[];
+  ResetLastError();
+  if (!CalendarValueHistory(values, from, to))
+  {
+    if (!g_calendarWarned)
+      PrintFormat("TVBridge: CalendarValueHistory loi %d (lich kinh te cua MT5 chua san sang? se thu lai sau 30s)", GetLastError());
+    g_calendarWarned = true;
+    return false;
+  }
+  int n = ArraySize(values);
+  string js = "";
+  int cnt = 0;
+  for (int i = 0; i < n && cnt < 3000; i++)
+  {
+    MqlCalendarEvent e;
+    if (!CalendarEventById(values[i].event_id, e))
+      continue;
+    string code = "";
+    string cur = "";
+    CalendarCountry((long)e.country_id, code, cur);
+    if (cnt > 0)
+      js += ",";
+    js += "{\"id\":" + IntegerToString((long)values[i].id)
+        + ",\"event_id\":" + IntegerToString((long)values[i].event_id)
+        + ",\"time\":" + IntegerToString(ToUtc((long)values[i].time))
+        + ",\"country\":\"" + Esc(code) + "\",\"currency\":\"" + Esc(cur) + "\""
+        + ",\"name\":\"" + Esc(e.name) + "\""
+        + ",\"importance\":" + IntegerToString((int)e.importance)
+        + ",\"unit\":" + IntegerToString((int)e.unit)
+        + ",\"multiplier\":" + IntegerToString((int)e.multiplier)
+        + ",\"digits\":" + IntegerToString((int)e.digits)
+        + ",\"time_mode\":" + IntegerToString((int)e.time_mode)
+        + ",\"impact\":" + IntegerToString((int)values[i].impact_type)
+        + ",\"actual\":" + CalNum(values[i].HasActualValue(), values[i].GetActualValue())
+        + ",\"forecast\":" + CalNum(values[i].HasForecastValue(), values[i].GetForecastValue())
+        + ",\"previous\":" + CalNum(values[i].HasPreviousValue(), values[i].GetPreviousValue())
+        + ",\"revised\":" + CalNum(values[i].HasRevisedValue(), values[i].GetRevisedValue()) + "}";
+    cnt++;
+  }
+  if (cnt == 0)
+  {
+    if (!g_calendarWarned)
+      Print("TVBridge: lich kinh te cua MT5 dang rong (chua dong bo?), se thu lai sau 30s");
+    g_calendarWarned = true;
+    return false;
+  }
+  string msg = "{\"type\":\"calendar\",\"from\":" + IntegerToString(ToUtc((long)from)) + ",\"to\":" + IntegerToString(ToUtc((long)to)) + ",\"events\":[" + js + "]}";
+  if (!SendLine(msg))
+    return false;
+  g_calendarOk = true;
+  g_calendarWarned = false;
+  if (!g_calendarLogged)
+    PrintFormat("TVBridge: da gui %d su kien kinh te (tu %d ngay truoc toi %d ngay sau), lam moi moi %ds", cnt, CalendarDaysBack, CalendarDaysAhead, CalendarRefreshSec);
+  g_calendarLogged = true;
+  return true;
 }
 
 //--- JSON parse tối giản --------------------------------------------
@@ -1299,6 +1412,12 @@ void OnTimer()
   ulong nowMs = GetTickCount64();
   if ((g_dealsDirty && nowMs - g_lastDealsMs >= 1000) || nowMs - g_lastDealsMs >= 60000)
     PostDeals();
+  if (SendCalendar)
+  {
+    ulong calDue = g_calendarOk ? (ulong)CalendarRefreshSec * 1000 : 30000;
+    if (g_lastCalendarMs == 0 || nowMs - g_lastCalendarMs >= calDue)
+      PostCalendar();
+  }
   // Heartbeat: chua subscribe symbol nao thi khong co gi de gui -> khong bao gio phat
   // hien socket da chet. Ping dinh ky de SendLine that bai -> tu reconnect.
   ulong now = GetTickCount64();

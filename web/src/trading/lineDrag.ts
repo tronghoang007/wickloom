@@ -113,7 +113,7 @@ export class LineDrag {
     }
     this.lockChart();
     this.drag = { id, from, price };
-    this.h.container.style.cursor = "pointer";
+    this.h.container.style.cursor = "grabbing";
   }
 
   private onDown = (e: PointerEvent) => {
@@ -141,7 +141,7 @@ export class LineDrag {
     }
     if (this.pick(e)) {
       e.stopPropagation(); // DrawingManager không được ghi đè con trỏ / tô sáng hình bên dưới
-      this.h.container.style.cursor = "pointer";
+      this.h.container.style.cursor = "grab"; // bàn tay mở: đường này kéo thả được
       this.hovering = true;
     } else if (this.hovering) {
       this.hovering = false;

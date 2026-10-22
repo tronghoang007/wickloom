@@ -5,6 +5,9 @@ import { SPEC } from "@/drawings/tools";
 import { useEffect, useRef, useState } from "react";
 import { ToolIcon } from "../toolIcons";
 
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const TOP = 8; // top-2: vị trí gốc của thanh, y = 0
+
 export default function FavoritesBar() {
   const { favorites, showFavs, tool, api } = useDrawingStore();
   const [pos, setPos] = useState(() => useDrawingStore.getState().favoritesPos);
@@ -15,6 +18,32 @@ export default function FavoritesBar() {
     oy: number;
   } | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  // Kích thước vùng chart chứa thanh + của thanh: mở / đóng thanh bên phải, đổi layout, thêm / bớt công cụ yêu thích đều làm đổi → vị trí phải kẹp lại theo kích thước MỚI
+  const [size, setSize] = useState({ pw: 0, ph: 0, bw: 0, bh: 0 });
+
+  useEffect(() => {
+    const bar = barRef.current;
+    const parent = bar?.parentElement;
+    if (!bar || !parent) return;
+    const measure = () => setSize({ pw: parent.clientWidth, ph: parent.clientHeight, bw: bar.offsetWidth, bh: bar.offsetHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(parent);
+    ro.observe(bar);
+    return () => ro.disconnect();
+  }, [showFavs, favorites.length]);
+
+  /** Giới hạn dịch chuyển để thanh luôn nằm trọn trong vùng chart (gốc: giữa ngang, cách mép trên 8px). */
+  const limits = (sz: typeof size) => {
+    const baseX = (sz.pw - sz.bw) / 2;
+    return { minX: -baseX, maxX: sz.pw - sz.bw - baseX, minY: -TOP, maxY: sz.ph - sz.bh - TOP };
+  };
+  // `pos` giữ vị trí người dùng chọn (đã lưu); vị trí HIỆN ra là bản kẹp theo kích thước hiện tại nên đóng sidebar lại thì thanh về chỗ cũ
+  const shown = (() => {
+    if (!size.pw) return pos;
+    const l = limits(size);
+    return { x: clamp(pos.x, l.minX, Math.max(l.minX, l.maxX)), y: clamp(pos.y, l.minY, Math.max(l.minY, l.maxY)) };
+  })();
 
   useEffect(() => {
     const bar = barRef.current;
@@ -34,7 +63,7 @@ export default function FavoritesBar() {
     <div
       ref={barRef}
       className="absolute left-1/2 top-2 z-20 flex h-[38px] max-w-[calc(100%-16px)] select-none items-center overflow-x-auto rounded-md bg-[var(--panel)] px-1 shadow-[0_2px_4px_rgba(0,0,0,0.4)] [scrollbar-width:none]"
-      style={{ transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)` }}
+      style={{ transform: `translate(calc(-50% + ${shown.x}px), ${shown.y}px)` }}
     >
       <div
         className="mr-1 flex h-9 w-4 shrink-0 cursor-grab touch-none items-center justify-center text-[var(--muted)] active:cursor-grabbing"
@@ -44,8 +73,8 @@ export default function FavoritesBar() {
           dragRef.current = {
             sx: e.clientX,
             sy: e.clientY,
-            ox: pos.x,
-            oy: pos.y,
+            ox: shown.x,
+            oy: shown.y,
           };
         }}
         onPointerMove={(e) => {
@@ -56,16 +85,12 @@ export default function FavoritesBar() {
             return;
           }
           const bar = barRef.current;
-          const bounds = bar?.parentElement?.getBoundingClientRect();
-          if (!bar || !bounds) return;
-          const width = bar.offsetWidth;
-          const height = bar.offsetHeight;
-          const baseX = (bounds.width - width) / 2;
-          const nextX = s.ox + e.clientX - s.sx;
-          const nextY = s.oy + e.clientY - s.sy;
+          const parent = bar?.parentElement;
+          if (!bar || !parent) return;
+          const l = limits({ pw: parent.clientWidth, ph: parent.clientHeight, bw: bar.offsetWidth, bh: bar.offsetHeight });
           setPos({
-            x: Math.max(-baseX, Math.min(bounds.width - width - baseX, nextX)),
-            y: Math.max(-8, Math.min(bounds.height - height - 8, nextY)),
+            x: clamp(s.ox + e.clientX - s.sx, l.minX, Math.max(l.minX, l.maxX)),
+            y: clamp(s.oy + e.clientY - s.sy, l.minY, Math.max(l.minY, l.maxY)),
           });
         }}
         onPointerUp={() => {

@@ -5,7 +5,7 @@ import ColorPicker from "./ColorPicker";
 import { useIndicatorStore } from "@/indicators/store";
 import { useVolumeStore } from "@/store/volume";
 import { useState, type ReactNode } from "react";
-import { Close, Search, StarI, Svg24 as Svg } from "../icons";
+import { Close, Search, StarI, Svg24 as Svg, Trash } from "../icons";
 
 const TITLES: Record<string, string> = {
   sma: "Simple moving average",
@@ -60,6 +60,8 @@ const NAV: {
   },
 ];
 
+const removeBtn = "flex h-7 w-7 items-center justify-center rounded text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[#f23645]";
+
 const field =
   "w-20 rounded border border-[var(--border)] bg-transparent px-1 py-0.5 text-sm";
 
@@ -80,10 +82,12 @@ function OnChart() {
           <div className="flex items-center justify-between text-sm font-semibold">
             {TITLES.volume}
             <button
-              className="text-xs text-red-400"
+              className={removeBtn}
+              title="Remove"
+              aria-label="Remove Volume"
               onClick={() => useVolumeStore.getState().set({ removed: true })}
             >
-              Remove
+              <Trash />
             </button>
           </div>
         </div>
@@ -98,10 +102,12 @@ function OnChart() {
             <div className="mb-2 flex items-center justify-between text-sm font-semibold">
               {TITLES[inst.id] ?? def.name}
               <button
-                className="text-xs text-red-400"
+                className={removeBtn}
+                title="Remove"
+                aria-label={`Remove ${TITLES[inst.id] ?? def.name}`}
                 onClick={() => remove(inst.uid)}
               >
-                Remove
+                <Trash />
               </button>
             </div>
             {def.inputs.map((inp) => (

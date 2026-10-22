@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import accounts, auth, me, mt5, state, tcp_server, trade
+from . import accounts, auth, economic, me, mt5, state, tcp_server, trade
 from .config import ALLOWED_ORIGINS, TF_SECONDS
 from .state import request_backfill
 from .store import TABLES
@@ -30,6 +30,7 @@ app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(mt5.router)
 app.include_router(trade.router)
+app.include_router(economic.router)
 
 
 def _push_subscribe() -> None:

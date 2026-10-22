@@ -11,7 +11,7 @@ import {
   StatusLineI,
   TradingI,
 } from "@/components/icons";
-import { TIMEZONES, sampleDate, tzOffsetLabel } from "@/lib/timefmt";
+import { sampleDate, sortedTimezones, tzMenuLabel } from "@/lib/timefmt";
 import { useChartStore } from "@/store/chart";
 import {
   CHART_THEMES,
@@ -21,15 +21,15 @@ import {
   type ChartSettings,
 } from "@/store/settings";
 
-type Tab = "symbol" | "status" | "scales" | "canvas" | "trading" | "alerts" | "events";
+type Tab = "symbol" | "status" | "scales" | "canvas" | "trading" | "events" | "alerts";
 const TABS: { id: Tab; label: string; icon: ReactNode; soon?: boolean }[] = [
   { id: "symbol", label: "Symbol", icon: <Candles /> },
   { id: "status", label: "Status line", icon: <StatusLineI /> },
   { id: "scales", label: "Scales and lines", icon: <ScalesI /> },
   { id: "canvas", label: "Canvas", icon: <CanvasI /> },
   { id: "trading", label: "Trading", icon: <TradingI /> },
+  { id: "events", label: "Events", icon: <CalendarI /> },
   { id: "alerts", label: "Alerts", icon: <AlertI />, soon: true },
-  { id: "events", label: "Events", icon: <CalendarI />, soon: true },
 ];
 
 const SOON = "Sắp có";
@@ -187,9 +187,33 @@ function SymbolTab({ s, set }: P) {
           value={s.timezone}
           width={220}
           onChange={(v) => set({ timezone: v })}
-          options={TIMEZONES.map((z) => ({ value: z.id, label: `(${tzOffsetLabel(z.id)}) ${z.label}` }))}
+          options={sortedTimezones().map((z) => ({ value: z.id, label: tzMenuLabel(z) }))}
         />
       </Row>
+    </>
+  );
+}
+
+function EventsTab({ s, set }: P) {
+  return (
+    <>
+      <Section>Economic events</Section>
+      <CheckRow label="Show economic events on chart" checked={s.showEvents} onChange={(v) => set({ showEvents: v })} />
+      <Row label="Importance">
+        <Select
+          value={String(s.eventsMinImportance)}
+          disabled={!s.showEvents}
+          onChange={(v) => set({ eventsMinImportance: Number(v) as 1 | 2 | 3 })}
+          options={[
+            { value: "1", label: "Low and above" },
+            { value: "2", label: "Medium and above" },
+            { value: "3", label: "High only" },
+          ]}
+        />
+      </Row>
+      <div className="mt-3 max-w-[360px] text-xs leading-relaxed text-[var(--muted)]">
+        Biểu tượng cờ nằm sát trục thời gian, tại giờ công bố; chỉ hiện sự kiện SẮP TỚI của các đồng tiền của symbol đang xem. Bấm vào để xem tên, dự báo, kỳ trước. Lịch lấy từ MT5 qua EA TVBridge ≥ 2.15.
+      </div>
     </>
   );
 }
@@ -452,6 +476,7 @@ export default function SettingsDialog() {
             {tab === "scales" && <ScalesTab {...body} />}
             {tab === "canvas" && <CanvasTab {...body} />}
             {tab === "trading" && <TradingTab {...body} />}
+            {tab === "events" && <EventsTab {...body} />}
           </div>
         </div>
         <div className="flex items-center justify-between border-t border-[var(--border)] px-5 py-3">
@@ -478,6 +503,10 @@ export default function SettingsDialog() {
               </div>
             )}
           </div>
+          {/* Ghi công theo giấy phép lightweight-charts (đã gỡ khỏi thanh dưới chart) */}
+          <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" className="text-[11px] text-[var(--muted)] hover:underline">
+            Charts by TradingView
+          </a>
           <div className="flex gap-2">
             <button type="button" onClick={cancel} className="h-8 rounded-md border border-[var(--fg)] px-3 hover:bg-[var(--hover)]">
               Cancel

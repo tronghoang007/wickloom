@@ -9,6 +9,7 @@ import { cancelOrder, useOrderState } from "@/trading/actions";
 import { askClosePosition } from "@/trading/tagActions";
 import { accountProfit, dealNet, dealSummary, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel } from "@/trading/format";
 import { tradeBlock, webTrading } from "@/trading/gate";
+import { useTradeFocus } from "@/trading/focus";
 import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
 import { useEffect, useState, type ReactNode } from "react";
@@ -116,6 +117,15 @@ export default function TradingPanel() {
 
 const digitsOf = (symbol: string) => useChartStore.getState().symbols.find((s) => s.name === symbol)?.digits;
 const showSymbol = (symbol: string) => useChartStore.getState().set({ symbol });
+
+/** Bấm một dòng vị thế / lệnh chờ: mở symbol của nó trên chart và focus lệnh đó (đường + thẻ của nó sáng lên, lệnh khác mờ đi: xem `trading/focus.ts`); bấm lại đúng dòng đó thì bỏ focus. */
+function pickRow(owner: string, symbol: string) {
+  const f = useTradeFocus.getState();
+  f.set(f.owner === owner ? null : owner);
+  showSymbol(symbol);
+}
+const rowClass = (focused: boolean) =>
+  `cursor-pointer border-t border-[var(--border)] hover:bg-[var(--hover)] ${focused ? "bg-[color-mix(in_srgb,var(--accent)_20%,transparent)]" : ""}`;
 const Empty = ({ children }: { children: ReactNode }) => <div className="px-4 py-6 text-sm text-[var(--muted)]">{children}</div>;
 
 function Positions({ data }: { data: TradeData }) {
@@ -154,8 +164,10 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
     setEditing(false);
     askClosePosition(p, want >= p.volume - 1e-9 ? 0 : want); // hộp thoại xác nhận rồi mới gửi; 0 = đóng hết
   };
+  const owner = `position:${p.ticket}`;
+  const focused = useTradeFocus((s) => s.owner === owner);
   return (
-    <tr className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--hover)]" onClick={() => showSymbol(p.symbol)} title="Mở symbol này trên chart">
+    <tr className={rowClass(focused)} onClick={() => pickRow(owner, p.symbol)} title="Mở symbol này trên chart và làm sáng lệnh trên biểu đồ" aria-selected={focused}>
       <td className={`${td} font-medium`}>{p.symbol}</td>
       <td className={`${td} ${p.type === "buy" ? "text-[#2962ff]" : "text-[#ff9800]"}`}>{sideLabel(p.type)}</td>
       <td className={td}>{fmtLot(p.volume)}</td>
@@ -227,8 +239,10 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
   const d = digitsOf(o.symbol);
   const busy = useOrderState((s) => s.busy);
   const block = tradeBlock({ replay: false, status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const owner = `order:${o.ticket}`;
+  const focused = useTradeFocus((s) => s.owner === owner);
   return (
-    <tr className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--hover)]" onClick={() => showSymbol(o.symbol)} title="Mở symbol này trên chart">
+    <tr className={rowClass(focused)} onClick={() => pickRow(owner, o.symbol)} title="Mở symbol này trên chart và làm sáng lệnh trên biểu đồ" aria-selected={focused}>
       <td className={`${td} font-medium`}>{o.symbol}</td>
       <td className={td}>{orderLabel(o.type)}</td>
       <td className={td}>{fmtLot(o.volume)}</td>

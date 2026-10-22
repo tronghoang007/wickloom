@@ -93,6 +93,29 @@ def test_offline_keeps_last_info_and_online_sorts_first():
     assert r.snapshot()[0]["id"].endswith(":999")  # offline thì account thấy gần nhất đứng đầu/active
 
 
+def test_new_account_replaces_the_old_offline_one():
+    # đổi login trong cùng cửa sổ MT5: kết nối EA cũ đóng trước, hello của account mới đến sau → account cũ (hoặc đã xoá khỏi MT5) không nằm lại trong danh sách
+    r = mt5.Mt5Registry()
+    old, new = W(), W()
+    r.register(old, {**HELLO, "login": 111})
+    r.update(old, {"balance": 5})
+    r.update_trade(old, {"type": "trade", "positions": [], "orders": []})
+    r.remove(old)
+    assert [a["online"] for a in r.snapshot()] == [False]  # chưa có account nào khác: vẫn hiện offline
+    r.register(new, {**HELLO, "login": 222})
+    assert [a["id"] for a in r.snapshot()] == ["Exness-MT5Trial17:222"]
+    assert r.trade("Exness-MT5Trial17:111") is None
+    assert r.info("Exness-MT5Trial17:111") is None
+
+
+def test_other_account_still_online_is_kept():
+    r = mt5.Mt5Registry()
+    a, b = W(), W()
+    r.register(a, {**HELLO, "login": 111})
+    r.register(b, {**HELLO, "login": 222})
+    assert sorted(x["id"] for x in r.snapshot()) == ["Exness-MT5Trial17:111", "Exness-MT5Trial17:222"]
+
+
 def test_reconnect_same_account_updates_in_place():
     r = mt5.Mt5Registry()
     w1 = W()

@@ -14,6 +14,7 @@ import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
 import { createLineDrag, type ChartDrag } from "@/trading/chartOrders";
 import type { DragPreview } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
+import { useReplaySim } from "@/trading/replaySim";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
@@ -42,14 +43,16 @@ import {
   useState,
   type MouseEvent as RMouseEvent,
 } from "react";
+import CalendarMarkers from "./CalendarMarkers";
 import ChartContextMenu, { type MenuItem } from "./ChartContextMenu";
 import { drawingMenuItems } from "./drawingMenu";
 import FavoritesBar from "./FavoritesBar";
 import InlineTextEditor from "./InlineTextEditor";
 import ReplayBar from "./ReplayBar";
-import { SymbolBadge } from "./SymbolSearchDialog";
+import { SymbolBadge } from "../SymbolIcon";
 import StylePanel from "./StylePanel";
 import TradeOverlay from "./TradeOverlay";
+import TimezoneMenu from "./TimezoneMenu";
 import TradeWidget from "./TradeWidget";
 import { tradeMenuItems } from "./tradeMenu";
 import VolumeLegend, { volumeMenuItems } from "./VolumeLegend";
@@ -285,6 +288,10 @@ export default function Chart({ paneId }: { paneId: string }) {
   } | null>(null);
   const selecting = usePaneState(pane.replay, (s) => s.selecting);
   const replayActive = usePaneState(pane.replay, (s) => s.active);
+  // Thoát Replay (hoặc chart bị gỡ): xoá vị thế giả lập của pane này
+  useEffect(() => {
+    if (!replayActive) useReplaySim.getState().reset(paneId);
+  }, [replayActive, paneId]);
   const playing = usePaneState(pane.replay, (s) => s.playing);
   const speed = usePaneState(pane.replay, (s) => s.speed);
   const interval = usePaneState(pane.replay, (s) => s.interval);
@@ -449,6 +456,8 @@ export default function Chart({ paneId }: { paneId: string }) {
     } else render();
     refreshExtras();
     setLegend(legendAt(vis.length - 1));
+    const last = vis[vis.length - 1];
+    if (last && pane.replay.getState().active) useReplaySim.getState().ingest(paneId, pane.chart.getState().symbol, last); // nến replay mới: giá khớp lệnh + kiểm tra SL / TP giả lập
   };
 
   const wantM1 = () => {
@@ -518,8 +527,8 @@ export default function Chart({ paneId }: { paneId: string }) {
   useEffect(() => {
     const chart = createChart(boxRef.current!, {
       autoSize: true,
-      // Logo TradingView trên chart tắt; link bắt buộc theo giấy phép lightweight-charts
-      // nằm ở thanh dưới ("Charts by TradingView"). Attribution notice:
+      // Logo TradingView trên chart tắt, không còn dòng "Charts by TradingView" ở thanh dưới (theo ý chủ app); ghi công theo giấy phép lightweight-charts
+      // nằm ở Settings > Symbol (cuối trang). Attribution notice:
       // TradingView Lightweight Charts™ Copyright (c) TradingView, Inc. https://www.tradingview.com/
       layout: { fontSize: 12, attributionLogo: false },
       crosshair: {
@@ -966,11 +975,12 @@ export default function Chart({ paneId }: { paneId: string }) {
   }, [chartType]);
 
   // Vị thế / lệnh chờ / bản nháp lệnh trên symbol này: đường giá + thẻ kéo thả kiểu TradingView do <TradeOverlay /> vẽ (docs/trade-plan.md T3-T4)
-  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null); // đường đang kéo
+  const [dragPreview, setDragPreview] = useState<DragPreview[]>([]); // đường giao dịch đang kéo / chờ xác nhận
   const lineDragRef = useRef<ChartDrag | null>(null);
   const getChart = useCallback(() => chartRef.current, []);
   const getSeries = useCallback(() => seriesRef.current, []);
   const getDigits = useCallback(() => digitsRef.current, []);
+  const getBars = useCallback(() => barsRef.current, []);
 
   // Kéo các đường giao dịch (lệnh chờ, entry/SL/TP của bảng đặt lệnh): nghe chuột ở phần tử bao quanh chart, trước DrawingManager
   useEffect(() => {
@@ -985,6 +995,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       getSymbol: () => pane.chart.getState().symbol,
       getDigits: () => digitsRef.current,
       isReplay: () => pane.replay.getState().active,
+      paneId,
       setPreview: setDragPreview,
     });
     lineDragRef.current = drag;
@@ -1469,6 +1480,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
         <TradeOverlay
+          paneId={paneId}
           symbol={symbol}
           chartType={chartType}
           replay={replayActive}
@@ -1477,9 +1489,10 @@ export default function Chart({ paneId }: { paneId: string }) {
           getSeries={getSeries}
           getDigits={getDigits}
           onGhost={(owner, kind, e) => lineDragRef.current?.beginStop(owner, kind, e)}
-          onConfirmEdit={() => lineDragRef.current?.confirmEdit()}
-          onCancelEdit={() => lineDragRef.current?.cancelEdit()}
+          onConfirmEdit={(owner) => lineDragRef.current?.confirmEdit(owner)}
+          onCancelEdit={(owner) => lineDragRef.current?.cancelEdit(owner)}
         />
+        <CalendarMarkers symbol={symbol} tf={tf} replay={replayActive} getChart={getChart} getBars={getBars} />
         {ctxMenu && (
           <ChartContextMenu
             x={ctxMenu.x}
@@ -1668,7 +1681,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           </div>
         )}
       </div>
-      {(selecting || replayActive) && <ReplayBar onStep={() => stepReplay()} />}
+      {(selecting || replayActive) && <ReplayBar paneId={paneId} symbol={symbol} onStep={() => stepReplay()} />}
       <div className="flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-xs">
         <div className="flex gap-0.5">
           {RANGES.map((r) => (
@@ -1682,15 +1695,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <a
-            href="https://www.tradingview.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[var(--muted)] hover:underline"
-          >
-            Charts by TradingView
-          </a>
-          <span className="text-[var(--muted)]">{clock}</span>
+          <TimezoneMenu clock={clock} />
           {scaleBtn("percent", "%")}
           {scaleBtn("log", "log")}
         </div>
