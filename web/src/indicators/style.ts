@@ -9,6 +9,8 @@ export const PLOT_TYPES: { id: PlotType; label: string }[] = [
   { id: "histogram", label: "Histogram" },
   { id: "area", label: "Area" },
   { id: "circles", label: "Circles" },
+  { id: "cross", label: "Cross" },
+  { id: "linebr", label: "Line with breaks" },
 ];
 export const LINE_STYLES: { id: LineStyleName; label: string }[] = [
   { id: "solid", label: "Solid" },
@@ -19,7 +21,7 @@ export const WIDTHS = [1, 2, 3, 4] as const;
 
 export type PlotStyleR = { color: string; colorDown: string; width: number; lineStyle: LineStyleName; type: PlotType; visible: boolean };
 export type LevelStyleR = { value: number; color: string; width: number; lineStyle: LineStyleName; visible: boolean };
-export type FillStyleR = { color: string; visible: boolean };
+export type FillStyleR = { color: string; colorDown: string; visible: boolean };
 
 export function plotStyle(inst: IndicatorInstance, p: PlotDef): PlotStyleR {
   const u = inst.style?.plots?.[p.id];
@@ -46,7 +48,7 @@ export function levelStyle(inst: IndicatorInstance, l: LevelDef): LevelStyleR {
 
 export function fillStyle(inst: IndicatorInstance, f: FillDef): FillStyleR {
   const u = inst.style?.fills?.[f.id];
-  return { color: u?.color ?? f.color, visible: u?.visible !== false };
+  return { color: u?.color ?? f.color, colorDown: u?.colorDown ?? f.colorDown ?? u?.color ?? f.color, visible: u?.visible !== false };
 }
 
 /** Một vùng tô có vẽ được không: chưa tắt, và hai đầu (plot / level) đang hiện. */

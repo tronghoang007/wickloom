@@ -7,7 +7,7 @@ export const INSTANCE_V = 1;
 
 export type PlotStyle = { color?: string; colorDown?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName; type?: PlotType };
 export type LevelStyle = { value?: number; color?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName };
-export type FillStyle = { color?: string; visible?: boolean };
+export type FillStyle = { color?: string; colorDown?: string; visible?: boolean };
 
 /** Một indicator đang dùng trên chart (lưu trong layout). Mọi field ngoài định danh chỉ chứa phần user đã đặt; còn lại theo def. */
 export type IndicatorInstance = {
@@ -104,7 +104,7 @@ export function migrateInstance(raw: unknown): IndicatorInstance | null {
 }
 
 const LINE_STYLE_IDS: readonly string[] = ["solid", "dashed", "dotted"];
-const PLOT_TYPE_IDS: readonly string[] = ["line", "step", "histogram", "area", "circles"];
+const PLOT_TYPE_IDS: readonly string[] = ["line", "step", "histogram", "area", "circles", "cross", "linebr"];
 const colorOf = (v: unknown): string | undefined =>
   typeof v === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6}([0-9a-f]{2})?)$/i.test(v.trim()) ? v.trim() : undefined;
 const widthOf = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 4 ? v : undefined);
@@ -145,6 +145,7 @@ function sanitizeStyle(raw: Record<string, unknown>, def: IndicatorDef): Indicat
     if (!s) continue;
     const fs: FillStyle = {};
     if (colorOf(s.color)) fs.color = colorOf(s.color);
+    if (f.colorDown && colorOf(s.colorDown)) fs.colorDown = colorOf(s.colorDown);
     if (s.visible === false) fs.visible = false;
     if (Object.keys(fs).length) fills[f.id] = fs;
   }

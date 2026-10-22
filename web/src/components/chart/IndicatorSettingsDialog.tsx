@@ -6,7 +6,7 @@ import type { InputDef, LineStyleName, PlotType } from "@/indicators/schema";
 import { LINE_STYLES, PLOT_TYPES, WIDTHS, fillStyle, levelStyle, plotStyle } from "@/indicators/style";
 import { SOURCES } from "@/indicators/ta";
 import { useIndicatorStore } from "@/indicators/store";
-import { useRef } from "react";
+import { Fragment, useRef } from "react";
 import ColorPicker from "./ColorPicker";
 import { Check, Section, SettingsFrame, VisibilityTab, field, num } from "./settingsParts";
 
@@ -30,7 +30,7 @@ function InputRow({ def, value, onChange }: { def: InputDef; value: number | str
           }}
         />
       ) : (
-        <select className={`${field} w-28`} value={value as string} onChange={(e) => onChange(e.target.value)}>
+        <select className={`${field} min-w-28 max-w-56`} value={value as string} onChange={(e) => onChange(e.target.value)}>
           {(def.type === "source" ? [...SOURCES] : def.options).map((o) => (
             <option key={o} value={o}>
               {o}
@@ -43,9 +43,9 @@ function InputRow({ def, value, onChange }: { def: InputDef; value: number | str
 }
 
 // Ô chọn gọn cho hàng style (kiểu nét / độ dày / kiểu plot)
-function Pick({ value, options, onChange, disabled }: { value: string; options: { id: string; label: string }[]; onChange: (v: string) => void; disabled?: boolean }) {
+function Pick({ value, options, onChange, disabled, width = "w-[72px]" }: { value: string; options: { id: string; label: string }[]; onChange: (v: string) => void; disabled?: boolean; width?: string }) {
   return (
-    <select className={`${field} h-7 px-1 text-[12px]`} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+    <select className={`${field} h-7 ${width} shrink-0 !pl-1.5 !pr-5 text-[12px]`} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
       {options.map((o) => (
         <option key={o.id} value={o.id}>
           {o.label}
@@ -79,7 +79,7 @@ function Dialog({ uid }: { uid: string }) {
     <SettingsFrame
       title={def.name}
       label={`${def.name} settings`}
-      width={420}
+      width={480}
       onCancel={cancel}
       onOk={close}
       // trả về mặc định nhưng giữ trạng thái ẩn
@@ -91,14 +91,17 @@ function Dialog({ uid }: { uid: string }) {
             (def.inputs.length === 0 ? (
               <div className="py-2 text-[var(--muted)]">This indicator has no inputs.</div>
             ) : (
-              def.inputs.map((d) => (
-                <InputRow key={d.key} def={d} value={inputs[d.key]} onChange={(v) => update(uid, { inputs: { ...inst.inputs, [d.key]: v } })} />
+              def.inputs.map((d, k) => (
+                <Fragment key={d.key}>
+                  {d.group && d.group !== def.inputs[k - 1]?.group && <Section>{d.group}</Section>}
+                  <InputRow def={d} value={inputs[d.key]} onChange={(v) => update(uid, { inputs: { ...inst.inputs, [d.key]: v } })} />
+                </Fragment>
               ))
             ))}
 
           {tab === "style" && (
             <>
-              {def.plots.map((p) => {
+              {def.plots.filter((p) => !p.hidden).map((p) => {
                 const st = plotStyle(inst, p);
                 const isLine = st.type !== "histogram";
                 return (
@@ -114,8 +117,8 @@ function Dialog({ uid }: { uid: string }) {
                       <>
                         <ColorPicker value={st.color} onChange={(color) => setStyle("plots", p.id, { color })} className="h-7 w-10 p-1" />
                         <Pick value={st.lineStyle} disabled={!isLine} options={LINE_STYLES} onChange={(v) => setStyle("plots", p.id, { lineStyle: v as LineStyleName })} />
-                        <Pick value={String(st.width)} disabled={!isLine} options={WIDTHS.map((w) => ({ id: String(w), label: `${w}px` }))} onChange={(v) => setStyle("plots", p.id, { width: Number(v) })} />
-                        <Pick value={st.type} options={PLOT_TYPES} onChange={(v) => setStyle("plots", p.id, { type: v as PlotType })} />
+                        <Pick value={String(st.width)} width="w-[56px]" disabled={!isLine} options={WIDTHS.map((w) => ({ id: String(w), label: `${w}px` }))} onChange={(v) => setStyle("plots", p.id, { width: Number(v) })} />
+                        <Pick value={st.type} width="w-[124px]" options={PLOT_TYPES} onChange={(v) => setStyle("plots", p.id, { type: v as PlotType })} />
                       </>
                     )}
                   </div>
@@ -157,7 +160,10 @@ function Dialog({ uid }: { uid: string }) {
                     return (
                       <div key={f.id} className="flex items-center justify-between">
                         <Check label={f.title} checked={st.visible} onChange={(visible) => setStyle("fills", f.id, { visible })} />
-                        <ColorPicker value={st.color} onChange={(color) => setStyle("fills", f.id, { color })} className="h-7 w-10 p-1" />
+                        <div className="flex items-center gap-1.5">
+                          <ColorPicker value={st.color} onChange={(color) => setStyle("fills", f.id, { color })} className="h-7 w-10 p-1" />
+                          {f.colorDown && <ColorPicker value={st.colorDown} onChange={(colorDown) => setStyle("fills", f.id, { colorDown })} className="h-7 w-10 p-1" />}
+                        </div>
                       </div>
                     );
                   })}

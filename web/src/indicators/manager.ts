@@ -23,6 +23,7 @@ type Live = {
   fills: FillPrimitive[]; // theo def.fills
   objects: ObjectsPrimitive | null; // line/label/box của def.objects
   candleColors: string[] | null; // màu ghi đè nến chart chính (đã cắt theo nến chart), null = không tô
+  lastNa: boolean[]; // theo plot: giá trị ở nến cuối là na (không hiện nhãn giá cuối, như TV)
   snaps: (Snap | null)[];
   data: PlotData[]; // giá trị đã tính (đã cắt theo nến chart) cho legend
   styleKey: string;
@@ -97,6 +98,7 @@ export class IndicatorManager {
     const i = indexOfTime(this.times, t);
     if (i < 0 || l.data.length === 0) return undefined;
     return l.def.plots.flatMap((p, k): PlotValue[] => {
+      if (p.hidden) return [];
       const d = l.data[k];
       const c = d.candle;
       if (c) {
@@ -158,7 +160,7 @@ export class IndicatorManager {
         objects = new ObjectsPrimitive();
         anchor!.attachPrimitive(objects);
       }
-      this.live.push({ inst, def, series, anchor, lines, fills, objects, candleColors: null, snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
+      this.live.push({ inst, def, series, anchor, lines, fills, objects, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
     });
   }
 
@@ -168,12 +170,12 @@ export class IndicatorManager {
     const shown = instanceShown(inst, this.feed.tf);
     const plots = def.plots.map((p) => plotStyle(inst, p));
     const levels = (def.levels ?? []).map((lv) => levelStyle(inst, lv));
-    const key = JSON.stringify([shown, plots, levels, showsPriceLabel(inst, def), inst.precision ?? null]);
+    const key = JSON.stringify([shown, plots, levels, showsPriceLabel(inst, def), inst.precision ?? null, l.lastNa]);
     if (key === l.styleKey) return;
     l.styleKey = key;
     def.plots.forEach((p, k) => {
       const st = plots[k];
-      const opts: Record<string, unknown> = { ...plotOptions(st), visible: shown && st.visible, lastValueVisible: showsPriceLabel(inst, def) };
+      const opts: Record<string, unknown> = { ...plotOptions(st), visible: shown && st.visible && !p.hidden, lastValueVisible: showsPriceLabel(inst, def) && !p.hidden && !l.lastNa[k] };
       if (st.type !== "histogram") {
         const volume = def.format === "volume";
         opts.priceFormat = volume
@@ -199,7 +201,8 @@ export class IndicatorManager {
         const lv = def.levels?.find((x) => x.id === r.level);
         return lv ? levelStyle(inst, lv).value : NaN;
       };
-      l.fills[k].set({ a: edge(f.between[0]), b: edge(f.between[1]), color: fillStyle(inst, f).color });
+      const st = fillStyle(inst, f);
+      l.fills[k].set({ a: edge(f.between[0]), b: edge(f.between[1]), color: st.color, ...(f.colorDown ? { colorDown: st.colorDown } : {}) });
     });
   }
 
@@ -254,6 +257,11 @@ export class IndicatorManager {
           for (let i = patch.from; i < ts.length; i++) s.update(this.point(ts[i], d, i) as never);
         return d;
       });
+      const lastNa = l.data.map((d) => Number.isNaN(d.values[times.length - 1] ?? NaN));
+      if (lastNa.some((x, k) => x !== !!l.lastNa[k])) {
+        l.lastNa = lastNa;
+        this.applyStyle(l);
+      }
       // LWC chỉ đổi giá ra toạ độ (price line, priceToCoordinate của fill) khi series có dữ liệu trong vùng đang nhìn:
       // series neo phủ mọi nến với giá trị 0 (không ảnh hưởng thang giá nhờ autoscaleInfoProvider)
       const anchorKey = `${times[0]}:${times.length}`;

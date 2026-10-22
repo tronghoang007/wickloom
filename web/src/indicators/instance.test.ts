@@ -160,3 +160,12 @@ describe("màu nến giảm của plot candles", () => {
     expect(m?.style).toEqual({ plots: { rsi: { color: "#111111" } } });
   });
 });
+
+describe("màu fill thứ hai (mây Ichimoku)", () => {
+  it("chỉ fill có colorDown giữ colorDown đã lưu", () => {
+    const k = migrateInstance({ uid: "u", id: "ichimoku", style: { fills: { cloud: { colorDown: "#ff0000", color: "#00ff00" } } } });
+    expect(k?.style).toEqual({ fills: { cloud: { color: "#00ff00", colorDown: "#ff0000" } } });
+    const r = migrateInstance({ uid: "u", id: "rsi", style: { fills: { band: { colorDown: "#ff0000", color: "#00ff00" } } } });
+    expect(r?.style).toEqual({ fills: { band: { color: "#00ff00" } } });
+  });
+});

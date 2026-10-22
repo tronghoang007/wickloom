@@ -20,7 +20,7 @@ export type InputDef = InputBase &
     | { type: "source"; default: SourceName }
   );
 
-export type PlotType = "line" | "step" | "histogram" | "area" | "circles" | "candles";
+export type PlotType = "line" | "step" | "histogram" | "area" | "circles" | "cross" | "linebr" | "candles";
 export type LineStyleName = "solid" | "dashed" | "dotted";
 
 export type PlotDef = {
@@ -32,7 +32,8 @@ export type PlotDef = {
   width?: number; // độ dày mặc định (1)
   lineStyle?: LineStyleName; // nét mặc định (solid)
   perBar?: boolean; // màu do compute quyết định theo từng nến (histogram MACD...): Settings không cho chọn màu/kiểu
-  offset?: string; // key của input dịch plot theo số nến (Offset của MA; dương = sang phải, vào vùng tương lai)
+  offset?: string | ((inputs: Inputs) => number); // key của input (hoặc hàm của inputs) dịch plot theo số nến (Offset của MA, Ichimoku; dương = sang phải, vào vùng tương lai)
+  hidden?: boolean; // plot chỉ để tính (đầu của fill, vd thân nến của Supertrend): không vẽ, không có hàng Style, không hiện trên legend
 };
 
 /** Đường ngang trong pane (hline của Pine): 30/70 của RSI... */
@@ -41,7 +42,8 @@ export type LevelDef = { id: string; title: string; value: number; color: string
 /** Một đầu của vùng tô: một plot hoặc một level. */
 export type FillRef = { plot: string } | { level: string };
 /** Vùng tô nền giữa hai plot / hai level (fill của Pine): dải Bollinger, vùng 30–70 của RSI. */
-export type FillDef = { id: string; title: string; between: [FillRef, FillRef]; color: string };
+/** `colorDown` (nếu có): màu khi đầu thứ nhất không cao hơn đầu thứ hai, tách theo từng nến (mây Ichimoku xanh/đỏ); `color` là màu khi cao hơn. */
+export type FillDef = { id: string; title: string; between: [FillRef, FillRef]; color: string; colorDown?: string };
 
 /** Giá trị một plot theo từng nến; `colors` (nếu có) là màu riêng từng nến (histogram MACD, Volume...).
  *  Plot `candles` (plotcandle): `values` = close, `candle` = open/high/low; màu nến tăng/giảm lấy từ style. */

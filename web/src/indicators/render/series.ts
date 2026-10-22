@@ -10,6 +10,7 @@ import {
     type SeriesType,
 } from "lightweight-charts";
 import type { LineStyleName, PlotType } from "../schema";
+import { CrossSeries, LineBreakSeries } from "./custom";
 import { withAlpha, type PlotStyleR } from "../style";
 
 export const LWC_LINE_STYLE: Record<LineStyleName, LineStyle> = {
@@ -31,6 +32,10 @@ export function addPlotSeries(chart: IChartApi, type: PlotType, paneIndex: numbe
       return chart.addSeries(AreaSeries, common, paneIndex) as ISeriesApi<SeriesType>;
     case "candles":
       return chart.addSeries(CandlestickSeries, { ...common, borderVisible: true }, paneIndex) as ISeriesApi<SeriesType>;
+    case "cross":
+      return chart.addCustomSeries(new CrossSeries(), common, paneIndex) as unknown as ISeriesApi<SeriesType>;
+    case "linebr":
+      return chart.addCustomSeries(new LineBreakSeries(), common, paneIndex) as unknown as ISeriesApi<SeriesType>;
     default:
       return chart.addSeries(LineSeries, common, paneIndex) as ISeriesApi<SeriesType>;
   }
@@ -51,6 +56,10 @@ export function plotOptions(st: PlotStyleR): Record<string, unknown> {
       return { lineColor: st.color, topColor: withAlpha(st.color, 0.35), bottomColor: withAlpha(st.color, 0), lineWidth, lineStyle: LWC_LINE_STYLE[st.lineStyle] };
     case "circles":
       return { color: st.color, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: st.width + 1 };
+    case "cross":
+      return { color: st.color, size: st.width + 2, thickness: 1 };
+    case "linebr":
+      return { color: st.color, thickness: st.width, dash: st.lineStyle };
     case "step":
       return { color: st.color, lineWidth, lineStyle: LWC_LINE_STYLE[st.lineStyle], lineType: LineType.WithSteps, lineVisible: true, pointMarkersVisible: false };
     default:

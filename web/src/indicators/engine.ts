@@ -40,7 +40,7 @@ export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars
     const d: PlotData | undefined = Array.isArray(r) ? { values: r } : r;
     const candleOk = p.type !== "candles" || (d?.candle && d.candle.o.length === bars.length && d.candle.h.length === bars.length && d.candle.l.length === bars.length);
     const ok: PlotData = d && d.values.length === bars.length && candleOk ? d : { values: nan(bars.length), ...(p.type === "candles" ? { candle: { o: nan(bars.length), h: nan(bars.length), l: nan(bars.length) } } : {}) };
-    const offset = p.offset ? Number(inputs[p.offset]) || 0 : 0;
+    const offset = (typeof p.offset === "function" ? p.offset(inputs) : p.offset ? Number(inputs[p.offset]) : 0) || 0;
     const cd = ok.candle;
     out[p.id] =
       offset === 0

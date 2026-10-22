@@ -82,3 +82,18 @@ export function hma(a: Num, n: number): Num {
   const full = wma(a, n);
   return wma(half.map((x, i) => 2 * x - full[i]), Math.max(1, Math.round(Math.sqrt(n))));
 }
+
+/** Các loại MA chọn được trong Settings (tên như TV). */
+export const MA_TYPES = ["SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"] as const;
+export type MaType = (typeof MA_TYPES)[number];
+
+/** MA theo loại; VWMA cần volume. Loại lạ thì SMA. */
+export function ma(type: string, a: Num, n: number, vol: Num): Num {
+  switch (type) {
+    case "EMA": return ema(a, n);
+    case "SMMA (RMA)": return rma(a, n);
+    case "WMA": return wma(a, n);
+    case "VWMA": return vwma(a, vol, n);
+    default: return sma(a, n);
+  }
+}

@@ -13,7 +13,8 @@ import type { Num } from "../ta";
 
 /** Một đầu của vùng tô: chuỗi giá theo từng nến (plot) hoặc hằng số (level). */
 export type FillEdge = Num | number;
-export type FillData = { a: FillEdge; b: FillEdge; color: string };
+/** `colorDown`: màu của nến mà đầu a không cao hơn đầu b (xem `FillDef.colorDown`); không có thì một màu `color` cho cả vùng. */
+export type FillData = { a: FillEdge; b: FillEdge; color: string; colorDown?: string };
 
 const at = (e: FillEdge, i: number): number => (typeof e === "number" ? e : (e[i] ?? NaN));
 const len = (e: FillEdge): number => (typeof e === "number" ? Infinity : e.length);
@@ -60,10 +61,11 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
         const from = Math.max(0, Math.floor(range.from) - 1);
         const to = Number.isFinite(n) ? Math.min(n - 1, Math.ceil(range.to) + 1) : Math.ceil(range.to) + 1;
         target.useBitmapCoordinateSpace(({ context, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
-          context.fillStyle = d.color;
           let run: { x: number; a: number; b: number }[] = [];
+          let runColor = d.color;
           const flush = () => {
             if (run.length >= 2) {
+              context.fillStyle = runColor;
               context.beginPath();
               context.moveTo(run[0].x, run[0].a);
               for (let k = 1; k < run.length; k++) context.lineTo(run[k].x, run[k].a);
@@ -79,8 +81,19 @@ export class FillPrimitive implements ISeriesPrimitive<Time> {
             const x = ts.logicalToCoordinate(i as Logical);
             const ya = Number.isNaN(va) ? null : series.priceToCoordinate(va);
             const yb = Number.isNaN(vb) ? null : series.priceToCoordinate(vb);
-            if (x === null || ya === null || yb === null) flush();
-            else run.push({ x: x * hpr, a: ya * vpr, b: yb * vpr });
+            if (x === null || ya === null || yb === null) {
+              flush();
+              continue;
+            }
+            // đổi màu giữa chừng: đoạn mới bắt đầu từ điểm cuối của đoạn trước nên không hở
+            const color = d.colorDown !== undefined && !(va > vb) ? d.colorDown : d.color;
+            if (run.length >= 2 && color !== runColor) {
+              const last = run[run.length - 1];
+              flush();
+              run = [last];
+            }
+            if (run.length <= 1) runColor = color;
+            run.push({ x: x * hpr, a: ya * vpr, b: yb * vpr });
           }
           flush();
         });

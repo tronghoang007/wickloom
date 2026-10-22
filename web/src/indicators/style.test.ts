@@ -10,7 +10,7 @@ describe("style hiệu lực", () => {
   it("mặc định theo def", () => {
     expect(plotStyle(inst, rsi.plots[0])).toEqual({ color: "#7e57c2", colorDown: "#7e57c2", width: 1, lineStyle: "solid", type: "line", visible: true });
     expect(levelStyle(inst, rsi.levels![0])).toEqual({ value: 70, color: "#787b86", width: 1, lineStyle: "dashed", visible: true });
-    expect(fillStyle(inst, rsi.fills![0])).toEqual({ color: "#7e57c21a", visible: true });
+    expect(fillStyle(inst, rsi.fills![0])).toEqual({ color: "#7e57c21a", colorDown: "#7e57c21a", visible: true });
   });
 
   it("phần user đặt thắng mặc định; plot perBar giữ kiểu của def", () => {
@@ -38,5 +38,15 @@ describe("style hiệu lực", () => {
     expect(withAlpha("red", 0.5)).toBe("red");
     expect(alphaOf("#2962ff80")).toBeCloseTo(0.5, 1);
     expect(alphaOf("#2962ff")).toBe(1);
+  });
+});
+
+describe("fill hai màu", () => {
+  const ich = byId("ichimoku");
+  it("mặc định xanh/đỏ theo def; user đổi từng màu độc lập", () => {
+    const f = ich.fills![0];
+    expect(fillStyle(newInstance("ichimoku"), f)).toEqual({ color: "#43a0471a", colorDown: "#f443361a", visible: true });
+    const i = { ...newInstance("ichimoku"), style: { fills: { cloud: { colorDown: "#123456" } } } };
+    expect(fillStyle(i, f)).toMatchObject({ color: "#43a0471a", colorDown: "#123456" });
   });
 });
