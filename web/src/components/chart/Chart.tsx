@@ -4,8 +4,7 @@ import { DrawingManager } from "@/drawings/manager";
 import { AlertI, Chevron, ResetViewI, SettingsI, SkipToLatest } from "../icons";
 import { useDrawingStore } from "@/drawings/store";
 import { IndicatorManager } from "@/indicators/manager";
-import { byId } from "@/indicators/catalog";
-import { inputsText, plotColor } from "@/indicators/instance";
+
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
@@ -56,6 +55,8 @@ import TradeOverlay from "./TradeOverlay";
 import TimezoneMenu from "./TimezoneMenu";
 import TradeWidget from "./TradeWidget";
 import { tradeMenuItems } from "./tradeMenu";
+import IndicatorLegend from "./IndicatorLegend";
+import { indicatorMenuItems } from "./indicatorMenu";
 import VolumeLegend, { volumeMenuItems } from "./VolumeLegend";
 import { heikinAshi } from "./transform";
 
@@ -281,6 +282,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   const prevSymbolRef = useRef(symbol);
   const wasActiveRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
+  const [, setIndVer] = useState(0); // indicator vừa tính lại: render lại để legend đọc giá trị mới
   const [hover, setHover] = useState<{
     x: number;
     y: number;
@@ -639,7 +641,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       .priceScale("vol")
       .applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-    indRef.current = new IndicatorManager(chart);
+    indRef.current = new IndicatorManager(chart, () => setIndVer((n) => n + 1));
     drawRef.current = new DrawingManager({
       pane,
       chart,
@@ -1577,26 +1579,19 @@ export default function Chart({ paneId }: { paneId: string }) {
               onMenu={(x, y) => setCtxMenu({ x, y, items: volumeMenuItems(tf) })}
             />
           )}
-          {!legendCollapsed && cs.showIndicatorTitles && indicators.map((inst) => {
-            const def = byId(inst.id);
-            const params = inputsText(def, inst);
-            return (
-              <div
-                key={inst.uid}
-                className="flex items-center gap-1.5 text-[var(--muted)]"
-              >
-                <span style={{ color: plotColor(inst, def, def.plots[0].id) }}>{def.name}</span>
-                {cs.showIndicatorInputs && <span>{params}</span>}
-                <button
-                  onClick={() => removeIndicator(inst.uid)}
-                  className="pointer-events-auto px-1 hover:text-[var(--fg)]"
-                  title="Remove"
-                >
-                  ✕
-                </button>
-              </div>
-            );
-          })}
+          {!legendCollapsed && indicators.map((inst) => (
+            <IndicatorLegend
+              key={inst.uid}
+              inst={inst}
+              tf={tf}
+              symbolDigits={digits}
+              getValues={(uid) => (L ? indRef.current?.valuesAt(uid, L.t) : undefined)}
+              onHide={() => pane.indicators.getState().update(inst.uid, { hidden: inst.hidden ? undefined : true })}
+              onSettings={() => pane.indicators.getState().openSettings(inst.uid)}
+              onRemove={() => removeIndicator(inst.uid)}
+              onMenu={(x, y) => setCtxMenu({ x, y, items: indicatorMenuItems(pane.indicators, inst, tf) })}
+            />
+          ))}
           {(!vs.removed || indicators.length > 0) && (
             <button
               type="button"

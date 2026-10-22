@@ -7,6 +7,7 @@ import ChartGrid from "@/components/chart/ChartGrid";
 import DrawingSettings from "@/components/chart/DrawingSettings";
 import OpenLayoutDialog from "@/components/chart/OpenLayoutDialog";
 import SettingsDialog from "@/components/chart/SettingsDialog";
+import IndicatorSettingsDialog from "@/components/chart/IndicatorSettingsDialog";
 import VolumeSettingsDialog from "@/components/chart/VolumeSettingsDialog";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
 import RightRail from "@/components/chart/RightRail";
@@ -66,6 +67,7 @@ export default function Page() {
       {/* hộp thoại dùng chung: một bản cho cả trang, nhắm vào chart đang active */}
       <SettingsDialog />
       <VolumeSettingsDialog />
+      <IndicatorSettingsDialog />
       <DrawingSettings />
       <OpenLayoutDialog />
       <AuthDialog />

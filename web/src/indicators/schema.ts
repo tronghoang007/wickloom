@@ -27,6 +27,7 @@ export type PlotDef = {
   title: string;
   type: PlotType;
   color: string; // màu mặc định
+  perBar?: boolean; // màu do compute quyết định theo từng nến (histogram MACD...): Settings không cho chọn màu
 };
 
 /** Giá trị một plot theo từng nến; `colors` (nếu có) là màu riêng từng nến (histogram MACD, Volume...). */

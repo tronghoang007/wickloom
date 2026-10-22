@@ -95,6 +95,25 @@ describe("pane active + facade", () => {
 });
 
 describe("state tách theo pane", () => {
+  it("update: field undefined thì bị bỏ; replace và Settings", () => {
+    const st = () => p1().indicators.getState();
+    st().add("rsi");
+    const uid = st().list[0].uid;
+    st().update(uid, { hidden: true, precision: 3 });
+    expect(st().list[0]).toMatchObject({ hidden: true, precision: 3 });
+    st().update(uid, { hidden: undefined });
+    expect("hidden" in st().list[0]).toBe(false);
+    expect(st().list[0].precision).toBe(3);
+    const before = st().list[0];
+    st().update(uid, { precision: 5 });
+    st().replace(before); // Cancel trong Settings
+    expect(st().list[0].precision).toBe(3);
+    st().openSettings(uid);
+    expect(st().settingsUid).toBe(uid);
+    st().remove(uid); // gỡ indicator đang mở Settings thì đóng luôn
+    expect(st().settingsUid).toBeNull();
+  });
+
   it("indicator của từng pane độc lập, yêu thích dùng chung", () => {
     p1().indicators.getState().add("sma");
     expect(p1().indicators.getState().list).toHaveLength(1);

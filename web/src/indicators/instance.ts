@@ -1,19 +1,33 @@
+import { UNITS, visibleOn, type Visibility } from "@/drawings/visibility";
 import { findDef } from "./catalog";
 import type { IndicatorDef, InputDef, InputValue, Inputs } from "./schema";
 import { SOURCES } from "./ta";
 
 export const INSTANCE_V = 1;
 
-export type PlotStyle = { color?: string };
+export type PlotStyle = { color?: string; visible?: boolean };
 
-/** Một indicator đang dùng trên chart (lưu trong layout). `inputs`/`style` chỉ chứa phần user đã đặt; phần còn lại theo def. */
+/** Một indicator đang dùng trên chart (lưu trong layout). Mọi field ngoài định danh chỉ chứa phần user đã đặt; còn lại theo def. */
 export type IndicatorInstance = {
   v: number;
   uid: string;
   id: string;
   inputs: Inputs;
   style?: { plots?: Record<string, PlotStyle> };
+  hidden?: boolean; // nút mắt
+  visibility?: Visibility; // hiện theo khung thời gian
+  precision?: number; // số chữ số của giá trị (không đặt = mặc định)
+  priceLabel?: boolean; // nhãn giá cuối trên trục (không đặt = theo def: chỉ indicator ở pane riêng)
+  statusValues?: boolean; // giá trị trên legend (mặc định bật)
+  statusInputs?: boolean; // tham số trên legend (mặc định bật)
 };
+
+/** Indicator có đang được vẽ không (không bị ẩn bằng nút mắt, đúng khung thời gian). */
+export const instanceShown = (inst: IndicatorInstance, tf: string): boolean => !inst.hidden && visibleOn(inst.visibility, tf);
+
+export const plotShown = (inst: IndicatorInstance, plotId: string): boolean => inst.style?.plots?.[plotId]?.visible !== false;
+
+export const showsPriceLabel = (inst: IndicatorInstance, def: IndicatorDef): boolean => inst.priceLabel ?? !def.overlay;
 
 /** Giá trị hợp lệ theo kiểu input (ép số nguyên, chặn min/max), hoặc undefined nếu không dùng được. */
 export function coerceInput(def: InputDef, v: unknown): InputValue | undefined {
@@ -69,8 +83,12 @@ export function migrateInstance(raw: unknown): IndicatorInstance | null {
   const plots: Record<string, PlotStyle> = {};
   const style = isRecord(raw.style) && isRecord(raw.style.plots) ? raw.style.plots : null;
   def.plots.forEach((p, k) => {
-    const color = style && isRecord(style[p.id]) ? (style[p.id] as Record<string, unknown>).color : Array.isArray(raw.colors) ? raw.colors[k] : undefined;
-    if (typeof color === "string" && color) plots[p.id] = { color };
+    const saved = style && isRecord(style[p.id]) ? (style[p.id] as Record<string, unknown>) : null;
+    const color = saved ? saved.color : Array.isArray(raw.colors) ? raw.colors[k] : undefined; // dạng cũ: colors[k]
+    const ps: PlotStyle = {};
+    if (typeof color === "string" && color) ps.color = color;
+    if (saved?.visible === false) ps.visible = false;
+    if (Object.keys(ps).length) plots[p.id] = ps;
   });
 
   return {
@@ -79,7 +97,27 @@ export function migrateInstance(raw: unknown): IndicatorInstance | null {
     id: def.id,
     inputs,
     ...(Object.keys(plots).length ? { style: { plots } } : {}),
+    ...(raw.hidden === true ? { hidden: true } : {}),
+    ...(sanitizeVisibility(raw.visibility) ? { visibility: sanitizeVisibility(raw.visibility) } : {}),
+    ...(typeof raw.precision === "number" && Number.isInteger(raw.precision) && raw.precision >= 0 && raw.precision <= 8 ? { precision: raw.precision } : {}),
+    ...(typeof raw.priceLabel === "boolean" ? { priceLabel: raw.priceLabel } : {}),
+    ...(raw.statusValues === false ? { statusValues: false } : {}),
+    ...(raw.statusInputs === false ? { statusInputs: false } : {}),
   };
+}
+
+/** Chỉ nhận đơn vị đã biết với {on, from, to} hợp lệ; rỗng -> undefined (= hiện ở mọi khung). */
+function sanitizeVisibility(raw: unknown): Visibility | undefined {
+  if (!isRecord(raw)) return undefined;
+  const out: Visibility = {};
+  for (const { id, max } of UNITS) {
+    const r = raw[id];
+    if (!isRecord(r) || typeof r.on !== "boolean" || typeof r.from !== "number" || typeof r.to !== "number") continue;
+    if (!Number.isFinite(r.from) || !Number.isFinite(r.to)) continue;
+    const from = Math.max(1, Math.min(max, Math.round(r.from)));
+    out[id] = { on: r.on, from, to: Math.max(from, Math.min(max, Math.round(r.to))) };
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function migrateInstances(raw: unknown): IndicatorInstance[] {

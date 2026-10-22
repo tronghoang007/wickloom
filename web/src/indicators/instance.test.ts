@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { byId } from "./catalog";
-import { coerceInput, inputsText, migrateInstance, migrateInstances, newInstance, plotColor, resolveInputs, withPlotColor } from "./instance";
+import { coerceInput, inputsText, instanceShown, migrateInstance, migrateInstances, newInstance, plotColor, plotShown, resolveInputs, showsPriceLabel, withPlotColor } from "./instance";
 
 describe("resolveInputs", () => {
   const sma = byId("sma");
@@ -82,5 +82,48 @@ describe("plotColor / withPlotColor / inputsText", () => {
   it("legend: giá trị đã điền mặc định, bool không hiện", () => {
     expect(inputsText(def, inst)).toBe("14 close");
     expect(inputsText(byId("vwap"), { ...newInstance("vwap"), inputs: { anchor: "Week" } })).toBe("Week hlc3");
+  });
+});
+
+describe("trạng thái hiển thị của instance", () => {
+  it("đi vòng lưu/đọc: hidden, visibility, precision, status, plot ẩn", () => {
+    const a = {
+      ...newInstance("macd"),
+      uid: "m",
+      hidden: true,
+      visibility: { minutes: { on: true, from: 5, to: 30 }, hours: { on: false, from: 1, to: 24 } },
+      precision: 3,
+      priceLabel: false,
+      statusValues: false as const,
+      statusInputs: false as const,
+      style: { plots: { signal: { visible: false as const }, macd: { color: "#123456" } } },
+    };
+    expect(migrateInstance(JSON.parse(JSON.stringify(a)))).toEqual(a);
+  });
+
+  it("giá trị rác bị bỏ, khoảng visibility được chặn về giới hạn của đơn vị", () => {
+    const m = migrateInstance({
+      uid: "u", id: "rsi", hidden: "yes", precision: 99, priceLabel: 1, statusValues: true,
+      visibility: { minutes: { on: true, from: -4, to: 500 }, bogus: { on: true, from: 1, to: 2 }, hours: { on: "x", from: 1, to: 2 } },
+    });
+    expect(m).toEqual({ v: 1, uid: "u", id: "rsi", inputs: {}, visibility: { minutes: { on: true, from: 1, to: 59 } } });
+  });
+
+  it("instanceShown: mắt và khung thời gian", () => {
+    const inst = newInstance("sma");
+    expect(instanceShown(inst, "M15")).toBe(true);
+    expect(instanceShown({ ...inst, hidden: true }, "M15")).toBe(false);
+    const onlyH1 = { ...inst, visibility: { minutes: { on: false, from: 1, to: 59 } } };
+    expect(instanceShown(onlyH1, "M15")).toBe(false);
+    expect(instanceShown(onlyH1, "H1")).toBe(true);
+  });
+
+  it("plotShown / showsPriceLabel: mặc định hiện; nhãn giá theo overlay", () => {
+    const inst = newInstance("sma");
+    expect(plotShown(inst, "sma")).toBe(true);
+    expect(plotShown({ ...inst, style: { plots: { sma: { visible: false } } } }, "sma")).toBe(false);
+    expect(showsPriceLabel(inst, byId("sma"))).toBe(false);
+    expect(showsPriceLabel(newInstance("rsi"), byId("rsi"))).toBe(true);
+    expect(showsPriceLabel({ ...inst, priceLabel: true }, byId("sma"))).toBe(true);
   });
 });

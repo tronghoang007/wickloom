@@ -22,7 +22,7 @@ export const macd: IndicatorDef = {
   plots: [
     { id: "macd", title: "MACD", type: "line", color: "#2962ff" },
     { id: "signal", title: "Signal", type: "line", color: "#ff6d00" },
-    { id: "hist", title: "Hist", type: "histogram", color: "#26a69a" },
+    { id: "hist", title: "Hist", type: "histogram", color: "#26a69a", perBar: true },
   ],
   warmup: (i) => warm(4, num(i, "fast"), num(i, "slow")) + warm(4, num(i, "signal")),
   compute: ({ inputs, src }) => {
@@ -63,7 +63,7 @@ export const atr: IndicatorDef = {
 export const volume: IndicatorDef = {
   id: "volume", name: "Volume", title: "Volume", overlay: false,
   inputs: [],
-  plots: [{ id: "volume", title: "Volume", type: "histogram", color: "#26a69a" }],
+  plots: [{ id: "volume", title: "Volume", type: "histogram", color: "#26a69a", perBar: true }],
   warmup: () => 0,
   compute: ({ bars }) => ({
     volume: withColors(bars.map((x) => x.v), bars.map((x) => (x.c >= x.o ? "#26a69a80" : "#ef535080"))),

@@ -14,13 +14,21 @@ export type ChartPane = { symbol: string; tf: string; chartType: ChartType; scal
 
 export type { IndicatorInstance };
 
+export type IndicatorPatch = Partial<Omit<IndicatorInstance, "uid" | "id" | "v">>;
+
 export type IndicatorsPane = {
   list: IndicatorInstance[];
   collapsed: boolean; // nút chevron trên legend: ẩn/hiện các hàng indicator (như TV)
+  settingsUid: string | null; // indicator đang mở dialog Settings (trạng thái chạy, không lưu)
   setCollapsed: (v: boolean) => void;
   add: (id: string) => void;
   remove: (uid: string) => void;
-  update: (uid: string, patch: Partial<Pick<IndicatorInstance, "inputs" | "style">>) => void;
+  /** Đổi field của 1 instance; field có giá trị `undefined` thì bị bỏ (về mặc định). */
+  update: (uid: string, patch: IndicatorPatch) => void;
+  /** Thay nguyên instance (Cancel / Reset trong Settings). */
+  replace: (inst: IndicatorInstance) => void;
+  openSettings: (uid: string) => void;
+  closeSettings: () => void;
 };
 
 // Volume là 1 indicator như TV ("Vol · Ticks"): có hàng legend, menu và Settings riêng.
@@ -110,9 +118,21 @@ export function createPane(id: string, init: PaneInit = {}): Pane {
     list: init.indicators ?? [],
     collapsed: init.legendCollapsed ?? false,
     setCollapsed: (collapsed) => set({ collapsed }),
+    settingsUid: null,
     add: (defId) => set((s) => ({ list: [...s.list, newInstance(defId)] })),
-    remove: (uid) => set((s) => ({ list: s.list.filter((x) => x.uid !== uid) })),
-    update: (uid, patch) => set((s) => ({ list: s.list.map((x) => (x.uid === uid ? { ...x, ...patch } : x)) })),
+    remove: (uid) => set((s) => ({ list: s.list.filter((x) => x.uid !== uid), settingsUid: s.settingsUid === uid ? null : s.settingsUid })),
+    update: (uid, patch) =>
+      set((s) => ({
+        list: s.list.map((x) => {
+          if (x.uid !== uid) return x;
+          const next = { ...x, ...patch };
+          for (const k of Object.keys(patch) as (keyof IndicatorPatch)[]) if (patch[k] === undefined) delete next[k];
+          return next;
+        }),
+      })),
+    replace: (inst) => set((s) => ({ list: s.list.map((x) => (x.uid === inst.uid ? inst : x)) })),
+    openSettings: (uid) => set({ settingsUid: uid }),
+    closeSettings: () => set({ settingsUid: null }),
   }));
 
   const volume = createStore<VolumePane>()((set) => ({
@@ -156,6 +176,6 @@ export function snapshotPane(p: Pane): Required<PaneInit> & { chart: ChartPane }
 export function applyPaneInit(p: Pane, init: PaneInit) {
   if (init.chart) p.chart.setState({ ...DEFAULT_CHART, ...init.chart });
   if (init.indicators || init.legendCollapsed !== undefined)
-    p.indicators.setState({ list: init.indicators ?? [], collapsed: init.legendCollapsed ?? false });
+    p.indicators.setState({ list: init.indicators ?? [], collapsed: init.legendCollapsed ?? false, settingsUid: null });
   if (init.volume) p.volume.setState({ s: { ...DEFAULT_VOLUME, ...init.volume } });
 }

@@ -32,5 +32,5 @@ export const indicatorGlobal = create<Global>()(
 export const useIndicatorStore = composeStore({
   global: indicatorGlobal,
   pane: (p) => p.indicators,
-  paneKeys: ["list", "collapsed"],
+  paneKeys: ["list", "collapsed", "settingsUid"],
 });

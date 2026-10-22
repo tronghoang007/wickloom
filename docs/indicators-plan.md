@@ -13,6 +13,12 @@ Chi tiết TV bên dưới lấy từ (a) dialog Vol đã capture ngày 2026-10-
   `instance.ts` (instance có `v`, `inputs`/`style.plots[id].color` chỉ lưu phần user đặt, migrate từ `{uid,id,inputs,colors}`, id lạ bị bỏ),
   `engine.ts`, `data.ts` (`BarHistory` nạp ngầm ≥5000 nến cũ hơn nến chart, `CalendarFeed` offset + D1), `diff.ts` (tick chỉ `update` nến cuối thay vì `setData` cả mảng), `manager.ts` viết lại.
   Sửa lỗi #1 (lịch sử ngắn), #3 (setData toàn bộ mỗi 250ms), #4 (windowed O(n·w)), #7 (VWAP theo UTC, `v||1`). 72 test mới; kiểm tra tay trên trình duyệt với layout cũ (migrate OK, nạp 4500 nến cũ, VWAP Week, đổi input trong dialog).
+  - **Phase 3 (một phần, làm sớm theo yêu cầu 2026-10-22 "mọi indicator phải có mắt/settings khi hover như Vol"): xong.** Hàng legend `IndicatorLegend` cho MỌI indicator: giá trị từng plot theo nến dưới crosshair,
+  rê chuột hiện **mắt · gear · thùng rác · ⋯**, nhấp đúp mở Settings, ẩn thì mờ + bỏ giá trị; menu ⋯ giống Vol (Visibility on intervals + Hide/Remove/Favorites/Settings chạy thật; Visual order / Move to / Pin to scale / Copy / Alert vẫn khoá).
+  `IndicatorSettingsDialog` chung dựng từ def (Inputs · Style: bật/tắt + màu từng plot, Precision, Labels on price scale, Values/Inputs in status line · Visibility; Defaults ▾ Reset, Cancel khôi phục, Ok).
+  Khung dialog tách thành `settingsParts.tsx` (`SettingsFrame`, `VisibilityTab`, `Check`, `Section`) dùng chung với Volume; icon hover tách thành `legendButtons.tsx`.
+  Instance thêm `hidden/visibility/precision/priceLabel/statusValues/statusInputs` + `style.plots[id].visible`. Manager đổi màu/ẩn/precision/input bằng `applyOptions` + tính lại (không dựng lại series) → phần lớn lỗi #2 đã hết; chỉ thêm/xoá/đổi thứ tự indicator mới dựng lại.
+  Còn lại của Phase 3: dialog Indicators dựng lại (bỏ tab "On chart"), Visual order / Move to / Pin to scale thật, Chart Settings → Status line → Values, độ dày/nét/levels/fill trong Style (Phase 2).
   Khác kế hoạch: (1) `lowerBars(tf, from, to)` và `htf(tf)` **chưa làm** — chưa def nào dùng, làm ở Phase 4b/4c khi cần;
   (2) lịch sử ngầm chỉ lấy từ DB backend, chưa tự xin MT5 backfill khi DB ít hơn 5000 nến; (3) EMA giờ seed bằng giá đầu tiên như Pine (trước đây seed SMA) nên có giá trị từ nến đầu;
   (4) VWAP thêm input **Anchor Period** (Session/Week/Month/Year); (5) #2 (xoá/dựng lại mọi series khi đổi màu/input) vẫn còn — thuộc Phase 2.
