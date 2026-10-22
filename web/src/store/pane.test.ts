@@ -182,9 +182,14 @@ describe("loadPaneInit", () => {
   it("migrate từ 3 key cũ (symbol/tf/loại nến, indicator + legend, volume)", () => {
     const init = loadPaneInit(fakeStorage(legacy()));
     expect(init.chart).toEqual({ symbol: "BTCUSDm", tf: "H1", chartType: "heikin", scaleMode: "log" });
-    expect(init.indicators?.[0]).toMatchObject({ id: "sma", inputs: { length: 9 } });
+    expect(init.indicators?.[0]).toMatchObject({ v: 1, id: "sma", inputs: { length: 9 }, style: { plots: { sma: { color: "#fff" } } } });
     expect(init.legendCollapsed).toBe(true);
     expect(init.volume).toEqual({ maOn: true, maLength: 50 });
+  });
+
+  it("indicator đã lưu: id lạ bị bỏ, input sai kiểu rơi về mặc định (chart không vỡ)", () => {
+    const init = parsePaneInit({ indicators: [{ uid: "a", id: "nope" }, { uid: "b", id: "rsi", inputs: { length: "14" } }] });
+    expect(init.indicators).toEqual([{ v: 1, uid: "b", id: "rsi", inputs: {} }]);
   });
 
   it("key mới thắng key cũ", () => {

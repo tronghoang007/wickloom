@@ -1,6 +1,8 @@
 "use client";
 
-import { INDICATORS, byId } from "@/indicators/registry";
+import { INDICATORS, byId } from "@/indicators/catalog";
+import { plotColor, resolveInputs, withPlotColor } from "@/indicators/instance";
+import { SOURCES } from "@/indicators/ta";
 import ColorPicker from "./ColorPicker";
 import { useIndicatorStore } from "@/indicators/store";
 import { useVolumeStore } from "@/store/volume";
@@ -110,57 +112,46 @@ function OnChart() {
                 <Trash />
               </button>
             </div>
-            {def.inputs.map((inp) => (
-              <label
-                key={inp.key}
-                className="mb-1 flex items-center justify-between text-xs"
-              >
-                {inp.label}
-                {inp.type === "number" ? (
-                  <input
-                    type="number"
-                    className={field}
-                    min={inp.min}
-                    step={inp.step}
-                    value={inst.inputs[inp.key] as number}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      if (v > 0)
-                        update(inst.uid, {
-                          inputs: { ...inst.inputs, [inp.key]: v },
-                        });
-                    }}
-                  />
-                ) : (
-                  <select
-                    className={field}
-                    value={inst.inputs[inp.key] as string}
-                    onChange={(e) =>
-                      update(inst.uid, {
-                        inputs: { ...inst.inputs, [inp.key]: e.target.value },
-                      })
-                    }
-                  >
-                    {inp.options.map((o) => (
-                      <option key={o} className="text-black">
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </label>
-            ))}
+            {def.inputs.map((inp) => {
+              const set = (v: number | string | boolean) => update(inst.uid, { inputs: { ...inst.inputs, [inp.key]: v } });
+              const value = resolveInputs(def, inst.inputs)[inp.key];
+              return (
+                <label key={inp.key} className="mb-1 flex items-center justify-between text-xs">
+                  {inp.label}
+                  {inp.type === "int" || inp.type === "float" ? (
+                    <input
+                      type="number"
+                      className={field}
+                      min={inp.min}
+                      max={inp.max}
+                      step={inp.step ?? (inp.type === "int" ? 1 : "any")}
+                      value={value as number}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        if (e.target.value !== "" && Number.isFinite(v) && v >= (inp.min ?? -Infinity) && v <= (inp.max ?? Infinity)) set(v);
+                      }}
+                    />
+                  ) : inp.type === "bool" ? (
+                    <input type="checkbox" checked={value as boolean} onChange={(e) => set(e.target.checked)} />
+                  ) : (
+                    <select className={field} value={value as string} onChange={(e) => set(e.target.value)}>
+                      {(inp.type === "source" ? [...SOURCES] : inp.options).map((o) => (
+                        <option key={o} className="text-black">
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+              );
+            })}
             <div className="flex gap-2 pt-1">
-              {inst.colors.map((c, k) => (
+              {def.plots.map((p) => (
                 <ColorPicker
-                  key={k}
-                  value={c}
+                  key={p.id}
+                  value={plotColor(inst, def, p.id)}
                   className="h-5 w-6 p-0.5"
-                  onChange={(v) =>
-                    update(inst.uid, {
-                      colors: inst.colors.map((x, j) => (j === k ? v : x)),
-                    })
-                  }
+                  onChange={(v) => update(inst.uid, { style: withPlotColor(inst, p.id, v).style })}
                 />
               ))}
             </div>

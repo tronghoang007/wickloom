@@ -1,9 +1,21 @@
 # Kế hoạch làm lại toàn bộ indicator theo TradingView (đủ Settings)
 
-Ngày lập: 2026-10-22. Mới là kế hoạch — CHƯA sửa code. Đã đọc: `web/src/indicators/*`, `IndicatorsDialog.tsx`,
+Ngày lập: 2026-10-22. Phần dưới (mục 1–8) là kế hoạch ban đầu; tiến độ ở mục "Tiến độ". Đã đọc: `web/src/indicators/*`, `IndicatorsDialog.tsx`,
 `VolumeSettingsDialog.tsx`, `store/volume.ts`, `store/paneStores.ts`, `store/paneStorage.ts`, phần legend trong `Chart.tsx`.
 Chi tiết TV bên dưới lấy từ (a) dialog Vol đã capture ngày 2026-10-21 (xem memory `volume-indicator-and-legend`) và
 (b) hiểu biết chung về TV; mục nào chưa kiểm chứng bằng TV thật đánh dấu **⚠** — Phase 0 sẽ chốt lại.
+
+## Tiến độ
+
+- **Phase 0 (capture TV): chưa làm** — cần bạn đồng ý tạo/xoá study tạm trong tab TV (mục 8). Phase 1 không phụ thuộc nó.
+- **Phase 1 (nền engine): xong 2026-10-22.** `indicators/ta/*` (sma ema rma wma vwma hma stdev highest lowest tr atr rsi change; O(n), seed/na như Pine),
+  `calendar.ts` (kỳ ngày/tuần/tháng/năm theo giờ broker, dùng mốc D1 thật để đúng qua DST), `schema.ts` + `defs/` + `catalog.ts` (10 indicator khai báo),
+  `instance.ts` (instance có `v`, `inputs`/`style.plots[id].color` chỉ lưu phần user đặt, migrate từ `{uid,id,inputs,colors}`, id lạ bị bỏ),
+  `engine.ts`, `data.ts` (`BarHistory` nạp ngầm ≥5000 nến cũ hơn nến chart, `CalendarFeed` offset + D1), `diff.ts` (tick chỉ `update` nến cuối thay vì `setData` cả mảng), `manager.ts` viết lại.
+  Sửa lỗi #1 (lịch sử ngắn), #3 (setData toàn bộ mỗi 250ms), #4 (windowed O(n·w)), #7 (VWAP theo UTC, `v||1`). 72 test mới; kiểm tra tay trên trình duyệt với layout cũ (migrate OK, nạp 4500 nến cũ, VWAP Week, đổi input trong dialog).
+  Khác kế hoạch: (1) `lowerBars(tf, from, to)` và `htf(tf)` **chưa làm** — chưa def nào dùng, làm ở Phase 4b/4c khi cần;
+  (2) lịch sử ngầm chỉ lấy từ DB backend, chưa tự xin MT5 backfill khi DB ít hơn 5000 nến; (3) EMA giờ seed bằng giá đầu tiên như Pine (trước đây seed SMA) nên có giá trị từ nến đầu;
+  (4) VWAP thêm input **Anchor Period** (Session/Week/Month/Year); (5) #2 (xoá/dựng lại mọi series khi đổi màu/input) vẫn còn — thuộc Phase 2.
 
 Kết luận: không vá `registry.ts` thêm được nữa. Mô hình hiện tại (input = số/select, màu = mảng, mỗi indicator 1 pane) quá hẹp so với
 Settings của TV. Cần **schema indicator mới (khai báo, giống metadata của Pine)** + engine tính + renderer + dialog Settings/legend dùng chung.

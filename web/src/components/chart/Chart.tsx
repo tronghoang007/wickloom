@@ -4,7 +4,8 @@ import { DrawingManager } from "@/drawings/manager";
 import { AlertI, Chevron, ResetViewI, SettingsI, SkipToLatest } from "../icons";
 import { useDrawingStore } from "@/drawings/store";
 import { IndicatorManager } from "@/indicators/manager";
-import { byId } from "@/indicators/registry";
+import { byId } from "@/indicators/catalog";
+import { inputsText, plotColor } from "@/indicators/instance";
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
@@ -390,7 +391,8 @@ export default function Chart({ paneId }: { paneId: string }) {
   };
 
   const refreshExtras = () => {
-    indRef.current?.update(pane.indicators.getState().list, barsRef.current);
+    const { symbol, tf } = pane.chart.getState();
+    indRef.current?.update(pane.indicators.getState().list, barsRef.current, { symbol, tf });
     drawRef.current?.refresh();
   };
 
@@ -1577,13 +1579,13 @@ export default function Chart({ paneId }: { paneId: string }) {
           )}
           {!legendCollapsed && cs.showIndicatorTitles && indicators.map((inst) => {
             const def = byId(inst.id);
-            const params = def.inputs.map((i) => inst.inputs[i.key]).join(" ");
+            const params = inputsText(def, inst);
             return (
               <div
                 key={inst.uid}
                 className="flex items-center gap-1.5 text-[var(--muted)]"
               >
-                <span style={{ color: inst.colors[0] }}>{def.name}</span>
+                <span style={{ color: plotColor(inst, def, def.plots[0].id) }}>{def.name}</span>
                 {cs.showIndicatorInputs && <span>{params}</span>}
                 <button
                   onClick={() => removeIndicator(inst.uid)}

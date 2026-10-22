@@ -1,3 +1,4 @@
+import { migrateInstances } from "@/indicators/instance";
 import { applyPaneInit, snapshotPane, type Pane, type PaneInit } from "./paneStores";
 
 // Lưu pane chính vào localStorage cho tới khi layout có chỗ lưu riêng (layout-plan Phase 3).
@@ -37,7 +38,7 @@ export function parsePaneInit(raw: Record<string, unknown> | null): PaneInit {
       ...(str(chart.scaleMode, ["normal", "log", "percent"]) ? { scaleMode: str(chart.scaleMode) as never } : {}),
     },
   };
-  if (Array.isArray(raw.indicators)) out.indicators = raw.indicators as PaneInit["indicators"];
+  if (Array.isArray(raw.indicators)) out.indicators = migrateInstances(raw.indicators); // cả dạng cũ {uid,id,inputs,colors}
   if (typeof raw.legendCollapsed === "boolean") out.legendCollapsed = raw.legendCollapsed;
   if (raw.volume && typeof raw.volume === "object") out.volume = raw.volume as PaneInit["volume"];
   return out;

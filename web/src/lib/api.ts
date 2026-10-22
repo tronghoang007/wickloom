@@ -58,6 +58,17 @@ export async function fetchBars(symbol: string, tf: string, to?: number, limit =
   return r.ok ? r.json() : [];
 }
 
+/** Giây: giờ broker − UTC (EA báo cho backend); 0 nếu backend chưa biết / không trả lời. */
+export async function fetchBrokerOffset(): Promise<number> {
+  try {
+    const r = await fetch(`${API}/health`);
+    const v = r.ok ? (await r.json())?.offset : 0;
+    return typeof v === "number" && Number.isFinite(v) ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
 // Xin EA nạp `count` bar cũ hơn mốc `before` (epoch UTC giây): scroll-back và nhảy tới
 // 1 thời điểm chưa từng tải (đổi timeframe lúc đang replay).
 export async function triggerBackfillAt(symbol: string, tf: string, count = 500, before = 0): Promise<{ ok: boolean }> {

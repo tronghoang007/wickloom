@@ -4,7 +4,7 @@
 import type { DrawingManager } from "@/drawings/manager";
 import type { Drawing } from "@/drawings/types";
 import type { Visibility } from "@/drawings/visibility";
-import { byId } from "@/indicators/registry";
+import { newInstance, type IndicatorInstance } from "@/indicators/instance";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 export type ChartType = "candles" | "bars" | "line" | "area" | "heikin";
@@ -12,12 +12,7 @@ export type ScaleMode = "normal" | "log" | "percent";
 
 export type ChartPane = { symbol: string; tf: string; chartType: ChartType; scaleMode: ScaleMode };
 
-export type IndicatorInstance = {
-  uid: string;
-  id: string;
-  inputs: Record<string, number | string>;
-  colors: string[];
-};
+export type { IndicatorInstance };
 
 export type IndicatorsPane = {
   list: IndicatorInstance[];
@@ -25,7 +20,7 @@ export type IndicatorsPane = {
   setCollapsed: (v: boolean) => void;
   add: (id: string) => void;
   remove: (uid: string) => void;
-  update: (uid: string, patch: Partial<Pick<IndicatorInstance, "inputs" | "colors">>) => void;
+  update: (uid: string, patch: Partial<Pick<IndicatorInstance, "inputs" | "style">>) => void;
 };
 
 // Volume là 1 indicator như TV ("Vol · Ticks"): có hàng legend, menu và Settings riêng.
@@ -115,12 +110,7 @@ export function createPane(id: string, init: PaneInit = {}): Pane {
     list: init.indicators ?? [],
     collapsed: init.legendCollapsed ?? false,
     setCollapsed: (collapsed) => set({ collapsed }),
-    add: (defId) =>
-      set((s) => {
-        const def = byId(defId);
-        const inputs = Object.fromEntries(def.inputs.map((i) => [i.key, i.default]));
-        return { list: [...s.list, { uid: crypto.randomUUID(), id: defId, inputs, colors: [...def.colors] }] };
-      }),
+    add: (defId) => set((s) => ({ list: [...s.list, newInstance(defId)] })),
     remove: (uid) => set((s) => ({ list: s.list.filter((x) => x.uid !== uid) })),
     update: (uid, patch) => set((s) => ({ list: s.list.map((x) => (x.uid === uid ? { ...x, ...patch } : x)) })),
   }));
