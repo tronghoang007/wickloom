@@ -17,9 +17,12 @@ export const LWC_LINE_STYLE: Record<LineStyleName, LineStyle> = {
   dotted: LineStyle.Dotted,
 };
 
+/** Id thang giá LWC: phải/trái là thang của pane; "none" = thang riêng ẩn của indicator (overlay). */
+export const scaleId = (scale: "right" | "left" | "none", uid: string): string => (scale === "none" ? `ov-${uid}` : scale);
+
 /** Dựng series cho một plot theo kiểu của nó (đổi kiểu = dựng lại series). Tuỳ chọn hiển thị đặt sau bằng `plotOptions`. */
-export function addPlotSeries(chart: IChartApi, type: PlotType, paneIndex: number, title: string): ISeriesApi<SeriesType> {
-  const common = { priceLineVisible: false, title };
+export function addPlotSeries(chart: IChartApi, type: PlotType, paneIndex: number, title: string, priceScaleId = "right"): ISeriesApi<SeriesType> {
+  const common = { priceLineVisible: false, title, priceScaleId };
   switch (type) {
     case "histogram":
       return chart.addSeries(HistogramSeries, { ...common, priceFormat: { type: "volume" } }, paneIndex) as ISeriesApi<SeriesType>;
@@ -48,7 +51,7 @@ export function plotOptions(st: PlotStyleR): Record<string, unknown> {
 }
 
 /** Series "neo" không vẽ gì, giữ đường ngang (levels) và vùng tô (fills) của một indicator: ẩn/hiện theo indicator chứ không theo plot nào. */
-export function addAnchorSeries(chart: IChartApi, paneIndex: number): ISeriesApi<SeriesType> {
+export function addAnchorSeries(chart: IChartApi, paneIndex: number, priceScaleId = "right"): ISeriesApi<SeriesType> {
   return chart.addSeries(
     LineSeries,
     {
@@ -57,6 +60,7 @@ export function addAnchorSeries(chart: IChartApi, paneIndex: number): ISeriesApi
       lastValueVisible: false,
       priceLineVisible: false,
       crosshairMarkerVisible: false,
+      priceScaleId,
       autoscaleInfoProvider: () => null, // không ảnh hưởng thang giá
     },
     paneIndex,

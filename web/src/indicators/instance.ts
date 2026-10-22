@@ -16,6 +16,8 @@ export type IndicatorInstance = {
   id: string;
   inputs: Inputs;
   style?: { plots?: Record<string, PlotStyle>; levels?: Record<string, LevelStyle>; fills?: Record<string, FillStyle> };
+  pane?: string; // khoá pane (xem layout.ts); không đặt = mặc định theo def
+  scale?: "right" | "left" | "none"; // thang giá; không đặt = mặc định (xem effectiveScale)
   hidden?: boolean; // nút mắt
   visibility?: Visibility; // hiện theo khung thời gian
   precision?: number; // số chữ số của giá trị (không đặt = mặc định)
@@ -90,6 +92,8 @@ export function migrateInstance(raw: unknown): IndicatorInstance | null {
     id: def.id,
     inputs,
     ...(style ? { style } : {}),
+    ...(typeof raw.pane === "string" && raw.pane && raw.pane.length <= 80 ? { pane: raw.pane } : {}),
+    ...(raw.scale === "right" || raw.scale === "left" || raw.scale === "none" ? { scale: raw.scale } : {}),
     ...(raw.hidden === true ? { hidden: true } : {}),
     ...(sanitizeVisibility(raw.visibility) ? { visibility: sanitizeVisibility(raw.visibility) } : {}),
     ...(typeof raw.precision === "number" && Number.isInteger(raw.precision) && raw.precision >= 0 && raw.precision <= 8 ? { precision: raw.precision } : {}),

@@ -5,8 +5,9 @@ import { BarHistory, CalendarFeed, HISTORY_BARS } from "./data";
 import { planUpdate, type Snap } from "./diff";
 import { computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
 import { instanceShown, plotColor, showsPriceLabel, type IndicatorInstance } from "./instance";
+import { effectiveScale, paneIndices, paneKeyOf } from "./layout";
 import { FillPrimitive, type FillEdge } from "./render/fill";
-import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions } from "./render/series";
+import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions, scaleId } from "./render/series";
 import type { IndicatorDef, PlotData } from "./schema";
 import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
 
@@ -42,9 +43,13 @@ function indexOfTime(times: number[], t: number): number {
   return times[lo] === t ? lo : -1;
 }
 
-/** Khoá "cấu trúc" của một instance: đổi khoá = phải dựng lại series (thêm/gỡ indicator, đổi kiểu plot). */
-const structKey = (inst: IndicatorInstance): string =>
-  `${inst.uid}:${inst.id}:${byId(inst.id).plots.map((p) => plotStyle(inst, p).type).join("/")}`;
+/** Khoá "cấu trúc" của cả danh sách: đổi khoá = phải dựng lại series (thêm/gỡ indicator, đổi kiểu plot, chuyển pane/thang giá). */
+function structSig(list: IndicatorInstance[]): string {
+  const keys = list.map((i) => paneKeyOf(i, byId(i.id)));
+  return list
+    .map((i, k) => `${i.uid}:${i.id}:${byId(i.id).plots.map((p) => plotStyle(i, p).type).join("/")}@${keys[k]}/${effectiveScale(i, byId(i.id), keys[k])}`)
+    .join(",");
+}
 
 export class IndicatorManager {
   private live: Live[] = [];
@@ -112,13 +117,17 @@ export class IndicatorManager {
 
   private build() {
     this.clear();
-    let pane = 0;
-    for (const inst of this.list) {
+    const keys = this.list.map((i) => paneKeyOf(i, byId(i.id)));
+    const indices = paneIndices(keys);
+    this.list.forEach((inst, n) => {
       const def = byId(inst.id);
-      const paneIndex = def.overlay ? 0 : ++pane;
-      const series = def.plots.map((p, k) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, k === 0 ? def.name : ""));
+      const paneIndex = indices[n];
+      const sid = scaleId(effectiveScale(inst, def, keys[n]), inst.uid);
+      const series = def.plots.map((p, k) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, k === 0 ? def.name : "", sid));
       const hasAnchor = !!(def.levels?.length || def.fills?.length);
-      const anchor = hasAnchor ? addAnchorSeries(this.chart, paneIndex) : null;
+      const anchor = hasAnchor ? addAnchorSeries(this.chart, paneIndex, sid) : null;
+      if (sid === "left") this.chart.priceScale("left", paneIndex).applyOptions({ visible: true });
+      else if (sid !== "right") this.chart.priceScale(sid, paneIndex).applyOptions({ visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } });
       const lines = (def.levels ?? []).map((l) =>
         anchor!.createPriceLine({ price: l.value, color: l.color, lineStyle: LWC_LINE_STYLE[l.lineStyle ?? "dashed"], lineWidth: 1, axisLabelVisible: false, title: "" }),
       );
@@ -128,7 +137,7 @@ export class IndicatorManager {
         return prim;
       });
       this.live.push({ inst, def, series, anchor, lines, fills, snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
-    }
+    });
   }
 
   // Phần hiển thị (màu, nét, độ dày, ẩn, nhãn, số chữ số, levels) đổi bằng applyOptions: series giữ nguyên nên xem trước trong Settings không nháy
@@ -175,7 +184,7 @@ export class IndicatorManager {
   }
 
   private sync() {
-    const sig = this.list.map(structKey).join(",");
+    const sig = structSig(this.list);
     if (sig !== this.sig) {
       this.sig = sig;
       this.build();
