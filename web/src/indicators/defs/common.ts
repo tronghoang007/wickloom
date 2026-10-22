@@ -1,5 +1,5 @@
 import type { InputDef, PlotData } from "../schema";
-import type { Num, SourceName } from "../ta";
+import { MA_TYPES, type Num, type SourceName } from "../ta";
 
 export const sourceInput = (d: SourceName = "close"): InputDef => ({ key: "src", label: "Source", type: "source", default: d });
 export const SRC = sourceInput();
@@ -13,3 +13,9 @@ export const withColors = (values: Num, colors: string[]): PlotData => ({ values
 
 /** Offset của MA: dịch plot theo số nến (dương = sang phải, vào vùng tương lai). */
 export const offsetInput = (): InputDef => ({ key: "offset", label: "Offset", type: "int", default: 0, min: -500, max: 500 });
+
+/** Chọn loại MA (SMA / EMA / SMMA / WMA / VWMA) như ô "Basis MA Type" / "Type" của TV. */
+export const maTypeInput = (key = "maType", label = "MA Type", d = "SMA"): InputDef => ({ key, label, type: "select", default: d, options: [...MA_TYPES] });
+
+/** Số nến cần trước nến đầu cho MA loại `type` (EMA / SMMA nhớ vô hạn nên cần thêm). */
+export const maWarmup = (type: string, n: number): number => (type === "EMA" ? warm(4, n) : type === "SMMA (RMA)" ? warm(10, n) : n);

@@ -1,7 +1,7 @@
 import { periodKeys, type Period } from "../calendar";
 import { num, str, type IndicatorDef } from "../schema";
 import * as ta from "../ta";
-import { SRC, length, offsetInput, sourceInput, warm } from "./common";
+import { SRC, length, maTypeInput, maWarmup, offsetInput, sourceInput, warm } from "./common";
 
 export const sma: IndicatorDef = {
   id: "sma", name: "SMA", title: "Simple moving average", overlay: true,
@@ -27,19 +27,43 @@ export const wma: IndicatorDef = {
   compute: ({ inputs, src }) => ({ wma: ta.wma(src(str(inputs, "src")), num(inputs, "length")) }),
 };
 
+export const smma: IndicatorDef = {
+  id: "smma", name: "SMMA", title: "Smoothed moving average", overlay: true,
+  inputs: [length(7), SRC, offsetInput()],
+  plots: [{ id: "smma", title: "SMMA", type: "line", color: "#673ab7", offset: "offset" }],
+  warmup: (i) => warm(10, num(i, "length")),
+  compute: ({ inputs, src }) => ({ smma: ta.rma(src(str(inputs, "src")), num(inputs, "length")) }),
+};
+
+export const vwma: IndicatorDef = {
+  id: "vwma", name: "VWMA", title: "Volume weighted moving average", overlay: true,
+  inputs: [length(20), SRC, offsetInput()],
+  plots: [{ id: "vwma", title: "VWMA", type: "line", color: "#2962ff", offset: "offset" }],
+  warmup: (i) => num(i, "length"),
+  compute: ({ bars, inputs, src }) => ({ vwma: ta.vwma(src(str(inputs, "src")), bars.map((b) => b.v), num(inputs, "length")) }),
+};
+
+export const hma: IndicatorDef = {
+  id: "hma", name: "HMA", title: "Hull moving average", overlay: true,
+  inputs: [length(9), SRC, offsetInput()],
+  plots: [{ id: "hma", title: "HMA", type: "line", color: "#2962ff", offset: "offset" }],
+  warmup: (i) => num(i, "length") + Math.ceil(Math.sqrt(num(i, "length"))),
+  compute: ({ inputs, src }) => ({ hma: ta.hma(src(str(inputs, "src")), num(inputs, "length")) }),
+};
+
 export const bb: IndicatorDef = {
   id: "bb", name: "Bollinger Bands", title: "Bollinger Bands", overlay: true,
-  inputs: [length(20), { key: "mult", label: "StdDev", type: "float", default: 2, min: 0.001, step: 0.1 }, SRC],
+  inputs: [length(20), maTypeInput("maType", "Basis MA Type"), SRC, { key: "mult", label: "StdDev", type: "float", default: 2, min: 0.001, step: 0.1 }, offsetInput()],
   plots: [
-    { id: "basis", title: "Basis", type: "line", color: "#ff6d00" },
-    { id: "upper", title: "Upper", type: "line", color: "#2962ff" },
-    { id: "lower", title: "Lower", type: "line", color: "#2962ff" },
+    { id: "basis", title: "Basis", type: "line", color: "#ff6d00", offset: "offset" },
+    { id: "upper", title: "Upper", type: "line", color: "#2962ff", offset: "offset" },
+    { id: "lower", title: "Lower", type: "line", color: "#2962ff", offset: "offset" },
   ],
   fills: [{ id: "band", title: "Background", between: [{ plot: "upper" }, { plot: "lower" }], color: "#2196f31a" }],
-  warmup: (i) => num(i, "length"),
-  compute: ({ inputs, src }) => {
+  warmup: (i) => maWarmup(str(i, "maType"), num(i, "length")),
+  compute: ({ bars, inputs, src }) => {
     const s = src(str(inputs, "src")), n = num(inputs, "length"), k = num(inputs, "mult");
-    const basis = ta.sma(s, n), dev = ta.stdev(s, n);
+    const basis = ta.ma(str(inputs, "maType"), s, n, bars.map((b) => b.v)), dev = ta.stdev(s, n);
     return { basis, upper: basis.map((x, j) => x + k * dev[j]), lower: basis.map((x, j) => x - k * dev[j]) };
   },
 };

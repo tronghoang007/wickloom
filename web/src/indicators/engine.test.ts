@@ -2,7 +2,7 @@ import type { Bar } from "@/lib/api";
 import { describe, expect, it } from "vitest";
 import { INDICATORS, byId } from "./catalog";
 import { computeExtras, computeInstance, futureTimes, historyTarget, shiftBy, trimPlot } from "./engine";
-import { newInstance, type IndicatorInstance } from "./instance";
+import { newInstance, resolveInputs, type IndicatorInstance } from "./instance";
 import { ObjectBuilder } from "./objects";
 import type { IndicatorDef } from "./schema";
 import { plotStyle } from "./style";
@@ -28,7 +28,11 @@ describe("computeInstance", () => {
     for (const def of INDICATORS) {
       const out = computeInstance(def, newInstance(def.id), bars, { offset: 0 });
       expect(Object.keys(out).sort(), def.id).toEqual(def.plots.map((p) => p.id).sort());
-      for (const p of def.plots) expect(out[p.id].values, `${def.id}.${p.id}`).toHaveLength(bars.length);
+      const inputs = resolveInputs(def, {});
+      for (const p of def.plots) {
+        const off = (typeof p.offset === "function" ? p.offset(inputs) : p.offset ? Number(inputs[p.offset]) : 0) || 0;
+        expect(out[p.id].values, `${def.id}.${p.id}`).toHaveLength(bars.length + Math.max(0, off)); // offset dương kéo dài sang vùng tương lai
+      }
     }
   });
 
