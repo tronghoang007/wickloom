@@ -10,7 +10,7 @@ Ngày viết: 2026-10-22 (sau commit 8635bdd). CHỈ LÀ PLAN, chưa code gì. L
 **U1, U2, U3 đã code** (chưa commit): backend `app/accounts.py`, `auth.py`, `me.py`, `auth_cli.py`; web `store/auth.ts`, `lib/authApi.ts`,
 `components/auth/*`, `chart/AccountMenu.tsx`, `drawings/guest.ts`, `drawings/storage.ts`. 44 test backend + 167 test web xanh; đã kiểm tay
 trên Chrome (đăng ký nhận dữ liệu cũ, reload giữ phiên, đăng xuất, vẽ khi là khách không PUT, đăng nhập nhận hình khách, cả `localhost` và `127.0.0.1`).
-**Chưa làm**: U4 phần web (gate Save/menu layout, đi cùng layout Phase 3), U5 (khối MT5 trong dropdown, trade). Chưa kiểm tay: dialog Account settings,
+**Chưa làm**: U5 (khối MT5 trong dropdown, trade). Chưa kiểm tay: dialog Account settings,
 popup "phiên hết hạn" (chỉ có vitest).
 
 Khác với plan ban đầu:
@@ -19,6 +19,7 @@ Khác với plan ban đầu:
 - Thêm `GET /auth/options` → `{allow_register, claim_legacy}` để form đăng ký biết có hiện ô "Nhận dữ liệu hiện có" không.
 - Backend `/me/layouts[/{id}]` đã có sẵn từ U3 và CRUD generic của cả `layouts`/`drawings`/`watchlists` đã đóng (kéo phần backend của U4 lên sớm vì
   dùng chung một hàm; web chưa dùng layout nên chưa ảnh hưởng).
+- Layout Phase 3 đã gắn vào: `authHooks.beforeLogin/beforeLogout`, hint đăng nhập nay lưu `{name, id}`, `adoptGuestDrawings(f, layoutId)` (xem `docs/layout-plan.md` §0).
 - `auth_cli`: thêm `list`, `claim-legacy <email>`; `reset <email>` hỏi mật khẩu bằng getpass.
 - 401 từ `/me/*` **không** lật sang khách (sẽ xoá hình chưa lưu): đặt cờ `expired`, mở popup đăng nhập lại (60s sau mới hỏi lại nếu đóng), retry của
   `DrawingSync` tự lưu tiếp sau khi đăng nhập. `/auth/me` 401 = khách, store tự xử lý, không đi qua handler này.
@@ -243,7 +244,7 @@ Tuyệt đối không PUT bản mặc định đè lên dữ liệu thật (cùn
 | U1 ✅ | Backend: bảng `users`/`sessions`, scrypt, `/auth/*`, middleware Origin, CORS credentials, giới hạn thử mật khẩu, `auth_cli`, test `backend/tests` | pytest: đăng ký/đăng nhập/đăng xuất/`me`, sai mật khẩu, trùng email, email hoa-thường, Origin lạ → 403, cookie đủ cờ, hết hạn/sliding, khoá sau 5 lần sai, đổi mật khẩu thu hồi session khác |
 | U2 ✅ | Web: `store/auth.ts`, `apiFetch` + `API` theo host, `AuthDialog`, `AccountMenu` (khách/user, **chưa** có khối MT5), Account settings | Đăng ký → đăng nhập → reload vẫn đăng nhập → Sign out; mở bằng `localhost:3000` **và** `127.0.0.1:3000` đều giữ phiên |
 | U3 ✅ | Dữ liệu theo user: `/me/watchlist` + `/me/drawings`, `memoryFetch` cho khách, gate `WatchlistPanel`, chuyển dữ liệu cũ (§5.5), đóng CRUD generic `watchlists`/`drawings` | Khách thấy nút Login/Register ở watchlist; 2 user không thấy dữ liệu nhau; dữ liệu cũ về đúng tài khoản đầu tiên; hình vẽ của khách sống qua đổi symbol nhưng không PUT |
-| U4 (backend ✅, web chưa) | Gắn vào **layout Phase 3**: `/me/layouts`, `requireLogin` cho Save + menu layout, luồng "Save → login → lưu", xử lý 401 giữa chừng, đóng CRUD generic `layouts` | Khách bấm Save → popup → sau đăng nhập layout nằm trong tài khoản; user thứ hai không thấy; hết phiên không mất bố cục |
+| U4 ✅ | Gắn vào **layout Phase 3**: `/me/layouts`, `requireLogin` cho Save + menu layout, luồng "Save → login → lưu", xử lý 401 giữa chừng, đóng CRUD generic `layouts` | Khách bấm Save → popup → sau đăng nhập layout nằm trong tài khoản; user thứ hai không thấy; hết phiên không mất bố cục |
 | U5 | Khối **Trading accounts** trong dropdown + huy hiệu Real/Demo (cùng `multi-account` Phase 2); trade `Depends(current_user)`, `requireLogin` ở Buy/Sell | Đổi account MT5 trong dropdown; khách bấm Buy/Sell chỉ ra popup đăng nhập |
 
 U1–U3 độc lập với layout và làm được ngay (không cần đợi tách pane). Làm U1–U3 **trước layout Phase 3** để layout sinh ra

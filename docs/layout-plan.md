@@ -40,9 +40,30 @@ symbol, Cmd+Z/Shift+Cmd+Z gỡ/khôi phục ở mọi ô, Maximize/Restore, kéo
 - `drawings/doc.ts` — `DrawingDoc` (§5.3): sở hữu drawings, kept, undo/redo và ĐÚNG MỘT `DrawingSync` cho mỗi (layout, symbol), đếm tham chiếu theo view; `DrawingManager`
   chỉ giữ accessor trỏ vào doc + implement `DocView` (`docChanged/docLoaded/docReset`). Đăng nhập/đăng xuất → mọi doc `reload()`. `closeAllDocs()` cho khi đổi cả layout.
 
-**Chưa có / giới hạn đã biết:** lưới KHÔNG được lưu — reload về 1 ô (pane chính vẫn nhớ symbol/khung/indicator qua `wickloom-pane1`); lưu layout là Phase 3.
-Hình Measure (ephemeral) cũng dùng chung giữa các ô cùng symbol (biến mất khi bỏ chọn). Kéo hình ở ô A chỉ cập nhật store của ô B khi thả (commit), không theo từng nhịp kéo.
-Vị trí nút Maximize và danh sách mẫu là đoán theo TV, đối chiếu ở Phase 0.
+**Phase 3 (lưu/mở layout theo tài khoản) đã code, chưa commit** (287 test web xanh; kiểm tay trên Chrome với backend scratch: khách dựng 2×2 + Save → đăng nhập → layout `default`
+lưu đúng; reload khôi phục; **tắt backend rồi reload vẫn thấy bố cục** (cache) và tự phục hồi khi backend lên; Make a copy kèm hình vẽ; Open layout (tìm kiếm, CURRENT);
+xoá layout đang mở → mở layout còn lại, không tạo lại bản vừa xoá; đăng xuất về 1 chart từ prefs khách; khách Save khi user đã có layout → layout mới "Chart <ngày giờ>",
+`default` giữ nguyên, hình vẽ của khách đi vào layout mới, toast "Mở layout của tôi"). Mô hình:
+
+- `store/layoutDoc.ts`: `LayoutDoc` v1 {version, name, templateId, tree, active, panes{chart, indicators, legendCollapsed, volume}, updatedAt}; `parseLayoutDoc` (version lạ → `version`,
+  hỏng → `invalid`: không dùng và KHÔNG ghi đè), `docKey` (bỏ `updatedAt` và `active`), `summarizeDoc` ("XAUUSDm 15 · BTCUSDm 1h").
+- `store/layoutSync.ts` `LayoutSync`: autosave một layout theo khuôn DrawingSync — debounce 1s, chỉ PUT khi `docKey` đổi, lỗi → `error` + thử lại 5s, **401 → `expired`, không retry mù**,
+  `resume()` sau đăng nhập lại, `flushOnUnload` (keepalive), `abandon()` (layout vừa xoá), version lạ → `readonly`.
+- `store/layoutSession.ts` `createLayoutSession(kv)` (singleton `appSession()` trong `store/appSession.ts`): điều phối theo auth. **Khách**: layout trong bộ nhớ, pane chính nhớ prefs ở
+  `wickloom-pane1` (chỉ khi là khách). **User**: đọc `/me/layouts`, mở layout đã nhớ (hoặc mới nhất), tạo `default` từ màn hình hiện tại nếu chưa có gì (id bị chiếm bởi bản không đọc được → uuid, không ghi đè),
+  autosave, cache `{id, doc}` ở `wickloom-layout-current:<user_id>`. **Mở nhanh**: lúc mở trang, nếu có `wickloom-auth-hint` (nay kèm `id`) và cache → áp layout cache ngay (chưa cần backend);
+  khi server trả lời: cùng bản → không dựng lại chart, máy này đã sửa lúc offline → bản trên máy thắng và được lưu lên, server khác mà máy này không sửa → lấy server; phiên đã hết → về khách.
+  Lỗi tải danh sách = `error` + thử lại, **không bao giờ PUT bản mặc định đè lên layout có sẵn**.
+- Hook của auth (`authHooks`): `beforeLogin` (quyết định layout sẽ mở TRƯỚC khi hình khách chuyển lên, để `adoptGuestDrawings(f, layoutId)` đổi `__default` → `__<layoutId>`; Save-intent → layout mới
+  nếu đã có layout, ngược lại `default`) và `beforeLogout` (lưu nốt layout trước khi xoá cookie; chưa lưu được thì huỷ đăng xuất). Hết phiên → `LayoutSync` `expired` → popup đăng nhập → `resume`.
+- Layout store: thêm `layoutId`, `name`, `revision` (đổi layout → `ChartGrid` key `<revision>:<paneId>` dựng lại mọi Chart), `applyLayout`, `setIdentity`, `snapshotLayout()`.
+  `DrawingManager` lấy `layoutId` hiện tại cho `DrawingDoc` → hình vẽ `/me/drawings/<symbol>__<layoutId>`; copy/xoá layout đi kèm hình vẽ (`__<id>`).
+- UI: `LayoutBar` (tên + trạng thái `Saved/Saving…/Save/Phiên hết hạn/Read-only`, menu Save · Rename… · Make a copy… · Create new layout… · Open layout… · Delete layout…, Ctrl/⌘+S),
+  `OpenLayoutDialog` (tìm kiếm, tóm tắt, thời gian sửa, CURRENT, xoá có xác nhận; không xoá layout cuối), `PromptDialog`. Mọi thao tác qua `requireLogin`.
+
+**Chưa có / giới hạn đã biết:** doc chưa có trường `sync` (Phase 4); layout không đọc được chỉ hiện trong danh sách, chưa mở/sửa được; hai tab cùng mở: last-write-wins; Chart không tự nạp lại dữ liệu
+giá nếu backend tắt lúc mở trang (có sẵn từ trước: `load()` không retry lỗi mạng); Ctrl+S chưa thử trên trình duyệt thật (chỉ code review: `preventDefault` + `save()`);
+vị trí nút Maximize và danh sách mẫu vẫn là đoán theo TV (Phase 0).
 
 ## 1. Hiện trạng (đọc từ code)
 
@@ -244,7 +265,7 @@ Không cần bảng mới, nhưng **không dùng CRUD generic `/layouts`** nữa
 | 0 | Chụp tham chiếu TV: popup layout (danh sách mẫu, nhãn sync), menu Save/Rename/Copy/Open, dialog Open, viền active, Maximize, hành vi Time vs Date range. Ghi `docs/tv-layout-reference.md` | Có tài liệu số đo + nhãn thật, các mục "chưa đối chiếu" ở §2 được xác nhận hoặc sửa |
 | 1 ✅ | Tách state theo pane (§5.1), vẫn 1 ô + migration state cũ (§4.4) | Hành vi y hệt trước: vẽ/undo/indicator/volume/replay/đổi symbol-khung chạy như cũ; `tsc`, lint, vitest xanh |
 | 2 ✅ | Cây chia ô + template + popup chọn + splitter + active pane + Maximize + `DrawingDoc` dùng chung (§5.2–5.3) | 2×2 mỗi ô symbol/khung riêng; vẽ ở ô A hiện ở ô B cùng symbol, undo chung, không mất hình; phím tắt/chụp ảnh chỉ tác động ô active |
-| 3 | Lưu/mở layout: `store/layout.ts`, `LayoutSync`, menu + dialog Open, autosave, Ctrl+S, khôi phục khi mở app, drawings theo layout (§4.3, §5.5), scope = user qua `/me/layouts`, chặn khách bằng `requireLogin` (= `auth-plan` U4). **Cần `auth-plan` U1–U3 xong trước** | Reload giữ nguyên bố cục + indicator; copy/xoá layout kèm drawings; tắt backend rồi reload không mất layout; khách bấm Save → popup → lưu đúng tài khoản; user B không thấy layout của A |
+| 3 ✅ | Lưu/mở layout: `store/layout.ts`, `LayoutSync`, menu + dialog Open, autosave, Ctrl+S, khôi phục khi mở app, drawings theo layout (§4.3, §5.5), scope = user qua `/me/layouts`, chặn khách bằng `requireLogin` (= `auth-plan` U4). **Cần `auth-plan` U1–U3 xong trước** | Reload giữ nguyên bố cục + indicator; copy/xoá layout kèm drawings; tắt backend rồi reload không mất layout; khách bấm Save → popup → lưu đúng tài khoản; user B không thấy layout của A |
 | 4 | Sync in layout: symbol, interval, crosshair, time, date range (§5.4) | Mỗi công tắc chạy đúng và lưu theo layout; không vòng lặp, không kích backfill hàng loạt |
 | 5 | Tuỳ chọn: Settings theo layout, Replay đa ô, kéo symbol từ watchlist vào ô, mẫu 10/12/16, visible range trong layout | Theo nhu cầu |
 | ~~A~~ | ~~Nối account MT5~~ — **bỏ**: layout theo user Wickloom, không còn phụ thuộc multi-account | — |

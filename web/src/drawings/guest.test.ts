@@ -137,6 +137,23 @@ describe("adoptGuestDrawings", () => {
     expect(s.calls).toEqual([]);
   });
 
+  it("layout đích: hình của khách ('__default') đi vào layout sẽ mở sau đăng nhập ('__<id>')", async () => {
+    await seed("XAU", { id: "d1" });
+    const s = server();
+    expect(await adoptGuestDrawings(s.f, "L2")).toBe(1);
+    expect(s.rows).toEqual({ [url("XAU").replace("__default", "__L2")]: doc({ id: "d1" }) });
+    expect(guestDocs.size()).toBe(0);
+  });
+
+  it("layout đích đã có hình ở symbol đó → server thắng, hình khách bị bỏ", async () => {
+    await seed("XAU", { id: "guest" });
+    const to = url("XAU").replace("__default", "__L2");
+    const s = server({ [to]: doc({ id: "server" }) });
+    expect(await adoptGuestDrawings(s.f, "L2")).toBe(0);
+    expect(s.rows[to]).toEqual(doc({ id: "server" }));
+    expect(s.calls.some((c) => c.startsWith("PUT"))).toBe(false);
+  });
+
   it("PUT lỗi / backend sập → giữ hình trong bộ nhớ để thử lại sau", async () => {
     await seed("XAU", { id: "d1" });
     expect(await adoptGuestDrawings(server({}, { putFails: true }).f)).toBe(0);

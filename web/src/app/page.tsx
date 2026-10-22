@@ -4,6 +4,7 @@ import AuthDialog from "@/components/auth/AuthDialog";
 import Toasts from "@/components/Toasts";
 import ChartGrid from "@/components/chart/ChartGrid";
 import DrawingSettings from "@/components/chart/DrawingSettings";
+import OpenLayoutDialog from "@/components/chart/OpenLayoutDialog";
 import SettingsDialog from "@/components/chart/SettingsDialog";
 import VolumeSettingsDialog from "@/components/chart/VolumeSettingsDialog";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
@@ -12,8 +13,8 @@ import Toolbar from "@/components/chart/Toolbar";
 import { drawingGlobal } from "@/drawings/store";
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal, useChartStore } from "@/store/chart";
-import { PRIMARY_PANE_ID, getPane } from "@/store/layout";
-import { bindPanePersistence, loadPaneInit } from "@/store/paneStorage";
+import { appSession } from "@/store/appSession";
+import { loadPaneInit } from "@/store/paneStorage";
 import { useEffect, useState } from "react";
 
 export default function Page() {
@@ -26,24 +27,19 @@ export default function Page() {
 
   useEffect(() => {
     let active = true;
-    let unbind: (() => void) | null = null;
+    let started = false;
     // Đọc state chart đã lưu (kể cả key cũ cần migrate) TRƯỚC khi các store chung rehydrate: chúng ghi lại các key cũ
     const init = loadPaneInit(localStorage);
     Promise.all([chartGlobal.persist.rehydrate(), drawingGlobal.persist.rehydrate()]).then(() => {
       if (!active) return;
-      // chart chính (symbol, tf, indicator, volume...) nạp từ localStorage rồi tự lưu khi đổi
-      unbind = bindPanePersistence(getPane(PRIMARY_PANE_ID), localStorage, {
-        init,
-        onUnload: (flush) => {
-          window.addEventListener("pagehide", flush);
-          return () => window.removeEventListener("pagehide", flush);
-        },
-      });
+      // chọn layout ban đầu (cache của user lần trước / khách), nghe đăng nhập–đăng xuất, tự lưu
+      appSession().start({ guestInit: init });
+      started = true;
       setPrefsReady(true);
     });
     return () => {
       active = false;
-      unbind?.();
+      if (started) appSession().stop();
     };
   }, []);
 
@@ -68,6 +64,7 @@ export default function Page() {
       <SettingsDialog />
       <VolumeSettingsDialog />
       <DrawingSettings />
+      <OpenLayoutDialog />
       <AuthDialog />
       <Toasts />
     </div>

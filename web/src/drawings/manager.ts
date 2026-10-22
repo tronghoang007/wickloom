@@ -16,7 +16,7 @@ import type {
 import { PriceScaleMode } from "lightweight-charts";
 import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } from "./coords";
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
-import { isActivePane } from "@/store/layout";
+import { isActivePane, useLayoutStore } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
 import { visibleOn } from "./visibility";
@@ -1127,7 +1127,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     if (symbol === this.symbol) { this.refresh(); return; }
     releaseDoc(this.doc, this); // view cuối của symbol cũ đi thì doc đó lưu nốt rồi đóng
     this.symbol = symbol;
-    this.doc = acquireDoc(symbol, this); // chart khác đang mở symbol này thì dùng chung doc (đã nạp sẵn)
+    this.doc = acquireDoc(symbol, this, useLayoutStore.getState().layoutId); // chart khác đang mở symbol này thì dùng chung doc (đã nạp sẵn)
     this.profileBars.clear();
     this.profileKeys.clear();
     this.profileVer++;

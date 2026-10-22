@@ -17,6 +17,7 @@ export default function ChartGrid() {
   const tree = useLayoutStore((s) => s.tree);
   const activeId = useLayoutStore((s) => s.activeId);
   const maximized = useLayoutStore((s) => s.maximized);
+  const revision = useLayoutStore((s) => s.revision); // mở layout khác → pane mới: dựng lại mọi Chart
   const boxRef = useRef<HTMLDivElement>(null);
   const rects = useMemo(() => paneRects(tree), [tree]);
   const lines = useMemo(() => gutters(tree), [tree]);
@@ -30,7 +31,7 @@ export default function ChartGrid() {
         // pane bị ẩn vẫn giữ nguyên kích thước (autoSize của chart không về 0) và vẫn mount
         const r = maximized !== null ? FULL : rects[id] ?? FULL;
         return (
-          <PaneFrame key={id} id={id} rect={r} hidden={hidden} multi={multi} active={id === activeId} maximized={id === maximized} />
+          <PaneFrame key={`${revision}:${id}`} id={id} rect={r} hidden={hidden} multi={multi} active={id === activeId} maximized={id === maximized} />
         );
       })}
       {maximized === null && lines.map((g) => <Splitter key={`${g.path.join(".")}/${g.index}`} g={g} boxRef={boxRef} />)}

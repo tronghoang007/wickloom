@@ -24,15 +24,18 @@ const hasItems = (doc: unknown) => Array.isArray((doc as { items?: unknown })?.i
 
 /** Vừa đăng nhập: hình vẽ của khách chuyển lên tài khoản, nhưng chỉ ở symbol mà server CHƯA có gì (server có dữ liệu thì
  *  server thắng - khách đã chọn đăng nhập vào tài khoản có sẵn). Mục nào chuyển lỗi thì giữ lại trong bộ nhớ.
+ *  Hình của khách nằm ở layout "default"; `layoutId` là layout sẽ mở sau khi đăng nhập (`__default` → `__<layoutId>`).
  *  Trả số symbol đã chuyển. */
-export async function adoptGuestDrawings(f: typeof fetch = apiFetch): Promise<number> {
+export async function adoptGuestDrawings(f: typeof fetch = apiFetch, layoutId = "default"): Promise<number> {
   let moved = 0;
+  const target = (url: string) => url.replace(/__default$/, `__${encodeURIComponent(layoutId)}`);
   for (const [url, doc] of [...docs]) {
     if (!hasItems(doc)) { docs.delete(url); continue; }
     try {
-      const got = await f(url);
+      const to = target(url);
+      const got = await f(to);
       if (got.status === 404) {
-        const put = await f(url, { method: "PUT", body: JSON.stringify(doc), headers: { "Content-Type": "application/json" } });
+        const put = await f(to, { method: "PUT", body: JSON.stringify(doc), headers: { "Content-Type": "application/json" } });
         if (!put.ok) continue;
         moved++;
       } else if (!got.ok) continue;

@@ -1,12 +1,19 @@
 import { create } from "zustand";
-import { buildTemplate, retarget, templateById, withSizes, type Node } from "./layoutTree";
+import { buildDoc, cleanName, type LayoutDoc } from "./layoutDoc";
+import { buildTemplate, paneIds, retarget, templateById, withSizes, type Node } from "./layoutTree";
 import { createPane, type Pane } from "./paneStores";
 
 // Registry các chart (pane) đang có + pane active. Toolbar, thanh vẽ, hộp tìm symbol... luôn tác động lên pane active
 // (như TradingView); chỉ Chart/DrawingManager của từng pane gắn thẳng vào store của pane đó.
 export const PRIMARY_PANE_ID = "p1";
 
+// Layout mặc định / của khách: id "default" (giữ hình vẽ cũ `<symbol>__default`, không cần migrate).
+export const DEFAULT_LAYOUT_ID = "default";
+
 type State = {
+  layoutId: string; // layout đang mở: khoá của hình vẽ `<symbol>__<layoutId>` và của `/me/layouts/<id>`
+  name: string;
+  revision: number; // tăng mỗi lần mở layout khác: ChartGrid dùng làm key để dựng lại mọi Chart với pane mới
   panes: Record<string, Pane>;
   tree: Node; // cách chia ô (store/layoutTree.ts)
   order: string[]; // id pane theo thứ tự trong cây
@@ -19,6 +26,11 @@ type State = {
   /** Kéo splitter: đổi tỉ lệ các con của nhóm tại `path`. */
   resizeAt: (path: number[], sizes: number[]) => void;
   setMaximized: (id: string | null) => void;
+  setName: (name: string) => void;
+  /** Layout hiện tại được lưu dưới id/tên mới (vd khách đăng nhập và Save): đổi khoá hình vẽ nên dựng lại các Chart. */
+  setIdentity: (layoutId: string, name: string) => void;
+  /** Mở một layout: thay toàn bộ pane/cây/tên bằng nội dung của `doc` (các Chart cũ bị huỷ, Chart mới dựng theo pane mới). */
+  applyLayout: (doc: LayoutDoc, layoutId: string) => void;
 };
 
 const exitReplayOf = (p: Pane | undefined) => {
@@ -27,6 +39,9 @@ const exitReplayOf = (p: Pane | undefined) => {
 };
 
 export const useLayoutStore = create<State>()((set, get) => ({
+  layoutId: DEFAULT_LAYOUT_ID,
+  name: "Default",
+  revision: 0,
   panes: { [PRIMARY_PANE_ID]: createPane(PRIMARY_PANE_ID) },
   tree: buildTemplate("1", [PRIMARY_PANE_ID]),
   order: [PRIMARY_PANE_ID],
@@ -72,7 +87,43 @@ export const useLayoutStore = create<State>()((set, get) => ({
     const next = id !== null && panes[id] ? id : null;
     if (next !== maximized) set({ maximized: next });
   },
+
+  setName: (name) => set({ name: cleanName(name) }),
+
+  setIdentity: (layoutId, name) =>
+    set((s) => (s.layoutId === layoutId ? { name: cleanName(name) } : { layoutId, name: cleanName(name), revision: s.revision + 1 })),
+
+  applyLayout: (doc, layoutId) => {
+    const order = paneIds(doc.tree);
+    const panes: Record<string, Pane> = {};
+    for (const id of order) {
+      const saved = doc.panes[id];
+      panes[id] = createPane(id, {
+        chart: saved.chart,
+        indicators: saved.indicators,
+        legendCollapsed: saved.legendCollapsed,
+        volume: saved.volume,
+      });
+    }
+    set((s) => ({
+      layoutId,
+      name: doc.name,
+      panes,
+      tree: doc.tree,
+      order,
+      templateId: doc.templateId,
+      activeId: order.includes(doc.active) ? doc.active : order[0],
+      maximized: null,
+      revision: s.revision + 1,
+    }));
+  },
 }));
+
+/** Document của layout đang mở (để lưu / tạo bản sao). */
+export const snapshotLayout = () => {
+  const s = useLayoutStore.getState();
+  return buildDoc({ name: s.name, templateId: s.templateId, tree: s.tree, order: s.order, panes: s.panes, activeId: s.activeId });
+};
 
 export const getPane = (id: string): Pane => useLayoutStore.getState().panes[id];
 export const activePane = (): Pane => {

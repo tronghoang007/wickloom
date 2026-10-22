@@ -1,5 +1,6 @@
 import { API } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
+import { DEFAULT_LAYOUT_ID } from "@/store/layout";
 import { drawingsFetch } from "./storage";
 import { DrawingSync } from "./sync";
 import { SPEC } from "./tools";
@@ -10,7 +11,7 @@ import type { Drawing } from "./types";
 // có type app không biết (giữ nguyên khi lưu), lịch sử undo/redo (undo theo layout như TV) và ĐÚNG MỘT DrawingSync.
 // Mỗi DrawingManager là một "view": sửa xong gọi `changed(this)` để các view khác vẽ lại.
 
-export const DEFAULT_LAYOUT_ID = "default";
+export { DEFAULT_LAYOUT_ID };
 
 export interface DocView {
   /** Hình đổi do view khác (sửa/xoá/undo). */

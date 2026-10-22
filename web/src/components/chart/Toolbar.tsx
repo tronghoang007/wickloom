@@ -12,7 +12,6 @@ import {
   BarsIcon,
   CameraI,
   Candles,
-  Chevron,
   CompareI,
   FullscreenI,
   Heikin,
@@ -29,6 +28,7 @@ import {
 } from "../icons";
 import AccountMenu from "./AccountMenu";
 import IndicatorsDialog from "./IndicatorsDialog";
+import LayoutBar from "./LayoutBar";
 import LayoutMenu from "./LayoutMenu";
 import SymbolSearchDialog from "./SymbolSearchDialog";
 import TimeframeBar from "./TimeframeBar";
@@ -180,13 +180,7 @@ export default function Toolbar() {
       <div className="flex-1" />
 
       <LayoutMenu className={iconBtn} />
-      <div className="mx-1 flex flex-col items-start leading-none">
-        <span className="text-sm font-medium">Default</span>
-        <span className="text-[10px] text-[var(--accent)]">Save</span>
-      </div>
-      <button className={`${iconBtn} w-6`} disabled>
-        <Chevron />
-      </button>
+      <LayoutBar />
       {sep}
       <button className={iconBtn} title="Settings" onClick={() => useSettingsStore.setState({ open: true })}>
         <SettingsI />

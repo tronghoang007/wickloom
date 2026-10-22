@@ -38,21 +38,32 @@ const EXPIRED_REASON = "Phiên đăng nhập hết hạn — đăng nhập lại
 const RETRY_MS = 4000;
 const REPROMPT_MS = 60_000; // đóng popup hết phiên thì 60s sau mới hỏi lại
 
-const readHint = (): string | null => {
+/** Gợi ý về lần đăng nhập trước (tên để vẽ avatar, id để mở layout đã cache khi backend chưa trả lời). */
+export const readAuthHint = (): { name: string; id: string | null } | null => {
   try {
-    return JSON.parse(localStorage.getItem(HINT_KEY) ?? "null")?.name ?? null;
+    const h = JSON.parse(localStorage.getItem(HINT_KEY) ?? "null");
+    return h && typeof h.name === "string" ? { name: h.name, id: typeof h.id === "string" ? h.id : null } : null;
   } catch {
     return null;
   }
 };
-const writeHint = (name: string | null) => {
+const readHint = (): string | null => readAuthHint()?.name ?? null;
+const writeHint = (user: User | null) => {
   try {
-    if (name) localStorage.setItem(HINT_KEY, JSON.stringify({ name }));
+    if (user) localStorage.setItem(HINT_KEY, JSON.stringify({ name: user.name, id: user.id }));
     else localStorage.removeItem(HINT_KEY);
   } catch {
     /* localStorage bị chặn: chỉ mất gợi ý avatar */
   }
 };
+
+type SessionHooks = {
+  /** Vừa xác thực xong, TRƯỚC khi hình khách chuyển lên server: trả layout sẽ mở để hình đi vào đúng layout đó. */
+  beforeLogin?: (user: User, fromGuest: boolean) => Promise<{ layoutId?: string } | void>;
+  /** Trước khi xoá cookie: lưu nốt thứ còn chờ (ném lỗi để huỷ đăng xuất nếu chưa lưu được). */
+  beforeLogout?: () => Promise<void>;
+};
+export const authHooks: SessionHooks = {};
 
 let waiters: Array<(ok: boolean) => void> = [];
 let refreshing: Promise<void> | null = null;
@@ -73,12 +84,13 @@ export const useAuthStore = create<State>()((set, get) => {
     if (fromGuest) {
       try {
         await flushAllDrawings();
-        adopted = await adoptGuestDrawings();
+        const target = await authHooks.beforeLogin?.(user, true).catch(() => undefined);
+        adopted = await adoptGuestDrawings(undefined, target?.layoutId);
       } catch {
         /* không chặn đăng nhập vì chuyển hình lỗi; hình còn trong bộ nhớ */
       }
     }
-    writeHint(user.name);
+    writeHint(user);
     set({ status: "user", user, hint: user.name, expired: false, dialog: null });
     settle(true);
     return adopted;
@@ -98,7 +110,7 @@ export const useAuthStore = create<State>()((set, get) => {
         try {
           const user = await authMe();
           if (user) {
-            writeHint(user.name);
+            writeHint(user);
             set({ status: "user", user, hint: user.name, expired: false });
           } else {
             writeHint(null);
@@ -129,6 +141,7 @@ export const useAuthStore = create<State>()((set, get) => {
     logout: async () => {
       // Lưu nốt hình vẽ khi còn cookie; cookie xoá trước thì PUT cuối cùng sẽ bị 401.
       await flushAllDrawings();
+      await authHooks.beforeLogout?.(); // layout chưa lưu được thì huỷ đăng xuất (còn cookie để lưu lại)
       await authLogout(); // lỗi thì ném ra: vẫn đăng nhập, UI báo cho người dùng
       writeHint(null);
       guestDocs.clear();
@@ -137,7 +150,7 @@ export const useAuthStore = create<State>()((set, get) => {
 
     updateName: async (name) => {
       const { user } = await authUpdateName(name);
-      writeHint(user.name);
+      writeHint(user);
       set({ user, hint: user.name });
     },
 
