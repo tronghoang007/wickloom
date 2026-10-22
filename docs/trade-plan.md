@@ -150,7 +150,7 @@ T1 làm được ngay sau Phase 2 của multi-account vì chỉ đọc. T2–T4 
 ### Trạng thái (cập nhật 2026-10-22)
 
 - **T1 xong** (commit `1e5eed5`, đã thử trên MT5 thật với EA 2.11).
-- **T2 xong phần code, chưa commit; EA 2.12 chưa chạy trên MT5 thật.** Có: widget SELL | lot | BUY dưới tiêu đề chart (giá Bid/Ask từ tick, −/+ theo
+- **T2 xong phần code (commit `d6a2309`); EA 2.12 chưa chạy trên MT5 thật.** Có: widget SELL | lot | BUY dưới tiêu đề chart (giá Bid/Ask từ tick, −/+ theo
   step, lot nhớ theo account × symbol, mờ + tooltip nói lý do khi chưa gửi được), đóng / đóng một phần trong tab Positions (bấm Close, sửa lot, OK),
   `POST /accounts/{id}/orders` + `DELETE /accounts/{id}/positions/{ticket}?volume=` (chỉ demo, backend đợi `trade_result` theo `req_id`, 10s, không tự gửi
   lại, `client_id` chống gửi lặp, một lệnh một lúc mỗi account, 20 lệnh/phút, bảng `orders_log`), EA: `TradingEnabled=false` mặc định + `AllowRealAccount`
