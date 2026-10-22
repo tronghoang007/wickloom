@@ -1,11 +1,14 @@
 "use client";
 
 import { fmtMoney, MODE_COLOR, MODE_LABEL } from "@/lib/mt5Format";
-import type { TradeData } from "@/lib/mt5Api";
+import type { Position, TradeData } from "@/lib/mt5Api";
 import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
+import { closeTrade, useOrderState } from "@/trading/actions";
 import { dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel, totalPnl } from "@/trading/format";
+import { tradeBlock, webTrading } from "@/trading/gate";
+import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
 import { useEffect, useState, type ReactNode } from "react";
 import { Chevron } from "../icons";
@@ -29,8 +32,8 @@ function useNowSec() {
   return now;
 }
 
-/** Panel Trading dưới chart (CHỈ ĐỌC, docs/trade-plan.md T1): vị thế, lệnh chờ, lịch sử, tóm tắt account MT5 đang cấp dữ liệu. Chỉ hiện khi đã đăng nhập
- *  và có account MT5 kết nối. Chưa có nút nào gửi/sửa/đóng lệnh. */
+/** Panel Trading dưới chart (docs/trade-plan.md T1-T2): vị thế, lệnh chờ, lịch sử, tóm tắt account MT5 đang cấp dữ liệu. Chỉ hiện khi đã đăng nhập
+ *  và có account MT5 kết nối. Đóng / đóng một phần vị thế ở tab Positions (chỉ account demo); lệnh chờ và sửa SL/TP chưa có (T3-T4). */
 export default function TradingPanel() {
   const status = useAuthStore((s) => s.status);
   const loaded = useMt5Store((s) => s.loaded);
@@ -120,31 +123,81 @@ function Positions({ data }: { data: TradeData }) {
     <table className="w-full text-xs tabular-nums">
       <thead>
         <tr>
-          {["Symbol", "Side", "Lot", "Entry", "SL", "TP", "Price", "P/L", "Opened"].map((h) => (
-            <th key={h} className={th}>{h}</th>
+          {["Symbol", "Side", "Lot", "Entry", "SL", "TP", "Price", "P/L", "Opened", ""].map((h, i) => (
+            <th key={i} className={th}>{h}</th>
           ))}
         </tr>
       </thead>
       <tbody>
-        {data.positions.map((p) => {
-          const d = digitsOf(p.symbol);
-          const pl = positionPnl(p);
-          return (
-            <tr key={p.ticket} className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--hover)]" onClick={() => showSymbol(p.symbol)} title="Mở symbol này trên chart">
-              <td className={`${td} font-medium`}>{p.symbol}</td>
-              <td className={`${td} ${p.type === "buy" ? "text-[#2962ff]" : "text-[#ff9800]"}`}>{sideLabel(p.type)}</td>
-              <td className={td}>{fmtLot(p.volume)}</td>
-              <td className={td}>{fmtPx(p.price_open, d)}</td>
-              <td className={td}>{fmtPx(p.sl, d, true)}</td>
-              <td className={td}>{fmtPx(p.tp, d, true)}</td>
-              <td className={td}>{fmtPx(p.price_current, d)}</td>
-              <td className={`${td} font-medium ${pnlClass(pl)}`}>{fmtPnl(pl)}</td>
-              <td className={`${td} text-[var(--muted)]`}>{fmtTime(p.time)}</td>
-            </tr>
-          );
-        })}
+        {data.positions.map((p) => (
+          <PositionRow key={p.ticket} p={p} account={data.account} />
+        ))}
       </tbody>
     </table>
+  );
+}
+
+// Một vị thế + nút Close. Bấm Close mở ô lot (mặc định cả vị thế): sửa nhỏ hơn rồi OK = đóng một phần, không bước xác nhận riêng (demo).
+function PositionRow({ p, account }: { p: Position; account: TradeData["account"] }) {
+  const d = digitsOf(p.symbol);
+  const pl = positionPnl(p);
+  const busy = useOrderState((s) => s.busy);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  // vào được lệnh đóng khi account sẵn sàng; spec/giá chỉ cần cho widget SELL/BUY
+  const block = tradeBlock({ replay: false, status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const close = () => {
+    const sym = useChartStore.getState().symbols.find((s) => s.name === p.symbol);
+    const spec = sym?.volume_min && sym.volume_step ? { min: sym.volume_min, max: p.volume, step: sym.volume_step } : null;
+    const want = spec ? normalizeLot(parseFloat(text.replace(",", ".")), spec) : p.volume;
+    setEditing(false);
+    void closeTrade(p.ticket, p.symbol, want >= p.volume - 1e-9 ? 0 : want); // 0 = đóng hết
+  };
+  return (
+    <tr className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--hover)]" onClick={() => showSymbol(p.symbol)} title="Mở symbol này trên chart">
+      <td className={`${td} font-medium`}>{p.symbol}</td>
+      <td className={`${td} ${p.type === "buy" ? "text-[#2962ff]" : "text-[#ff9800]"}`}>{sideLabel(p.type)}</td>
+      <td className={td}>{fmtLot(p.volume)}</td>
+      <td className={td}>{fmtPx(p.price_open, d)}</td>
+      <td className={td}>{fmtPx(p.sl, d, true)}</td>
+      <td className={td}>{fmtPx(p.tp, d, true)}</td>
+      <td className={td}>{fmtPx(p.price_current, d)}</td>
+      <td className={`${td} font-medium ${pnlClass(pl)}`}>{fmtPnl(pl)}</td>
+      <td className={`${td} text-[var(--muted)]`}>{fmtTime(p.time)}</td>
+      <td className={td} onClick={(e) => e.stopPropagation()}>
+        {editing ? (
+          <span className="flex items-center gap-1">
+            <input
+              autoFocus
+              aria-label="Close lot"
+              inputMode="decimal"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") close();
+                else if (e.key === "Escape") setEditing(false);
+              }}
+              className="w-14 rounded border border-[var(--border)] bg-transparent px-1 py-0.5 text-center"
+            />
+            <button className="rounded bg-[#f23645] px-1.5 py-0.5 text-white hover:brightness-110" onClick={close}>OK</button>
+            <button className="px-1 text-[var(--muted)] hover:text-[var(--fg)]" aria-label="Cancel" onClick={() => setEditing(false)}>✕</button>
+          </span>
+        ) : (
+          <button
+            className="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)] disabled:opacity-40"
+            disabled={block !== null || busy}
+            title={block ?? "Đóng vị thế (sửa lot để đóng một phần)"}
+            onClick={() => {
+              setText(fmtLot(p.volume));
+              setEditing(true);
+            }}
+          >
+            Close
+          </button>
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -225,6 +278,7 @@ function AccountInfo({ data }: { data: TradeData }) {
     ["Leverage", a.leverage ? `1:${a.leverage}` : "—"],
     ["Margin mode", a.margin_mode ? a.margin_mode[0].toUpperCase() + a.margin_mode.slice(1) : "—"],
     ["Login", a.login ? `#${a.login} · ${a.server}` : a.server],
+    ["Web trading", webTrading(a)],
   ];
   const warn =
     a.terminal_trade_allowed === false
@@ -242,7 +296,7 @@ function AccountInfo({ data }: { data: TradeData }) {
           </div>
         ))}
       </div>
-      {warn && <div className="mt-3 text-xs text-[#d69a00]">{warn} (App hiện chỉ đọc: chưa gửi lệnh.)</div>}
+      {warn && <div className="mt-3 text-xs text-[#d69a00]">{warn}</div>}
     </div>
   );
 }

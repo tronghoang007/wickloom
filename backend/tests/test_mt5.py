@@ -235,7 +235,7 @@ def test_account_message_margin_and_permissions():
     assert a["margin_mode"] == "hedging" and a["trade_allowed"] is True
 
 
-def test_trade_endpoint_needs_login_404_and_is_read_only():
+def test_trade_state_endpoint_needs_login_404_and_is_read_only():
     c = TestClient(app, headers=ORIGIN)
     aid = mt5.registry.register(W(), HELLO)
     assert c.get(f"/accounts/{aid}/trade").status_code == 401  # có vị thế + số dư: khách không xem được
@@ -243,9 +243,8 @@ def test_trade_endpoint_needs_login_404_and_is_read_only():
     assert c.get("/accounts/khong-co/trade").status_code == 404
     body = c.get(f"/accounts/{aid}/trade").json()
     assert body["account"]["id"] == aid and body["positions"] == [] and body["orders"] == [] and body["deals"] == []
-    for method in ("post", "put", "patch", "delete"):  # T1 không có đường nào để gửi/sửa lệnh
+    for method in ("post", "put", "patch", "delete"):  # /trade chỉ đọc; gửi lệnh có đường riêng (tests/test_trade.py)
         assert getattr(c, method)(f"/accounts/{aid}/trade").status_code in (404, 405)
-        assert getattr(c, method)(f"/accounts/{aid}/orders").status_code in (404, 405)
 
 
 def test_tcp_ea_sends_trade_state_end_to_end():

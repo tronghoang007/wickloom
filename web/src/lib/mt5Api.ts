@@ -21,6 +21,9 @@ export type Mt5Account = {
   margin_mode?: "netting" | "hedging" | "exchange";
   trade_allowed?: boolean; // account cho phép giao dịch (investor password thì false)
   terminal_trade_allowed?: boolean; // nút Algo Trading của MT5 đang bật
+  ea_trading?: boolean; // EA bật TradingEnabled (EA >= 2.12); thiếu = EA cũ, coi như chưa bật
+  max_lot?: number; // MaxLotPerOrder của EA
+  ea_version?: string;
   online: boolean;
   active: boolean; // account đang cấp dữ liệu (hoặc vừa cấp gần nhất khi offline)
   seen: number;

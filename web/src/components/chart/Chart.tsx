@@ -12,6 +12,7 @@ import { isActivePane, useLayoutStore } from "@/store/layout";
 import { usePaneState } from "@/store/compose";
 import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
 import { tradeLines } from "@/trading/format";
+import { useQuoteStore } from "@/trading/quote";
 import { useTradeStore } from "@/trading/store";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
@@ -47,6 +48,7 @@ import InlineTextEditor from "./InlineTextEditor";
 import ReplayBar from "./ReplayBar";
 import { SymbolBadge } from "./SymbolSearchDialog";
 import StylePanel from "./StylePanel";
+import TradeWidget from "./TradeWidget";
 import VolumeLegend, { volumeMenuItems } from "./VolumeLegend";
 import { heikinAshi } from "./transform";
 
@@ -1253,6 +1255,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           upsert(m.bar);
         } else if (m.type === "tick" && m.symbol === symbol) {
           tickRef.current = { bid: m.bid, ask: m.ask };
+          useQuoteStore.getState().set(symbol, m.bid, m.ask);
           const price = m.bid || m.last;
           if (price > 0 && barsRef.current.length > 0) {
             const last = barsRef.current[barsRef.current.length - 1];
@@ -1536,6 +1539,7 @@ export default function Chart({ paneId }: { paneId: string }) {
               </span>
             )}
           </div>
+          <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />
           {!legendCollapsed && (
             <VolumeLegend
               getBars={() => barsRef.current}

@@ -3,7 +3,7 @@ import json
 import time
 from typing import Any, Dict
 
-from . import mt5, state
+from . import mt5, state, trade
 from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN
 from .models import BarsIn, SymbolsIn, TicksIn
 
@@ -147,6 +147,8 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
                     mt5.registry.update(writer, msg)
                 elif mtype in ("trade", "deals"):
                     mt5.registry.update_trade(writer, msg)
+                elif mtype == "trade_result":
+                    trade.broker.resolve(msg, mt5.registry.account_of(writer))
             except Exception as exc:
                 print(f"TVBridge {peer}: loi xu ly '{mtype}': {exc}")
     except (asyncio.IncompleteReadError, ConnectionResetError):

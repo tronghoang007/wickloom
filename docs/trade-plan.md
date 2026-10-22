@@ -147,6 +147,18 @@ Móc vào chỗ đã có:
 
 T1 làm được ngay sau Phase 2 của multi-account vì chỉ đọc. T2–T4 chỉ chạy với account `mode = demo` cho tới T5.
 
+### Trạng thái (cập nhật 2026-10-22)
+
+- **T1 xong** (commit `1e5eed5`, đã thử trên MT5 thật với EA 2.11).
+- **T2 xong phần code, chưa commit; EA 2.12 chưa chạy trên MT5 thật.** Có: widget SELL | lot | BUY dưới tiêu đề chart (giá Bid/Ask từ tick, −/+ theo
+  step, lot nhớ theo account × symbol, mờ + tooltip nói lý do khi chưa gửi được), đóng / đóng một phần trong tab Positions (bấm Close, sửa lot, OK),
+  `POST /accounts/{id}/orders` + `DELETE /accounts/{id}/positions/{ticket}?volume=` (chỉ demo, backend đợi `trade_result` theo `req_id`, 10s, không tự gửi
+  lại, `client_id` chống gửi lặp, một lệnh một lúc mỗi account, 20 lệnh/phút, bảng `orders_log`), EA: `TradingEnabled=false` mặc định + `AllowRealAccount`
+  + `MaxLotPerOrder` + `OrderCheck` trước `OrderSend`, `symbols` báo thêm volume_min/max/step.
+- Khác plan ban đầu: đóng vị thế dùng `DELETE …?volume=` (query thay vì body); chưa có endpoint `orders/check` riêng (OrderCheck chạy ngay trong EA,
+  endpoint riêng làm cùng ticket ở T3); chưa có hộp xác nhận cho demo (bấm là gửi, như TV mặc định); kết quả của sàn trả HTTP 200 với `ok=false` + `message`.
+- Để bật: gắn EA 2.12 với `TradingEnabled = true` (và "Allow Algo Trading") trên account **demo**; real vẫn bị chặn ở cả web, backend và EA.
+
 ## 8. An toàn cho real
 
 - `TradingEnabled = false` mặc định; real phải bật tay **ở EA**, web không bật hộ được.

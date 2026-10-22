@@ -28,6 +28,13 @@ class SymbolInfo(BaseModel):
     type: str = "forex"
     description: str = ""
     broker: str = ""
+    # Thông số giao dịch (EA >= 2.12); None = EA cũ không báo -> web không đoán min/step của symbol
+    volume_min: Optional[float] = None
+    volume_max: Optional[float] = None
+    volume_step: Optional[float] = None
+    contract_size: Optional[float] = None
+    stops_level: Optional[int] = None
+    freeze_level: Optional[int] = None
 
 
 class SymbolsIn(BaseModel):

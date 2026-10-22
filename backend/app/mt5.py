@@ -1,6 +1,6 @@
 """Account MT5 mà các EA TVBridge báo lên: `hello` (login, tên, demo/real, tiền tệ), thông điệp `account` định kỳ
-(balance/equity/margin) và trạng thái giao dịch CHỈ ĐỌC (`trade`: vị thế + lệnh chờ, `deals`: lịch sử khớp lệnh).
-Chỉ lưu trong bộ nhớ: EA tự báo lại mỗi lần kết nối. Không bao giờ có mật khẩu account. (docs/trade-plan.md T1)
+(balance/equity/margin) và trạng thái giao dịch (`trade`: vị thế + lệnh chờ, `deals`: lịch sử khớp lệnh). Gửi lệnh xuống EA nằm ở
+trade.py (T2). Chỉ lưu trong bộ nhớ: EA tự báo lại mỗi lần kết nối. Không bao giờ có mật khẩu account. (docs/trade-plan.md T1-T2)
 
 Backend hiện chỉ có MỘT nguồn dữ liệu một lúc (`state.ea_hub` từ chối EA thứ 2 khác server) nên danh sách thường có đúng 1 account;
 registry khoá theo `server:login` để khi backend đa nguồn (docs/multi-account-plan.md Phase 1) thì không phải đổi hình dạng dữ liệu.
@@ -116,10 +116,15 @@ class Mt5Registry:
             v = _num(msg.get(k))
             if v is not None:
                 info[k] = v
-        for k in ("trade_allowed", "terminal_trade_allowed"):  # EA có quyền giao dịch không (T1: chỉ để hiện, chưa có trade)
+        for k in ("trade_allowed", "terminal_trade_allowed", "ea_trading"):  # EA có quyền giao dịch không; ea_trading = input TradingEnabled
             v = _flag(msg.get(k))
             if v is not None:
                 info[k] = v
+        v = _num(msg.get("max_lot"))  # MaxLotPerOrder của EA
+        if v is not None and v >= 0:
+            info["max_lot"] = v
+        if isinstance(msg.get("ea_version"), str):
+            info["ea_version"] = _str(msg["ea_version"], 16)
         if msg.get("margin_mode") in MARGIN_MODES:
             info["margin_mode"] = msg["margin_mode"]
         info["seen"] = self.clock()
@@ -147,6 +152,16 @@ class Mt5Registry:
     def remove(self, writer: Any) -> None:
         self._by_writer.pop(writer, None)
 
+    def info(self, aid: str) -> Optional[Dict[str, Any]]:
+        return self._info.get(aid)
+
+    def account_of(self, writer: Any) -> Optional[str]:
+        return self._by_writer.get(writer)
+
+    def writer(self, aid: str) -> Optional[Any]:
+        """Kết nối EA đang online của account `aid` (None nếu offline) - nơi gửi lệnh giao dịch xuống."""
+        return next((w for w, a in self._by_writer.items() if a == aid), None)
+
     def snapshot(self) -> List[Dict[str, Any]]:
         """Online trước, rồi theo lần thấy gần nhất. `active` = account đang cấp dữ liệu (hoặc vừa cấp gần nhất khi offline)."""
         online = set(self._by_writer.values())
@@ -172,7 +187,7 @@ def list_accounts(_user=Depends(current_user)):
 
 @router.get("/accounts/{account_id}/trade")
 def account_trade(account_id: str, _user=Depends(current_user)):
-    """CHỈ ĐỌC: vị thế, lệnh chờ, lịch sử khớp lệnh gần đây của account + tóm tắt account. Không có endpoint gửi/sửa lệnh (docs/trade-plan.md T2+).
+    """Vị thế, lệnh chờ, lịch sử khớp lệnh gần đây của account + tóm tắt account (endpoint chỉ đọc; gửi/đóng lệnh ở trade.py).
     `updated_at` = lúc EA báo vị thế/lệnh lần cuối (None nếu chưa báo); account offline thì dữ liệu là bản cuối cùng (UI phải đánh dấu cũ)."""
     t = registry.trade(account_id)
     if t is None:

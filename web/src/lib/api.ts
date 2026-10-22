@@ -1,5 +1,10 @@
 export type Bar = { t: number; o: number; h: number; l: number; c: number; v: number };
-export type SymbolInfo = { name: string; digits: number; tick_size: number; type: string; description?: string; broker?: string };
+export type SymbolInfo = {
+  name: string; digits: number; tick_size: number; type: string; description?: string; broker?: string;
+  // thông số giao dịch (EA >= 2.12); null/thiếu = EA cũ chưa báo
+  volume_min?: number | null; volume_max?: number | null; volume_step?: number | null;
+  contract_size?: number | null; stops_level?: number | null; freeze_level?: number | null;
+};
 
 export const TF_SECONDS: Record<string, number> = {
   M1: 60, M2: 120, M3: 180, M4: 240, M5: 300, M6: 360, M10: 600, M12: 720, M15: 900, M20: 1200, M30: 1800,

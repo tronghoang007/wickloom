@@ -36,14 +36,21 @@
 //|   "deals" (lịch sử khớp lệnh DealsDays ngày, tối đa MaxDeals),   |
 //|   "account" thêm margin/margin_level/margin_mode/trade_allowed.  |
 //|   KHÔNG có code gửi/sửa/đóng lệnh trong EA                       |
+//| - 2.12: GIAO DỊCH từ web (docs/trade-plan.md T2): "order_send"   |
+//|   (Buy/Sell market + SL/TP) và "position_close" (đóng/đóng một   |
+//|   phần), trả "trade_result". MẶC ĐỊNH TẮT (TradingEnabled=false);|
+//|   account không phải demo bị từ chối trừ khi AllowRealAccount.   |
+//|   Luôn OrderCheck trước OrderSend. "symbols" thêm volume_min/    |
+//|   max/step, contract_size, stops_level, freeze_level; "account"  |
+//|   thêm ea_trading/max_lot/ea_version                             |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.11"
+#property version "2.12"
 
-#define EA_VERSION "2.11"
+#define EA_VERSION "2.12"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -53,6 +60,13 @@ input int BackfillChunk = 5000;
 input int MaxTicksPerCall = 2000;
 input int DealsDays = 30;  // lich su deal gui len web (chi doc)
 input int MaxDeals = 200;
+
+input group "Giao dich tu web (mac dinh TAT)"
+input bool TradingEnabled = false;   // cho phep web dat/dong lenh qua EA nay
+input bool AllowRealAccount = false; // khoa them: account KHONG phai demo chi duoc giao dich khi bat cai nay
+input int MagicNumber = 20261022;    // magic cua lenh do app dat (phan biet voi lenh tay / EA khac)
+input double MaxLotPerOrder = 1.0;   // EA tu choi lenh lon hon, ke ca khi web gui sai
+input int Deviation = 100;           // truot gia toi da (diem) cho lenh market
 
 int g_sock = INVALID_HANDLE;
 string g_rx = "";
@@ -220,7 +234,10 @@ void PostAccount()
             + ",\"profit\":" + DoubleToString(AccountInfoDouble(ACCOUNT_PROFIT), 2)
             + ",\"margin_mode\":\"" + MarginMode() + "\""
             + ",\"trade_allowed\":" + JsonBool(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) != 0)
-            + ",\"terminal_trade_allowed\":" + JsonBool(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) != 0) + "}";
+            + ",\"terminal_trade_allowed\":" + JsonBool(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) != 0)
+            + ",\"ea_trading\":" + JsonBool(TradingEnabled)
+            + ",\"max_lot\":" + DoubleToString(MaxLotPerOrder, 2)
+            + ",\"ea_version\":\"" + EA_VERSION + "\"}";
   SendLine(js);
 }
 
@@ -421,7 +438,13 @@ void PostSymbols()
     string s = SymbolName(i, false);
     if (i > 0)
       js += ",";
-    js += "{\"name\":\"" + Esc(s) + "\",\"digits\":" + IntegerToString((int)SymbolInfoInteger(s, SYMBOL_DIGITS)) + ",\"tick_size\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_TRADE_TICK_SIZE), 10) + ",\"type\":\"" + SymbolType(s) + "\",\"description\":\"" + Esc(SymbolInfoString(s, SYMBOL_DESCRIPTION)) + "\",\"broker\":\"" + Esc(broker) + "\"}";
+    js += "{\"name\":\"" + Esc(s) + "\",\"digits\":" + IntegerToString((int)SymbolInfoInteger(s, SYMBOL_DIGITS)) + ",\"tick_size\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_TRADE_TICK_SIZE), 10) + ",\"type\":\"" + SymbolType(s) + "\",\"description\":\"" + Esc(SymbolInfoString(s, SYMBOL_DESCRIPTION)) + "\",\"broker\":\"" + Esc(broker) + "\""
+        + ",\"volume_min\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_VOLUME_MIN), 8)
+        + ",\"volume_max\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_VOLUME_MAX), 8)
+        + ",\"volume_step\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_VOLUME_STEP), 8)
+        + ",\"contract_size\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_TRADE_CONTRACT_SIZE), 8)
+        + ",\"stops_level\":" + IntegerToString((int)SymbolInfoInteger(s, SYMBOL_TRADE_STOPS_LEVEL))
+        + ",\"freeze_level\":" + IntegerToString((int)SymbolInfoInteger(s, SYMBOL_TRADE_FREEZE_LEVEL)) + "}";
   }
   js += "]}";
   SendLine(js);
@@ -673,12 +696,213 @@ void Backfill(string symbol, string tfs, int count, int start_pos = 0, long befo
   PrintFormat("Backfill %s %s: %d bar (pos %d, before %s)", symbol, tfs, total, start_pos, IntegerToString(before));
 }
 
+//--- giao dich tu web (T2): market Buy/Sell + dong vi the -------------------
+double JsonDbl(string obj, string key)
+{
+  int p = StringFind(obj, "\"" + key + "\"");
+  if (p < 0)
+    return 0;
+  p = StringFind(obj, ":", p) + 1;
+  while (p < StringLen(obj) && StringGetCharacter(obj, p) == ' ')
+    p++;
+  int e = p;
+  while (e < StringLen(obj))
+  {
+    ushort ch = StringGetCharacter(obj, e);
+    if ((ch < '0' || ch > '9') && ch != '-' && ch != '.' && ch != 'e' && ch != 'E' && ch != '+')
+      break;
+    e++;
+  }
+  return StringToDouble(StringSubstr(obj, p, e - p));
+}
+
+// Ket qua cho backend: ok=true khi san da khop (retcode 10009/10010/10008); reason = ma loi cua EA (backend dich sang tieng Viet)
+void SendTradeResult(string req, bool ok, uint retcode, string reason, string comment, ulong order = 0, ulong deal = 0, double price = 0, double volume = 0)
+{
+  SendLine("{\"type\":\"trade_result\",\"req_id\":\"" + Esc(req) + "\",\"ok\":" + JsonBool(ok)
+           + ",\"retcode\":" + IntegerToString((long)retcode) + ",\"reason\":\"" + Esc(reason) + "\",\"comment\":\"" + Esc(comment) + "\""
+           + ",\"order\":" + IntegerToString((long)order) + ",\"deal\":" + IntegerToString((long)deal)
+           + ",\"price\":" + DoubleToString(price, 8) + ",\"volume\":" + DoubleToString(volume, 8) + "}");
+}
+
+// "" = duoc phep giao dich; nguoc lai tra ma ly do (khop voi bang dich cua backend/app/trade.py)
+string TradeGuard()
+{
+  if (!TradingEnabled)
+    return "ea_trading_off";
+  if ((ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE) != ACCOUNT_TRADE_MODE_DEMO && !AllowRealAccount)
+    return "real_blocked";
+  if (!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+    return "terminal_trade_off";
+  if (!MQLInfoInteger(MQL_TRADE_ALLOWED))
+    return "ea_trade_off";
+  if (!AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+    return "account_trade_off";
+  if (!AccountInfoInteger(ACCOUNT_TRADE_EXPERT))
+    return "expert_not_allowed";
+  return "";
+}
+
+ENUM_ORDER_TYPE_FILLING FillingFor(string sym)
+{
+  long m = SymbolInfoInteger(sym, SYMBOL_FILLING_MODE);
+  if ((m & SYMBOL_FILLING_FOK) != 0)
+    return ORDER_FILLING_FOK;
+  if ((m & SYMBOL_FILLING_IOC) != 0)
+    return ORDER_FILLING_IOC;
+  return ORDER_FILLING_RETURN;
+}
+
+// Khoi luong hop le theo min/max/step cua symbol (tra "" neu duoc, nguoc lai ma loi)
+string CheckVolume(string sym, double vol)
+{
+  double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+  double vmin = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+  double vmax = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+  if (vol <= 0 || vol < vmin - 1e-9 || vol > vmax + 1e-9)
+    return "bad_volume";
+  if (step > 0 && MathAbs(vol / step - MathRound(vol / step)) > 1e-6)
+    return "bad_volume";
+  if (vol > MaxLotPerOrder + 1e-9)
+    return "lot_over_limit";
+  return "";
+}
+
+// OrderCheck truoc OrderSend: bat loi margin/stops/volume ma khong gui lenh that
+void ExecuteRequest(string req, MqlTradeRequest &rq)
+{
+  MqlTradeCheckResult ck;
+  ZeroMemory(ck);
+  ResetLastError();
+  bool passed = OrderCheck(rq, ck);
+  if (!passed || (ck.retcode != 0 && ck.retcode != TRADE_RETCODE_DONE))
+  {
+    PrintFormat("TVBridge: [trade] OrderCheck tu choi %s %s %.2f: retcode %u (%s)", rq.symbol, EnumToString(rq.type), rq.volume, ck.retcode, ck.comment);
+    SendTradeResult(req, false, ck.retcode, "check_failed", ck.comment);
+    return;
+  }
+  MqlTradeResult res;
+  ZeroMemory(res);
+  bool sent = OrderSend(rq, res);
+  bool done = sent && (res.retcode == TRADE_RETCODE_DONE || res.retcode == TRADE_RETCODE_DONE_PARTIAL || res.retcode == TRADE_RETCODE_PLACED);
+  PrintFormat("TVBridge: [trade] %s %s %.2f -> retcode %u deal %I64u order %I64u price %.5f (%s)", rq.symbol, EnumToString(rq.type), rq.volume,
+              res.retcode, res.deal, res.order, res.price, res.comment);
+  SendTradeResult(req, done, res.retcode, done ? "" : "rejected", res.comment, res.order, res.deal, res.price, res.volume);
+}
+
+void HandleOrderSend(string line)
+{
+  string req = JsonStr(line, "req_id");
+  string sym = JsonStr(line, "symbol");
+  string side = JsonStr(line, "side");
+  double vol = JsonDbl(line, "volume");
+  double sl = JsonDbl(line, "sl");
+  double tp = JsonDbl(line, "tp");
+  string cid = JsonStr(line, "client_id");
+
+  string why = TradeGuard();
+  if (why != "")
+  {
+    SendTradeResult(req, false, 0, why, "");
+    return;
+  }
+  if ((side != "buy" && side != "sell") || sym == "" || !SymbolSelect(sym, true))
+  {
+    SendTradeResult(req, false, 0, "bad_request", "");
+    return;
+  }
+  why = CheckVolume(sym, vol);
+  if (why != "")
+  {
+    SendTradeResult(req, false, 0, why, "");
+    return;
+  }
+  MqlTick tick;
+  if (!SymbolInfoTick(sym, tick) || tick.ask <= 0 || tick.bid <= 0)
+  {
+    SendTradeResult(req, false, 0, "no_quote", "");
+    return;
+  }
+  int dg = PriceDigits(sym);
+  bool buy = (side == "buy");
+  MqlTradeRequest rq;
+  ZeroMemory(rq);
+  rq.action = TRADE_ACTION_DEAL;
+  rq.symbol = sym;
+  rq.volume = vol;
+  rq.type = buy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+  rq.price = NormalizeDouble(buy ? tick.ask : tick.bid, dg);
+  rq.sl = sl > 0 ? NormalizeDouble(sl, dg) : 0;
+  rq.tp = tp > 0 ? NormalizeDouble(tp, dg) : 0;
+  rq.deviation = Deviation;
+  rq.magic = MagicNumber;
+  rq.comment = StringSubstr("wl:" + cid, 0, 31); // MT5 gioi han comment 31 ky tu
+  rq.type_filling = FillingFor(sym);
+  ExecuteRequest(req, rq);
+}
+
+// Dong vi the theo ticket; volume = 0 -> dong het, khac 0 -> dong mot phan
+void HandlePositionClose(string line)
+{
+  string req = JsonStr(line, "req_id");
+  ulong ticket = (ulong)JsonInt(line, "ticket");
+  double vol = JsonDbl(line, "volume");
+
+  string why = TradeGuard();
+  if (why != "")
+  {
+    SendTradeResult(req, false, 0, why, "");
+    return;
+  }
+  if (ticket == 0 || !PositionSelectByTicket(ticket))
+  {
+    SendTradeResult(req, false, 0, "no_position", "");
+    return;
+  }
+  string sym = PositionGetString(POSITION_SYMBOL);
+  double have = PositionGetDouble(POSITION_VOLUME);
+  bool wasBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+  if (vol <= 0 || vol > have)
+    vol = have;
+  double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+  double vmin = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+  if (vol < vmin - 1e-9 || (step > 0 && MathAbs(vol / step - MathRound(vol / step)) > 1e-6))
+  {
+    SendTradeResult(req, false, 0, "bad_volume", "");
+    return;
+  }
+  MqlTick tick;
+  if (!SymbolInfoTick(sym, tick) || tick.ask <= 0 || tick.bid <= 0)
+  {
+    SendTradeResult(req, false, 0, "no_quote", "");
+    return;
+  }
+  int dg = PriceDigits(sym);
+  MqlTradeRequest rq;
+  ZeroMemory(rq);
+  rq.action = TRADE_ACTION_DEAL;
+  rq.position = ticket;
+  rq.symbol = sym;
+  rq.volume = vol;
+  rq.type = wasBuy ? ORDER_TYPE_SELL : ORDER_TYPE_BUY; // dong = lenh nguoc chieu
+  rq.price = NormalizeDouble(wasBuy ? tick.bid : tick.ask, dg);
+  rq.deviation = Deviation;
+  rq.magic = MagicNumber;
+  rq.comment = "wl:close";
+  rq.type_filling = FillingFor(sym);
+  ExecuteRequest(req, rq);
+}
+
 //--- nhận lệnh từ backend ---------------------------------------------
 void HandleCommand(string line)
 {
   string type = JsonStr(line, "type");
   if (type == "need_symbols")
     PostSymbols();
+  else if (type == "order_send")
+    HandleOrderSend(line);
+  else if (type == "position_close")
+    HandlePositionClose(line);
   else if (type == "subscribe")
     ApplySubscribe(JsonArray(line, "symbols"));
   else if (type == "backfill")

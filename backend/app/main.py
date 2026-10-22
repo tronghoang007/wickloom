@@ -1,10 +1,12 @@
 import asyncio
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from . import accounts, auth, me, mt5, state, tcp_server
+from . import accounts, auth, me, mt5, state, tcp_server, trade
 from .config import ALLOWED_ORIGINS, TF_SECONDS
 from .state import request_backfill
 from .store import TABLES
@@ -16,9 +18,18 @@ app.add_middleware(
     CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(_request: Request, exc: RequestValidationError):
+    """422 gọn, không đính kèm `input`: body có NaN/Infinity (json.loads của Python nhận) làm handler mặc định ném ValueError khi encode lại -> 500."""
+    return JSONResponse({"detail": [{"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")} for e in exc.errors()]}, status_code=422)
+
+
 app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(mt5.router)
+app.include_router(trade.router)
 
 
 def _push_subscribe() -> None:
