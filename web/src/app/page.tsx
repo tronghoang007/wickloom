@@ -2,7 +2,10 @@
 
 import AuthDialog from "@/components/auth/AuthDialog";
 import Toasts from "@/components/Toasts";
-import Chart from "@/components/chart/Chart";
+import ChartGrid from "@/components/chart/ChartGrid";
+import DrawingSettings from "@/components/chart/DrawingSettings";
+import SettingsDialog from "@/components/chart/SettingsDialog";
+import VolumeSettingsDialog from "@/components/chart/VolumeSettingsDialog";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
 import RightRail from "@/components/chart/RightRail";
 import Toolbar from "@/components/chart/Toolbar";
@@ -57,10 +60,14 @@ export default function Page() {
       <div className="flex min-h-0 flex-1">
         <DrawingToolbar />
         <main className="min-w-0 flex-1">
-          <Chart paneId={PRIMARY_PANE_ID} />
+          <ChartGrid />
         </main>
         <RightRail />
       </div>
+      {/* hộp thoại dùng chung: một bản cho cả trang, nhắm vào chart đang active */}
+      <SettingsDialog />
+      <VolumeSettingsDialog />
+      <DrawingSettings />
       <AuthDialog />
       <Toasts />
     </div>

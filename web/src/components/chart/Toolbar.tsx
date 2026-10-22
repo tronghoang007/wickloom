@@ -17,7 +17,6 @@ import {
   FullscreenI,
   Heikin,
   IndicatorsI,
-  LayoutI,
   LineIcon,
   MoonI,
   PlusCircle,
@@ -30,6 +29,7 @@ import {
 } from "../icons";
 import AccountMenu from "./AccountMenu";
 import IndicatorsDialog from "./IndicatorsDialog";
+import LayoutMenu from "./LayoutMenu";
 import SymbolSearchDialog from "./SymbolSearchDialog";
 import TimeframeBar from "./TimeframeBar";
 
@@ -179,9 +179,7 @@ export default function Toolbar() {
 
       <div className="flex-1" />
 
-      <button className={iconBtn} disabled title="Layout (sắp có)">
-        <LayoutI />
-      </button>
+      <LayoutMenu className={iconBtn} />
       <div className="mx-1 flex flex-col items-start leading-none">
         <span className="text-sm font-medium">Default</span>
         <span className="text-[10px] text-[var(--accent)]">Save</span>

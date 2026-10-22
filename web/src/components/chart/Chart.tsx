@@ -38,16 +38,13 @@ import {
   type MouseEvent as RMouseEvent,
 } from "react";
 import ChartContextMenu, { type MenuItem } from "./ChartContextMenu";
-import DrawingSettings from "./DrawingSettings";
 import { drawingMenuItems } from "./drawingMenu";
 import FavoritesBar from "./FavoritesBar";
 import InlineTextEditor from "./InlineTextEditor";
 import ReplayBar from "./ReplayBar";
 import { SymbolBadge } from "./SymbolSearchDialog";
 import StylePanel from "./StylePanel";
-import SettingsDialog from "./SettingsDialog";
 import VolumeLegend, { volumeMenuItems } from "./VolumeLegend";
-import VolumeSettingsDialog from "./VolumeSettingsDialog";
 import { heikinAshi } from "./transform";
 
 
@@ -220,6 +217,7 @@ function mergeBars(cur: Bar[], add: Bar[], liveT: number) {
 export default function Chart({ paneId }: { paneId: string }) {
   // Chart gắn thẳng vào store của pane mình (không qua facade "pane đang active" của UI ngoài)
   const pane = useLayoutStore((s) => s.panes[paneId]);
+  const isActive = useLayoutStore((s) => s.activeId === paneId); // thanh nổi (style, favorites, soạn text) chỉ hiện ở chart active
   const { symbol, tf, chartType, scaleMode } = usePaneState(pane.chart);
   const theme = useChartStore((s) => s.theme);
   const symDigits = useChartStore(
@@ -1320,7 +1318,6 @@ export default function Chart({ paneId }: { paneId: string }) {
     >
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
-        <SettingsDialog />
         {ctxMenu && (
           <ChartContextMenu
             x={ctxMenu.x}
@@ -1451,11 +1448,13 @@ export default function Chart({ paneId }: { paneId: string }) {
             )}
           </div>
         </div>
-        <FavoritesBar />
-        <StylePanel />
-        <InlineTextEditor />
-        <DrawingSettings />
-        <VolumeSettingsDialog />
+        {isActive && (
+          <>
+            <FavoritesBar />
+            <StylePanel />
+            <InlineTextEditor />
+          </>
+        )}
         {selecting && (
           <div
             className="absolute inset-y-0 left-0 z-30 cursor-pointer"

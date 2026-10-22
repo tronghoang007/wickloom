@@ -3,7 +3,7 @@ import { indicatorGlobal, useIndicatorStore } from "@/indicators/store";
 import { exitReplay, useReplayStore } from "@/replay/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chartGlobal, useChartStore } from "./chart";
-import { PRIMARY_PANE_ID, allPanes, flushAllDrawings, getPane, isActivePane, useLayoutStore } from "./layout";
+import { PRIMARY_PANE_ID, flushAllDrawings, getPane, isActivePane, useLayoutStore } from "./layout";
 import { DEFAULT_CHART, DEFAULT_VOLUME, applyPaneInit, createPane, snapshotPane } from "./paneStores";
 import { PANE_KEY, bindPanePersistence, loadPaneInit, parsePaneInit } from "./paneStorage";
 import { useVolumeStore } from "./volume";
@@ -11,11 +11,12 @@ import { useVolumeStore } from "./volume";
 const p1 = () => getPane(PRIMARY_PANE_ID);
 
 beforeEach(() => {
-  useLayoutStore.getState().add("p2", { chart: { symbol: "EURUSD", tf: "H1" } });
+  useLayoutStore.getState().setTemplate("2-cols");
+  getPane("p2").chart.setState({ symbol: "EURUSD", tf: "H1" });
 });
 afterEach(() => {
   useLayoutStore.getState().setActive(PRIMARY_PANE_ID);
-  useLayoutStore.getState().remove("p2");
+  useLayoutStore.getState().setTemplate("1");
   p1().chart.setState(DEFAULT_CHART);
   p1().indicators.setState({ list: [], collapsed: false });
   p1().volume.setState({ s: DEFAULT_VOLUME });
@@ -91,14 +92,6 @@ describe("pane active + facade", () => {
     expect(useLayoutStore.getState().activeId).toBe(PRIMARY_PANE_ID);
   });
 
-  it("xoá pane đang active thì active về pane đầu; không xoá được pane chính", () => {
-    useLayoutStore.getState().setActive("p2");
-    useLayoutStore.getState().remove("p2");
-    expect(useLayoutStore.getState().activeId).toBe(PRIMARY_PANE_ID);
-    useLayoutStore.getState().remove(PRIMARY_PANE_ID);
-    expect(allPanes().map((p) => p.id)).toEqual([PRIMARY_PANE_ID]);
-    useLayoutStore.getState().add("p2");
-  });
 });
 
 describe("state tách theo pane", () => {

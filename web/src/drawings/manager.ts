@@ -1,6 +1,6 @@
-import { API, TF_SECONDS, fetchBars, type Bar } from "@/lib/api";
-import { useAuthStore } from "@/store/auth";
-import { drawingsFetch, noteGuestDrawing } from "./storage";
+import { TF_SECONDS, fetchBars, type Bar } from "@/lib/api";
+import { DrawingDoc, acquireDoc, releaseDoc, type DocView } from "./doc";
+import { noteGuestDrawing } from "./storage";
 import { crosshairLabel } from "@/lib/timefmt";
 import type {
     IChartApi,
@@ -19,7 +19,6 @@ import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
 import { isActivePane } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
-import { DrawingSync } from "./sync";
 import { visibleOn } from "./visibility";
 import { defaultOpts, GROUPS, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, type Ctx, type OneClickView } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
@@ -57,12 +56,20 @@ const HANDLE_R = 8;
 const DRAG_MIN = 5; // px: nhả chuột xa hơn chỗ nhấn mới tính là nhấn-kéo-thả
 const AXIS_BG = "#2962ff";
 
-export class DrawingManager implements ISeriesPrimitive<Time> {
+export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private series: ISeriesApi<SeriesType> | null = null;
   private redraw: (() => void) | null = null;
-  // Drawing không bị sửa tại chỗ: đổi gì thì thay object mới (cache shape theo object, store luôn mới)
-  private drawings: Drawing[] = [];
-  private kept: unknown[] = []; // item trên server có type app không biết: giữ nguyên khi lưu
+  // Hình vẽ, undo/redo và lưu trữ thuộc DrawingDoc của symbol đang mở, dùng chung với các chart khác cùng symbol.
+  // Các accessor dưới đây giữ nguyên cách viết `this.drawings = ...` của code cũ.
+  private doc: DrawingDoc = new DrawingDoc(null); // chưa mở symbol nào
+  private get drawings(): Drawing[] { return this.doc.drawings; }
+  private set drawings(v: Drawing[]) { this.doc.drawings = v; }
+  private get kept(): unknown[] { return this.doc.kept; }
+  private set kept(v: unknown[]) { this.doc.kept = v; }
+  private get undoStack(): string[] { return this.doc.undoStack; }
+  private set undoStack(v: string[]) { this.doc.undoStack = v; }
+  private get redoStack(): string[] { return this.doc.redoStack; }
+  private set redoStack(v: string[]) { this.doc.redoStack = v; }
   private cache = new WeakMap<Drawing, Built>();
   private profileBars = new Map<string, { bars: Bar[]; step: number }>(); // nến khung nhỏ của VP + giây mỗi nến
   private profileKeys = new Map<string, string>();
@@ -72,16 +79,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private chartLock: { handleScroll: unknown; handleScale: unknown } | null = null;
   private pendingText: string | undefined;
   private symbol = "";
-  private undoStack: string[] = [];
-  private redoStack: string[] = [];
-  private sync = new DrawingSync({
-    url: (symbol) => `${API}/me/drawings/${encodeURIComponent(symbol)}__default`,
-    fetch: drawingsFetch,
-    items: () => [...this.kept, ...this.drawings.filter((d) => !SPEC[d.type]?.ephemeral)],
-    onLoad: (items) => this.onLoaded(items),
-  });
   private unsub: () => void;
-  private unsubAuth: () => void;
   private stCache: { g: unknown; p: unknown; v: DrawingGlobal & DrawPane } | null = null;
 
   // Trạng thái công cụ dùng chung (tool, magnet...) gộp với trạng thái của pane này (hình đang chọn...): cùng hình dạng
@@ -117,14 +115,6 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
       offGlobal();
       offPane();
     };
-    // Đổi nơi lưu (khách ↔ user, hoặc sang user khác): nạp lại hình của symbol đang mở từ nơi mới
-    let who = authKey();
-    this.unsubAuth = useAuthStore.subscribe(() => {
-      const next = authKey();
-      if (next === who) return;
-      who = next;
-      this.reloadDrawings();
-    });
   }
 
   destroy() {
@@ -136,9 +126,8 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     window.removeEventListener("pointercancel", this.onUp);
     window.removeEventListener("keydown", this.onKey);
     this.unsub();
-    this.unsubAuth();
     this.unlockChart();
-    this.sync.close();
+    releaseDoc(this.doc, this);
     this.o.pane.draw.setState({ api: null, drawings: [], selectedId: null });
   }
 
@@ -1058,28 +1047,37 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private commit() {
     this.setSt({ drawings: [...this.drawings] });
     this.refresh();
-    this.sync.schedule();
+    this.doc.changed(this); // lên lịch lưu + các chart khác cùng symbol vẽ lại
     noteGuestDrawing();
   }
 
   /** Lưu ngay và đợi server trả lời (dùng trước khi đổi/đóng phiên đăng nhập). */
   flushSave(): Promise<void> {
-    return this.sync.flush();
+    return this.doc.flush();
   }
 
-  // Bỏ hình đang giữ (thuộc nơi lưu cũ, không lưu sang nơi mới) rồi nạp lại symbol hiện tại.
-  private reloadDrawings() {
-    const symbol = this.symbol;
-    this.sync.abandon();
-    if (!symbol) return;
-    this.drawings = [];
-    this.kept = [];
-    this.undoStack = [];
-    this.redoStack = [];
+  // --- DocView: DrawingDoc gọi khi hình đổi từ bên ngoài ---
+  docChanged() {
+    this.setSt({ drawings: [...this.drawings] });
+    const sel = this.st.selectedId;
+    if (sel !== null && !this.drawings.some((d) => d.id === sel)) this.setSt({ selectedId: null }); // hình đang chọn bị xoá ở chart khác
+    for (const d of this.drawings) this.prefetchProfileBars(d);
+    this.refresh();
+  }
+
+  docLoaded(known: Drawing[]) {
+    for (const d of known) this.prefetchProfileBars(d);
+    this.setSt({ drawings: [...this.drawings] });
+    this.refresh();
+  }
+
+  docReset() {
     this.mode = { k: "idle" };
     this.unlockChart();
+    this.profileBars.clear();
+    this.profileKeys.clear();
+    this.profileVer++;
     this.setSt({ drawings: [], selectedId: null });
-    this.sync.open(symbol);
     this.refresh();
   }
 
@@ -1127,43 +1125,16 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   setSymbol(symbol: string) {
     // Đổi timeframe vẫn cùng symbol: giữ nguyên drawings, chỉ vẽ lại.
     if (symbol === this.symbol) { this.refresh(); return; }
-    this.sync.open(symbol); // lưu nốt symbol cũ rồi mới load symbol mới
+    releaseDoc(this.doc, this); // view cuối của symbol cũ đi thì doc đó lưu nốt rồi đóng
     this.symbol = symbol;
-    this.drawings = [];
-    this.kept = [];
+    this.doc = acquireDoc(symbol, this); // chart khác đang mở symbol này thì dùng chung doc (đã nạp sẵn)
     this.profileBars.clear();
     this.profileKeys.clear();
     this.profileVer++;
     this.mode = { k: "idle" };
     this.unlockChart();
-    this.undoStack = [];
-    this.redoStack = [];
-    this.setSt({ drawings: [], selectedId: null });
+    this.setSt({ drawings: [...this.drawings], selectedId: null });
+    for (const d of this.drawings) this.prefetchProfileBars(d);
     this.refresh();
   }
-
-  // Bản trên server về: đặt dưới các hình đã vẽ trong lúc chờ load
-  private onLoaded(items: unknown[]) {
-    const known: Drawing[] = [];
-    this.kept = [];
-    for (const it of items) {
-      const d = it as Drawing;
-      const spec = d && SPEC[d.type];
-      if (spec && Array.isArray(d.points) && d.points.length >= spec.n) known.push(d);
-      else this.kept.push(it);
-    }
-    this.drawings = [...known, ...this.drawings];
-    // ảnh chụp undo cũ chưa có bản server: undo về đó sẽ xóa mất drawings
-    this.undoStack = [];
-    this.redoStack = [];
-    for (const d of known) this.prefetchProfileBars(d);
-    this.setSt({ drawings: [...this.drawings] });
-    this.refresh();
-  }
-}
-
-// Đổi giá trị này = đổi nơi lưu hình vẽ. "loading" (chưa biết là khách hay user) cũng tính là một nơi để lúc có kết quả thì nạp lại.
-function authKey(): string {
-  const s = useAuthStore.getState();
-  return s.status === "user" ? `u:${s.user?.id}` : s.status;
 }

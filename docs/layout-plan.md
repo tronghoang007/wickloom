@@ -26,11 +26,23 @@ Phase 2 (lưới) chưa làm. Cách làm khác chút so với §5.1 để giảm
 - Lưu tạm: `store/paneStorage.ts` — key `wickloom-pane1` {chart, indicators, legendCollapsed, volume}, debounce 300ms + flush `pagehide`; lần đầu migrate từ
   `invest-chart-prefs` + `tv-indicators` + `tv-volume` (đọc TRƯỚC khi các store chung rehydrate vì chúng ghi đè key cũ chỉ còn phần chung). Phase 3 thay bằng layout lưu server.
 
-**Việc phải làm ở Phase 2 (đã thấy khi làm Phase 1):**
-1. `Chart` hiện tự render `SettingsDialog`, `VolumeSettingsDialog`, `DrawingSettings`, `StylePanel`, `FavoritesBar`, `InlineTextEditor` — nhiều chart thì mỗi chart một bản
-   (Settings dialog mở N lần). Chỉ render ở pane active, hoặc đưa các dialog toàn cục ra `page.tsx`.
-2. Mỗi `Chart` mở WS riêng và `Chart` đọc `useChartStore.symbols` chung: ổn. `DrawingDoc` dùng chung khi 2 ô cùng symbol (§5.3) vẫn chưa làm.
-3. `Toolbar` nút Undo/Redo, Replay dùng facade → tác động pane active (đúng ý), nhưng ReplayBar của ô không active vẫn hiện: cần kiểm khi có nhiều ô.
+**Phase 2 (lưới nhiều chart) đã code, chưa commit** (228 test web xanh; kiểm tay trên Chrome: chọn 2×2 và 6 ô, mỗi ô symbol riêng, vẽ ở ô A hiện ở mọi ô cùng
+symbol, Cmd+Z/Shift+Cmd+Z gỡ/khôi phục ở mọi ô, Maximize/Restore, kéo splitter độc lập từng nhóm, về lại 1 ô; không lỗi console):
+
+- `store/layoutTree.ts` (thuần logic): `Node = {pane} | {dir, sizes, children}`; 22 mẫu 1–8 ô (`TEMPLATES`, theo trí nhớ về TV — **chưa đối chiếu**); `paneRects`, `gutters`,
+  `dragSizes` (mỗi ô ≥ min, tổng không đổi), `withSizes`, `splitAt`, `retarget` (đổi số ô: giữ pane theo thứ tự, thêm pane mới, bỏ các ô cuối; id không tái dùng).
+- `useLayoutStore` thêm `tree/order/templateId/maximized`, `setTemplate` (pane mới nhân bản symbol/khung/loại nến của pane ACTIVE, không kèm indicator), `resizeAt`,
+  `setMaximized`; `setActive` thoát Replay của chart vừa rời (§3.4 đề xuất 4).
+- `ChartGrid`: mọi pane render PHẲNG (absolute theo tỉ lệ, key theo id) nên đổi mẫu/phóng to không tạo lại Chart; pane ẩn khi Maximize vẫn mount với kích thước đầy đủ.
+  Splitter 6px kéo bằng pointer capture (ô ≥ 160px), bấm đúp = chia đều. Viền accent cho pane active khi > 1 ô; nút Maximize ở góc trên phải mỗi ô (hiện khi rê chuột).
+- `LayoutMenu`: nút Layout trên toolbar → popup chọn mẫu, icon vẽ tự động từ cây.
+- Hộp thoại chỉ một bản: `SettingsDialog`, `VolumeSettingsDialog`, `DrawingSettings` chuyển lên `page.tsx`; `FavoritesBar`, `StylePanel`, `InlineTextEditor` chỉ render ở pane active.
+- `drawings/doc.ts` — `DrawingDoc` (§5.3): sở hữu drawings, kept, undo/redo và ĐÚNG MỘT `DrawingSync` cho mỗi (layout, symbol), đếm tham chiếu theo view; `DrawingManager`
+  chỉ giữ accessor trỏ vào doc + implement `DocView` (`docChanged/docLoaded/docReset`). Đăng nhập/đăng xuất → mọi doc `reload()`. `closeAllDocs()` cho khi đổi cả layout.
+
+**Chưa có / giới hạn đã biết:** lưới KHÔNG được lưu — reload về 1 ô (pane chính vẫn nhớ symbol/khung/indicator qua `wickloom-pane1`); lưu layout là Phase 3.
+Hình Measure (ephemeral) cũng dùng chung giữa các ô cùng symbol (biến mất khi bỏ chọn). Kéo hình ở ô A chỉ cập nhật store của ô B khi thả (commit), không theo từng nhịp kéo.
+Vị trí nút Maximize và danh sách mẫu là đoán theo TV, đối chiếu ở Phase 0.
 
 ## 1. Hiện trạng (đọc từ code)
 
@@ -231,7 +243,7 @@ Không cần bảng mới, nhưng **không dùng CRUD generic `/layouts`** nữa
 |---|---|---|
 | 0 | Chụp tham chiếu TV: popup layout (danh sách mẫu, nhãn sync), menu Save/Rename/Copy/Open, dialog Open, viền active, Maximize, hành vi Time vs Date range. Ghi `docs/tv-layout-reference.md` | Có tài liệu số đo + nhãn thật, các mục "chưa đối chiếu" ở §2 được xác nhận hoặc sửa |
 | 1 ✅ | Tách state theo pane (§5.1), vẫn 1 ô + migration state cũ (§4.4) | Hành vi y hệt trước: vẽ/undo/indicator/volume/replay/đổi symbol-khung chạy như cũ; `tsc`, lint, vitest xanh |
-| 2 | Cây chia ô + template + popup chọn + splitter + active pane + Maximize + `DrawingDoc` dùng chung (§5.2–5.3) | 2×2 mỗi ô symbol/khung riêng; vẽ ở ô A hiện ở ô B cùng symbol, undo chung, không mất hình; phím tắt/chụp ảnh chỉ tác động ô active |
+| 2 ✅ | Cây chia ô + template + popup chọn + splitter + active pane + Maximize + `DrawingDoc` dùng chung (§5.2–5.3) | 2×2 mỗi ô symbol/khung riêng; vẽ ở ô A hiện ở ô B cùng symbol, undo chung, không mất hình; phím tắt/chụp ảnh chỉ tác động ô active |
 | 3 | Lưu/mở layout: `store/layout.ts`, `LayoutSync`, menu + dialog Open, autosave, Ctrl+S, khôi phục khi mở app, drawings theo layout (§4.3, §5.5), scope = user qua `/me/layouts`, chặn khách bằng `requireLogin` (= `auth-plan` U4). **Cần `auth-plan` U1–U3 xong trước** | Reload giữ nguyên bố cục + indicator; copy/xoá layout kèm drawings; tắt backend rồi reload không mất layout; khách bấm Save → popup → lưu đúng tài khoản; user B không thấy layout của A |
 | 4 | Sync in layout: symbol, interval, crosshair, time, date range (§5.4) | Mỗi công tắc chạy đúng và lưu theo layout; không vòng lặp, không kích backfill hàng loạt |
 | 5 | Tuỳ chọn: Settings theo layout, Replay đa ô, kéo symbol từ watchlist vào ô, mẫu 10/12/16, visible range trong layout | Theo nhu cầu |
