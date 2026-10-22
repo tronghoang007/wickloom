@@ -1,5 +1,6 @@
 import type { Bar } from "@/lib/api";
 import type { CalendarOpts } from "./calendar";
+import type { LowerNeed } from "./lower";
 import type { Num, SourceName } from "./ta";
 
 // Mỗi indicator là một IndicatorDef khai báo (giống metadata của Pine): UI Settings, legend và renderer dựng từ đây,
@@ -9,7 +10,7 @@ import type { Num, SourceName } from "./ta";
 export type InputValue = number | string | boolean;
 export type Inputs = Record<string, InputValue>;
 
-type InputBase = { key: string; label: string; group?: string; tooltip?: string };
+type InputBase = { key: string; label: string; group?: string; tooltip?: string; enabledIf?: (inputs: Inputs) => boolean }; // enabledIf: input chỉ có tác dụng khi điều kiện đúng (xám đi nếu sai)
 
 export type InputDef = InputBase &
   (
@@ -65,6 +66,8 @@ export type Ctx = {
   inputs: Inputs; // đã điền mặc định + ép kiểu
   src: (name: string) => Num;
   calendar: CalendarOpts;
+  /** Nến khung nhỏ (ghép nhiều khung, tăng dần theo t) theo `def.lower`; chưa nạp xong thì rỗng, indicator tự xử lý. */
+  lower: Bar[];
 };
 
 export type IndicatorDef = {
@@ -79,6 +82,8 @@ export type IndicatorDef = {
   fills?: FillDef[];
   /** Số nến cần có trước nến đầu tiên của chart để giá trị đã hội tụ (EMA/RMA nhớ vô hạn nên chỉ là xấp xỉ). */
   warmup: (inputs: Inputs) => number;
+  /** Cần nến khung nhỏ (chia volume trong nến chart): khung nào, phủ từ đâu. Trả null = không cần / dùng nến chart. Manager nạp ngầm rồi tính lại. */
+  lower?: (inputs: Inputs, info: { bars: Bar[]; cut: number; step: number; calendar: CalendarOpts }) => LowerNeed | null;
   /** Cần mốc ngày của broker (VWAP, Pivot...): nạp thêm D1 để ranh giới phiên đúng qua DST. */
   needsCalendar?: boolean;
   compute: (ctx: Ctx) => Record<string, Num | PlotData>;

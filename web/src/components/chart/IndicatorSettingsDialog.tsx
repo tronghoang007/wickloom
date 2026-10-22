@@ -10,15 +10,16 @@ import { Fragment, useRef } from "react";
 import ColorPicker from "./ColorPicker";
 import { Check, Section, SettingsFrame, VisibilityTab, field, num } from "./settingsParts";
 
-function InputRow({ def, value, onChange }: { def: InputDef; value: number | string | boolean; onChange: (v: number | string | boolean) => void }) {
+function InputRow({ def, value, onChange, enabled = true }: { def: InputDef; value: number | string | boolean; onChange: (v: number | string | boolean) => void; enabled?: boolean }) {
   if (def.type === "bool") return <Check label={def.label} checked={value as boolean} onChange={onChange} />;
   return (
-    <label className="flex items-center justify-between py-1.5" title={def.tooltip}>
+    <label className={`flex items-center justify-between py-1.5 ${enabled ? "" : "opacity-40"}`} title={def.tooltip}>
       {def.label}
       {def.type === "int" || def.type === "float" ? (
         <input
           className={`${field} w-20`}
           type="number"
+          disabled={!enabled}
           min={def.min}
           max={def.max}
           step={def.step ?? (def.type === "int" ? 1 : "any")}
@@ -30,7 +31,7 @@ function InputRow({ def, value, onChange }: { def: InputDef; value: number | str
           }}
         />
       ) : (
-        <select className={`${field} min-w-28 max-w-56`} value={value as string} onChange={(e) => onChange(e.target.value)}>
+        <select className={`${field} min-w-28 max-w-56`} disabled={!enabled} value={value as string} onChange={(e) => onChange(e.target.value)}>
           {(def.type === "source" ? [...SOURCES] : def.options).map((o) => (
             <option key={o} value={o}>
               {o}
@@ -94,7 +95,7 @@ function Dialog({ uid }: { uid: string }) {
               def.inputs.map((d, k) => (
                 <Fragment key={d.key}>
                   {d.group && d.group !== def.inputs[k - 1]?.group && <Section>{d.group}</Section>}
-                  <InputRow def={d} value={inputs[d.key]} onChange={(v) => update(uid, { inputs: { ...inst.inputs, [d.key]: v } })} />
+                  <InputRow def={d} value={inputs[d.key]} enabled={d.enabledIf ? d.enabledIf(inputs) : true} onChange={(v) => update(uid, { inputs: { ...inst.inputs, [d.key]: v } })} />
                 </Fragment>
               ))
             ))}

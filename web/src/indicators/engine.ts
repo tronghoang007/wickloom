@@ -19,19 +19,19 @@ export function shiftBy<T>(a: T[], offset: number, fill: T): T[] {
 /** Mốc thời gian của `count` nến tương lai nối tiếp `last`, mỗi nến cách `step` giây (xấp xỉ: không nhảy cuối tuần/nghỉ). */
 export const futureTimes = (last: number, count: number, step: number): number[] => Array.from({ length: count }, (_, k) => last + (k + 1) * step);
 
-function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts): Ctx {
+function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = []): Ctx {
   const memo = new Map<string, Num>();
   const src = (name: string) => {
     let s = memo.get(name);
     if (!s) memo.set(name, (s = source(bars, name)));
     return s;
   };
-  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar };
+  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar, lower };
 }
 
 /** Tính mọi plot của 1 instance trên `bars` (đã gồm lịch sử nạp ngầm). Luôn trả đủ plot của def; mỗi plot dài bars.length, cộng thêm offset nếu offset dương. */
-export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts): Computed {
-  const ctx = makeCtx(def, inst, bars, calendar);
+export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = []): Computed {
+  const ctx = makeCtx(def, inst, bars, calendar, lower);
   const { inputs } = ctx;
   const raw = def.compute(ctx);
   const out: Computed = {};
@@ -57,9 +57,9 @@ export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars
 /** Phần không phải chuỗi theo nến: object line/label/box và màu ghi đè nến chart chính (null = def không có / trả sai độ dài). */
 export type Extras = { objects: ObjectSet | null; candleColors: string[] | null };
 
-export function computeExtras(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts): Extras {
+export function computeExtras(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = []): Extras {
   if (!def.objects && !def.candleColors) return { objects: null, candleColors: null };
-  const ctx = makeCtx(def, inst, bars, calendar);
+  const ctx = makeCtx(def, inst, bars, calendar, lower);
   const objects = def.objects ? sanitizeObjects(def.objects(ctx)) : null;
   const colors = def.candleColors?.(ctx);
   return { objects, candleColors: colors && colors.length === bars.length ? colors : null };

@@ -5,8 +5,9 @@ import { mergeCandleColors, planCandleColors } from "./candleColors";
 import { BarHistory, CalendarFeed, HISTORY_BARS } from "./data";
 import { planUpdate, type Snap } from "./diff";
 import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
-import { instanceShown, plotColor, showsPriceLabel, type IndicatorInstance } from "./instance";
+import { instanceShown, plotColor, resolveInputs, showsPriceLabel, type IndicatorInstance } from "./instance";
 import { effectiveScale, paneIndices, paneKeyOf } from "./layout";
+import { LowerFeed } from "./lower";
 import { trimObjects } from "./objects";
 import { FillPrimitive, type FillEdge } from "./render/fill";
 import { ObjectsPrimitive } from "./render/objects";
@@ -78,6 +79,7 @@ export class IndicatorManager {
     () => this.schedule(),
   );
 
+  private lower = new LowerFeed((symbol, tf, from, to, limit) => fetchBars(symbol, tf, to, limit, from), () => this.schedule());
   private prevColors: string[] | null = null;
 
   /** `onSync`: báo sau mỗi lần tính lại để legend đọc giá trị mới. `onCandleColors`: báo khi indicator (Color Candles) đổi màu nến chart. */
@@ -243,7 +245,8 @@ export class IndicatorManager {
     for (const l of this.live) {
       this.applyStyle(l);
       if (l.def.needsCalendar && !cal) continue; // chưa biết ranh giới phiên: chờ thay vì vẽ sai
-      const out = computeInstance(l.def, l.inst, all, cal ?? { offset: 0 });
+      const lowerBars = this.lowerBars(l, all, cut, step, cal ?? { offset: 0 });
+      const out = computeInstance(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars);
       l.data = l.def.plots.map((p, k) => {
         const d = trimPlot(out[p.id], cut);
         // offset dương: plot dài hơn nến chart, phần thừa nằm ở vùng tương lai (mốc thời gian suy ra theo khung)
@@ -272,13 +275,20 @@ export class IndicatorManager {
       const shown = instanceShown(l.inst, tf);
       this.applyFills(l, shown);
       if (l.objects || l.def.candleColors) {
-        const ex = shown ? computeExtras(l.def, l.inst, all, cal ?? { offset: 0 }) : { objects: null, candleColors: null };
+        const ex = shown ? computeExtras(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars) : { objects: null, candleColors: null };
         l.objects?.set(ex.objects ? trimObjects(ex.objects, cut) : null);
         l.candleColors = ex.candleColors ? ex.candleColors.slice(cut) : null;
       }
     }
     this.pushCandleColors();
     this.onSync();
+  }
+
+  /** Nến khung nhỏ mà indicator cần (đã nạp tới đâu có tới đó; phần còn lại nạp ngầm rồi tính lại). */
+  private lowerBars(l: Live, all: Bar[], cut: number, step: number, calendar: { offset: number; dayOpens?: number[] }): Bar[] {
+    if (!l.def.lower) return [];
+    const need = l.def.lower(resolveInputs(l.def, l.inst.inputs), { bars: all, cut, step, calendar });
+    return need ? this.lower.get(this.feed.symbol, need, this.bars[this.bars.length - 1].t + step) : [];
   }
 
   // Color Candles: gộp màu của các indicator đang hiện rồi báo chart chính tô lại phần đã đổi
