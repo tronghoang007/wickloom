@@ -169,3 +169,13 @@ describe("màu fill thứ hai (mây Ichimoku)", () => {
     expect(r?.style).toEqual({ fills: { band: { color: "#00ff00" } } });
   });
 });
+
+describe("style của items (mức pivot, profile...)", () => {
+  it("giữ phần hợp lệ của item mà def còn có, bỏ item lạ và giá trị sai", () => {
+    const m = migrateInstance({
+      uid: "u", id: "pivots",
+      style: { items: { R1: { color: "#ff0000", visible: false, width: 3, lineStyle: "dashed" }, S2: { width: 9, lineStyle: "wavy", color: "red" }, ZZ: { color: "#00ff00" } } },
+    });
+    expect(m?.style).toEqual({ items: { R1: { color: "#ff0000", visible: false, width: 3, lineStyle: "dashed" } } });
+  });
+});

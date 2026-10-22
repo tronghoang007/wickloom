@@ -8,6 +8,7 @@ export const INSTANCE_V = 1;
 export type PlotStyle = { color?: string; colorDown?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName; type?: PlotType };
 export type LevelStyle = { value?: number; color?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName };
 export type FillStyle = { color?: string; colorDown?: string; visible?: boolean };
+export type ItemStyleU = { color?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName };
 
 /** Một indicator đang dùng trên chart (lưu trong layout). Mọi field ngoài định danh chỉ chứa phần user đã đặt; còn lại theo def. */
 export type IndicatorInstance = {
@@ -15,7 +16,7 @@ export type IndicatorInstance = {
   uid: string;
   id: string;
   inputs: Inputs;
-  style?: { plots?: Record<string, PlotStyle>; levels?: Record<string, LevelStyle>; fills?: Record<string, FillStyle> };
+  style?: { plots?: Record<string, PlotStyle>; levels?: Record<string, LevelStyle>; fills?: Record<string, FillStyle>; items?: Record<string, ItemStyleU> };
   pane?: string; // khoá pane (xem layout.ts); không đặt = mặc định theo def
   scale?: "right" | "left" | "none"; // thang giá; không đặt = mặc định (xem effectiveScale)
   hidden?: boolean; // nút mắt
@@ -149,7 +150,19 @@ function sanitizeStyle(raw: Record<string, unknown>, def: IndicatorDef): Indicat
     if (s.visible === false) fs.visible = false;
     if (Object.keys(fs).length) fills[f.id] = fs;
   }
+  const items: Record<string, ItemStyleU> = {};
+  for (const it of def.items ?? []) {
+    const s = isRecord(sub("items")[it.id]) ? (sub("items")[it.id] as Record<string, unknown>) : null;
+    if (!s) continue;
+    const is: ItemStyleU = {};
+    if (colorOf(s.color)) is.color = colorOf(s.color);
+    if (s.visible === false) is.visible = false;
+    if (it.line && widthOf(s.width)) is.width = widthOf(s.width);
+    if (it.line && lineStyleOf(s.lineStyle)) is.lineStyle = lineStyleOf(s.lineStyle);
+    if (Object.keys(is).length) items[it.id] = is;
+  }
   const out: NonNullable<IndicatorInstance["style"]> = {};
+  if (Object.keys(items).length) out.items = items;
   if (Object.keys(plots).length) out.plots = plots;
   if (Object.keys(levels).length) out.levels = levels;
   if (Object.keys(fills).length) out.fills = fills;

@@ -40,7 +40,7 @@ export function mergeSources(sources: LowerSource[]): Bar[] {
 }
 
 /** Có nến nào của `bars` (tăng dần) bắt đầu trong [from, to) hoặc nến liền trước chồng sang from không. Nến trước chồng sang chỉ xét khi nó ngắn hơn khoảng truy vấn nên không cần: các nến mịn không dài hơn nến thô. */
-function overlaps(bars: Bar[], from: number, to: number): boolean {
+export function overlaps(bars: Bar[], from: number, to: number): boolean {
   let lo = 0;
   let hi = bars.length;
   while (lo < hi) {

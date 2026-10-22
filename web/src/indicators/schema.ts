@@ -1,5 +1,6 @@
 import type { Bar } from "@/lib/api";
 import type { CalendarOpts } from "./calendar";
+import type { Profile } from "@/volumeProfile/compute";
 import type { LowerNeed } from "./lower";
 import type { Num, SourceName } from "./ta";
 
@@ -46,6 +47,12 @@ export type FillRef = { plot: string } | { level: string };
 /** `colorDown` (nếu có): màu khi đầu thứ nhất không cao hơn đầu thứ hai, tách theo từng nến (mây Ichimoku xanh/đỏ); `color` là màu khi cao hơn. */
 export type FillDef = { id: string; title: string; between: [FillRef, FillRef]; color: string; colorDown?: string };
 
+/** Phần tử vẽ có style riêng nhưng không phải plot / level / fill: các mức của Pivot Points, histogram và POC/VAH/VAL của volume profile.
+ *  Mỗi cái một hàng trong tab Style (bật/tắt, màu, và nét + độ dày nếu có `line`); compute đọc style hiệu lực qua `ctx.items`. */
+export type ItemDef = { id: string; title: string; color: string; group?: string; line?: { width?: number; style?: LineStyleName }; plain?: boolean };
+// plain: chỉ chọn màu, không có ô bật/tắt (màu histogram của profile)
+export type ItemStyle = { color: string; visible: boolean; width: number; style: LineStyleName };
+
 /** Giá trị một plot theo từng nến; `colors` (nếu có) là màu riêng từng nến (histogram MACD, Volume...).
  *  Plot `candles` (plotcandle): `values` = close, `candle` = open/high/low; màu nến tăng/giảm lấy từ style. */
 export type PlotData = { values: Num; colors?: string[]; candle?: { o: Num; h: Num; l: Num } };
@@ -61,6 +68,21 @@ export type ObjLabel = { x: number; y: number; text: string; color: string; bg?:
 export type ObjBox = { x1: number; y1: number; x2: number; y2: number; bg?: string; border?: string; borderWidth?: number; borderStyle?: LineStyleName; extendRight?: boolean };
 export type ObjectSet = { lines: ObjLine[]; labels: ObjLabel[]; boxes: ObjBox[] };
 
+/** Một volume profile đã tính (`computeProfile`) kèm vị trí ngang: `x1..x2` = chỉ số nến đầu/cuối của phiên (không dùng khi `style.pinned`). */
+export type PlacedProfile = Profile & { x1: number; x2: number };
+export type ProfileLine = { show: boolean; color: string; width: number; style: LineStyleName };
+export type ProfileStyle = {
+  volume: "updown" | "total" | "delta";
+  width: number; // % bề rộng phiên (hoặc pane nếu pinned)
+  place: "left" | "right";
+  values: boolean;
+  extend: boolean; // kéo POC/VAH/VAL sang phải hết pane
+  pinned: boolean; // ghim vào mép pane (Visible Range) thay vì theo nến
+  up: string; down: string; vaUp: string; vaDown: string;
+  poc: ProfileLine; vah: ProfileLine; val: ProfileLine;
+};
+export type ProfileSet = { profiles: PlacedProfile[]; style: ProfileStyle };
+
 export type Ctx = {
   bars: Bar[]; // đã gồm cả lịch sử nạp ngầm phía trước (xem engine)
   inputs: Inputs; // đã điền mặc định + ép kiểu
@@ -68,6 +90,14 @@ export type Ctx = {
   calendar: CalendarOpts;
   /** Nến khung nhỏ (ghép nhiều khung, tăng dần theo t) theo `def.lower`; chưa nạp xong thì rỗng, indicator tự xử lý. */
   lower: Bar[];
+  /** Style hiệu lực của `def.items` (đã gồm phần user đặt). */
+  items: Record<string, ItemStyle>;
+  /** Kích thước tick của symbol (giá). */
+  tick: number;
+  /** Số nến lịch sử ngầm đứng trước nến đầu tiên của chart trong `bars` (nến thứ `cut` là nến đầu của chart). */
+  cut: number;
+  /** Vùng đang nhìn thấy, theo chỉ số trong `bars` (chỉ có khi `def.needsRange`); không biết thì undefined. */
+  range?: { from: number; to: number };
 };
 
 export type IndicatorDef = {
@@ -80,10 +110,15 @@ export type IndicatorDef = {
   plots: PlotDef[];
   levels?: LevelDef[];
   fills?: FillDef[];
+  items?: ItemDef[];
   /** Số nến cần có trước nến đầu tiên của chart để giá trị đã hội tụ (EMA/RMA nhớ vô hạn nên chỉ là xấp xỉ). */
   warmup: (inputs: Inputs) => number;
   /** Cần nến khung nhỏ (chia volume trong nến chart): khung nào, phủ từ đâu. Trả null = không cần / dùng nến chart. Manager nạp ngầm rồi tính lại. */
-  lower?: (inputs: Inputs, info: { bars: Bar[]; cut: number; step: number; calendar: CalendarOpts }) => LowerNeed | null;
+  lower?: (inputs: Inputs, info: { bars: Bar[]; cut: number; step: number; calendar: CalendarOpts; range?: { from: number; to: number } }) => LowerNeed | null;
+  /** Kết quả phụ thuộc vùng đang nhìn (Visible Range Volume Profile): manager tính lại khi kéo / zoom. */
+  needsRange?: boolean;
+  /** Volume profile của indicator (Session / Visible Range Volume Profile), vẽ bằng `ProfilePrimitive`. */
+  profiles?: (ctx: Ctx) => ProfileSet;
   /** Cần mốc ngày của broker (VWAP, Pivot...): nạp thêm D1 để ranh giới phiên đúng qua DST. */
   needsCalendar?: boolean;
   compute: (ctx: Ctx) => Record<string, Num | PlotData>;

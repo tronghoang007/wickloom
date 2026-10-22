@@ -1,0 +1,137 @@
+import type { Bar } from "@/lib/api";
+import { computeProfile } from "@/volumeProfile/compute";
+import { periodKeys, periodStarts, type Period } from "../calendar";
+import { lowerCandidates, overlaps, withinBudget } from "../lower";
+import { num, str, type Ctx, type IndicatorDef, type InputDef, type ItemDef, type PlacedProfile, type ProfileSet, type ProfileStyle } from "../schema";
+import { TF_SECONDS } from "@/lib/api";
+import { barStep, groupPeriods } from "./pivots";
+
+// Session Volume Profile và Visible Range Volume Profile: cùng họ với FRVP / AVP của drawings (volumeProfile/compute.ts),
+// volume chia theo nến khung nhỏ (LowerFeed) như TV, nơi thiếu thì dùng nến chart.
+
+const BUDGET = 100_000;
+const SESSIONS: Record<string, Period> = { Day: "day", Week: "week", Month: "month" };
+
+const layoutInput: InputDef = { key: "layout", label: "Rows Layout", type: "select", default: "Number Of Rows", options: ["Number Of Rows", "Ticks Per Row"] };
+const rowsInput: InputDef = { key: "rows", label: "Row Size", type: "int", default: 24, min: 1, max: 1000 };
+const volumeInput: InputDef = { key: "volume", label: "Volume", type: "select", default: "Up/Down", options: ["Up/Down", "Total", "Delta"] };
+const vaInput: InputDef = { key: "va", label: "Value Area Volume", type: "int", default: 70, min: 1, max: 100 };
+const widthInput = (d: number, of = "box"): InputDef => ({ key: "width", label: `Width (% of the ${of})`, type: "int", default: d, min: 1, max: 100 });
+const placeInput = (d: string): InputDef => ({ key: "place", label: "Placement", type: "select", default: d, options: ["Left", "Right"] });
+const valuesInput: InputDef = { key: "values", label: "Values", type: "bool", default: false };
+
+const ITEMS: ItemDef[] = [
+  { id: "up", title: "Up Volume", color: "#26a69a", group: "Profile", plain: true },
+  { id: "down", title: "Down Volume", color: "#f23645", group: "Profile", plain: true },
+  { id: "vaUp", title: "Value Area Up", color: "#00bcd4", group: "Profile", plain: true },
+  { id: "vaDown", title: "Value Area Down", color: "#e91e63", group: "Profile", plain: true },
+  { id: "vah", title: "VAH", color: "#2962ff", group: "Lines", line: { width: 1, style: "dashed" } },
+  { id: "val", title: "VAL", color: "#2962ff", group: "Lines", line: { width: 1, style: "dashed" } },
+  { id: "poc", title: "POC", color: "#ff9800", group: "Lines", line: { width: 2, style: "solid" } },
+];
+
+function styleOf(c: Ctx, pinned: boolean): ProfileStyle {
+  const { inputs, items } = c;
+  const line = (id: string) => ({ show: items[id].visible, color: items[id].color, width: items[id].width, style: items[id].style });
+  return {
+    volume: str(inputs, "volume") === "Total" ? "total" : str(inputs, "volume") === "Delta" ? "delta" : "updown",
+    width: num(inputs, "width"),
+    place: str(inputs, "place") === "Right" ? "right" : "left",
+    values: !!inputs.values,
+    extend: !!inputs.extend,
+    pinned,
+    up: items.up.color, down: items.down.color, vaUp: items.vaUp.color, vaDown: items.vaDown.color,
+    poc: line("poc"), vah: line("vah"), val: line("val"),
+  };
+}
+
+/** Nến để tính volume của khoảng [t0, t1): nến khung nhỏ có trong khoảng, cộng nến chart ở chỗ không có nến khung nhỏ nào (đầu / đuôi chưa phủ tới, lỗ hổng). */
+export function profileSource(chart: Bar[], lower: Bar[], t0: number, t1: number, step: number): Bar[] {
+  let lo = 0;
+  let hi = lower.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (lower[mid].t < t0) lo = mid + 1;
+    else hi = mid;
+  }
+  let end = lo;
+  while (end < lower.length && lower[end].t < t1) end++;
+  const fine = lower.slice(lo, end);
+  if (fine.length === 0) return chart.filter((b) => b.t >= t0 && b.t < t1);
+  const fill = chart.filter((b) => b.t >= t0 && b.t < t1 && !overlaps(fine, b.t, b.t + step));
+  return fill.length === 0 ? fine : [...fine, ...fill].sort((a, b) => a.t - b.t);
+}
+
+const compute = (c: Ctx, src: Bar[]) =>
+  computeProfile(src, c.tick, num(c.inputs, "rows"), num(c.inputs, "va"), str(c.inputs, "layout") === "Ticks Per Row" ? "ticks" : "rows");
+
+export const svp: IndicatorDef = {
+  id: "svp", name: "SVP", title: "Session volume profile", overlay: true,
+  inputs: [
+    layoutInput, rowsInput, volumeInput, vaInput,
+    { key: "session", label: "Session", type: "select", default: "Day", options: Object.keys(SESSIONS) },
+    widthInput(30), placeInput("Left"), valuesInput,
+    { key: "extend", label: "Extend POC/VAH/VAL", type: "bool", default: false },
+  ],
+  plots: [],
+  items: ITEMS,
+  needsCalendar: true,
+  warmup: () => 0,
+  compute: () => ({}),
+  lower: (inputs, { bars, cut, step, calendar }) => {
+    if (bars.length === 0 || step >= 86400) return null;
+    const starts = periodStarts(bars.map((b) => b.t), SESSIONS[str(inputs, "session")] ?? "day", calendar);
+    const from = bars[starts.filter((s) => s <= cut).pop() ?? 0].t; // đầu phiên chứa nến đầu tiên của chart
+    const tfs = withinBudget(lowerCandidates(step, "M1"), from, bars[bars.length - 1].t + step, BUDGET);
+    return tfs.length ? { tfs, from } : null;
+  },
+  profiles: (c): ProfileSet => {
+    const { bars, lower } = c;
+    const style = styleOf(c, false);
+    if (bars.length === 0) return { profiles: [], style };
+    const step = barStep(bars);
+    if (step >= 86400) return { profiles: [], style }; // từ D1 trở lên không có phiên để chia
+    const sessions = groupPeriods(bars, periodKeys(bars.map((b) => b.t), SESSIONS[str(c.inputs, "session")] ?? "day", c.calendar));
+    const profiles: PlacedProfile[] = [];
+    for (const s of sessions) {
+      if (s.last < c.cut) continue; // phiên nằm hẳn trong lịch sử ẩn
+      const vp = compute(c, profileSource(bars.slice(s.first, s.last + 1), lower, bars[s.first].t, bars[s.last].t + step, step));
+      if (vp) profiles.push({ ...vp, x1: s.first, x2: s.last });
+    }
+    return { profiles, style };
+  },
+};
+
+/** Khung nhỏ đầu tiên (M1…D1, nhỏ hơn khung chart) mà vùng `seconds` giây có dưới 5000 nến, như FRVP của TV. */
+export const rangeLowerTf = (step: number, seconds: number): string | null =>
+  lowerCandidates(step, "M1").find((tf) => seconds / TF_SECONDS[tf] < 5000) ?? null;
+
+export const vrvp: IndicatorDef = {
+  id: "vrvp", name: "VRVP", title: "Visible range volume profile", overlay: true,
+  inputs: [layoutInput, rowsInput, volumeInput, vaInput, widthInput(30, "pane"), placeInput("Right"), valuesInput],
+  plots: [],
+  items: ITEMS.map((it) => (it.id === "vah" || it.id === "val" ? { ...it, line: { width: 1, style: "dashed" as const } } : it)),
+  needsRange: true,
+  warmup: () => 0,
+  compute: () => ({}),
+  lower: (_inputs, { bars, step, range }) => {
+    if (!range || bars.length === 0 || range.to <= range.from) return null;
+    const from = bars[range.from].t;
+    const to = bars[range.to].t + step;
+    const first = rangeLowerTf(step, to - from);
+    if (!first) return null;
+    const tfs = withinBudget(lowerCandidates(step, first), from, to, BUDGET);
+    return tfs.length ? { tfs, from } : null;
+  },
+  profiles: (c): ProfileSet => {
+    const { bars, lower } = c;
+    const style = styleOf(c, true);
+    if (bars.length === 0) return { profiles: [], style };
+    const step = barStep(bars);
+    const from = c.range?.from ?? c.cut;
+    const to = c.range?.to ?? bars.length - 1;
+    if (to < from) return { profiles: [], style };
+    const vp = compute(c, profileSource(bars.slice(from, to + 1), lower, bars[from].t, bars[to].t + step, step));
+    return { profiles: vp ? [{ ...vp, x1: from, x2: to }] : [], style };
+  },
+};

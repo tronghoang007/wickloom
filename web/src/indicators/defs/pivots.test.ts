@@ -139,6 +139,17 @@ describe("object của Pivot Points", () => {
     expect(run({ labels: false }).labels).toHaveLength(0);
   });
 
+  it("style từng mức: ẩn mức, đổi màu / độ dày / nét", () => {
+    const inst = { ...newInstance("pivots"), inputs: { back: 1 }, style: { items: { R1: { visible: false as const }, S1: { color: "#123456", width: 3, lineStyle: "dotted" as const } } } };
+    const o = computeExtras(def, inst, bars, { offset: 0 }).objects!;
+    expect(o.lines).toHaveLength(10); // thiếu R1
+    expect(o.labels.some((l) => l.text.startsWith("R1"))).toBe(false);
+    const s1 = o.labels.find((l) => l.text.startsWith("S1"))!;
+    expect(s1.color).toBe("#123456");
+    const line = o.lines.find((l) => l.color === "#123456")!;
+    expect(line).toMatchObject({ width: 3, style: "dotted" });
+  });
+
   it("màu theo vai trò (P cam, R đỏ, S xanh); đổi kiểu đổi số mức; Weekly gom nhiều ngày", () => {
     const o = run({ back: 1 });
     expect(new Set(o.lines.map((l) => l.color))).toEqual(new Set(["#fb8c00", "#f23645", "#089981"]));

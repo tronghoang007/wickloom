@@ -8,9 +8,10 @@ import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } 
 import { instanceShown, plotColor, resolveInputs, showsPriceLabel, type IndicatorInstance } from "./instance";
 import { effectiveScale, paneIndices, paneKeyOf } from "./layout";
 import { LowerFeed } from "./lower";
-import { trimObjects } from "./objects";
+import { trimObjects, trimProfiles } from "./objects";
 import { FillPrimitive, type FillEdge } from "./render/fill";
 import { ObjectsPrimitive } from "./render/objects";
+import { ProfilePrimitive } from "./render/profile";
 import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions, scaleId } from "./render/series";
 import type { IndicatorDef, PlotData } from "./schema";
 import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
@@ -23,6 +24,7 @@ type Live = {
   lines: IPriceLine[]; // theo def.levels
   fills: FillPrimitive[]; // theo def.fills
   objects: ObjectsPrimitive | null; // line/label/box của def.objects
+  profiles: ProfilePrimitive | null; // volume profile của def.profiles
   candleColors: string[] | null; // màu ghi đè nến chart chính (đã cắt theo nến chart), null = không tô
   lastNa: boolean[]; // theo plot: giá trị ở nến cuối là na (không hiện nhãn giá cuối, như TV)
   snaps: (Snap | null)[];
@@ -83,7 +85,19 @@ export class IndicatorManager {
   private prevColors: string[] | null = null;
 
   /** `onSync`: báo sau mỗi lần tính lại để legend đọc giá trị mới. `onCandleColors`: báo khi indicator (Color Candles) đổi màu nến chart. */
-  constructor(private chart: IChartApi, private onSync: () => void = () => {}, private onCandleColors: CandleColorSink = () => {}) {}
+  constructor(
+    private chart: IChartApi,
+    private onSync: () => void = () => {},
+    private onCandleColors: CandleColorSink = () => {},
+    private getTick: () => number = () => 0,
+  ) {
+    chart.timeScale().subscribeVisibleLogicalRangeChange(this.onRange);
+  }
+
+  // Kéo / zoom: chỉ indicator phụ thuộc vùng nhìn (Visible Range Volume Profile) cần tính lại; tính lại gộp theo `schedule` (250ms)
+  private onRange = () => {
+    if (this.live.some((l) => l.def.needsRange)) this.schedule();
+  };
 
   // Tính lại tối đa ~4 lần/giây để realtime không tốn CPU
   update(list: IndicatorInstance[], bars: Bar[], feed: FeedKey) {
@@ -125,6 +139,7 @@ export class IndicatorManager {
 
   destroy() {
     this.destroyed = true;
+    try { this.chart.timeScale().unsubscribeVisibleLogicalRangeChange(this.onRange); } catch { /* chart đã bị huỷ */ }
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -145,7 +160,7 @@ export class IndicatorManager {
       const paneIndex = indices[n];
       const sid = scaleId(effectiveScale(inst, def, keys[n]), inst.uid);
       const series = def.plots.map((p, k) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, k === 0 ? def.name : "", sid));
-      const hasAnchor = !!(def.levels?.length || def.fills?.length || def.objects);
+      const hasAnchor = !!(def.levels?.length || def.fills?.length || def.objects || def.profiles);
       const anchor = hasAnchor ? addAnchorSeries(this.chart, paneIndex, sid) : null;
       if (sid === "left") this.chart.priceScale("left", paneIndex).applyOptions({ visible: true });
       else if (sid !== "right") this.chart.priceScale(sid, paneIndex).applyOptions({ visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } });
@@ -162,7 +177,12 @@ export class IndicatorManager {
         objects = new ObjectsPrimitive();
         anchor!.attachPrimitive(objects);
       }
-      this.live.push({ inst, def, series, anchor, lines, fills, objects, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
+      let profiles: ProfilePrimitive | null = null;
+      if (def.profiles) {
+        profiles = new ProfilePrimitive();
+        anchor!.attachPrimitive(profiles);
+      }
+      this.live.push({ inst, def, series, anchor, lines, fills, objects, profiles, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
     });
   }
 
@@ -245,7 +265,9 @@ export class IndicatorManager {
     for (const l of this.live) {
       this.applyStyle(l);
       if (l.def.needsCalendar && !cal) continue; // chưa biết ranh giới phiên: chờ thay vì vẽ sai
-      const lowerBars = this.lowerBars(l, all, cut, step, cal ?? { offset: 0 });
+      const range = l.def.needsRange ? this.visibleRange(cut) : undefined;
+      const lowerBars = this.lowerBars(l, all, cut, step, cal ?? { offset: 0 }, range);
+      const env = { tick: this.getTick(), cut, ...(range ? { range } : {}) };
       const out = computeInstance(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars);
       l.data = l.def.plots.map((p, k) => {
         const d = trimPlot(out[p.id], cut);
@@ -274,9 +296,10 @@ export class IndicatorManager {
       }
       const shown = instanceShown(l.inst, tf);
       this.applyFills(l, shown);
-      if (l.objects || l.def.candleColors) {
-        const ex = shown ? computeExtras(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars) : { objects: null, candleColors: null };
+      if (l.objects || l.profiles || l.def.candleColors) {
+        const ex = shown ? computeExtras(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars, env) : { objects: null, candleColors: null, profiles: null };
         l.objects?.set(ex.objects ? trimObjects(ex.objects, cut) : null);
+        l.profiles?.set(ex.profiles ? trimProfiles(ex.profiles, cut) : null);
         l.candleColors = ex.candleColors ? ex.candleColors.slice(cut) : null;
       }
     }
@@ -284,10 +307,18 @@ export class IndicatorManager {
     this.onSync();
   }
 
+  /** Vùng đang nhìn thấy theo chỉ số trong `all` (chart bắt đầu ở `cut`); undefined nếu chưa biết. */
+  private visibleRange(cut: number): { from: number; to: number } | undefined {
+    const r = this.chart.timeScale().getVisibleLogicalRange();
+    if (!r || this.bars.length === 0) return undefined;
+    const n = this.bars.length;
+    return { from: cut + Math.max(0, Math.floor(r.from)), to: cut + Math.min(n - 1, Math.ceil(r.to)) };
+  }
+
   /** Nến khung nhỏ mà indicator cần (đã nạp tới đâu có tới đó; phần còn lại nạp ngầm rồi tính lại). */
-  private lowerBars(l: Live, all: Bar[], cut: number, step: number, calendar: { offset: number; dayOpens?: number[] }): Bar[] {
+  private lowerBars(l: Live, all: Bar[], cut: number, step: number, calendar: { offset: number; dayOpens?: number[] }, range?: { from: number; to: number }): Bar[] {
     if (!l.def.lower) return [];
-    const need = l.def.lower(resolveInputs(l.def, l.inst.inputs), { bars: all, cut, step, calendar });
+    const need = l.def.lower(resolveInputs(l.def, l.inst.inputs), { bars: all, cut, step, calendar, ...(range ? { range } : {}) });
     return need ? this.lower.get(this.feed.symbol, need, this.bars[this.bars.length - 1].t + step) : [];
   }
 

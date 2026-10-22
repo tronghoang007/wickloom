@@ -3,7 +3,7 @@
 import { byId } from "@/indicators/catalog";
 import { resolveInputs, showsPriceLabel, type IndicatorInstance } from "@/indicators/instance";
 import type { InputDef, LineStyleName, PlotType } from "@/indicators/schema";
-import { LINE_STYLES, PLOT_TYPES, WIDTHS, fillStyle, levelStyle, plotStyle } from "@/indicators/style";
+import { LINE_STYLES, PLOT_TYPES, WIDTHS, fillStyle, itemStyle, levelStyle, plotStyle } from "@/indicators/style";
 import { SOURCES } from "@/indicators/ta";
 import { useIndicatorStore } from "@/indicators/store";
 import { Fragment, useRef } from "react";
@@ -44,7 +44,7 @@ function InputRow({ def, value, onChange, enabled = true }: { def: InputDef; val
 }
 
 // Ô chọn gọn cho hàng style (kiểu nét / độ dày / kiểu plot)
-function Pick({ value, options, onChange, disabled, width = "w-[72px]" }: { value: string; options: { id: string; label: string }[]; onChange: (v: string) => void; disabled?: boolean; width?: string }) {
+function Pick({ value, options, onChange, disabled, width = "w-[80px]" }: { value: string; options: { id: string; label: string }[]; onChange: (v: string) => void; disabled?: boolean; width?: string }) {
   return (
     <select className={`${field} h-7 ${width} shrink-0 !pl-1.5 !pr-5 text-[12px]`} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
       {options.map((o) => (
@@ -70,7 +70,7 @@ function Dialog({ uid }: { uid: string }) {
   const def = byId(inst.id);
   const inputs = resolveInputs(def, inst.inputs);
   // Đổi style của 1 plot / level / fill; bỏ field rỗng và `visible: true` (mặc định) cho gọn dữ liệu lưu
-  const setStyle = (group: "plots" | "levels" | "fills", id: string, patch: Record<string, unknown>) => {
+  const setStyle = (group: "plots" | "levels" | "fills" | "items", id: string, patch: Record<string, unknown>) => {
     const cur = (inst.style?.[group] ?? {}) as Record<string, Record<string, unknown>>;
     const next = Object.fromEntries(Object.entries({ ...cur[id], ...patch }).filter(([k, v]) => v !== undefined && !(k === "visible" && v === true)));
     update(uid, { style: { ...inst.style, [group]: { ...cur, [id]: next } } });
@@ -170,6 +170,29 @@ function Dialog({ uid }: { uid: string }) {
                   })}
                 </>
               )}
+
+              {def.items?.map((it, k) => {
+                const st = itemStyle(inst, it);
+                return (
+                  <Fragment key={it.id}>
+                    {it.group && it.group !== def.items![k - 1]?.group && <Section>{it.group}</Section>}
+                    <div className="flex items-center gap-1.5">
+                      {it.plain ? (
+                        <span className="min-w-0 flex-1 whitespace-nowrap">{it.title}</span>
+                      ) : (
+                        <Check className="min-w-0 flex-1 whitespace-nowrap" label={it.title} checked={st.visible} onChange={(visible) => setStyle("items", it.id, { visible })} />
+                      )}
+                      <ColorPicker value={st.color} onChange={(color) => setStyle("items", it.id, { color })} className="h-7 w-10 p-1" />
+                      {it.line && (
+                        <>
+                          <Pick value={st.style} options={LINE_STYLES} onChange={(v) => setStyle("items", it.id, { lineStyle: v as LineStyleName })} />
+                          <Pick value={String(st.width)} width="w-[56px]" options={WIDTHS.map((w) => ({ id: String(w), label: `${w}px` }))} onChange={(v) => setStyle("items", it.id, { width: Number(v) })} />
+                        </>
+                      )}
+                    </div>
+                  </Fragment>
+                );
+              })}
 
               <Section>Output values</Section>
               <label className="flex items-center justify-between py-1.5">

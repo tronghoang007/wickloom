@@ -217,8 +217,8 @@ describe("computeExtras (object + màu nến)", () => {
   const inst = newInstance("xtest");
   const cal = { offset: 0 };
 
-  it("def không có object / màu nến: null cả hai", () => {
-    expect(computeExtras(base, inst, bars, cal)).toEqual({ objects: null, candleColors: null });
+  it("def không có object / màu nến / profile: null hết", () => {
+    expect(computeExtras(base, inst, bars, cal)).toEqual({ objects: null, candleColors: null, profiles: null });
   });
 
   it("object dựng bằng ObjectBuilder, lọc toạ độ na", () => {

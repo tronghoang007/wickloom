@@ -1,7 +1,7 @@
 import type { Bar } from "@/lib/api";
 import { periodKeys, type Period } from "../calendar";
 import { ObjectBuilder } from "../objects";
-import { num, str, type IndicatorDef } from "../schema";
+import { num, str, type IndicatorDef, type ItemDef } from "../schema";
 import { length } from "./common";
 
 // Pivot Points Standard: từ H/L/C (và O) của kỳ TRƯỚC tính các mức, vẽ ngang suốt kỳ HIỆN TẠI. Kỳ theo giờ broker.
@@ -96,7 +96,10 @@ export function decimalsOf(bars: Bar[]): number {
 }
 
 const COLORS = { P: "#fb8c00", R: "#f23645", S: "#089981" };
-const colorOf = (name: string) => COLORS[name[0] as "P" | "R" | "S"];
+/** Mỗi mức một hàng style (P, R1–R5, S1–S5): màu / nét / độ dày / bật-tắt. Mức mà kiểu pivot đang chọn không có thì bỏ qua. */
+const ITEMS: ItemDef[] = ["P", "R1", "R2", "R3", "R4", "R5", "S1", "S2", "S3", "S4", "S5"].map((id) => ({
+  id, title: id, color: COLORS[id[0] as "P" | "R" | "S"], line: { width: 1, style: "solid" },
+}));
 
 export const pivots: IndicatorDef = {
   id: "pivots", name: "Pivots", title: "Pivot points standard", overlay: true,
@@ -107,29 +110,29 @@ export const pivots: IndicatorDef = {
     { key: "labels", label: "Show Labels", type: "bool", default: true },
     { key: "labelsPos", label: "Labels Position", type: "select", default: "Left", options: ["Left", "Right"] },
     { key: "prices", label: "Show Prices", type: "bool", default: true },
-    { key: "width", label: "Line Width", type: "int", default: 1, min: 1, max: 4 },
   ],
   plots: [],
+  items: ITEMS,
   needsCalendar: true,
   warmup: () => 0,
   compute: () => ({}),
-  objects: ({ bars, inputs, calendar }) => {
+  objects: ({ bars, inputs, calendar, items }) => {
     const out = new ObjectBuilder();
     if (bars.length < 2) return out.set;
     const frame = str(inputs, "frame");
     const period = PERIOD_OF[frame] ?? autoPeriod(barStep(bars));
     const periods = groupPeriods(bars, periodKeys(bars.map((b) => b.t), period, calendar));
     const dec = decimalsOf(bars);
-    const width = num(inputs, "width");
     const back = num(inputs, "back");
     // Kỳ đầu của lịch sử đã nạp có thể bị cắt dở nên không dùng làm gốc tính; kỳ cuối (đang chạy) kéo dài sang phải
     for (let k = Math.max(2, periods.length - back); k < periods.length; k++) {
       const prev = periods[k - 1], cur = periods[k];
       const isLast = k === periods.length - 1;
       for (const lv of pivotLevels(str(inputs, "type"), prev, cur.o)) {
-        if (!Number.isFinite(lv.price)) continue;
-        const color = colorOf(lv.name);
-        out.line({ x1: cur.first, y1: lv.price, x2: cur.last, y2: lv.price, color, width, extend: isLast ? "right" : "none" });
+        const it = items[lv.name];
+        if (!Number.isFinite(lv.price) || !it?.visible) continue;
+        const color = it.color;
+        out.line({ x1: cur.first, y1: lv.price, x2: cur.last, y2: lv.price, color, width: it.width, style: it.style, extend: isLast ? "right" : "none" });
         if (!inputs.labels) continue;
         const text = inputs.prices ? `${lv.name} ${lv.price.toFixed(dec)}` : lv.name;
         const left = str(inputs, "labelsPos") === "Left";

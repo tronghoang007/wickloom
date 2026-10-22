@@ -662,6 +662,11 @@ export default function Chart({ paneId }: { paneId: string }) {
         if (from === null) seriesRef.current?.setData(pts as never);
         else for (const pt of pts) seriesRef.current?.update(pt as never);
       },
+      () =>
+        useChartStore
+          .getState()
+          .symbols.find((item) => item.name === pane.chart.getState().symbol)
+          ?.tick_size ?? 10 ** -digitsRef.current,
     );
     drawRef.current = new DrawingManager({
       pane,

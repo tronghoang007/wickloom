@@ -1,4 +1,4 @@
-import type { FillDef, FillRef, IndicatorDef, LevelDef, LineStyleName, PlotDef, PlotType } from "./schema";
+import type { FillDef, FillRef, IndicatorDef, ItemDef, ItemStyle, LevelDef, LineStyleName, PlotDef, PlotType } from "./schema";
 import type { IndicatorInstance } from "./instance";
 
 // Style hiệu lực của plot / level / fill = phần user đã đặt đè lên mặc định của def.
@@ -50,6 +50,16 @@ export function fillStyle(inst: IndicatorInstance, f: FillDef): FillStyleR {
   const u = inst.style?.fills?.[f.id];
   return { color: u?.color ?? f.color, colorDown: u?.colorDown ?? f.colorDown ?? u?.color ?? f.color, visible: u?.visible !== false };
 }
+
+export type ItemStyleR = ItemStyle;
+
+export function itemStyle(inst: IndicatorInstance, it: ItemDef): ItemStyle {
+  const u = inst.style?.items?.[it.id];
+  return { color: u?.color ?? it.color, visible: u?.visible !== false, width: u?.width ?? it.line?.width ?? 1, style: u?.lineStyle ?? it.line?.style ?? "solid" };
+}
+
+export const itemStyles = (inst: IndicatorInstance, def: IndicatorDef): Record<string, ItemStyle> =>
+  Object.fromEntries((def.items ?? []).map((it) => [it.id, itemStyle(inst, it)]));
 
 /** Một vùng tô có vẽ được không: chưa tắt, và hai đầu (plot / level) đang hiện. */
 export function fillShown(inst: IndicatorInstance, def: IndicatorDef, f: FillDef): boolean {

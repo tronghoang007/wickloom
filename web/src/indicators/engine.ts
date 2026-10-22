@@ -2,7 +2,8 @@ import type { Bar } from "@/lib/api";
 import type { CalendarOpts } from "./calendar";
 import { resolveInputs, type IndicatorInstance } from "./instance";
 import { sanitizeObjects } from "./objects";
-import type { Computed, Ctx, IndicatorDef, ObjectSet, PlotData } from "./schema";
+import { itemStyles } from "./style";
+import type { Computed, Ctx, IndicatorDef, ObjectSet, PlotData, ProfileSet } from "./schema";
 import { nan, source, type Num } from "./ta";
 
 /** Dịch `a` sang phải `offset` phần tử (âm = sang trái); dương thì mảng dài thêm `offset` (vùng tương lai). Chỗ trống là `fill`. */
@@ -19,14 +20,17 @@ export function shiftBy<T>(a: T[], offset: number, fill: T): T[] {
 /** Mốc thời gian của `count` nến tương lai nối tiếp `last`, mỗi nến cách `step` giây (xấp xỉ: không nhảy cuối tuần/nghỉ). */
 export const futureTimes = (last: number, count: number, step: number): number[] => Array.from({ length: count }, (_, k) => last + (k + 1) * step);
 
-function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = []): Ctx {
+/** Phần môi trường của chart mà compute có thể cần ngoài nến: kích thước tick, vùng đang nhìn. */
+export type Env = { tick?: number; range?: { from: number; to: number }; cut?: number };
+
+function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = [], env: Env = {}): Ctx {
   const memo = new Map<string, Num>();
   const src = (name: string) => {
     let s = memo.get(name);
     if (!s) memo.set(name, (s = source(bars, name)));
     return s;
   };
-  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar, lower };
+  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar, lower, items: itemStyles(inst, def), tick: env.tick && env.tick > 0 ? env.tick : 0.01, cut: env.cut ?? 0, ...(env.range ? { range: env.range } : {}) };
 }
 
 /** Tính mọi plot của 1 instance trên `bars` (đã gồm lịch sử nạp ngầm). Luôn trả đủ plot của def; mỗi plot dài bars.length, cộng thêm offset nếu offset dương. */
@@ -55,14 +59,14 @@ export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars
 }
 
 /** Phần không phải chuỗi theo nến: object line/label/box và màu ghi đè nến chart chính (null = def không có / trả sai độ dài). */
-export type Extras = { objects: ObjectSet | null; candleColors: string[] | null };
+export type Extras = { objects: ObjectSet | null; candleColors: string[] | null; profiles: ProfileSet | null };
 
-export function computeExtras(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = []): Extras {
-  if (!def.objects && !def.candleColors) return { objects: null, candleColors: null };
-  const ctx = makeCtx(def, inst, bars, calendar, lower);
+export function computeExtras(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = [], env: Env = {}): Extras {
+  if (!def.objects && !def.candleColors && !def.profiles) return { objects: null, candleColors: null, profiles: null };
+  const ctx = makeCtx(def, inst, bars, calendar, lower, env);
   const objects = def.objects ? sanitizeObjects(def.objects(ctx)) : null;
   const colors = def.candleColors?.(ctx);
-  return { objects, candleColors: colors && colors.length === bars.length ? colors : null };
+  return { objects, candleColors: colors && colors.length === bars.length ? colors : null, profiles: def.profiles ? def.profiles(ctx) : null };
 }
 
 /** Bỏ `cut` nến đầu (lịch sử nạp ngầm): chỉ phần trùng với nến chart mới được vẽ, để trục thời gian của chart không đổi. */

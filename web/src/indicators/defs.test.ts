@@ -26,7 +26,7 @@ describe("catalog toàn vẹn", () => {
   it("id indicator, plot, level, fill, input không trùng", () => {
     expect(new Set(INDICATORS.map((d) => d.id)).size).toBe(INDICATORS.length);
     for (const d of INDICATORS) {
-      for (const list of [d.plots.map((p) => p.id), (d.levels ?? []).map((l) => l.id), (d.fills ?? []).map((f) => f.id), d.inputs.map((i) => i.key)])
+      for (const list of [d.plots.map((p) => p.id), (d.levels ?? []).map((l) => l.id), (d.fills ?? []).map((f) => f.id), (d.items ?? []).map((i) => i.id), d.inputs.map((i) => i.key)])
         expect(new Set(list).size, d.id).toBe(list.length);
     }
   });
@@ -50,12 +50,13 @@ describe("catalog toàn vẹn", () => {
         if (p.colorDown) expect(p.colorDown).toMatch(hex);
       }
       for (const l of d.levels ?? []) expect(l.color, `${d.id}.${l.id}`).toMatch(hex);
+      for (const it of d.items ?? []) expect(it.color, `${d.id}.${it.id}`).toMatch(hex);
       for (const f of d.fills ?? []) {
         expect(f.color, `${d.id}.${f.id}`).toMatch(hex);
         if (f.colorDown) expect(f.colorDown).toMatch(hex);
       }
       for (const i of d.inputs) if (i.type === "select") expect(i.options, `${d.id}.${i.key}`).toContain(i.default);
-      expect(d.plots.some((p) => !p.hidden) || !!d.objects, d.id).toBe(true); // vẽ bằng plot hoặc bằng object
+      expect(d.plots.some((p) => !p.hidden) || !!d.objects || !!d.profiles, d.id).toBe(true); // vẽ bằng plot, object hoặc profile
     }
   });
 
