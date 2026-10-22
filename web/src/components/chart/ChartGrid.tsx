@@ -2,7 +2,8 @@
 
 import { useLayoutStore } from "@/store/layout";
 import { FULL, dragSizes, gutters, paneRects, splitAt, type Gutter } from "@/store/layoutTree";
-import { useMemo, useRef } from "react";
+import { startPaneSync } from "@/store/paneSync";
+import { useEffect, useMemo, useRef } from "react";
 import { FullscreenI } from "../icons";
 import Chart from "./Chart";
 
@@ -23,6 +24,7 @@ export default function ChartGrid() {
   const lines = useMemo(() => gutters(tree), [tree]);
   const ids = useMemo(() => Object.keys(panes).sort((a, b) => idNum(a) - idNum(b)), [panes]); // thứ tự DOM ổn định
   const multi = ids.length > 1;
+  useEffect(() => startPaneSync(), []); // "Sync in layout": symbol / khung đi theo giữa các chart
 
   return (
     <div ref={boxRef} className="relative h-full w-full overflow-hidden">

@@ -11,6 +11,7 @@ import { useChartStore } from "@/store/chart";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import { usePaneState } from "@/store/compose";
 import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
+import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
 import { fmtVol, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
@@ -234,6 +235,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   });
   const digits = cs.precision ?? symDigits;
   const boxRef = useRef<HTMLDivElement>(null);
+  const hoverRef = useRef(false); // chuột đang ở trong chart này (nguồn của "Sync crosshair")
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
   const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -635,8 +637,84 @@ export default function Chart({ paneId }: { paneId: string }) {
           ?.tick_size ?? 10 ** -digitsRef.current,
     });
 
+    // Góc nhìn + crosshair của chart này cho "Sync in layout" (store/paneSync.ts). Thời gian là đơn vị chung giữa các khung.
+    const tfSec = () => TF_SECONDS[pane.chart.getState().tf];
+    let remoteCross = false; // đang vẽ crosshair do chart khác đẩy sang (ẩn đường ngang, vì không có giá của con trỏ)
+    let remoteT: number | null = null; // thời gian của crosshair đó: LWC giữ nó theo pixel nên phải vẽ lại sau khi góc nhìn dời
+    const setHorz = (on: boolean) => chart.applyOptions({ crosshair: { horzLine: { visible: on, labelVisible: on } } });
+    const endRemoteCross = () => {
+      remoteT = null;
+      if (!remoteCross) return;
+      remoteCross = false;
+      setHorz(true);
+    };
+    const setCross = (t: number | null) => {
+      const bars = barsRef.current;
+      const series = seriesRef.current;
+      let i = t === null || !series ? -1 : barIndexAt(bars, tfSec(), t);
+      // LWC kẹp crosshair vào mép khi nến nằm ngoài vùng đang hiện (nhãn giờ sai) → coi như không có
+      const vis = chart.timeScale().getVisibleLogicalRange();
+      if (i >= 0 && (!vis || i < Math.ceil(vis.from) || i > Math.floor(vis.to))) i = -1;
+      if (i < 0) {
+        if (remoteCross) {
+          chart.clearCrosshairPosition();
+          endRemoteCross();
+          setLegend(legendAt(bars.length - 1));
+        }
+        remoteT = t; // vẫn nhớ để vẽ lại khi góc nhìn dời tới đó
+        return;
+      }
+      remoteT = t;
+      if (!remoteCross) {
+        remoteCross = true;
+        setHorz(false);
+      }
+      chart.setCrosshairPosition(bars[i].c, bars[i].t as UTCTimestamp, series!);
+      setLegend(legendAt(i));
+    };
+    const view: PaneView = {
+      getRange: () => {
+        const r = chart.timeScale().getVisibleLogicalRange();
+        const bars = barsRef.current;
+        if (!r || !bars.length) return null;
+        const from = timeAt(bars, tfSec(), r.from);
+        const to = timeAt(bars, tfSec(), r.to);
+        return from === null || to === null ? null : { from, to, lf: r.from, lt: r.to };
+      },
+      setRange: (to, from) => {
+        const ts = chart.timeScale();
+        const cur = ts.getVisibleLogicalRange();
+        const bars = barsRef.current;
+        if (!cur || !bars.length) return null;
+        const lt = indexAt(bars, tfSec(), to);
+        const lf = from === undefined ? (lt === null ? null : lt - (cur.to - cur.from)) : indexAt(bars, tfSec(), from);
+        if (lt === null || lf === null || !(lt - lf > 0.5)) return null;
+        if (Math.abs(lt - cur.to) > 1e-4 || Math.abs(lf - cur.from) > 1e-4) {
+          ts.setVisibleLogicalRange({ from: lf, to: lt });
+          if (remoteT !== null) setCross(remoteT);
+        }
+        const after = ts.getVisibleLogicalRange();
+        return after && { lf: after.from, lt: after.to };
+      },
+      setCrosshair: setCross,
+      hovered: () => hoverRef.current,
+    };
+    const unregisterView = registerPaneView(paneId, view);
+    const onEnter = () => {
+      hoverRef.current = true;
+      endRemoteCross(); // chuột vào: crosshair của chính chart này (đủ cả đường ngang) thay cho crosshair từ chart khác
+    };
+    const onLeave = () => {
+      hoverRef.current = false;
+    };
+    box.addEventListener("mouseenter", onEnter);
+    box.addEventListener("mouseleave", onLeave);
+
     chart.subscribeCrosshairMove((p) => {
       const bars = barsRef.current;
+      // "Sync in layout › Crosshair": rời chart thì luôn báo để xoá, còn vị trí chỉ báo khi chuột đang ở chart này
+      if (!p.time) syncCrosshair(paneId, null);
+      else if (hoverRef.current) syncCrosshair(paneId, p.time as number);
       if (!p.time || bars.length === 0)
         return setLegend(legendAt(bars.length - 1));
       let lo = 0,
@@ -657,9 +735,13 @@ export default function Chart({ paneId }: { paneId: string }) {
       setShowLatestButton(
         awayFromLatest && !pane.replay.getState().selecting,
       );
+      if (range) syncRange(paneId); // "Sync in layout › Time / Date range"
+      if (remoteT !== null) setCross(remoteT); // crosshair do chart khác đẩy sang: vẽ lại theo thời gian khi góc nhìn dời (LWC giữ theo pixel)
       if (
         !range ||
         range.from > 50 ||
+        isSyncedRange(paneId, { lf: range.from, lt: range.to }) || // góc nhìn do đồng bộ đặt: để trống, không đi tải thêm
+
         loadingRef.current ||
         exhaustedRef.current ||
         pane.replay.getState().active
@@ -718,6 +800,9 @@ export default function Chart({ paneId }: { paneId: string }) {
     });
 
     return () => {
+      unregisterView();
+      box.removeEventListener("mouseenter", onEnter);
+      box.removeEventListener("mouseleave", onLeave);
       box.removeEventListener("wheel", onAxisWheel, { capture: true });
       drawRef.current?.destroy();
       indRef.current?.destroy();

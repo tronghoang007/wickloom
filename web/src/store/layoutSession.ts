@@ -134,7 +134,7 @@ export function createLayoutSession(
     bind();
     const offLayout = useLayoutStore.subscribe((s, prev) => {
       if (s.panes !== prev.panes) bind();
-      if (s.panes !== prev.panes || s.tree !== prev.tree || s.templateId !== prev.templateId || s.name !== prev.name) onChange();
+      if (s.panes !== prev.panes || s.tree !== prev.tree || s.templateId !== prev.templateId || s.name !== prev.name || s.sync !== prev.sync) onChange();
     });
     return () => {
       offs.forEach((f) => f());

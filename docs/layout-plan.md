@@ -61,7 +61,17 @@ xoá layout đang mở → mở layout còn lại, không tạo lại bản vừ
 - UI: `LayoutBar` (tên + trạng thái `Saved/Saving…/Save/Phiên hết hạn/Read-only`, menu Save · Rename… · Make a copy… · Create new layout… · Open layout… · Delete layout…, Ctrl/⌘+S),
   `OpenLayoutDialog` (tìm kiếm, tóm tắt, thời gian sửa, CURRENT, xoá có xác nhận; không xoá layout cuối), `PromptDialog`. Mọi thao tác qua `requireLogin`.
 
-**Chưa có / giới hạn đã biết:** doc chưa có trường `sync` (Phase 4); layout không đọc được chỉ hiện trong danh sách, chưa mở/sửa được; hai tab cùng mở: last-write-wins; Chart không tự nạp lại dữ liệu
+**Phase 4 (Sync in layout) đã code, chưa commit** (313 test web xanh, `tsc` + `next build` sạch, lint giữ 12 lỗi cũ; kiểm tay trên Chrome với backend scratch, 2 chart: **Crosshair** (khác khung, kể cả sau khi cuộn khi đang hover — nhãn giờ khớp, legend chart nhận đổi theo), **Time** (cuộn chart này thì chart kia theo mép phải), **Interval** (bật → chart khác lấy khung của chart active; đổi khung ở toolbar → cả hai đổi), **Date range** (hai chart cùng khoảng sau khi cuộn). **Symbol chỉ có unit test**: DB scratch chỉ có 1 symbol nên không đổi được qua UI. Chưa kiểm tay: lưu công tắc vào layout server (có unit test `parse/docKey/applyLayout`), Maximize, 3+ chart):
+
+- `LayoutDoc.sync: {symbol, interval, crosshair, time, dateRange}` (boolean, thêm vào doc v1 mà không đổi `LAYOUT_VERSION`; doc cũ không có / hỏng → tắt hết, `parseSync`); `useLayoutStore.sync` + `setSync(patch)`; lưu cùng layout (nằm trong `docKey` nên đổi công tắc = autosave). Khách không lưu (như lưới).
+- `store/paneSync.ts`: **Symbol/Interval** — `startPaneSync()` (gọi ở `ChartGrid`) nghe store `chart` của từng pane, đổi ở pane nào thì ghi vào các pane khác CHỈ khi đang khác giá trị (không vòng lặp); vừa bật công tắc thì các pane khác lấy ngay symbol/khung của pane ACTIVE (không áp khi mở layout khác: `revision` đổi).
+  **Crosshair / Time / Date range** — mỗi `Chart` đăng ký một `PaneView` {getRange, setRange, setCrosshair, hovered}; thời gian (giây) là đơn vị chung giữa các khung (`timeAt`/`indexAt`: chỉ số logic ↔ thời gian, nội suy qua lỗ cuối tuần, ngoại suy theo độ dài 1 nến ngoài hai đầu).
+  *Time* = dời mép phải của các chart khác về cùng thời gian, giữ số nến đang hiện (kéo/cuộn có tác dụng, zoom thì không — mép phải đứng yên); *Date range* = đặt cả hai mép (zoom cũng lan). Định nghĩa Time vs Date range là **đoán** (chưa đối chiếu TV, Phase 0).
+- Chống vòng lặp: `applying` (sự kiện lồng nhau) + `echo` (góc nhìn do đồng bộ vừa đặt cho một chart thì sự kiện dội lại bị bỏ qua) + chỉ đặt khi khác > 1e-4 nến. Chart không có dữ liệu trong khoảng đó thì để trống: `isSyncedRange` cho handler "cuộn tới đầu dữ liệu" của Chart bỏ qua nên **không kích backfill hàng loạt**.
+- Crosshair: chỉ pane có chuột (`hoverRef`) là nguồn và không nhận; `setCrosshairPosition` của LWC không bắn lại sự kiện (đã đọc mã nguồn) nên không vòng lặp. Chart nhận ẩn đường ngang (không có giá), cập nhật legend theo nến đó, **vẽ lại sau mỗi lần dời góc nhìn** (LWC giữ crosshair giả theo pixel) và **không vẽ khi nến nằm ngoài vùng đang hiện** (LWC kẹp vào mép với nhãn giờ sai). Khác khung: lấy nến chứa thời gian đó (`barIndexAt`).
+- UI: khối "Sync in layout" (5 checkbox, mờ khi chỉ 1 chart) trong popup `LayoutMenu`. Mặc định tắt hết (TV có thể bật sẵn một vài mục — chưa đối chiếu).
+
+**Chưa có / giới hạn đã biết:** layout không đọc được chỉ hiện trong danh sách, chưa mở/sửa được; hai tab cùng mở: last-write-wins; Chart không tự nạp lại dữ liệu
 giá nếu backend tắt lúc mở trang (có sẵn từ trước: `load()` không retry lỗi mạng); Ctrl+S chưa thử trên trình duyệt thật (chỉ code review: `preventDefault` + `save()`);
 vị trí nút Maximize và danh sách mẫu vẫn là đoán theo TV (Phase 0).
 
@@ -266,7 +276,7 @@ Không cần bảng mới, nhưng **không dùng CRUD generic `/layouts`** nữa
 | 1 ✅ | Tách state theo pane (§5.1), vẫn 1 ô + migration state cũ (§4.4) | Hành vi y hệt trước: vẽ/undo/indicator/volume/replay/đổi symbol-khung chạy như cũ; `tsc`, lint, vitest xanh |
 | 2 ✅ | Cây chia ô + template + popup chọn + splitter + active pane + Maximize + `DrawingDoc` dùng chung (§5.2–5.3) | 2×2 mỗi ô symbol/khung riêng; vẽ ở ô A hiện ở ô B cùng symbol, undo chung, không mất hình; phím tắt/chụp ảnh chỉ tác động ô active |
 | 3 ✅ | Lưu/mở layout: `store/layout.ts`, `LayoutSync`, menu + dialog Open, autosave, Ctrl+S, khôi phục khi mở app, drawings theo layout (§4.3, §5.5), scope = user qua `/me/layouts`, chặn khách bằng `requireLogin` (= `auth-plan` U4). **Cần `auth-plan` U1–U3 xong trước** | Reload giữ nguyên bố cục + indicator; copy/xoá layout kèm drawings; tắt backend rồi reload không mất layout; khách bấm Save → popup → lưu đúng tài khoản; user B không thấy layout của A |
-| 4 | Sync in layout: symbol, interval, crosshair, time, date range (§5.4) | Mỗi công tắc chạy đúng và lưu theo layout; không vòng lặp, không kích backfill hàng loạt |
+| 4 ✅ | Sync in layout: symbol, interval, crosshair, time, date range (§5.4) | Mỗi công tắc chạy đúng và lưu theo layout; không vòng lặp, không kích backfill hàng loạt |
 | 5 | Tuỳ chọn: Settings theo layout, Replay đa ô, kéo symbol từ watchlist vào ô, mẫu 10/12/16, visible range trong layout | Theo nhu cầu |
 | ~~A~~ | ~~Nối account MT5~~ — **bỏ**: layout theo user Wickloom, không còn phụ thuộc multi-account | — |
 

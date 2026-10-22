@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { buildDoc, cleanName, type LayoutDoc } from "./layoutDoc";
+import { NO_SYNC, buildDoc, cleanName, type LayoutDoc, type SyncFlags } from "./layoutDoc";
 import { buildTemplate, paneIds, retarget, templateById, withSizes, type Node } from "./layoutTree";
 import { createPane, type Pane } from "./paneStores";
 
@@ -20,7 +20,9 @@ type State = {
   templateId: string;
   activeId: string;
   maximized: string | null; // chart đang phóng to (chỉ là trạng thái UI, không lưu)
+  sync: SyncFlags; // "Sync in layout" (lưu cùng layout); việc đồng bộ thật nằm ở store/paneSync.ts
   setActive: (id: string) => void;
+  setSync: (patch: Partial<SyncFlags>) => void;
   /** Đổi mẫu chia ô: giữ pane theo thứ tự, thiếu thì thêm (nhân bản symbol/khung/loại nến của pane active), thừa thì bỏ các ô cuối. */
   setTemplate: (templateId: string) => void;
   /** Kéo splitter: đổi tỉ lệ các con của nhóm tại `path`. */
@@ -48,6 +50,13 @@ export const useLayoutStore = create<State>()((set, get) => ({
   templateId: "1",
   activeId: PRIMARY_PANE_ID,
   maximized: null,
+  sync: NO_SYNC,
+
+  setSync: (patch) =>
+    set((s) => {
+      const sync = { ...s.sync, ...patch };
+      return (Object.keys(sync) as (keyof SyncFlags)[]).every((k) => sync[k] === s.sync[k]) ? s : { sync };
+    }),
 
   setActive: (id) => {
     const { panes, activeId } = get();
@@ -114,6 +123,7 @@ export const useLayoutStore = create<State>()((set, get) => ({
       templateId: doc.templateId,
       activeId: order.includes(doc.active) ? doc.active : order[0],
       maximized: null,
+      sync: doc.sync,
       revision: s.revision + 1,
     }));
   },
@@ -122,7 +132,7 @@ export const useLayoutStore = create<State>()((set, get) => ({
 /** Document của layout đang mở (để lưu / tạo bản sao). */
 export const snapshotLayout = () => {
   const s = useLayoutStore.getState();
-  return buildDoc({ name: s.name, templateId: s.templateId, tree: s.tree, order: s.order, panes: s.panes, activeId: s.activeId });
+  return buildDoc({ name: s.name, templateId: s.templateId, tree: s.tree, order: s.order, panes: s.panes, activeId: s.activeId, sync: s.sync });
 };
 
 export const getPane = (id: string): Pane => useLayoutStore.getState().panes[id];

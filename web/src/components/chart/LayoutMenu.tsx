@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutStore } from "@/store/layout";
+import { SYNC_KEYS } from "@/store/layoutDoc";
 import { TEMPLATES, buildTemplate, paneRects, type Template } from "@/store/layoutTree";
 import { useState } from "react";
 import { LayoutI } from "../icons";
@@ -23,11 +24,22 @@ function TemplateIcon({ t }: { t: Template }) {
 
 const label = (t: Template) => `${t.count} chart${t.count > 1 ? "s" : ""} (${t.id})`;
 
+const SYNC_LABELS: Record<(typeof SYNC_KEYS)[number], string> = {
+  symbol: "Symbol",
+  interval: "Interval",
+  crosshair: "Crosshair",
+  time: "Time",
+  dateRange: "Date range",
+};
+
 /** Nút Layout trên toolbar + popup chọn mẫu chia ô (1–8 chart). */
 export default function LayoutMenu({ className }: { className: string }) {
   const [open, setOpen] = useState(false);
   const templateId = useLayoutStore((s) => s.templateId);
   const setTemplate = useLayoutStore((s) => s.setTemplate);
+  const sync = useLayoutStore((s) => s.sync);
+  const setSync = useLayoutStore((s) => s.setSync);
+  const multi = useLayoutStore((s) => s.order.length > 1);
   const counts = [...new Set(TEMPLATES.map((t) => t.count))];
 
   return (
@@ -62,6 +74,17 @@ export default function LayoutMenu({ className }: { className: string }) {
                     ))}
                   </div>
                 </div>
+              ))}
+            </div>
+            <div className="mb-1 mt-3 border-t border-[var(--border)] pt-3 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+              Sync in layout
+            </div>
+            <div className={multi ? "" : "opacity-50"} title={multi ? undefined : "Cần ít nhất 2 chart"}>
+              {SYNC_KEYS.map((k) => (
+                <label key={k} className="flex cursor-pointer items-center justify-between rounded px-1 py-1 text-sm hover:bg-[var(--hover)]">
+                  <span>{SYNC_LABELS[k]}</span>
+                  <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={sync[k]} onChange={(e) => setSync({ [k]: e.target.checked })} />
+                </label>
               ))}
             </div>
           </div>

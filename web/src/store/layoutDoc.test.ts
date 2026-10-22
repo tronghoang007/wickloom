@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LAYOUT_VERSION, buildDoc, cleanName, docKey, parseLayoutDoc, summarizeDoc, tfShort, type LayoutDoc } from "./layoutDoc";
+import { LAYOUT_VERSION, NO_SYNC, buildDoc, cleanName, docKey, parseLayoutDoc, summarizeDoc, tfShort, type LayoutDoc } from "./layoutDoc";
 import { buildTemplate } from "./layoutTree";
 import { createPane } from "./paneStores";
 
@@ -46,6 +46,23 @@ describe("parseLayoutDoc", () => {
       expect(docKey(r.doc)).toBe(docKey(d));
       expect(r.doc.active).toBe("p2");
     }
+  });
+
+  it("sync: doc cũ không có / hỏng → tắt hết; chỉ nhận đúng `true`; đổi công tắc là có thay đổi cần lưu", () => {
+    const d = twoPaneDoc();
+    expect(d.sync).toEqual(NO_SYNC);
+    const parse = (sync: unknown) => {
+      const r = parseLayoutDoc({ ...JSON.parse(JSON.stringify(d)), sync });
+      if (!r.ok) throw new Error("parse failed");
+      return r.doc;
+    };
+    expect(parse(undefined).sync).toEqual(NO_SYNC);
+    expect(parse("symbol").sync).toEqual(NO_SYNC);
+    expect(parse({ symbol: 1, time: "true", dateRange: true, lạ: true }).sync).toEqual({ ...NO_SYNC, dateRange: true });
+    const on = { ...d, sync: { ...NO_SYNC, crosshair: true } };
+    expect(docKey(on)).not.toBe(docKey(d));
+    expect(parse(on.sync).sync).toEqual(on.sync);
+    expect(docKey(parse(on.sync))).toBe(docKey(on)); // lưu rồi đọc lại: không bị coi là có thay đổi
   });
 
   it("version lạ (app mới hơn) → reason version; thiếu/sai kiểu → invalid", () => {

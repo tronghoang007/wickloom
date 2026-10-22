@@ -10,6 +10,17 @@ export const LAYOUT_VERSION = 1;
 
 export type PaneSaved = ReturnType<typeof snapshotPane>;
 
+/** "Sync in layout": đổi ở một chart thì các chart còn lại đổi theo (xem store/paneSync.ts). */
+export type SyncFlags = { symbol: boolean; interval: boolean; crosshair: boolean; time: boolean; dateRange: boolean };
+export const SYNC_KEYS = ["symbol", "interval", "crosshair", "time", "dateRange"] as const;
+export const NO_SYNC: SyncFlags = { symbol: false, interval: false, crosshair: false, time: false, dateRange: false };
+
+/** Doc cũ không có `sync` (thêm sau, vẫn version 1): thiếu/hỏng thì tắt hết. */
+export function parseSync(raw: unknown): SyncFlags {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return Object.fromEntries(SYNC_KEYS.map((k) => [k, o[k] === true])) as SyncFlags;
+}
+
 export type LayoutDoc = {
   version: number;
   name: string;
@@ -17,6 +28,7 @@ export type LayoutDoc = {
   tree: Node;
   active: string;
   panes: Record<string, PaneSaved>;
+  sync: SyncFlags;
   updatedAt: number;
 };
 
@@ -35,6 +47,7 @@ export type LayoutInput = {
   order: string[];
   panes: Record<string, Pane>;
   activeId: string;
+  sync?: SyncFlags;
 };
 
 export function buildDoc(s: LayoutInput, now = Date.now()): LayoutDoc {
@@ -45,6 +58,7 @@ export function buildDoc(s: LayoutInput, now = Date.now()): LayoutDoc {
     tree: s.tree,
     active: s.activeId,
     panes: Object.fromEntries(s.order.map((id) => [id, snapshotPane(s.panes[id])])),
+    sync: { ...(s.sync ?? NO_SYNC) },
     updatedAt: now,
   };
 }
@@ -108,6 +122,7 @@ export function parseLayoutDoc(raw: unknown): ParsedDoc {
       tree,
       active: typeof o.active === "string" && order.includes(o.active) ? o.active : order[0],
       panes,
+      sync: parseSync(o.sync),
       updatedAt: typeof o.updatedAt === "number" && Number.isFinite(o.updatedAt) ? o.updatedAt : 0,
     },
   };
