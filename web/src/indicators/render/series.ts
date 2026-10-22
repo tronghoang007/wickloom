@@ -1,5 +1,6 @@
 import {
     AreaSeries,
+    CandlestickSeries,
     HistogramSeries,
     LineSeries,
     LineStyle,
@@ -28,6 +29,8 @@ export function addPlotSeries(chart: IChartApi, type: PlotType, paneIndex: numbe
       return chart.addSeries(HistogramSeries, { ...common, priceFormat: { type: "volume" } }, paneIndex) as ISeriesApi<SeriesType>;
     case "area":
       return chart.addSeries(AreaSeries, common, paneIndex) as ISeriesApi<SeriesType>;
+    case "candles":
+      return chart.addSeries(CandlestickSeries, { ...common, borderVisible: true }, paneIndex) as ISeriesApi<SeriesType>;
     default:
       return chart.addSeries(LineSeries, common, paneIndex) as ISeriesApi<SeriesType>;
   }
@@ -39,6 +42,11 @@ export function plotOptions(st: PlotStyleR): Record<string, unknown> {
   switch (st.type) {
     case "histogram":
       return { color: st.color };
+    case "candles":
+      return {
+        upColor: st.color, borderUpColor: st.color, wickUpColor: st.color,
+        downColor: st.colorDown, borderDownColor: st.colorDown, wickDownColor: st.colorDown,
+      };
     case "area":
       return { lineColor: st.color, topColor: withAlpha(st.color, 0.35), bottomColor: withAlpha(st.color, 0), lineWidth, lineStyle: LWC_LINE_STYLE[st.lineStyle] };
     case "circles":

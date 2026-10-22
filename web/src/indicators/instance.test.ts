@@ -153,3 +153,10 @@ describe("style đã lưu (nét, độ dày, kiểu, levels, fills)", () => {
     expect(r?.style).toBeUndefined();
   });
 });
+
+describe("màu nến giảm của plot candles", () => {
+  it("chỉ plot candles giữ colorDown", () => {
+    const m = migrateInstance({ uid: "u", id: "rsi", style: { plots: { rsi: { colorDown: "#ff0000", color: "#111111" } } } });
+    expect(m?.style).toEqual({ plots: { rsi: { color: "#111111" } } });
+  });
+});

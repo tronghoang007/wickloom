@@ -20,14 +20,15 @@ export type InputDef = InputBase &
     | { type: "source"; default: SourceName }
   );
 
-export type PlotType = "line" | "step" | "histogram" | "area" | "circles";
+export type PlotType = "line" | "step" | "histogram" | "area" | "circles" | "candles";
 export type LineStyleName = "solid" | "dashed" | "dotted";
 
 export type PlotDef = {
   id: string;
   title: string;
   type: PlotType; // kiểu mặc định; user đổi được trong Style (trừ plot perBar)
-  color: string; // màu mặc định (#rrggbb hoặc #rrggbbaa)
+  color: string; // màu mặc định (#rrggbb hoặc #rrggbbaa); với candles là màu nến tăng
+  colorDown?: string; // chỉ candles: màu nến giảm (mặc định = color)
   width?: number; // độ dày mặc định (1)
   lineStyle?: LineStyleName; // nét mặc định (solid)
   perBar?: boolean; // màu do compute quyết định theo từng nến (histogram MACD...): Settings không cho chọn màu/kiểu
@@ -42,8 +43,9 @@ export type FillRef = { plot: string } | { level: string };
 /** Vùng tô nền giữa hai plot / hai level (fill của Pine): dải Bollinger, vùng 30–70 của RSI. */
 export type FillDef = { id: string; title: string; between: [FillRef, FillRef]; color: string };
 
-/** Giá trị một plot theo từng nến; `colors` (nếu có) là màu riêng từng nến (histogram MACD, Volume...). */
-export type PlotData = { values: Num; colors?: string[] };
+/** Giá trị một plot theo từng nến; `colors` (nếu có) là màu riêng từng nến (histogram MACD, Volume...).
+ *  Plot `candles` (plotcandle): `values` = close, `candle` = open/high/low; màu nến tăng/giảm lấy từ style. */
+export type PlotData = { values: Num; colors?: string[]; candle?: { o: Num; h: Num; l: Num } };
 export type Computed = Record<string, PlotData>;
 
 export type Ctx = {
@@ -58,6 +60,7 @@ export type IndicatorDef = {
   name: string; // tên ngắn trên legend
   title: string; // tên đầy đủ trong dialog Indicators
   overlay: boolean; // mặc định vẽ trên chart chính hay pane riêng
+  format?: "price" | "volume"; // định dạng trục/nhãn: volume = 1.15K, 2.3M (mặc định price)
   inputs: InputDef[];
   plots: PlotDef[];
   levels?: LevelDef[];

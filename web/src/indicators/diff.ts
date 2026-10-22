@@ -3,7 +3,7 @@ import type { Num } from "./ta";
 // Quyết định cách đẩy dữ liệu 1 plot vào series của lightweight-charts: chỉ nến cuối đổi (tick) hoặc thêm 1 nến mới
 // thì `update` đúng các điểm đó, còn lại mới `setData` cả mảng (đổi input, nạp thêm lịch sử, ...).
 
-export type Snap = { times: number[]; values: Num; colors?: string[] };
+export type Snap = { times: number[]; values: Num; colors?: string[]; aux?: Num[] }; // aux: open/high/low của plot candles
 
 export type Patch = { kind: "none" } | { kind: "all" } | { kind: "tail"; from: number };
 
@@ -18,7 +18,8 @@ export function planUpdate(prev: Snap | null, next: Snap): Patch {
     const diff =
       prev.times[i] !== next.times[i] ||
       !same(prev.values[i], next.values[i]) ||
-      (prev.colors?.[i] ?? "") !== (next.colors?.[i] ?? "");
+      (prev.colors?.[i] ?? "") !== (next.colors?.[i] ?? "") ||
+      (next.aux?.some((a, k) => !same(a[i], prev.aux?.[k]?.[i] ?? NaN)) ?? false);
     if (!diff) continue;
     return i >= n - 1 ? { kind: "tail", from: n - 1 } : { kind: "all" };
   }

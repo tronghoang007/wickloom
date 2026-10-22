@@ -42,7 +42,7 @@ export default function IndicatorLegend({
       {cs.showIndicatorTitles && <span className="text-[var(--fg)]">{def.name}</span>}
       {cs.showIndicatorInputs && params && <span className="text-[var(--muted)]">{params}</span>}
       {shown.map((v) => (
-        <span key={v.id} style={{ color: v.color }}>{fmtPlotValue(v.value, digits)}</span>
+        <span key={v.id} style={{ color: v.color }}>{fmtPlotValue(v.value, digits, def.format === "volume")}</span>
       ))}
       <span className="hidden items-center group-hover/ind:flex">
         <IconBtn title={inst.hidden ? "Show" : "Hide"} onClick={onHide}>

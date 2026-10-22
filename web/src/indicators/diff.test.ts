@@ -47,4 +47,12 @@ describe("planUpdate", () => {
     expect(planUpdate(snap([1, 2], ["a", "b"]), snap([1, 2], ["a", "c"]))).toEqual({ kind: "tail", from: 1 });
     expect(planUpdate(snap([1, 2], ["a", "b"]), snap([1, 2], ["x", "b"]))).toEqual({ kind: "all" });
   });
+
+  it("candles: đổi high/low/open ở nến cuối -> update; ở nến giữa -> setData", () => {
+    const a: Snap = { ...snap([1, 2, 3]), aux: [[1, 2, 3], [2, 3, 4], [0, 1, 2]] };
+    const same: Snap = { ...snap([1, 2, 3]), aux: [[1, 2, 3], [2, 3, 4], [0, 1, 2]] };
+    expect(planUpdate(a, same)).toEqual({ kind: "none" });
+    expect(planUpdate(a, { ...same, aux: [[1, 2, 3], [2, 3, 4.5], [0, 1, 2]] })).toEqual({ kind: "tail", from: 2 });
+    expect(planUpdate(a, { ...same, aux: [[1, 2, 3], [2, 9, 4], [0, 1, 2]] })).toEqual({ kind: "all" });
+  });
 });

@@ -104,7 +104,13 @@ function Dialog({ uid }: { uid: string }) {
                 return (
                   <div key={p.id} className="flex items-center gap-1.5">
                     <Check className="min-w-0 flex-1 whitespace-nowrap" label={p.title} checked={st.visible} onChange={(visible) => setStyle("plots", p.id, { visible })} />
-                    {!p.perBar && (
+                    {p.type === "candles" && (
+                      <>
+                        <ColorPicker value={st.color} onChange={(color) => setStyle("plots", p.id, { color })} className="h-7 w-10 p-1" />
+                        <ColorPicker value={st.colorDown} onChange={(colorDown) => setStyle("plots", p.id, { colorDown })} className="h-7 w-10 p-1" />
+                      </>
+                    )}
+                    {!p.perBar && p.type !== "candles" && (
                       <>
                         <ColorPicker value={st.color} onChange={(color) => setStyle("plots", p.id, { color })} className="h-7 w-10 p-1" />
                         <Pick value={st.lineStyle} disabled={!isLine} options={LINE_STYLES} onChange={(v) => setStyle("plots", p.id, { lineStyle: v as LineStyleName })} />

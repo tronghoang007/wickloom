@@ -26,8 +26,8 @@ type Live = {
 
 export type FeedKey = { symbol: string; tf: string };
 
-/** Giá trị 1 plot ở một nến, cho legend. */
-export type PlotValue = { id: string; title: string; value: number; color: string };
+/** Giá trị 1 plot ở một nến, cho legend. Plot candles cho 4 giá trị (O, H, L, C), cùng `plot` = id plot. */
+export type PlotValue = { id: string; plot: string; title: string; value: number; color: string };
 
 const DEFAULT_FORMAT = { type: "price" as const, precision: 2, minMove: 0.01 };
 
@@ -86,12 +86,19 @@ export class IndicatorManager {
     if (!l) return undefined;
     const i = indexOfTime(this.times, t);
     if (i < 0 || l.data.length === 0) return undefined;
-    return l.def.plots.map((p, k) => ({
-      id: p.id,
-      title: p.title,
-      value: l.data[k].values[i] ?? NaN,
-      color: l.data[k].colors?.[i] || plotColor(l.inst, l.def, p.id),
-    }));
+    return l.def.plots.flatMap((p, k): PlotValue[] => {
+      const d = l.data[k];
+      const c = d.candle;
+      if (c) {
+        const st = plotStyle(l.inst, p);
+        const close = d.values[i] ?? NaN;
+        const color = close >= (c.o[i] ?? NaN) ? st.color : st.colorDown;
+        return (["o", "h", "l"] as const)
+          .map((key): PlotValue => ({ id: `${p.id}.${key}`, plot: p.id, title: key.toUpperCase(), value: c[key][i] ?? NaN, color }))
+          .concat({ id: `${p.id}.c`, plot: p.id, title: "C", value: close, color });
+      }
+      return [{ id: p.id, plot: p.id, title: p.title, value: d.values[i] ?? NaN, color: d.colors?.[i] || plotColor(l.inst, l.def, p.id) }];
+    });
   }
 
   private schedule() {
@@ -152,8 +159,12 @@ export class IndicatorManager {
     def.plots.forEach((p, k) => {
       const st = plots[k];
       const opts: Record<string, unknown> = { ...plotOptions(st), visible: shown && st.visible, lastValueVisible: showsPriceLabel(inst, def) };
-      if (st.type !== "histogram")
-        opts.priceFormat = inst.precision === undefined ? DEFAULT_FORMAT : { type: "price", precision: inst.precision, minMove: 10 ** -inst.precision };
+      if (st.type !== "histogram") {
+        const volume = def.format === "volume";
+        opts.priceFormat = volume
+          ? { type: "volume", ...(inst.precision === undefined ? {} : { precision: inst.precision }) }
+          : inst.precision === undefined ? DEFAULT_FORMAT : { type: "price", precision: inst.precision, minMove: 10 ** -inst.precision };
+      }
       l.series[k].applyOptions(opts);
     });
     l.anchor?.applyOptions({ visible: shown });
@@ -179,6 +190,12 @@ export class IndicatorManager {
   private point(time: number, d: PlotData, i: number) {
     const v = d.values[i];
     const t = time as UTCTimestamp;
+    const c = d.candle;
+    if (c) {
+      const o = c.o[i], h = c.h[i], l = c.l[i];
+      if (v === undefined || Number.isNaN(v) || Number.isNaN(o) || Number.isNaN(h) || Number.isNaN(l)) return { time: t };
+      return { time: t, open: o, high: h, low: l, close: v };
+    }
     if (v === undefined || Number.isNaN(v)) return { time: t };
     return d.colors?.[i] ? { time: t, value: v, color: d.colors[i] } : { time: t, value: v };
   }
@@ -211,7 +228,7 @@ export class IndicatorManager {
         const d = trimPlot(out[p.id], cut);
         // offset dương: plot dài hơn nến chart, phần thừa nằm ở vùng tương lai (mốc thời gian suy ra theo khung)
         const ts = d.values.length > times.length ? times.concat(futureTimes(times[times.length - 1], d.values.length - times.length, step)) : times;
-        const next: Snap = { times: ts, values: d.values, colors: d.colors };
+        const next: Snap = { times: ts, values: d.values, colors: d.colors, aux: d.candle ? [d.candle.o, d.candle.h, d.candle.l] : undefined };
         const patch = planUpdate(l.snaps[k], next);
         l.snaps[k] = next;
         const s = l.series[k];

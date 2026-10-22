@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { INDICATORS, byId } from "./catalog";
 import { computeInstance, futureTimes, historyTarget, shiftBy, trimPlot } from "./engine";
 import { newInstance, type IndicatorInstance } from "./instance";
+import type { IndicatorDef } from "./schema";
+import { plotStyle } from "./style";
 import * as ta from "./ta";
 
 const utc = (iso: string) => Date.parse(iso + "Z") / 1000;
@@ -155,5 +157,51 @@ describe("offset", () => {
   it("trimPlot sau offset giữ phần tương lai", () => {
     const off = run("ema", { length: 5, offset: 4 }, bars).ema;
     expect(trimPlot(off, 20).values).toHaveLength(44);
+  });
+});
+
+describe("plot candles", () => {
+  // Delta tích luỹ theo nến chart (def thử, không nằm trong catalog): open = tích luỹ trước nến, close = sau nến
+  const candleDef: IndicatorDef = {
+    id: "ctest", name: "CT", title: "CT", overlay: false, format: "volume", inputs: [],
+    plots: [{ id: "cvd", title: "CVD", type: "candles", color: "#089981", colorDown: "#f23645" }],
+    warmup: () => 0,
+    compute: ({ bars }) => {
+      const o: number[] = [], h: number[] = [], l: number[] = [], c: number[] = [];
+      let cum = 0;
+      for (const b of bars) {
+        const d = b.c >= b.o ? b.v : -b.v;
+        o.push(cum); cum += d; c.push(cum);
+        h.push(Math.max(o[o.length - 1], cum) + 1); l.push(Math.min(o[o.length - 1], cum) - 1);
+      }
+      return { cvd: { values: c, candle: { o, h, l } } };
+    },
+  };
+  const bars = mk(30);
+  const inst = { ...newInstance("ctest") };
+
+  it("trả đủ open/high/low/close và nối tiếp nhau", () => {
+    const d = computeInstance(candleDef, inst, bars, { offset: 0 }).cvd;
+    expect(d.candle!.o).toHaveLength(30);
+    expect(d.candle!.o[1]).toBe(d.values[0]);
+    expect(d.candle!.h[5]).toBeGreaterThanOrEqual(Math.max(d.candle!.o[5], d.values[5]));
+  });
+
+  it("compute thiếu candle -> plot na (không ném lỗi)", () => {
+    const bad: IndicatorDef = { ...candleDef, compute: ({ bars: b }) => ({ cvd: { values: b.map((x) => x.c) } }) };
+    const d = computeInstance(bad, inst, bars, { offset: 0 }).cvd;
+    expect(d.values.every(Number.isNaN)).toBe(true);
+    expect(d.candle!.o.every(Number.isNaN)).toBe(true);
+  });
+
+  it("trimPlot cắt cả open/high/low", () => {
+    const d = trimPlot(computeInstance(candleDef, inst, bars, { offset: 0 }).cvd, 10);
+    expect(d.values).toHaveLength(20);
+    expect(d.candle!.l).toHaveLength(20);
+  });
+
+  it("kiểu candles cố định; có màu lên/xuống; volume format", () => {
+    expect(plotStyle({ ...inst, style: { plots: { cvd: { type: "line" } } } }, candleDef.plots[0])).toMatchObject({ type: "candles", color: "#089981", colorDown: "#f23645" });
+    expect(plotStyle(inst, { ...candleDef.plots[0], colorDown: undefined }).colorDown).toBe("#089981");
   });
 });

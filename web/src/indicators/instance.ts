@@ -5,7 +5,7 @@ import { SOURCES } from "./ta";
 
 export const INSTANCE_V = 1;
 
-export type PlotStyle = { color?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName; type?: PlotType };
+export type PlotStyle = { color?: string; colorDown?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName; type?: PlotType };
 export type LevelStyle = { value?: number; color?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName };
 export type FillStyle = { color?: string; visible?: boolean };
 
@@ -120,10 +120,11 @@ function sanitizeStyle(raw: Record<string, unknown>, def: IndicatorDef): Indicat
     const ps: PlotStyle = {};
     const color = colorOf(s ? s.color : Array.isArray(raw.colors) ? raw.colors[k] : undefined);
     if (color) ps.color = color;
+    if (p.type === "candles" && colorOf(s?.colorDown)) ps.colorDown = colorOf(s?.colorDown);
     if (s?.visible === false) ps.visible = false;
     if (widthOf(s?.width)) ps.width = widthOf(s?.width);
     if (lineStyleOf(s?.lineStyle)) ps.lineStyle = lineStyleOf(s?.lineStyle);
-    if (!p.perBar && typeof s?.type === "string" && PLOT_TYPE_IDS.includes(s.type)) ps.type = s.type as PlotType;
+    if (!p.perBar && p.type !== "candles" && typeof s?.type === "string" && PLOT_TYPE_IDS.includes(s.type)) ps.type = s.type as PlotType;
     if (Object.keys(ps).length) plots[p.id] = ps;
   });
   const levels: Record<string, LevelStyle> = {};

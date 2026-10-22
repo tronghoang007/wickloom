@@ -8,7 +8,7 @@ describe("style hiệu lực", () => {
   const inst = newInstance("rsi");
 
   it("mặc định theo def", () => {
-    expect(plotStyle(inst, rsi.plots[0])).toEqual({ color: "#7e57c2", width: 1, lineStyle: "solid", type: "line", visible: true });
+    expect(plotStyle(inst, rsi.plots[0])).toEqual({ color: "#7e57c2", colorDown: "#7e57c2", width: 1, lineStyle: "solid", type: "line", visible: true });
     expect(levelStyle(inst, rsi.levels![0])).toEqual({ value: 70, color: "#787b86", width: 1, lineStyle: "dashed", visible: true });
     expect(fillStyle(inst, rsi.fills![0])).toEqual({ color: "#7e57c21a", visible: true });
   });

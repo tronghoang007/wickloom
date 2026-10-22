@@ -17,7 +17,7 @@ export const LINE_STYLES: { id: LineStyleName; label: string }[] = [
 ];
 export const WIDTHS = [1, 2, 3, 4] as const;
 
-export type PlotStyleR = { color: string; width: number; lineStyle: LineStyleName; type: PlotType; visible: boolean };
+export type PlotStyleR = { color: string; colorDown: string; width: number; lineStyle: LineStyleName; type: PlotType; visible: boolean };
 export type LevelStyleR = { value: number; color: string; width: number; lineStyle: LineStyleName; visible: boolean };
 export type FillStyleR = { color: string; visible: boolean };
 
@@ -25,9 +25,10 @@ export function plotStyle(inst: IndicatorInstance, p: PlotDef): PlotStyleR {
   const u = inst.style?.plots?.[p.id];
   return {
     color: u?.color ?? p.color,
+    colorDown: u?.colorDown ?? p.colorDown ?? u?.color ?? p.color,
     width: u?.width ?? p.width ?? 1,
     lineStyle: u?.lineStyle ?? p.lineStyle ?? "solid",
-    type: p.perBar ? p.type : (u?.type ?? p.type),
+    type: p.perBar || p.type === "candles" ? p.type : (u?.type ?? p.type),
     visible: u?.visible !== false,
   };
 }

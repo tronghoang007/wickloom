@@ -32,16 +32,31 @@ export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars
   for (const p of def.plots) {
     const r = raw[p.id];
     const d: PlotData | undefined = Array.isArray(r) ? { values: r } : r;
-    const ok: PlotData = d && d.values.length === bars.length ? d : { values: nan(bars.length) };
+    const candleOk = p.type !== "candles" || (d?.candle && d.candle.o.length === bars.length && d.candle.h.length === bars.length && d.candle.l.length === bars.length);
+    const ok: PlotData = d && d.values.length === bars.length && candleOk ? d : { values: nan(bars.length), ...(p.type === "candles" ? { candle: { o: nan(bars.length), h: nan(bars.length), l: nan(bars.length) } } : {}) };
     const offset = p.offset ? Number(inputs[p.offset]) || 0 : 0;
-    out[p.id] = offset === 0 ? ok : { values: shiftBy(ok.values, offset, NaN), ...(ok.colors ? { colors: shiftBy(ok.colors, offset, "") } : {}) };
+    const cd = ok.candle;
+    out[p.id] =
+      offset === 0
+        ? ok
+        : {
+            values: shiftBy(ok.values, offset, NaN),
+            ...(ok.colors ? { colors: shiftBy(ok.colors, offset, "") } : {}),
+            ...(cd ? { candle: { o: shiftBy(cd.o, offset, NaN), h: shiftBy(cd.h, offset, NaN), l: shiftBy(cd.l, offset, NaN) } } : {}),
+          };
   }
   return out;
 }
 
 /** Bỏ `cut` nến đầu (lịch sử nạp ngầm): chỉ phần trùng với nến chart mới được vẽ, để trục thời gian của chart không đổi. */
 export function trimPlot(d: PlotData, cut: number): PlotData {
-  return cut === 0 ? d : { values: d.values.slice(cut), ...(d.colors ? { colors: d.colors.slice(cut) } : {}) };
+  if (cut === 0) return d;
+  const c = d.candle;
+  return {
+    values: d.values.slice(cut),
+    ...(d.colors ? { colors: d.colors.slice(cut) } : {}),
+    ...(c ? { candle: { o: c.o.slice(cut), h: c.h.slice(cut), l: c.l.slice(cut) } } : {}),
+  };
 }
 
 /** Số nến cần nạp (gồm cả nến chart) để các indicator hội tụ: tối thiểu `floor`, hoặc warmup lớn nhất + nến chart. */
