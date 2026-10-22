@@ -157,7 +157,7 @@ T1 làm được ngay sau Phase 2 của multi-account vì chỉ đọc. T2–T4 
   + `MaxLotPerOrder` + `OrderCheck` trước `OrderSend`, `symbols` báo thêm volume_min/max/step.
 - Khác plan ban đầu: đóng vị thế dùng `DELETE …?volume=` (query thay vì body); chưa có endpoint `orders/check` riêng (OrderCheck chạy ngay trong EA,
   endpoint riêng làm cùng ticket ở T3); chưa có hộp xác nhận cho demo (bấm là gửi, như TV mặc định); kết quả của sàn trả HTTP 200 với `ok=false` + `message`.
-- **T3 xong phần code, chưa commit; EA 2.13 chưa chạy trên MT5 thật.** Có: lệnh chờ với loại Limit/Stop tự suy ra (`web/src/trading/orderType.ts`; web gửi hướng + giá,
+- **T3 xong phần code (commit `2ad37ac`); EA 2.13 chưa chạy trên MT5 thật.** Có: lệnh chờ với loại Limit/Stop tự suy ra (`web/src/trading/orderType.ts`; web gửi hướng + giá,
   EA quyết loại theo Ask/Bid lúc thực thi, account không phải demo mà loại đổi so với `expected_type` thì EA từ chối `type_changed`), menu chuột phải
   (Buy/Sell limit-stop tại giá bấm + "Add order" mở ticket có SL/TP/hết hạn, nhãn loại đổi theo từng tick), kéo đường lệnh chờ trên chart (cùng loại → sửa giá; qua giá
   thị trường → đặt lệnh mới đúng loại TRƯỚC rồi mới xoá cũ; vùng cấm stops level bị chặn ở web và EA), Cancel ở tab Orders, `POST /accounts/{id}/orders` có `price`,
