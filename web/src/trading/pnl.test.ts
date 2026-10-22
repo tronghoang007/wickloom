@@ -19,6 +19,26 @@ describe("pnlSpec", () => {
   });
 });
 
+describe("pnlSpec dự phòng khi EA cũ chưa báo tick_value", () => {
+  const old = (o: Partial<SymbolInfo> = {}) => sym({ name: "XAUUSDm", tick_value: null, contract_size: 100, ...o });
+  it("symbol tính bằng đồng tiền của account: tick value = tick_size × contract_size (vàng 0.1 USD/tick/lot)", () => {
+    expect(pnlSpec(old(), "USD")).toEqual(GOLD);
+    expect(pnlSpec(old({ name: "EURUSD", tick_size: 0.00001, contract_size: 100000 }), "USD")?.tickValue).toBeCloseTo(1);
+    expect(pnlSpec(old({ name: "BTCUSD.raw", tick_size: 0.01, contract_size: 1 }), "USD")?.tickValue).toBeCloseTo(0.01);
+    expect(pnlSpec(old(), "usd")).toEqual(GOLD);
+  });
+  it("không chắc đúng thì null: khác đồng tiền, cặp chéo, chỉ số, thiếu contract_size / account", () => {
+    expect(pnlSpec(old(), "EUR")).toBeNull();
+    expect(pnlSpec(old({ name: "USDJPY" }), "USD")).toBeNull();
+    expect(pnlSpec(old({ name: "US30m" }), "USD")).toBeNull();
+    expect(pnlSpec(old({ contract_size: null }), "USD")).toBeNull();
+    expect(pnlSpec(old())).toBeNull();
+  });
+  it("tick_value từ EA luôn thắng dự phòng", () => {
+    expect(pnlSpec(old({ tick_value: 0.5 }), "USD")?.tickValue).toBe(0.5);
+  });
+});
+
 describe("estimatePnl", () => {
   it("Buy lãi khi giá lên, lỗ khi giá xuống", () => {
     expect(estimatePnl("buy", 1, 4000, 4010, GOLD)).toBeCloseTo(1000); // 10 / 0.001 tick × 0.1

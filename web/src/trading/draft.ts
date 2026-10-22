@@ -1,4 +1,4 @@
-import { COLORS, type LineSpec, type StopTitleFn } from "./format";
+import { COLORS, ghostsFor, sideColor, stopLabel, type LineSpec, type StopTitleFn } from "./format";
 import { pendingLabel, resolveOrderType, snapPrice, type Side } from "./orderType";
 
 // Bản nháp lệnh trong bảng đặt lệnh (docs/trade-plan.md T3-T4). Giá trị là CHUỖI để gõ dở ("4120.") vẫn giữ nguyên; entry/SL/TP của bản nháp cũng vẽ
@@ -22,24 +22,37 @@ export const parseNum = (t: string): number => (t.trim() === "" ? 0 : parseFloat
 export type DraftField = "price" | "sl" | "tp";
 export const DRAFT_IDS: Record<string, DraftField> = { "d:entry": "price", "d:sl": "sl", "d:tp": "tp" };
 
-/** Đường của bản nháp trên chart của `symbol`: giá vào (chỉ lệnh chờ, nhãn loại lệnh theo giá thị trường hiện tại), SL đỏ, TP xanh. Nét liền để phân biệt với đường lệnh đã đặt. */
+/** Đường của bản nháp trên chart của `symbol` (nét đứt như TradingView): giá vào + thẻ có nút đặt lệnh (lệnh chờ: ở giá đã nhập, nhãn loại lệnh theo giá thị trường hiện tại; Market: ở giá khớp
+ *  Ask / Bid, kéo đi chỗ khác thì thành lệnh chờ), SL / TP chấm chấm kèm lãi/lỗi. Chưa có giá vào hợp lệ (chưa nhập, chưa có tick) thì không có đường giá vào. */
 export function draftLines(d: Draft | null, symbol: string, quote: { bid: number; ask: number } | undefined, stopTitle?: StopTitleFn): LineSpec[] {
   if (!d || d.symbol !== symbol) return [];
   const out: LineSpec[] = [];
+  const pending = d.mode === "pending";
   const price = parseNum(d.price);
-  if (d.mode === "pending" && price > 0) {
-    const type = quote ? resolveOrderType(d.side, price, quote.bid, quote.ask) : null;
-    const name = type ? pendingLabel(type) : d.side === "buy" ? "Buy" : "Sell";
-    out.push({ key: "d:entry", price, color: COLORS.order, dashed: false, title: `${name} ${d.lot}`.toUpperCase() });
-  }
+  // giá vào dùng để vẽ và tính lãi/lỗi: giá vào của lệnh chờ, hoặc giá khớp market (Buy mua ở Ask, Sell bán ở Bid)
+  const entry = pending ? price : quote ? (d.side === "buy" ? quote.ask : quote.bid) : 0;
   const sl = parseNum(d.sl);
   const tp = parseNum(d.tp);
-  // giá vào dùng để tính lãi/lỗi: giá vào của lệnh chờ, hoặc giá khớp market (Buy mua ở Ask, Sell bán ở Bid)
-  const entry = d.mode === "pending" ? price : quote ? (d.side === "buy" ? quote.ask : quote.bid) : 0;
   const lot = parseNum(d.lot);
+  const sideName = d.side === "buy" ? "Buy" : "Sell";
+  if (entry > 0) {
+    const type = pending && quote ? resolveOrderType(d.side, price, quote.bid, quote.ask) : null;
+    const label = !pending ? "Market" : type ? pendingLabel(type) : sideName;
+    out.push({
+      key: "d:entry",
+      price: entry,
+      color: sideColor(d.side),
+      style: "dashed",
+      title: `${label} ${d.lot}`.toUpperCase(),
+      tag: { kind: "entry", owner: { t: "draft" }, qty: d.lot, label, ghosts: ghostsFor(sl, tp), place: sideName, draft: true },
+    });
+  }
   const title = (kind: "sl" | "tp", p: number) => (stopTitle ? stopTitle(kind, d.side, lot, entry, p, symbol) : kind.toUpperCase());
-  if (sl > 0) out.push({ key: "d:sl", price: sl, color: COLORS.sl, dashed: false, title: title("sl", sl) });
-  if (tp > 0) out.push({ key: "d:tp", price: tp, color: COLORS.tp, dashed: false, title: title("tp", tp) });
+  for (const [kind, v, color] of [["sl", sl, COLORS.sl], ["tp", tp, COLORS.tp]] as const) {
+    if (!(v > 0)) continue;
+    const t = title(kind, v);
+    out.push({ key: `d:${kind}`, price: v, color, style: "dotted", title: t, tag: { kind, owner: { t: "draft" }, qty: d.lot, label: stopLabel(t), ghosts: [], draft: true } });
+  }
   return out;
 }
 

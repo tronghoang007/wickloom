@@ -130,7 +130,7 @@ export default function VolumeLegend({
   const showValues = vs.statusValues && !vs.hidden && bar;
 
   return (
-    <div className={`group pointer-events-auto flex w-fit items-center gap-x-1.5 rounded border border-transparent pr-1 hover:border-[var(--border)] ${vs.hidden ? "opacity-50" : ""}`}>
+    <div className={`group/vol pointer-events-auto flex w-fit items-center gap-x-1.5 rounded border border-transparent pr-1 hover:border-[var(--border)] ${vs.hidden ? "opacity-50" : ""}`}>
       {showTitle && <span className="text-[var(--fg)]">{TITLE}</span>}
       {showInputs && <span className="text-[var(--muted)]">{vs.maLength}</span>}
       {showValues && (
@@ -139,7 +139,7 @@ export default function VolumeLegend({
           {ma !== null && <span style={{ color: vs.maColor }}>{fmtVol(ma, digits)}</span>}
         </>
       )}
-      <span className="hidden items-center group-hover:flex">
+      <span className="hidden items-center group-hover/vol:flex">
         <IconBtn title={vs.hidden ? "Show" : "Hide"} onClick={() => set({ hidden: !vs.hidden })}>
           <EyeIc off={vs.hidden} />
         </IconBtn>

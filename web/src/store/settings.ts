@@ -52,6 +52,10 @@ export type ChartSettings = {
   marginTop: number; // %
   marginBottom: number; // %
   rightOffset: number; // bar
+  // Trading
+  // One-click trading (như TradingView): tắt (mặc định) = đóng vị thế hỏi bằng hộp thoại, kéo SL/TP / lệnh chờ đã đặt dừng ở giá mới chờ bấm ✓ trên thẻ;
+  // bật = làm ngay, không hỏi
+  oneClick: boolean;
 };
 
 export const DATE_FORMATS = [
@@ -118,7 +122,14 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   marginTop: 8,
   marginBottom: 25,
   rightOffset: 8,
+  oneClick: false,
 };
+
+/** Setting đã lưu + mặc định cho field mới. `confirmClose` (bản thử trước, đã gộp vào One-click trading): ai đã tắt xác nhận đóng thì giữ ý đó. */
+export function mergeSettings(saved: (Partial<ChartSettings> & { confirmClose?: boolean }) | undefined): ChartSettings {
+  const legacy = saved && saved.oneClick === undefined && saved.confirmClose === false ? { oneClick: true } : {};
+  return { ...DEFAULT_SETTINGS, ...saved, ...legacy };
+}
 
 type State = {
   s: ChartSettings;
@@ -146,7 +157,7 @@ export const useSettingsStore = create<State>()(
       },
       partialize: (st) => ({ s: st.s }),
       // thêm field mới vào DEFAULT_SETTINGS không làm mất setting đã lưu
-      merge: (saved, cur) => ({ ...cur, s: { ...DEFAULT_SETTINGS, ...(saved as Partial<State>)?.s } }),
+      merge: (saved, cur) => ({ ...cur, s: mergeSettings((saved as { s?: Partial<ChartSettings> })?.s) }),
     },
   ),
 );

@@ -6,12 +6,28 @@ import type { Side } from "./orderType";
 // mọi loại symbol (cặp có đồng tiền lãi khác đồng account, vàng, chỉ số...). Chưa có tick_value thì KHÔNG hiện số (tốt hơn hiện số sai). Hàm thuần.
 export type PnlSpec = { tickSize: number; tickValue: number; tickValueLoss: number };
 
-export function pnlSpec(sym: SymbolInfo | undefined): PnlSpec | null {
+/** Đồng tiền lãi/lỗi suy từ tên symbol cặp 6 chữ cái có hậu tố broker ("XAUUSDm", "EURUSD.raw" → "XAUUSD", "EURUSD"): 3 chữ cuối. null nếu không phải dạng đó (chỉ số, cổ phiếu...). */
+function quoteCurrency(name: string): string | null {
+  const base = name.replace(/[^A-Za-z0-9].*$/, "").replace(/[a-z]+$/, "");
+  return /^[A-Z]{6}$/.test(base) ? base.slice(3) : null;
+}
+
+/** Thông số tính lãi/lỗi của symbol. Ưu tiên tick value MT5 báo (EA >= 2.14, đúng với mọi loại symbol). EA cũ chưa báo thì dự phòng CHỈ khi chắc đúng: symbol tính bằng đúng đồng tiền
+ *  của account (vd XAUUSDm với account USD) thì giá trị một tick = tick_size × contract_size (EA >= 2.12 báo). Còn lại (cặp chéo, chỉ số...) → null: không hiện số thay vì hiện sai. */
+export function pnlSpec(sym: SymbolInfo | undefined, accountCcy?: string): PnlSpec | null {
   const tickSize = sym?.tick_size;
+  if (!tickSize || tickSize <= 0) return null;
   const tv = sym?.tick_value;
-  if (!tickSize || tickSize <= 0 || !tv || tv <= 0) return null;
-  const tl = sym?.tick_value_loss;
-  return { tickSize, tickValue: tv, tickValueLoss: tl && tl > 0 ? tl : tv };
+  if (tv && tv > 0) {
+    const tl = sym?.tick_value_loss;
+    return { tickSize, tickValue: tv, tickValueLoss: tl && tl > 0 ? tl : tv };
+  }
+  const size = sym?.contract_size;
+  if (accountCcy && size && size > 0 && quoteCurrency(sym.name) === accountCcy.toUpperCase()) {
+    const v = tickSize * size;
+    return { tickSize, tickValue: v, tickValueLoss: v };
+  }
+  return null;
 }
 
 const dirOf = (side: Side) => (side === "buy" ? 1 : -1);

@@ -171,6 +171,16 @@ T1 làm được ngay sau Phase 2 của multi-account vì chỉ đọc. T2–T4 
   Lãi/lỗ tính từ `tick_value` của MT5 (EA 2.14 báo trong `symbols`), chưa có thì không hiện số thay vì hiện sai (`web/src/trading/pnl.ts`). Nhãn đường SL/TP trên chart (bản nháp, vị thế, lệnh chờ) kèm lãi/lỗ
   ("TP +20.00 USD"). Kéo thả SL/TP của vị thế đang mở (EA 2.14 `position_modify`, `PATCH /accounts/{id}/positions/{ticket}`) và của lệnh chờ (`PATCH …/orders/{ticket}`): nhãn đổi theo số lãi/lỗ lúc kéo, kiểm tra
   phía + stops level trước khi gửi, toast có nút "Hoàn tác". Tab Account có dòng Profit. Chưa có: thêm SL/TP cho vị thế chưa có bằng cách kéo (hiện chỉ kéo đường đã có), tuỳ chọn "đặt nhanh không hỏi lại".
+- **Giao diện giống TradingView (2026-10-22, chưa commit):** đã xem trực tiếp TV Paper Trading (docs/tv-chart-trading-reference.md) rồi làm lại: thẻ trên chart (`TradeOverlay.tsx`) `[TP][SL][lot | loại / lãi-lỗ | ×][Buy|Sell]` với nút TP/SL
+  mờ **kéo ra giá cần đặt** (bản nháp, vị thế, lệnh chờ; bấm không kéo thì nhận mức gợi ý 0.25%), nút Buy/Sell của bản nháp đặt thẳng từ chart (bên PHẢI cụm thẻ cho khỏi bấm nhầm TP/SL), × huỷ lệnh chờ / bỏ SL-TP (có "Hoàn tác") /
+  đóng vị thế (hỏi lại bằng toast), đường nối dọc giữa giá vào và SL/TP, đường nháp nét đứt / lệnh đã đặt nét liền / SL-TP chấm chấm, màu Buy xanh dương, Sell đỏ, SL cam, TP xanh lá. Bản nháp Market có đường giá khớp: kéo nó đi chỗ khác thì
+  thành lệnh chờ, Limit / Stop vẫn **tự suy ra** (cả bản nháp lẫn lệnh đã đặt). Panel Order làm lại theo TV: ô Sell | Buy (ô chọn tô màu) với chip spread (pip) ở giữa, tab Market | Limit / Stop gạch chân, công tắc cho TP / SL,
+  nút đặt lệnh hai dòng dính đáy (không bị đẩy ra khỏi màn hình). Widget SELL | spread | BUY trên chart bỏ ô lot (lot chỉ ở panel, nhớ theo account × symbol). Cursor `pointer` cho mọi nút / tab (quy tắc chung `globals.css`).
+  Tab Account có thêm Profit đã đóng / Deposit / Swap / Commission tính từ deal (như màn History của MT5; "Profit" cũ đổi tên "Profit đang mở").
+- **Xác nhận kiểu TV + One-click trading (2026-10-22, đã xem TV thật, docs/tv-chart-trading-reference.md):** Settings > Trading > **One-click trading** (`oneClick`, mặc định TẮT; bật = làm ngay không hỏi). Khi tắt: (1) kéo SL/TP / giá lệnh chờ của lệnh đã đặt
+  (kể cả kéo nút TP/SL mờ ra giá) thì đường dừng ở giá mới, thẻ lệnh chủ hiện **Discard / Confirm** (thẻ đang sửa mờ đi), Confirm mới gửi, Discard / Esc / kéo đường khác thì trả về (`pending` trong `chartOrders.ts`, `DragPreview.pending`);
+  (2) × hộp thoại: đóng vị thế ("Đóng vị thế": account, lệnh, giá vào / hiện tại, lãi/lỗi), huỷ lệnh chờ ("Giữ lệnh / Huỷ lệnh"), bỏ SL / TP ("Giữ lại / Bỏ SL") (`store/confirm.ts`, `ConfirmHost`, `trading/tagActions.ts`). Đặt lệnh từ nút Buy/Sell
+  và kéo trên bản nháp thì không hỏi (giống TV). Nút Close ở tab Positions cũng qua hộp thoại đóng vị thế.
 - Để bật: gắn EA 2.14 với `TradingEnabled = true` (và "Allow Algo Trading") trên account **demo**; real vẫn bị chặn ở cả web, backend và EA.
 
 ## 8. An toàn cho real

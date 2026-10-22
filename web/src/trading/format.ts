@@ -38,6 +38,28 @@ export const accountProfit = (data: TradeData) => data.account.profit ?? totalPn
 /** Lãi/lỗ cuối cùng của một deal trong lịch sử (kể cả phí). */
 export const dealNet = (d: Deal) => d.profit + d.commission + d.swap;
 
+export type DealSummary = { profit: number; swap: number; commission: number; deposit: number; withdrawal: number; closed: number };
+
+/** Tổng hợp từ lịch sử deal như màn History của MT5: Profit = tổng lãi/lỗ các lệnh ĐÃ ĐÓNG (deal vào lệnh chưa có lãi/lỗ nên không tính), Swap + Commission của mọi deal mua/bán,
+ *  Deposit / Withdrawal = deal nạp / rút tiền (type balance). Chỉ tính các deal EA gửi lên (gần đây, có trần số lượng). */
+export function dealSummary(deals: Deal[]): DealSummary {
+  const out: DealSummary = { profit: 0, swap: 0, commission: 0, deposit: 0, withdrawal: 0, closed: 0 };
+  for (const d of deals) {
+    if (d.type === "balance") {
+      if (d.profit >= 0) out.deposit += d.profit;
+      else out.withdrawal += d.profit;
+    } else if (d.type === "buy" || d.type === "sell") {
+      out.swap += d.swap;
+      out.commission += d.commission;
+      if (d.entry === "out" || d.entry === "inout") {
+        out.profit += d.profit;
+        out.closed += 1;
+      }
+    }
+  }
+  return out;
+}
+
 export const STALE_SECONDS = 15;
 /** Dữ liệu cũ: account offline, hoặc EA lâu rồi chưa báo vị thế/lệnh. UI phải làm mờ và không vẽ đường trên chart. */
 export function isStale(data: TradeData | null, nowSec: number): boolean {
@@ -46,36 +68,83 @@ export function isStale(data: TradeData | null, nowSec: number): boolean {
   return data.updated_at === null || nowSec - data.updated_at > STALE_SECONDS;
 }
 
-export type LineSpec = { key: string; price: number; color: string; dashed: boolean; title: string };
+export type LineStyleName = "solid" | "dashed" | "dotted";
+export type TagOwner = { t: "draft" } | { t: "position"; ticket: number } | { t: "order"; ticket: number };
+/** Thẻ trên chart của một đường (kiểu TradingView): [nút đặt lệnh của bản nháp] [TP+] [SL+] [lot | nhãn | ×]. `ghosts` = SL/TP chưa có: kéo nút mờ ra giá cần đặt để tạo. */
+export type LineTag = { kind: "entry" | "tp" | "sl"; owner: TagOwner; qty: string; label: string; ghosts: ("tp" | "sl")[]; place?: string; draft: boolean; pending?: boolean };
+export type LineSpec = { key: string; price: number; color: string; style: LineStyleName; title: string; tag?: LineTag };
 
-export const COLORS = { buy: "#2962ff", sell: "#ff9800", sl: "#f23645", tp: "#089981", order: "#d69a00" };
+// Màu theo TradingView Paper Trading: Buy xanh dương, Sell đỏ, TP xanh lá, SL cam
+export const COLORS = { buy: "#2962ff", sell: "#f23645", sl: "#ff9800", tp: "#089981" };
+export const sideColor = (side: "buy" | "sell") => (side === "buy" ? COLORS.buy : COLORS.sell);
 
-/** Đường đang kéo (lệnh chờ, SL/TP của vị thế / lệnh): vẽ ở giá xem trước với nhãn mới (loại lệnh sẽ thành nếu thả tay ở đó, hoặc số lãi/lỗi tại giá đó). */
-export type DragPreview = { key: string; price: number; title: string };
+/** Đường đang kéo (lệnh chờ, SL/TP của vị thế / lệnh): vẽ ở giá xem trước với nhãn mới (loại lệnh sẽ thành nếu thả tay ở đó, hoặc số lãi/lỗi tại giá đó). `label` = chữ trên thẻ.
+ *  `pending` = đã thả tay, đang chờ người dùng bấm ✓ xác nhận (thẻ hiện ✓ / ✕ thay cho ×). */
+export type DragPreview = { key: string; price: number; title: string; label?: string; pending?: boolean };
 
 /** Nhãn đường SL/TP: tên + lãi/lỗi dự kiến theo tiền account ("SL -12.40 USD"); callback do nơi dùng cấp (cần thông số symbol), thiếu thì chỉ "SL" / "TP". */
 export type StopTitleFn = (kind: "sl" | "tp", side: "buy" | "sell", lot: number, entry: number, price: number, symbol: string) => string;
 
 const plainStop: StopTitleFn = (kind) => kind.toUpperCase();
 
-/** Đường trên chart của symbol hiện tại: entry + SL + TP của vị thế, giá + SL + TP của lệnh chờ. Dữ liệu cũ thì không có đường nào. `drag` đè giá + nhãn của một đường đang kéo. */
-export function tradeLines(data: TradeData | null, symbol: string, nowSec: number, drag?: DragPreview | null, stopTitle: StopTitleFn = plainStop): LineSpec[] {
+/** Chữ trên thẻ SL/TP: bỏ tên ("TP +20.00 USD" → "+20.00 USD"); chỉ có tên thì giữ nguyên. */
+export const stopLabel = (title: string) => title.replace(/^(SL|TP)\s+/, "") || title;
+
+/** Nút "TP" / "SL" mờ trên thẻ lệnh cho những mức chưa đặt. */
+export const ghostsFor = (sl: number, tp: number): ("tp" | "sl")[] => [...(tp > 0 ? [] : (["tp"] as const)), ...(sl > 0 ? [] : (["sl"] as const))];
+
+/** Đường trên chart của symbol hiện tại: entry + SL + TP của vị thế, giá + SL + TP của lệnh chờ. Dữ liệu cũ thì không có đường nào. `drag` đè giá + nhãn của một đường đang kéo
+ *  (đường SL/TP chưa tồn tại mà đang được kéo ra từ nút mờ thì được dựng tạm). `ccy` = đơn vị tiền của account, ghi sau số lãi/lỗ của vị thế. */
+export function tradeLines(data: TradeData | null, symbol: string, nowSec: number, drag?: DragPreview | null, stopTitle: StopTitleFn = plainStop, ccy = ""): LineSpec[] {
   if (!data || isStale(data, nowSec)) return [];
   const out: LineSpec[] = [];
+  const pending = (key: string, v: number) => (v > 0 ? v : drag?.key === key ? drag.price : 0); // SL/TP chưa có nhưng đang được kéo ra
+  const stops = (prefix: "p" | "o", owner: TagOwner, ticket: number, side: "buy" | "sell", lot: number, entry: number, slv: number, tpv: number) => {
+    for (const [kind, v, color] of [["sl", slv, COLORS.sl], ["tp", tpv, COLORS.tp]] as const) {
+      if (!(v > 0)) continue;
+      const title = stopTitle(kind, side, lot, entry, v, symbol);
+      out.push({ key: `${prefix}${kind}:${ticket}`, price: v, color, style: "dotted", title, tag: { kind, owner, qty: fmtLot(lot), label: stopLabel(title), ghosts: [], draft: false } });
+    }
+  };
   for (const p of data.positions) {
     if (p.symbol !== symbol || p.type === "other") continue;
     const buy = p.type === "buy";
     const side = buy ? "buy" : "sell";
-    out.push({ key: `p:${p.ticket}`, price: p.price_open, color: buy ? COLORS.buy : COLORS.sell, dashed: false, title: `${buy ? "BUY" : "SELL"} ${fmtLot(p.volume)}  ${fmtPnl(positionPnl(p))}` });
-    if (p.sl > 0) out.push({ key: `psl:${p.ticket}`, price: p.sl, color: COLORS.sl, dashed: true, title: stopTitle("sl", side, p.volume, p.price_open, p.sl, symbol) });
-    if (p.tp > 0) out.push({ key: `ptp:${p.ticket}`, price: p.tp, color: COLORS.tp, dashed: true, title: stopTitle("tp", side, p.volume, p.price_open, p.tp, symbol) });
+    const owner: TagOwner = { t: "position", ticket: p.ticket };
+    const sl = pending(`psl:${p.ticket}`, p.sl);
+    const tp = pending(`ptp:${p.ticket}`, p.tp);
+    const pnl = fmtPnl(positionPnl(p));
+    out.push({
+      key: `p:${p.ticket}`,
+      price: p.price_open,
+      color: sideColor(side),
+      style: "solid",
+      title: `${buy ? "BUY" : "SELL"} ${fmtLot(p.volume)}  ${pnl}`,
+      tag: { kind: "entry", owner, qty: fmtLot(p.volume), label: ccy ? `${pnl} ${ccy}` : pnl, ghosts: ghostsFor(sl, tp), draft: false },
+    });
+    stops("p", owner, p.ticket, side, p.volume, p.price_open, sl, tp);
   }
   for (const o of data.orders) {
     if (o.symbol !== symbol || o.price_open <= 0) continue;
     const side = o.type.startsWith("buy") ? "buy" : "sell";
-    out.push({ key: `o:${o.ticket}`, price: o.price_open, color: COLORS.order, dashed: true, title: `${orderLabel(o.type).toUpperCase()} ${fmtLot(o.volume)}` });
-    if (o.sl > 0) out.push({ key: `osl:${o.ticket}`, price: o.sl, color: COLORS.sl, dashed: true, title: stopTitle("sl", side, o.volume, o.price_open, o.sl, symbol) });
-    if (o.tp > 0) out.push({ key: `otp:${o.ticket}`, price: o.tp, color: COLORS.tp, dashed: true, title: stopTitle("tp", side, o.volume, o.price_open, o.tp, symbol) });
+    const owner: TagOwner = { t: "order", ticket: o.ticket };
+    const sl = pending(`osl:${o.ticket}`, o.sl);
+    const tp = pending(`otp:${o.ticket}`, o.tp);
+    out.push({
+      key: `o:${o.ticket}`,
+      price: o.price_open,
+      color: sideColor(side),
+      style: "solid",
+      title: `${orderLabel(o.type).toUpperCase()} ${fmtLot(o.volume)}`,
+      tag: { kind: "entry", owner, qty: fmtLot(o.volume), label: orderLabel(o.type), ghosts: ghostsFor(sl, tp), draft: false },
+    });
+    stops("o", owner, o.ticket, side, o.volume, o.price_open, sl, tp);
   }
-  return drag ? out.map((l) => (l.key === drag.key ? { ...l, price: drag.price, title: drag.title } : l)) : out;
+  if (!drag) return out;
+  return out.map((l) => {
+    if (l.key !== drag.key) return l;
+    const label = drag.label ?? (l.tag && l.tag.kind !== "entry" ? stopLabel(drag.title) : l.tag?.label);
+    const tag = l.tag && { ...l.tag, ...(label !== undefined ? { label } : {}), ...(drag.pending ? { pending: true } : {}) };
+    return { ...l, price: drag.price, title: drag.title, tag };
+  });
 }

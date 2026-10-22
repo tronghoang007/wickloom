@@ -37,7 +37,7 @@ export default function RightRail() {
               </button>
             </div>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={`min-h-0 flex-1 ${open === "order" ? "flex flex-col" : "overflow-y-auto"}`}>
             {open === "watchlist" ? <WatchlistPanel /> : open === "calendar" ? <EconomicCalendarPanel /> : <OrderTicket />}
           </div>
         </div>

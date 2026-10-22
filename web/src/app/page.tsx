@@ -2,6 +2,7 @@
 
 import AuthDialog from "@/components/auth/AuthDialog";
 import Toasts from "@/components/Toasts";
+import ConfirmHost from "@/components/ConfirmHost";
 import ChartGrid from "@/components/chart/ChartGrid";
 import DrawingSettings from "@/components/chart/DrawingSettings";
 import OpenLayoutDialog from "@/components/chart/OpenLayoutDialog";
@@ -69,6 +70,7 @@ export default function Page() {
       <OpenLayoutDialog />
       <AuthDialog />
       <Toasts />
+      <ConfirmHost />
     </div>
   );
 }

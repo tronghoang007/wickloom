@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useQuoteStore } from "./quote";
+import { spreadPips, splitPrice, useQuoteStore } from "./quote";
 
 beforeEach(() => useQuoteStore.setState({ quotes: {} }));
 
@@ -23,5 +23,26 @@ describe("useQuoteStore", () => {
     expect(useQuoteStore.getState().quotes).toBe(before);
     useQuoteStore.getState().set("X", 1, 3);
     expect(useQuoteStore.getState().quotes).not.toBe(before);
+  });
+});
+
+describe("spreadPips", () => {
+  it("vàng 3 chữ số: 0.45 → 45.0 (như TV); forex 5 chữ số: 0.00012 → 1.2", () => {
+    expect(spreadPips(4087.44, 4087.89, 3)).toBe("45.0");
+    expect(spreadPips(1.0985, 1.09862, 5)).toBe("1.2");
+  });
+  it("symbol 2 / 4 chữ số tính theo điểm; không bao giờ âm", () => {
+    expect(spreadPips(100, 100.5, 2)).toBe("50.0");
+    expect(spreadPips(150.123, 150.12, 3)).toBe("0.0");
+  });
+});
+
+describe("splitPrice", () => {
+  it("tách pipette cho symbol 3 / 5 chữ số", () => {
+    expect(splitPrice(4087.44, 3)).toEqual(["4,087.44", "0"]);
+    expect(splitPrice(1.09862, 5)).toEqual(["1.0986", "2"]);
+  });
+  it("symbol khác giữ nguyên giá", () => {
+    expect(splitPrice(67000.5, 2)).toEqual(["67,000.50", ""]);
   });
 });

@@ -5,8 +5,9 @@ import type { PendingOrder, Position, TradeData } from "@/lib/mt5Api";
 import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
-import { cancelOrder, closeTrade, useOrderState } from "@/trading/actions";
-import { accountProfit, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel } from "@/trading/format";
+import { cancelOrder, useOrderState } from "@/trading/actions";
+import { askClosePosition } from "@/trading/tagActions";
+import { accountProfit, dealNet, dealSummary, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel } from "@/trading/format";
 import { tradeBlock, webTrading } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
@@ -57,7 +58,7 @@ export default function TradingPanel() {
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg)]" data-testid="trading-panel">
       <div className="flex h-[34px] items-center gap-1 px-2 text-sm">
         <button
-          className="flex items-center gap-1.5 rounded px-1.5 py-1 hover:bg-[var(--hover)]"
+          className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 hover:bg-[var(--hover)]"
           title={open ? "Thu gọn" : "Mở panel Trading"}
           aria-expanded={open}
           onClick={() => useTradeStore.getState().setOpen(!open)}
@@ -83,7 +84,7 @@ export default function TradingPanel() {
             return (
               <button
                 key={t.id}
-                className={`rounded px-2.5 py-1 text-[13px] hover:bg-[var(--hover)] ${on ? "bg-[var(--hover)] font-semibold" : "text-[var(--muted)]"}`}
+                className={`cursor-pointer rounded px-2.5 py-1 text-[13px] hover:bg-[var(--hover)] ${on ? "bg-[var(--hover)] font-semibold" : "text-[var(--muted)]"}`}
                 onClick={() => useTradeStore.getState().showTab(t.id)}
               >
                 {t.label}
@@ -137,7 +138,7 @@ function Positions({ data }: { data: TradeData }) {
   );
 }
 
-// Một vị thế + nút Close. Bấm Close mở ô lot (mặc định cả vị thế): sửa nhỏ hơn rồi OK = đóng một phần, không bước xác nhận riêng (demo).
+// Một vị thế + nút Close. Bấm Close mở ô lot (mặc định cả vị thế): sửa nhỏ hơn rồi OK = đóng một phần; OK mở hộp thoại xác nhận (cùng hộp với dấu × trên chart).
 function PositionRow({ p, account }: { p: Position; account: TradeData["account"] }) {
   const d = digitsOf(p.symbol);
   const pl = positionPnl(p);
@@ -151,7 +152,7 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
     const spec = sym?.volume_min && sym.volume_step ? { min: sym.volume_min, max: p.volume, step: sym.volume_step } : null;
     const want = spec ? normalizeLot(parseFloat(text.replace(",", ".")), spec) : p.volume;
     setEditing(false);
-    void closeTrade(p.ticket, p.symbol, want >= p.volume - 1e-9 ? 0 : want); // 0 = đóng hết
+    askClosePosition(p, want >= p.volume - 1e-9 ? 0 : want); // hộp thoại xác nhận rồi mới gửi; 0 = đóng hết
   };
   return (
     <tr className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--hover)]" onClick={() => showSymbol(p.symbol)} title="Mở symbol này trên chart">
@@ -180,12 +181,12 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
               }}
               className="w-14 rounded border border-[var(--border)] bg-transparent px-1 py-0.5 text-center"
             />
-            <button className="rounded bg-[#f23645] px-1.5 py-0.5 text-white hover:brightness-110" onClick={close}>OK</button>
-            <button className="px-1 text-[var(--muted)] hover:text-[var(--fg)]" aria-label="Cancel" onClick={() => setEditing(false)}>✕</button>
+            <button className="cursor-pointer rounded bg-[#f23645] px-1.5 py-0.5 text-white hover:brightness-110" onClick={close}>OK</button>
+            <button className="cursor-pointer px-1 text-[var(--muted)] hover:text-[var(--fg)]" aria-label="Cancel" onClick={() => setEditing(false)}>✕</button>
           </span>
         ) : (
           <button
-            className="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)] disabled:opacity-40"
+            className="cursor-pointer rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40"
             disabled={block !== null || busy}
             title={block ?? "Đóng vị thế (sửa lot để đóng một phần)"}
             onClick={() => {
@@ -238,7 +239,7 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
       <td className={`${td} text-[var(--muted)]`}>{o.expiration ? fmtTime(o.expiration) : "GTC"}</td>
       <td className={td} onClick={(e) => e.stopPropagation()}>
         <button
-          className="rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)] disabled:opacity-40"
+          className="cursor-pointer rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40"
           disabled={block !== null || busy}
           title={block ?? "Huỷ lệnh chờ"}
           onClick={() => void cancelOrder(o.ticket, o.symbol)}
@@ -285,10 +286,24 @@ function History({ data }: { data: TradeData }) {
 function AccountInfo({ data }: { data: TradeData }) {
   const a = data.account;
   const ccy = a.currency;
+  // Tổng hợp từ deal gần đây như màn History của MT5 (Profit đã đóng, Deposit, Swap, Commission); chưa có deal nào thì bỏ cả cụm
+  const sum = dealSummary(data.deals);
+  const money = (v: number) => <span className={pnlClass(v)}>{fmtPnl(v)}{ccy ? ` ${ccy}` : ""}</span>;
+  const history: [string, ReactNode][] =
+    data.deals.length === 0
+      ? []
+      : [
+          ["Profit đã đóng", money(sum.profit)],
+          ["Deposit", fmtMoney(sum.deposit, ccy)],
+          ...(sum.withdrawal ? ([["Withdrawal", fmtMoney(-sum.withdrawal, ccy)]] as [string, ReactNode][]) : []),
+          ["Swap", money(sum.swap)],
+          ["Commission", money(sum.commission)],
+        ];
   const rows: [string, ReactNode][] = [
     ["Balance", fmtMoney(a.balance, ccy)],
     ["Equity", fmtMoney(a.equity, ccy)],
-    ["Profit", <span key="p" className={pnlClass(accountProfit(data))}>{fmtPnl(accountProfit(data))}{ccy ? ` ${ccy}` : ""}</span>],
+    ["Profit đang mở", <span key="p" className={pnlClass(accountProfit(data))}>{fmtPnl(accountProfit(data))}{ccy ? ` ${ccy}` : ""}</span>],
+    ...history,
     ["Margin", fmtMoney(a.margin, ccy)],
     ["Free margin", fmtMoney(a.margin_free, ccy)],
     ["Margin level", a.margin_level ? `${a.margin_level.toLocaleString("en-US", { maximumFractionDigits: 2 })}%` : "—"],

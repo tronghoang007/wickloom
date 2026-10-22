@@ -11,12 +11,9 @@ import { useChartStore } from "@/store/chart";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import { usePaneState } from "@/store/compose";
 import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
-import { createLineDrag, makeStopTitle } from "@/trading/chartOrders";
-import { draftLines } from "@/trading/draft";
-import { tradeLines, type DragPreview } from "@/trading/format";
+import { createLineDrag, type ChartDrag } from "@/trading/chartOrders";
+import type { DragPreview } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
-import { useTradeStore } from "@/trading/store";
-import { useTicketStore } from "@/trading/ticket";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
@@ -39,6 +36,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -51,6 +49,7 @@ import InlineTextEditor from "./InlineTextEditor";
 import ReplayBar from "./ReplayBar";
 import { SymbolBadge } from "./SymbolSearchDialog";
 import StylePanel from "./StylePanel";
+import TradeOverlay from "./TradeOverlay";
 import TradeWidget from "./TradeWidget";
 import { tradeMenuItems } from "./tradeMenu";
 import VolumeLegend, { volumeMenuItems } from "./VolumeLegend";
@@ -966,40 +965,12 @@ export default function Chart({ paneId }: { paneId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartType]);
 
-  // Vị thế / lệnh chờ của account MT5 trên symbol này (CHỈ ĐỌC, docs/trade-plan.md T1): entry kèm lot + P/L, SL đỏ, TP xanh lá, lệnh chờ vàng.
-  // Chỉ cập nhật đường đã có (không tạo lại mỗi lần hỏi backend nên không nhấp nháy); dữ liệu cũ / đang Replay thì không vẽ.
-  const tradeData = useTradeStore((s) => s.data);
-  const ticketDraft = useTicketStore((s) => s.draft); // bản nháp trong bảng đặt lệnh: entry / SL / TP vẽ lên chart, kéo được (docs/trade-plan.md T3-T4)
-  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null); // lệnh chờ đang kéo
-  const tradeLinesRef = useRef<{ series: ISeriesApi<SeriesType> | null; lines: Map<string, IPriceLine> }>({ series: null, lines: new Map() });
-  useEffect(() => {
-    const series = seriesRef.current;
-    if (!series) return;
-    const st = tradeLinesRef.current;
-    if (st.series !== series) {
-      st.series = series; // series mới (đổi loại nến): price line cũ đã mất cùng series cũ
-      st.lines = new Map();
-    }
-    const want = replayActive
-      ? []
-      : [
-          ...tradeLines(tradeData, symbol, Date.now() / 1000, dragPreview, makeStopTitle()),
-          ...draftLines(ticketDraft, symbol, useQuoteStore.getState().quotes[symbol], makeStopTitle()),
-        ];
-    const keep = new Set(want.map((w) => w.key));
-    for (const [k, l] of st.lines) {
-      if (!keep.has(k)) {
-        series.removePriceLine(l);
-        st.lines.delete(k);
-      }
-    }
-    for (const w of want) {
-      const opts = { price: w.price, color: w.color, lineWidth: 1 as const, lineStyle: w.dashed ? LineStyle.Dashed : LineStyle.Solid, axisLabelVisible: true, title: w.title };
-      const cur = st.lines.get(w.key);
-      if (cur) cur.applyOptions(opts);
-      else st.lines.set(w.key, series.createPriceLine(opts));
-    }
-  }, [tradeData, symbol, chartType, replayActive, dragPreview, ticketDraft]);
+  // Vị thế / lệnh chờ / bản nháp lệnh trên symbol này: đường giá + thẻ kéo thả kiểu TradingView do <TradeOverlay /> vẽ (docs/trade-plan.md T3-T4)
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null); // đường đang kéo
+  const lineDragRef = useRef<ChartDrag | null>(null);
+  const getChart = useCallback(() => chartRef.current, []);
+  const getSeries = useCallback(() => seriesRef.current, []);
+  const getDigits = useCallback(() => digitsRef.current, []);
 
   // Kéo các đường giao dịch (lệnh chờ, entry/SL/TP của bảng đặt lệnh): nghe chuột ở phần tử bao quanh chart, trước DrawingManager
   useEffect(() => {
@@ -1016,7 +987,11 @@ export default function Chart({ paneId }: { paneId: string }) {
       isReplay: () => pane.replay.getState().active,
       setPreview: setDragPreview,
     });
-    return () => drag.destroy();
+    lineDragRef.current = drag;
+    return () => {
+      drag.destroy();
+      lineDragRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1493,6 +1468,18 @@ export default function Chart({ paneId }: { paneId: string }) {
     >
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
+        <TradeOverlay
+          symbol={symbol}
+          chartType={chartType}
+          replay={replayActive}
+          preview={dragPreview}
+          getChart={getChart}
+          getSeries={getSeries}
+          getDigits={getDigits}
+          onGhost={(owner, kind, e) => lineDragRef.current?.beginStop(owner, kind, e)}
+          onConfirmEdit={() => lineDragRef.current?.confirmEdit()}
+          onCancelEdit={() => lineDragRef.current?.cancelEdit()}
+        />
         {ctxMenu && (
           <ChartContextMenu
             x={ctxMenu.x}

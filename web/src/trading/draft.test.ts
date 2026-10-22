@@ -16,24 +16,37 @@ describe("parseNum", () => {
 });
 
 describe("draftLines", () => {
-  it("lệnh chờ: đường giá vào mang nhãn loại lệnh suy ra từ giá thị trường + SL đỏ + TP xanh, nét liền", () => {
+  it("lệnh chờ: đường giá vào nét đứt theo hướng, nhãn loại lệnh suy ra từ giá thị trường; SL cam + TP xanh chấm chấm", () => {
     const l = draftLines(d({ sl: "4110", tp: "4140" }), "XAUUSDm", Q);
-    expect(l).toEqual([
-      { key: "d:entry", price: 4120, color: COLORS.order, dashed: false, title: "BUY LIMIT 0.10" },
-      { key: "d:sl", price: 4110, color: COLORS.sl, dashed: false, title: "SL" },
-      { key: "d:tp", price: 4140, color: COLORS.tp, dashed: false, title: "TP" },
+    expect(l).toMatchObject([
+      { key: "d:entry", price: 4120, color: COLORS.buy, style: "dashed", title: "BUY LIMIT 0.10" },
+      { key: "d:sl", price: 4110, color: COLORS.sl, style: "dotted", title: "SL" },
+      { key: "d:tp", price: 4140, color: COLORS.tp, style: "dotted", title: "TP" },
     ]);
+    expect(l[0].tag).toEqual({ kind: "entry", owner: { t: "draft" }, qty: "0.10", label: "Buy limit", ghosts: [], place: "Buy", draft: true });
+    expect(draftLines(d({ side: "sell", price: "4140" }), "XAUUSDm", Q)[0].color).toBe(COLORS.sell);
+  });
+  it("thẻ giá vào có nút mờ cho SL/TP chưa đặt", () => {
+    expect(draftLines(d(), "XAUUSDm", Q)[0].tag?.ghosts).toEqual(["tp", "sl"]);
+    expect(draftLines(d({ tp: "4140" }), "XAUUSDm", Q)[0].tag?.ghosts).toEqual(["sl"]);
   });
   it("kéo đường vào qua giá thị trường thì nhãn đổi: Buy Limit → Buy Stop", () => {
     expect(draftLines(d({ price: "4150" }), "XAUUSDm", Q)[0].title).toBe("BUY STOP 0.10");
     expect(draftLines(d({ side: "sell", price: "4100" }), "XAUUSDm", Q)[0].title).toBe("SELL STOP 0.10");
+    expect(draftLines(d({ price: "4150" }), "XAUUSDm", Q)[0].tag?.label).toBe("Buy stop");
   });
   it("chưa có giá thị trường: nhãn chỉ có hướng", () => {
     expect(draftLines(d(), "XAUUSDm", undefined)[0].title).toBe("BUY 0.10");
   });
-  it("market: không có đường giá vào, chỉ SL/TP đã đặt", () => {
-    expect(draftLines(d({ mode: "market", sl: "4100" }), "XAUUSDm", Q).map((x) => x.key)).toEqual(["d:sl"]);
-    expect(draftLines(d({ mode: "market" }), "XAUUSDm", Q)).toEqual([]);
+  it("market: đường giá vào ở giá khớp (Buy ở Ask, Sell ở Bid) với nút Buy/Sell, cộng SL/TP đã đặt", () => {
+    const l = draftLines(d({ mode: "market", sl: "4100" }), "XAUUSDm", Q);
+    expect(l.map((x) => x.key)).toEqual(["d:entry", "d:sl"]);
+    expect(l[0]).toMatchObject({ price: 4130.2, tag: { label: "Market", place: "Buy" } });
+    expect(draftLines(d({ mode: "market", side: "sell" }), "XAUUSDm", Q)[0]).toMatchObject({ price: 4130, tag: { place: "Sell" } });
+  });
+  it("market chưa có giá thị trường: không có đường giá vào, vẫn có SL/TP đã đặt", () => {
+    expect(draftLines(d({ mode: "market" }), "XAUUSDm", undefined)).toEqual([]);
+    expect(draftLines(d({ mode: "market", sl: "4100" }), "XAUUSDm", undefined).map((x) => x.key)).toEqual(["d:sl"]);
   });
   it("chỉ vẽ trên chart của đúng symbol, không có bản nháp thì không có đường", () => {
     expect(draftLines(d(), "EURUSD", Q)).toEqual([]);
@@ -72,8 +85,8 @@ describe("draftLines với nhãn lãi/lỗi", () => {
     expect(l.find((x) => x.key === "d:tp")?.title).toBe("tp|buy|0.1|4120|4140");
   });
   it("market tính từ giá khớp: Buy ở Ask, Sell ở Bid", () => {
-    expect(draftLines(d({ mode: "market", sl: "4100" }), "XAUUSDm", Q, title)[0].title).toBe("sl|buy|0.1|4130.2|4100");
-    expect(draftLines(d({ mode: "market", side: "sell", tp: "4100" }), "XAUUSDm", Q, title)[0].title).toBe("tp|sell|0.1|4130|4100");
+    expect(draftLines(d({ mode: "market", sl: "4100" }), "XAUUSDm", Q, title)[1].title).toBe("sl|buy|0.1|4130.2|4100");
+    expect(draftLines(d({ mode: "market", side: "sell", tp: "4100" }), "XAUUSDm", Q, title)[1].title).toBe("tp|sell|0.1|4130|4100");
   });
   it("không có callback thì chỉ tên", () => {
     expect(draftLines(d({ sl: "4110" }), "XAUUSDm", Q).find((x) => x.key === "d:sl")?.title).toBe("SL");

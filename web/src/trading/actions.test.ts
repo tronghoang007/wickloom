@@ -317,4 +317,24 @@ describe("moveStop", () => {
     expect(await moveStop(pos, 4118, 3)).toBe(false);
     expect(sendModifyPos).not.toHaveBeenCalled();
   });
+  it("đặt mới (kéo nút TP/SL mờ ra): toast nói đặt (không phải đổi), Hoàn tác = bỏ mức vừa đặt", async () => {
+    sendModifyPos.mockResolvedValue(done());
+    await moveStop({ ...pos, from: 0 }, 4118.5, 3);
+    expect(sendModifyPos).toHaveBeenCalledWith("S:1", 111, { sl: 4118.5 });
+    expect(toastMock.mock.calls[0][0]).toBe("Đã đặt SL XAUUSDm #111 → 4118.500");
+    toastMock.mock.calls[0][1].action.run();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendModifyPos).toHaveBeenLastCalledWith("S:1", 111, { sl: 0 });
+    expect(toastMock).toHaveBeenLastCalledWith("Đã bỏ SL XAUUSDm #111", { ms: 4000 });
+  });
+
+  it("giá 0 = bỏ SL/TP (dấu × trên thẻ): gửi 0, Hoàn tác đặt lại mức cũ", async () => {
+    sendModifyPos.mockResolvedValue(done());
+    expect(await moveStop(pos, 0, 3)).toBe(true);
+    expect(sendModifyPos).toHaveBeenCalledWith("S:1", 111, { sl: 0 });
+    expect(toastMock.mock.calls[0][0]).toBe("Đã bỏ SL XAUUSDm #111");
+    toastMock.mock.calls[0][1].action.run();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendModifyPos).toHaveBeenLastCalledWith("S:1", 111, { sl: 4115 });
+  });
 });

@@ -59,8 +59,13 @@ export class LineDrag {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  // Đường sát con trỏ (chỉ trong vùng vẽ, không phải trục giá / widget SELL-BUY đè lên chart)
+  // Đường sát con trỏ (chỉ trong vùng vẽ, không phải trục giá / widget SELL-BUY đè lên chart). Con trỏ ở trên thẻ của một đường (`data-line-key`) thì kéo đúng đường đó, bất kể
+  // lệch tâm bao nhiêu; nút trên thẻ (`data-tag-btn`) tự xử lý chuột nên không kéo gì.
   private pick(e: PointerEvent): DragTarget | null {
+    const el = e.target instanceof Element ? e.target : null;
+    if (el?.closest("[data-tag-btn]")) return null;
+    const tagKey = el?.closest("[data-line-key]")?.getAttribute("data-line-key");
+    if (tagKey) return this.h.getTargets().find((t) => t.id === tagKey) ?? null;
     if (!this.h.container.contains(e.target as Node)) return null;
     const targets = this.h.getTargets();
     if (targets.length === 0) return null;
@@ -99,10 +104,7 @@ export class LineDrag {
     this.drag = null;
   }
 
-  private onDown = (e: PointerEvent) => {
-    if (e.button !== 0 || this.drag) return;
-    const t = this.pick(e);
-    if (!t) return;
+  private start(e: PointerEvent, id: string, from: number, price: number) {
     this.consume(e);
     try {
       this.h.container.setPointerCapture(e.pointerId); // nhả chuột ngoài chart vẫn nhận được pointerup
@@ -110,9 +112,21 @@ export class LineDrag {
       /* pointer đã biến mất */
     }
     this.lockChart();
-    this.drag = { id: t.id, from: t.price, price: t.price };
-    this.h.container.style.cursor = "ns-resize";
+    this.drag = { id, from, price };
+    this.h.container.style.cursor = "pointer";
+  }
+
+  private onDown = (e: PointerEvent) => {
+    if (e.button !== 0 || this.drag) return;
+    const t = this.pick(e);
+    if (t) this.start(e, t.id, t.price, t.price);
   };
+
+  /** Bắt đầu kéo một đường CHƯA có trên chart (nút TP/SL mờ trên thẻ lệnh): `from` = mức hiện có (0 = chưa đặt), `price` = giá khởi đầu (thả ngay không kéo thì nhận giá này). */
+  begin(e: PointerEvent, id: string, from: number, price: number) {
+    if (e.button !== 0 || this.drag) return;
+    this.start(e, id, from, price);
+  }
 
   private onMoveEv = (e: PointerEvent) => {
     if (this.drag) {
@@ -127,7 +141,7 @@ export class LineDrag {
     }
     if (this.pick(e)) {
       e.stopPropagation(); // DrawingManager không được ghi đè con trỏ / tô sáng hình bên dưới
-      this.h.container.style.cursor = "ns-resize";
+      this.h.container.style.cursor = "pointer";
       this.hovering = true;
     } else if (this.hovering) {
       this.hovering = false;

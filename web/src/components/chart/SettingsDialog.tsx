@@ -27,7 +27,7 @@ const TABS: { id: Tab; label: string; icon: ReactNode; soon?: boolean }[] = [
   { id: "status", label: "Status line", icon: <StatusLineI /> },
   { id: "scales", label: "Scales and lines", icon: <ScalesI /> },
   { id: "canvas", label: "Canvas", icon: <CanvasI /> },
-  { id: "trading", label: "Trading", icon: <TradingI />, soon: true },
+  { id: "trading", label: "Trading", icon: <TradingI /> },
   { id: "alerts", label: "Alerts", icon: <AlertI />, soon: true },
   { id: "events", label: "Events", icon: <CalendarI />, soon: true },
 ];
@@ -379,6 +379,18 @@ function cancelSettings() {
   closeSettings();
 }
 
+function TradingTab({ s, set }: P) {
+  return (
+    <>
+      <Section>General</Section>
+      <CheckRow label="One-click trading" checked={s.oneClick} onChange={(v) => set({ oneClick: v })} />
+      <p className="-mt-1 mb-2 pl-7 text-[12px] text-[var(--muted)]">
+        Instantly edit orders and close positions without confirmation. Off: closing a position asks in a dialog, and dragging an order, SL or TP that is already placed waits at the new price until you click Confirm on its tag (or Discard / Esc to undo).
+      </p>
+    </>
+  );
+}
+
 /** Settings kiểu TradingView. Chỉnh là áp ngay lên chart (xem trước); Cancel/X/Esc trả về
  *  setting lúc mở dialog, Ok giữ lại. */
 export default function SettingsDialog() {
@@ -439,6 +451,7 @@ export default function SettingsDialog() {
             {tab === "status" && <StatusTab {...body} />}
             {tab === "scales" && <ScalesTab {...body} />}
             {tab === "canvas" && <CanvasTab {...body} />}
+            {tab === "trading" && <TradingTab {...body} />}
           </div>
         </div>
         <div className="flex items-center justify-between border-t border-[var(--border)] px-5 py-3">

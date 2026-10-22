@@ -140,19 +140,22 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
 
 export type StopTarget = { target: "position" | "order"; ticket: number; symbol: string; field: "sl" | "tp"; from: number };
 
-/** Kéo SL/TP của vị thế / lệnh chờ tới `price`. Thành công thì toast kèm nút "Hoàn tác" (đặt lại mức cũ). `pnlText` = " (+78.30 USD)" nếu biết lãi/lỗi tại mức mới. */
+/** Kéo SL/TP của vị thế / lệnh chờ tới `price` (0 = bỏ SL/TP, như bấm × trên thẻ). Thành công thì toast kèm nút "Hoàn tác" (đặt lại mức cũ; mức cũ 0 thì hoàn tác = bỏ).
+ *  `pnlText` = " (+78.30 USD)" nếu biết lãi/lỗi tại mức mới. */
 export async function moveStop(t: StopTarget, price: number, digits?: number, pnlText = ""): Promise<boolean> {
   const name = t.field.toUpperCase();
+  const where = `${t.symbol} #${t.ticket}`;
   const call = (accountId: string, p: number) =>
     t.target === "position" ? sendModifyPosition(accountId, t.ticket, { [t.field]: p }) : sendModifyOrder(accountId, t.ticket, { [t.field]: p });
   const undo = () =>
     void run("Đăng nhập để giao dịch", async (accountId) => {
-      report(await call(accountId, t.from), `Đã hoàn tác ${name} ${t.symbol} #${t.ticket} → ${fmtPx(t.from, digits)}`);
+      report(await call(accountId, t.from), t.from > 0 ? `Đã hoàn tác ${name} ${where} → ${fmtPx(t.from, digits)}` : `Đã bỏ ${name} ${where}`);
     });
   const done = await run("Đăng nhập để giao dịch", async (accountId) => {
     const o = await call(accountId, price);
     if (o.kind === "done" && o.result.ok) {
-      toast(`Đã đổi ${name} ${t.symbol} #${t.ticket} → ${fmtPx(price, digits)}${pnlText}`, { ms: 8000, action: { label: "Hoàn tác", run: undo } });
+      const text = price > 0 ? `Đã ${t.from > 0 ? "đổi" : "đặt"} ${name} ${where} → ${fmtPx(price, digits)}${pnlText}` : `Đã bỏ ${name} ${where}`;
+      toast(text, { ms: 8000, action: t.from !== price ? { label: "Hoàn tác", run: undo } : undefined });
       refreshSoon();
       return true;
     }
