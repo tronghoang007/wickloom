@@ -1,16 +1,23 @@
 "use client";
 
+import AuthDialog from "@/components/auth/AuthDialog";
+import Toasts from "@/components/Toasts";
 import Chart from "@/components/chart/Chart";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
 import RightRail from "@/components/chart/RightRail";
 import Toolbar from "@/components/chart/Toolbar";
 import { useDrawingStore } from "@/drawings/store";
+import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useEffect, useState } from "react";
 
 export default function Page() {
   const theme = useChartStore((s) => s.theme);
   const [prefsReady, setPrefsReady] = useState(false);
+
+  useEffect(() => {
+    void useAuthStore.getState().refresh(); // ai đang đăng nhập? (khách / user)
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -42,6 +49,8 @@ export default function Page() {
         </main>
         <RightRail />
       </div>
+      <AuthDialog />
+      <Toasts />
     </div>
   );
 }

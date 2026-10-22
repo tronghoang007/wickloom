@@ -1,6 +1,7 @@
 "use client";
 
 import { WS_URL, fetchBars, getWatchlist, saveWatchlist, type Bar } from "@/lib/api";
+import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useSettingsStore } from "@/store/settings";
 import { useEffect, useRef, useState } from "react";
@@ -90,6 +91,33 @@ const fmt = (n: number, d: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const sign = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "");
 
+/** Khách: watchlist thuộc tài khoản nên thay thân panel bằng lời mời đăng nhập. loading: khung xương, không chớp nút Login. */
+function WatchlistGate({ status }: { status: "loading" | "guest" }) {
+  const openAuth = useAuthStore((s) => s.openAuth);
+  if (status === "loading")
+    return (
+      <div className="space-y-2 px-4 py-3" aria-hidden>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-5 animate-pulse rounded bg-[var(--hover)]" />
+        ))}
+      </div>
+    );
+  return (
+    <div className="flex flex-col items-center px-6 py-10 text-center">
+      <div className="text-[15px] font-semibold">Đăng nhập để dùng watchlist</div>
+      <div className="mt-1 text-[13px] text-[var(--muted)]">Watchlist, layout và hình vẽ được lưu theo tài khoản Wickloom của bạn.</div>
+      <div className="mt-4 flex w-full max-w-[220px] flex-col gap-2">
+        <button className="h-9 rounded bg-[var(--accent)] text-sm font-semibold text-white hover:brightness-110" onClick={() => openAuth("login")}>
+          Sign in
+        </button>
+        <button className="h-9 rounded border border-[var(--border)] text-sm hover:bg-[var(--hover)]" onClick={() => openAuth("register")}>
+          Create account
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function WatchlistPanel() {
   const set = useChartStore((s) => s.set);
   const current = useChartStore((s) => s.symbol);
@@ -100,10 +128,19 @@ export default function WatchlistPanel() {
   const [adding, setAdding] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const quotes = useQuotes(symbols);
+  const status = useAuthStore((s) => s.status);
+  const userId = useAuthStore((s) => s.user?.id);
 
+  // Watchlist thuộc tài khoản: đổi user / đăng xuất thì nạp lại (khách không có watchlist, không gọi server)
   useEffect(() => {
-    getWatchlist().then(setSymbols);
-  }, []);
+    if (status !== "user") return;
+    let alive = true;
+    getWatchlist().then((s) => alive && setSymbols(s));
+    return () => {
+      alive = false;
+      setSymbols([]);
+    };
+  }, [status, userId]);
 
   const persist = (next: string[]) => {
     setSymbols(next);
@@ -124,13 +161,13 @@ export default function WatchlistPanel() {
   const sm = sel ? meta(sel) : undefined;
   const sChg = sq && sq.prev ? sq.last - sq.prev : null;
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-10 shrink-0 items-center justify-between pl-4 pr-2">
-        <span className="flex items-center gap-1 text-[14px] font-semibold">
-          Watchlist
-          <Chevron size={14} />
-        </span>
+  const title = (
+    <div className="flex h-10 shrink-0 items-center justify-between pl-4 pr-2">
+      <span className="flex items-center gap-1 text-[14px] font-semibold">
+        Watchlist
+        <Chevron size={14} />
+      </span>
+      {status === "user" && (
         <button
           className="flex h-7 w-7 items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)]"
           title="Add symbol"
@@ -138,7 +175,21 @@ export default function WatchlistPanel() {
         >
           <Plus size={24} />
         </button>
+      )}
+    </div>
+  );
+
+  if (status !== "user")
+    return (
+      <div className="flex h-full flex-col">
+        {title}
+        <WatchlistGate status={status} />
       </div>
+    );
+
+  return (
+    <div className="flex h-full flex-col">
+      {title}
 
       <div className="grid shrink-0 grid-cols-[1fr_66px_54px_52px_18px] items-center gap-x-1 px-4 pb-1 text-[11px] text-[var(--muted)]">
         <span>Symbol</span>

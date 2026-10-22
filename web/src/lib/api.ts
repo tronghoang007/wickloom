@@ -7,8 +7,42 @@ export const TF_SECONDS: Record<string, number> = {
   D1: 86400, W1: 604800, MN1: 2592000,
 };
 
-export const API = process.env.NEXT_PUBLIC_API ?? "http://127.0.0.1:8000";
+// Host của API theo host của trang: cookie phiên cấp bởi 127.0.0.1:8000 không đi theo fetch từ trang localhost:3000
+// (và ngược lại), nên mở bằng host nào thì gọi API bằng host đó. NEXT_PUBLIC_API (nếu đặt) thắng.
+export const API =
+  process.env.NEXT_PUBLIC_API ??
+  (typeof window === "undefined" ? "http://127.0.0.1:8000" : `${location.protocol}//${location.hostname}:8000`);
 export const WS_URL = API.replace(/^http/, "ws") + "/ws";
+
+let onUnauthorized: ((path: string) => void) | null = null;
+/** Store auth đăng ký để biết khi /me/* trả 401 (phiên hết hạn giữa chừng) (không import ngược store vào đây - tránh vòng phụ thuộc). */
+export function setUnauthorizedHandler(fn: ((path: string) => void) | null) {
+  onUnauthorized = fn;
+}
+
+/** fetch tới backend kèm cookie phiên. Nhận path (`/me/watchlist`) hoặc URL đầy đủ (DrawingSync truyền `${API}/...`). */
+export async function apiFetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
+  const url = typeof input === "string" && input.startsWith("/") ? `${API}${input}` : String(input);
+  const headers = new Headers(init.headers);
+  if (init.body !== undefined && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const res = await fetch(url, { ...init, headers, credentials: "include" });
+  if (res.status === 401) {
+    const path = new URL(url).pathname;
+    if (path.startsWith("/me/")) onUnauthorized?.(path); // /auth/me 401 = khách, store tự xử lý trong refresh()
+  }
+  return res;
+}
+
+/** Thông báo lỗi tiếng Việt từ `{detail}` của backend (422 của pydantic có detail dạng mảng -> câu chung). */
+export async function errorMessage(res: Response): Promise<string> {
+  try {
+    const d = (await res.json())?.detail;
+    if (typeof d === "string") return d;
+  } catch {
+    /* thân không phải JSON */
+  }
+  return res.status === 422 ? "Dữ liệu không hợp lệ" : `Lỗi ${res.status}`;
+}
 
 export async function fetchBars(symbol: string, tf: string, to?: number, limit = 500, from?: number): Promise<Bar[]> {
   const q = new URLSearchParams({ symbol, tf, limit: String(limit) });
@@ -32,19 +66,14 @@ export async function fetchSymbols(): Promise<SymbolInfo[]> {
   return r.ok ? r.json() : [];
 }
 
-// Watchlist: 1 document duy nhất id="default" trong bảng `watchlists` (CRUD generic đã
-// có sẵn ở backend, xem backend/app/store.py TABLES) - không cần endpoint riêng.
+// Watchlist của user đăng nhập: 1 document `/me/watchlist` (backend gắn chủ sở hữu theo phiên). Khách không gọi.
 export async function getWatchlist(): Promise<string[]> {
-  const r = await fetch(`${API}/watchlists/default`);
+  const r = await apiFetch("/me/watchlist");
   if (!r.ok) return [];
   const row = await r.json();
   return Array.isArray(row?.data?.symbols) ? row.data.symbols : [];
 }
 
 export async function saveWatchlist(symbols: string[]): Promise<void> {
-  await fetch(`${API}/watchlists/default?scope=default`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ symbols }),
-  }).catch(() => {});
+  await apiFetch("/me/watchlist", { method: "PUT", body: JSON.stringify({ symbols }) }).catch(() => {});
 }

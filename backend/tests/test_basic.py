@@ -79,8 +79,8 @@ def test_ticks_aggregate_and_meta():
     c = TestClient(app)
     rows = c.get("/bars", params={"symbol": "XAUUSD", "tf": "M1"}).json()
     assert rows == [{"t": m, "o": 10, "h": 12, "l": 10, "c": 12, "v": 2}]
-    c.put("/layouts/a", params={"scope": "x"}, json={"k": 1})
-    assert c.get("/layouts/a").json()["data"] == {"k": 1}
+    c.put("/settings/a", params={"scope": "x"}, json={"k": 1})
+    assert c.get("/settings/a").json()["data"] == {"k": 1}
 
 
 def test_stale_ticks_dropped():

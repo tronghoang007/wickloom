@@ -9,7 +9,13 @@ BARS_DIR = DATA_DIR / "bars"  # cache parquet cũ (trước khi chuyển sang SQ
 BARS_DB = DATA_DIR / "bars.sqlite"
 SQLITE_PATH = DATA_DIR / "meta.sqlite"
 
-EA_TCP_HOST = os.environ.get("TV_EA_TCP_HOST", "127.0.0.1")
+# Web được phép gọi API (CORS + chặn CSRF theo Origin). Đổi khi chạy web ở cổng/host khác.
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
+    "WICKLOOM_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+ALLOW_REGISTER = os.environ.get("WICKLOOM_ALLOW_REGISTER", "1") != "0"  # đặt 0 khi lỡ đưa app ra mạng
+COOKIE_SECURE = os.environ.get("WICKLOOM_COOKIE_SECURE", "0") == "1"  # bật khi chạy sau HTTPS
+
+EA_TCP_HOST =os.environ.get("TV_EA_TCP_HOST", "127.0.0.1")
 EA_TCP_PORT = int(os.environ.get("TV_EA_TCP_PORT", "8001"))
 
 TF_SECONDS = {

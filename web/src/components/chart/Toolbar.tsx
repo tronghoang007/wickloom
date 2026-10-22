@@ -28,6 +28,7 @@ import {
   TemplatesI,
   Undo,
 } from "../icons";
+import AccountMenu from "./AccountMenu";
 import IndicatorsDialog from "./IndicatorsDialog";
 import SymbolSearchDialog from "./SymbolSearchDialog";
 import TimeframeBar from "./TimeframeBar";
@@ -115,7 +116,10 @@ export default function Toolbar() {
       : document.documentElement.requestFullscreen();
 
   return (
-    <div className="flex h-[38px] items-center border-b border-[var(--border)] px-1">
+    <div className="flex h-[38px] items-center border-b border-[var(--border)] pr-1">
+      <div className="flex w-[52px] shrink-0 items-center justify-center">
+        <AccountMenu />
+      </div>
       <SymbolSearch />
       <button
         className={`${iconBtn} ml-1`}

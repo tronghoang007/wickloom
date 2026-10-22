@@ -1,8 +1,9 @@
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from .config import BARS_DB, SQLITE_PATH
 
@@ -71,6 +72,7 @@ class MetaStore:
 
     def __init__(self, path: Path = SQLITE_PATH):
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
         self.db = sqlite3.connect(path, check_same_thread=False)
         self._lock = threading.Lock()
         for t in TABLES:
@@ -78,6 +80,24 @@ class MetaStore:
                 f"CREATE TABLE IF NOT EXISTS {t} (id TEXT PRIMARY KEY, scope TEXT NOT NULL DEFAULT '', data TEXT NOT NULL)"
             )
         self.db.commit()
+
+    @contextmanager
+    def tx(self) -> Iterator[sqlite3.Connection]:
+        """Giữ lock + commit khi xong, rollback nếu lỗi - cho thao tác nhiều câu lệnh phải đi cùng nhau
+        (bảng users/sessions, chuyển dữ liệu cũ sang user)."""
+        with self._lock:
+            try:
+                yield self.db
+                self.db.commit()
+            except BaseException:
+                self.db.rollback()
+                raise
+
+    def backup(self, dest: Path) -> Path:
+        """Chụp nguyên DB ra `dest` (VACUUM INTO) - sao lưu trước khi đổi hàng loạt."""
+        with self._lock:
+            self.db.execute("VACUUM INTO ?", (str(dest),))
+        return dest
 
     def list(self, table: str, scope: Optional[str] = None) -> List[Dict[str, Any]]:
         assert table in TABLES

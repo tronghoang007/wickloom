@@ -4,16 +4,20 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import state, tcp_server
-from .config import TF_SECONDS
+from . import accounts, auth, me, state, tcp_server
+from .config import ALLOWED_ORIGINS, TF_SECONDS
 from .state import request_backfill
 from .store import TABLES
 
 app = FastAPI(title="TV personal backend")
+# Thứ tự: add sau = bọc ngoài. CORS ngoài cùng để cả 403 của OriginGuard vẫn có header CORS cho web đọc lỗi.
+app.add_middleware(auth.OriginGuard, allowed=ALLOWED_ORIGINS)
 app.add_middleware(
-    CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
+app.include_router(auth.router)
+app.include_router(me.router)
 
 
 def _push_subscribe() -> None:
@@ -89,8 +93,10 @@ def _crud(table: str) -> APIRouter:
     return r
 
 
+# Dữ liệu người dùng đi qua /me/* (cần đăng nhập); CRUD generic cho các bảng đó đã đóng, không thì vòng qua được xác thực.
 for _t in TABLES:
-    app.include_router(_crud(_t))
+    if _t not in accounts.USER_TABLES:
+        app.include_router(_crud(_t))
 
 
 @app.websocket("/ws")

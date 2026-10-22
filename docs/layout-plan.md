@@ -1,6 +1,8 @@
 # Kế hoạch: layout nhiều chart như TradingView + lưu layout (theo tài khoản Wickloom)
 
-Ngày viết: 2026-10-22 (sau commit 8635bdd). CHỈ LÀ PLAN, chưa code gì. Mục tiêu: chia màn hình thành 1–8 chart
+Ngày viết: 2026-10-22 (sau commit 8635bdd). CHỈ LÀ PLAN, chưa code gì cho layout. **Cập nhật cùng ngày:** `auth-plan` U1–U3 đã code
+(đăng nhập, `/me/watchlist|drawings`, và `/me/layouts[/{id}]` ở backend đã sẵn dùng; web có `useAuthStore.requireLogin(reason)`, `memoryFetch` cho khách,
+`DrawingSync.flush()` trả Promise + `abandon()`), nên bước tiếp theo của layout là **Phase 0–2** (không còn phụ thuộc gì). Mục tiêu: chia màn hình thành 1–8 chart
 (2×2, 1 lớn + 2 nhỏ…), kéo splitter, đồng bộ symbol/khung/crosshair giữa các chart, và **lưu / mở / đổi tên / copy / xoá
 layout** như menu layout của TV. Layout **lưu theo tài khoản Wickloom** (đăng ký/đăng nhập riêng của app, chốt 2026-10-22,
 xem `docs/auth-plan.md`), **không** theo account MT5 (account MT5 chỉ để trade). Chưa login thì bấm Save sẽ bắt đăng nhập.

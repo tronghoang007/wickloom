@@ -49,18 +49,20 @@ export class DrawingSync {
   schedule() {
     if (this.status !== "ready") return;
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.flush(), this.o.saveDelay ?? 500);
+    this.saveTimer = setTimeout(() => void this.flush(), this.o.saveDelay ?? 500);
   }
 
-  flush() {
+  /** Lưu ngay nếu có thay đổi. Promise xong khi PUT trả lời (hoặc ngay nếu không có gì để lưu) - logout đợi nó
+   *  để PUT cuối còn cookie. Lỗi PUT không ném ra: sync tự thử lại. */
+  flush(): Promise<void> {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
-    if (this.status !== "ready" || !this.symbol) return;
+    if (this.status !== "ready" || !this.symbol) return Promise.resolve();
     const items = this.o.items();
     const json = JSON.stringify(items);
-    if (json === this.saved) return;
+    if (json === this.saved) return Promise.resolve();
     this.saved = json;
     const { symbol, seq } = this;
-    this.f(`${this.o.url(symbol)}?scope=${encodeURIComponent(symbol)}`, {
+    return this.f(`${this.o.url(symbol)}?scope=${encodeURIComponent(symbol)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ version: DRAWINGS_VERSION, items }),
@@ -69,8 +71,18 @@ export class DrawingSync {
       .catch(() => {
         if (seq !== this.seq || this.saved !== json) return;
         this.saved = null; // lần sau sẽ ghi lại
-        this.retryLater(() => this.flush());
+        this.retryLater(() => void this.flush());
       });
+  }
+
+  /** Bỏ trạng thái hiện tại mà KHÔNG lưu - khi đổi nơi lưu (đăng nhập/đăng xuất) thì nội dung đang giữ thuộc về
+   *  nơi cũ, lưu nó sang nơi mới sẽ đè dữ liệu thật. Gọi `open()` sau đó để nạp lại. */
+  abandon() {
+    this.clearTimers();
+    this.seq++;
+    this.symbol = "";
+    this.status = "idle";
+    this.saved = null;
   }
 
   private async load(seq: number) {

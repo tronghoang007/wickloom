@@ -1,4 +1,6 @@
 import { API, TF_SECONDS, fetchBars, type Bar } from "@/lib/api";
+import { useAuthStore } from "@/store/auth";
+import { drawingsFetch, noteGuestDrawing } from "./storage";
 import { crosshairLabel } from "@/lib/timefmt";
 import type {
     IChartApi,
@@ -70,11 +72,13 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
   private undoStack: string[] = [];
   private redoStack: string[] = [];
   private sync = new DrawingSync({
-    url: (symbol) => `${API}/drawings/${encodeURIComponent(symbol)}__default`,
+    url: (symbol) => `${API}/me/drawings/${encodeURIComponent(symbol)}__default`,
+    fetch: drawingsFetch,
     items: () => [...this.kept, ...this.drawings.filter((d) => !SPEC[d.type]?.ephemeral)],
     onLoad: (items) => this.onLoaded(items),
   });
   private unsub: () => void;
+  private unsubAuth: () => void;
 
   constructor(private o: Opts) {
     o.container.addEventListener("pointerdown", this.onDown, true);
@@ -86,6 +90,14 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     window.addEventListener("keydown", this.onKey);
     useDrawingStore.setState({ api: this });
     this.unsub = useDrawingStore.subscribe(() => this.refresh());
+    // Đổi nơi lưu (khách ↔ user, hoặc sang user khác): nạp lại hình của symbol đang mở từ nơi mới
+    let who = authKey();
+    this.unsubAuth = useAuthStore.subscribe(() => {
+      const next = authKey();
+      if (next === who) return;
+      who = next;
+      this.reloadDrawings();
+    });
   }
 
   destroy() {
@@ -97,6 +109,7 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     window.removeEventListener("pointercancel", this.onUp);
     window.removeEventListener("keydown", this.onKey);
     this.unsub();
+    this.unsubAuth();
     this.unlockChart();
     this.sync.close();
     useDrawingStore.setState({ api: null, drawings: [], selectedId: null });
@@ -1018,6 +1031,28 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     useDrawingStore.setState({ drawings: [...this.drawings] });
     this.refresh();
     this.sync.schedule();
+    noteGuestDrawing();
+  }
+
+  /** Lưu ngay và đợi server trả lời (dùng trước khi đổi/đóng phiên đăng nhập). */
+  flushSave(): Promise<void> {
+    return this.sync.flush();
+  }
+
+  // Bỏ hình đang giữ (thuộc nơi lưu cũ, không lưu sang nơi mới) rồi nạp lại symbol hiện tại.
+  private reloadDrawings() {
+    const symbol = this.symbol;
+    this.sync.abandon();
+    if (!symbol) return;
+    this.drawings = [];
+    this.kept = [];
+    this.undoStack = [];
+    this.redoStack = [];
+    this.mode = { k: "idle" };
+    this.unlockChart();
+    useDrawingStore.setState({ drawings: [], selectedId: null });
+    this.sync.open(symbol);
+    this.refresh();
   }
 
   private setProfileBars(id: string, bars: Bar[] | undefined, step = 0) {
@@ -1097,4 +1132,10 @@ export class DrawingManager implements ISeriesPrimitive<Time> {
     useDrawingStore.setState({ drawings: [...this.drawings] });
     this.refresh();
   }
+}
+
+// Đổi giá trị này = đổi nơi lưu hình vẽ. "loading" (chưa biết là khách hay user) cũng tính là một nơi để lúc có kết quả thì nạp lại.
+function authKey(): string {
+  const s = useAuthStore.getState();
+  return s.status === "user" ? `u:${s.user?.id}` : s.status;
 }
