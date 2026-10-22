@@ -3,7 +3,7 @@ import json
 import time
 from typing import Any, Dict
 
-from . import state
+from . import mt5, state
 from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN
 from .models import BarsIn, SymbolsIn, TicksIn
 
@@ -106,6 +106,7 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
             print(f"TVBridge {peer}: doi broker/server -> {ident}, archive bar cache vao {archive}")
 
         state.ea_hub.add(writer, ident)
+        mt5.registry.register(writer, hello)
         registered = True
         print(f"TVBridge connected: {peer}")
 
@@ -142,6 +143,8 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
                     _handle_ticks(TicksIn.model_validate(msg))
                 elif mtype == "bars":
                     _handle_bars(BarsIn.model_validate(msg))
+                elif mtype == "account":
+                    mt5.registry.update(writer, msg)
             except Exception as exc:
                 print(f"TVBridge {peer}: loi xu ly '{mtype}': {exc}")
     except (asyncio.IncompleteReadError, ConnectionResetError):
@@ -149,6 +152,7 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
     finally:
         if registered:
             state.ea_hub.remove(writer)
+            mt5.registry.remove(writer)
         writer.close()
         print(f"TVBridge disconnected: {peer}")
 

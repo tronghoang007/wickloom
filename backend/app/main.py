@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import accounts, auth, me, state, tcp_server
+from . import accounts, auth, me, mt5, state, tcp_server
 from .config import ALLOWED_ORIGINS, TF_SECONDS
 from .state import request_backfill
 from .store import TABLES
@@ -18,6 +18,7 @@ app.add_middleware(
 )
 app.include_router(auth.router)
 app.include_router(me.router)
+app.include_router(mt5.router)
 
 
 def _push_subscribe() -> None:

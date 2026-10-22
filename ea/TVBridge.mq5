@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TVBridge.mq5 - đẩy symbol/tick/bar sang backend qua TCP socket   |
-//| VERSION: 2.09 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
+//| VERSION: 2.10 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
 //| EnsureConnected() để biết bản đang chạy có phải bản mới nhất)    |
 //| - 2.00: chuyển từ WebRequest sang TCP socket                     |
 //| - 2.01: fix SendLine coi SocketSend=0 (buffer đầy) là lỗi fatal  |
@@ -27,14 +27,18 @@
 //|   CopyTicks trả cả lịch sử tick -> backend treo, ghi đè bar)     |
 //| - 2.09: hello gửi thêm ACCOUNT_SERVER (backend nhận diện nguồn    |
 //|   theo server); bị server từ chối thì chờ 30s mới kết nối lại     |
+//| - 2.10: hello gửi thêm login/name/mode (demo|real|contest)/      |
+//|   currency/leverage và thông điệp "account" (balance/equity/     |
+//|   margin_free/profit) mỗi 5s - web hiện Trading accounts +       |
+//|   huy hiệu Demo/Real. Backend cũ bỏ qua các trường/thông điệp này|
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.09"
+#property version "2.10"
 
-#define EA_VERSION "2.09"
+#define EA_VERSION "2.10"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -142,12 +146,43 @@ bool EnsureConnected()
   }
 
   // server = nguon du lieu (backend resync khi doi server; cung server khac login thi giu cache)
-  string hello = "{\"type\":\"hello\",\"token\":\"" + Esc(Token) + "\",\"broker\":\"" + Esc(AccountInfoString(ACCOUNT_COMPANY)) + "\",\"server\":\"" + Esc(AccountInfoString(ACCOUNT_SERVER)) + "\"}";
+  string hello = "{\"type\":\"hello\",\"token\":\"" + Esc(Token) + "\",\"broker\":\"" + Esc(AccountInfoString(ACCOUNT_COMPANY)) + "\",\"server\":\"" + Esc(AccountInfoString(ACCOUNT_SERVER)) + "\""
+               + ",\"login\":" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
+               + ",\"name\":\"" + Esc(AccountInfoString(ACCOUNT_NAME)) + "\""
+               + ",\"mode\":\"" + AccountMode() + "\""
+               + ",\"currency\":\"" + Esc(AccountInfoString(ACCOUNT_CURRENCY)) + "\""
+               + ",\"leverage\":" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LEVERAGE)) + "}";
   if (!SendLine(hello))
     return false;
+  PostAccount();
   PostSymbols(); // luôn gửi lại symbols mỗi lần (re)connect - không chờ server hỏi need_symbols
   PrintFormat("TVBridge v%s: da ket noi %s:%d", EA_VERSION, ServerHost, ServerPort);
   return true;
+}
+
+// demo / real / contest (cuộc thi) - web đánh dấu REAL màu đỏ để không nhầm với demo
+string AccountMode()
+{
+  switch ((ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE))
+  {
+    case ACCOUNT_TRADE_MODE_DEMO:
+      return "demo";
+    case ACCOUNT_TRADE_MODE_REAL:
+      return "real";
+    case ACCOUNT_TRADE_MODE_CONTEST:
+      return "contest";
+  }
+  return "";
+}
+
+// Số dư account (chỉ đọc) - backend giữ bản mới nhất để web hiện trong dropdown avatar
+void PostAccount()
+{
+  string js = "{\"type\":\"account\",\"balance\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2)
+            + ",\"equity\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2)
+            + ",\"margin_free\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2)
+            + ",\"profit\":" + DoubleToString(AccountInfoDouble(ACCOUNT_PROFIT), 2) + "}";
+  SendLine(js);
 }
 
 string SymbolType(string s)
@@ -513,6 +548,7 @@ void OnTimer()
   if (g_sock != INVALID_HANDLE && now - g_lastPingMs >= 5000)
   {
     g_lastPingMs = now;
-    SendLine("{\"type\":\"ping\"}");
+    if (SendLine("{\"type\":\"ping\"}"))
+      PostAccount(); // cùng nhịp heartbeat: số dư luôn mới trong vòng 5s
   }
 }

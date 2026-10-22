@@ -152,3 +152,7 @@ Thiết kế đợt này chừa sẵn chỗ để thêm trade không phải đ�
   lẫn vào.
 - Plan trade chi tiết: `docs/trade-plan.md` (loại lệnh như MT5 + tự chuyển Limit/Stop, kéo SL/TP, set lot).
   Còn thiếu: mức giới hạn lot/lỗ-ngày cho real.
+
+## 9. Đã làm trước Phase 1 (2026-10-22, chưa commit — xem `auth-plan.md` §0 "U5")
+
+Phần của Phase 1/2 không cần backend đa nguồn đã làm ở chế độ **1 account**: EA 2.10 báo `login/name/mode/currency/leverage` + `account` (balance/equity...) mỗi 5s; backend `app/mt5.py` giữ registry `server:login` và `GET /accounts` (cần đăng nhập, `switchable:false`); web có huy hiệu Real/Demo/offline trên avatar + khối Trading accounts trong dropdown. Còn nguyên Phase 0 (2 cửa sổ MT5 trên wine), Phase 1 (backend đa nguồn: bar theo server, symbols/watchlist theo account) và phần chuyển account của Phase 2. Hình dạng dữ liệu đã chừa chỗ (`id = server:login`, danh sách nhiều account, `switchable`).

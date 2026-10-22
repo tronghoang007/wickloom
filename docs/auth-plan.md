@@ -10,7 +10,9 @@ Ngày viết: 2026-10-22 (sau commit 8635bdd). CHỈ LÀ PLAN, chưa code gì. L
 **U1, U2, U3 đã code** (chưa commit): backend `app/accounts.py`, `auth.py`, `me.py`, `auth_cli.py`; web `store/auth.ts`, `lib/authApi.ts`,
 `components/auth/*`, `chart/AccountMenu.tsx`, `drawings/guest.ts`, `drawings/storage.ts`. 44 test backend + 167 test web xanh; đã kiểm tay
 trên Chrome (đăng ký nhận dữ liệu cũ, reload giữ phiên, đăng xuất, vẽ khi là khách không PUT, đăng nhập nhận hình khách, cả `localhost` và `127.0.0.1`).
-**Chưa làm**: U5 (khối MT5 trong dropdown, trade). Chưa kiểm tay: dialog Account settings,
+**U5 làm một phần (2026-10-22, chưa commit)** — phần không cần backend đa nguồn: EA **TVBridge 2.10** (hello thêm `login/name/mode/currency/leverage` + thông điệp `account` balance/equity/margin_free/profit mỗi 5s, cùng nhịp ping; **cần biên dịch lại bằng F7 trong MetaEditor**, EA cũ vẫn chạy: backend hiện account chỉ có server, mode "unknown"),
+backend `app/mt5.py` (`Mt5Registry` khoá `server:login`, chỉ trong bộ nhớ, giá trị NaN/sai kiểu bị bỏ; `GET /accounts` cần đăng nhập, trả `{accounts, switchable:false}`), web `lib/mt5Api.ts` + `lib/mt5Format.ts` + `store/mt5.ts` (poll 10s khi đã đăng nhập, tab ẩn thì bỏ lượt) và `AccountMenu`: **huy hiệu** góc dưới phải avatar (đỏ Real, xanh lá Demo, xám offline) + khối **TRADING ACCOUNTS (MT5)** trong dropdown (tên, `#login · server · 1:đòn bẩy`, nhãn DEMO/REAL, số dư + equity, chấm online). Kiểm tay trên Chrome với backend scratch + EA giả (demo → real → tắt EA): huy hiệu và nhãn đổi đúng, khách không thấy khối này (`/accounts` 401).
+**Chưa làm** (phụ thuộc `multi-account-plan` Phase 0/1: chạy 2 cửa sổ MT5 trên wine chưa kiểm chứng, backend đa nguồn): **chuyển account ngay trong dropdown** (hiện chỉ có chú thích "App nhận dữ liệu từ 1 account MT5 một lúc"), nhiều account trong danh sách, "Add MT5 account…", truyền `account` qua api/WS/SymbolSearch. **Buy/Sell + `Depends(current_user)` cho trade**: chart chưa có nút Buy/Sell (chỉ 2 mục menu chuột phải đang tắt) và backend chưa có endpoint trade — làm cùng `trade-plan`. Chưa kiểm tay: EA 2.10 thật (chưa biên dịch), dialog Account settings, dialog Account settings,
 popup "phiên hết hạn" (chỉ có vitest).
 
 Khác với plan ban đầu:
@@ -245,7 +247,7 @@ Tuyệt đối không PUT bản mặc định đè lên dữ liệu thật (cùn
 | U2 ✅ | Web: `store/auth.ts`, `apiFetch` + `API` theo host, `AuthDialog`, `AccountMenu` (khách/user, **chưa** có khối MT5), Account settings | Đăng ký → đăng nhập → reload vẫn đăng nhập → Sign out; mở bằng `localhost:3000` **và** `127.0.0.1:3000` đều giữ phiên |
 | U3 ✅ | Dữ liệu theo user: `/me/watchlist` + `/me/drawings`, `memoryFetch` cho khách, gate `WatchlistPanel`, chuyển dữ liệu cũ (§5.5), đóng CRUD generic `watchlists`/`drawings` | Khách thấy nút Login/Register ở watchlist; 2 user không thấy dữ liệu nhau; dữ liệu cũ về đúng tài khoản đầu tiên; hình vẽ của khách sống qua đổi symbol nhưng không PUT |
 | U4 ✅ | Gắn vào **layout Phase 3**: `/me/layouts`, `requireLogin` cho Save + menu layout, luồng "Save → login → lưu", xử lý 401 giữa chừng, đóng CRUD generic `layouts` | Khách bấm Save → popup → sau đăng nhập layout nằm trong tài khoản; user thứ hai không thấy; hết phiên không mất bố cục |
-| U5 | Khối **Trading accounts** trong dropdown + huy hiệu Real/Demo (cùng `multi-account` Phase 2); trade `Depends(current_user)`, `requireLogin` ở Buy/Sell | Đổi account MT5 trong dropdown; khách bấm Buy/Sell chỉ ra popup đăng nhập |
+| U5 ◐ | Khối **Trading accounts** trong dropdown + huy hiệu Real/Demo (cùng `multi-account` Phase 2); trade `Depends(current_user)`, `requireLogin` ở Buy/Sell | Đổi account MT5 trong dropdown; khách bấm Buy/Sell chỉ ra popup đăng nhập |
 
 U1–U3 độc lập với layout và làm được ngay (không cần đợi tách pane). Làm U1–U3 **trước layout Phase 3** để layout sinh ra
 đã gắn user, khỏi migrate.
