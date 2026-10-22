@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Deal, Mt5Account, PendingOrder, Position, TradeData } from "@/lib/mt5Api";
-import { COLORS, STALE_SECONDS, dealNet, fmtLot, fmtPnl, fmtPx, isStale, orderLabel, positionPnl, sideLabel, totalPnl, tradeLines } from "./format";
+import { COLORS, STALE_SECONDS, accountProfit, dealNet, type StopTitleFn, fmtLot, fmtPnl, fmtPx, isStale, orderLabel, positionPnl, sideLabel, totalPnl, tradeLines } from "./format";
 
 const account = { id: "S:1", server: "S", broker: "B", login: 1, name: "n", mode: "demo", currency: "USD", leverage: 500, online: true, active: true, seen: 1 } as Mt5Account;
 const pos = (o: Partial<Position> = {}): Position => ({
@@ -79,12 +79,22 @@ describe("tradeLines", () => {
     expect(tradeLines(data({ positions: [pos({ symbol: "EURUSD" })], orders: [] }), "XAUUSDm", 1000)).toEqual([]);
   });
 
-  it("lệnh chờ đang kéo: giá xem trước + nhãn loại mới, lệnh khác và SL/TP không đổi", () => {
-    const l = tradeLines(data({ positions: [] }), "XAUUSDm", 1000, { ticket: 2, price: 4150.5, label: "Buy stop" });
+  it("đường đang kéo: giá + nhãn xem trước; các đường khác không đổi", () => {
+    const l = tradeLines(data({ positions: [] }), "XAUUSDm", 1000, { key: "o:2", price: 4150.5, title: "BUY STOP 0.20" });
     expect(l[0]).toMatchObject({ key: "o:2", price: 4150.5, title: "BUY STOP 0.20" });
     expect(l[1]).toMatchObject({ key: "otp:2", price: 4150 }); // TP không đi theo
-    const other = tradeLines(data({ positions: [] }), "XAUUSDm", 1000, { ticket: 99, price: 1, label: "Sell stop" });
-    expect(other[0]).toMatchObject({ price: 4080, title: "BUY LIMIT 0.20" }); // ticket khác: không ảnh hưởng
+    const other = tradeLines(data({ positions: [] }), "XAUUSDm", 1000, { key: "o:99", price: 1, title: "x" });
+    expect(other[0]).toMatchObject({ price: 4080, title: "BUY LIMIT 0.20" }); // key khác: không ảnh hưởng
+  });
+
+  it("SL/TP của vị thế và lệnh chờ mang nhãn lãi/lỗi do callback cấp; kéo SL thì nhãn đổi theo", () => {
+    const title: StopTitleFn = (kind, side, lot, entry, price) => `${kind.toUpperCase()}@${side}:${lot}:${entry}:${price}`;
+    const l = tradeLines(data(), "XAUUSDm", 1000, null, title);
+    expect(l.find((x) => x.key === "psl:1")?.title).toBe("SL@buy:0.1:4100.5:4090");
+    expect(l.find((x) => x.key === "ptp:1")?.title).toBe("TP@buy:0.1:4100.5:4120");
+    expect(l.find((x) => x.key === "otp:2")?.title).toBe("TP@buy:0.2:4080:4150");
+    const dragged = tradeLines(data(), "XAUUSDm", 1000, { key: "psl:1", price: 4085, title: "SL -15" }, title);
+    expect(dragged.find((x) => x.key === "psl:1")).toMatchObject({ price: 4085, title: "SL -15" });
   });
 
   it("dữ liệu cũ hoặc không có → không vẽ đường nào (tránh đường vị thế đã đóng)", () => {
@@ -95,5 +105,17 @@ describe("tradeLines", () => {
 
   it("loại lạ ('other') bị bỏ; lệnh chờ giá 0 bị bỏ", () => {
     expect(tradeLines(data({ positions: [pos({ type: "other" })], orders: [ord({ price_open: 0 })] }), "XAUUSDm", 1000)).toEqual([]);
+  });
+});
+
+describe("accountProfit", () => {
+  it("dùng ACCOUNT_PROFIT của MT5 khi EA báo, kể cả 0 (không có vị thế)", () => {
+    expect(accountProfit(data({ account: { ...account, profit: -12.5 } }))).toBe(-12.5);
+    expect(accountProfit(data({ account: { ...account, profit: 0 }, positions: [pos()] }))).toBe(0);
+  });
+  it("EA cũ chưa báo profit thì cộng từ các vị thế (profit + swap)", () => {
+    const { profit: _drop, ...rest } = account as typeof account & { profit?: number };
+    void _drop;
+    expect(accountProfit(data({ account: rest as typeof account, positions: [pos()] }))).toBeCloseTo(47);
   });
 });

@@ -7,12 +7,14 @@ const sendClose = vi.fn();
 const sendPending = vi.fn();
 const sendModify = vi.fn();
 const sendCancel = vi.fn();
+const sendModifyPos = vi.fn();
 vi.mock("@/lib/tradeApi", () => ({
   sendMarketOrder: (...a: unknown[]) => sendOrder(...a),
   sendClosePosition: (...a: unknown[]) => sendClose(...a),
   sendPendingOrder: (...a: unknown[]) => sendPending(...a),
   sendModifyOrder: (...a: unknown[]) => sendModify(...a),
   sendCancelOrder: (...a: unknown[]) => sendCancel(...a),
+  sendModifyPosition: (...a: unknown[]) => sendModifyPos(...a),
 }));
 const requireLogin = vi.fn();
 vi.mock("@/store/auth", () => ({ useAuthStore: { getState: () => ({ requireLogin }) } }));
@@ -23,7 +25,7 @@ vi.mock("./store", () => ({ useTradeStore: { getState: () => ({ refresh }) } }))
 
 import { useMt5Store } from "@/store/mt5";
 import type { PendingOrder } from "@/lib/mt5Api";
-import { cancelOrder, closeTrade, moveOrder, newClientId, placeMarket, placePending, useOrderState } from "./actions";
+import { cancelOrder, closeTrade, moveOrder, moveStop, newClientId, placeMarket, placePending, useOrderState } from "./actions";
 import { useQuoteStore } from "./quote";
 
 const acc = { id: "S:1", server: "S", mode: "demo", online: true, active: true } as Mt5Account;
@@ -33,7 +35,7 @@ const done = (o: Partial<{ ok: boolean; message: string; price: number; orderTyp
 
 beforeEach(() => {
   vi.useFakeTimers();
-  for (const m of [sendOrder, sendClose, sendPending, sendModify, sendCancel, requireLogin, toastMock, refresh]) m.mockReset();
+  for (const m of [sendOrder, sendClose, sendPending, sendModify, sendCancel, sendModifyPos, requireLogin, toastMock, refresh]) m.mockReset();
   useQuoteStore.setState({ quotes: { XAUUSDm: { bid: 4130, ask: 4130.2 } } });
   requireLogin.mockResolvedValue(true);
   useMt5Store.setState({ accounts: [acc], loaded: true });
@@ -264,5 +266,55 @@ describe("moveOrder", () => {
     await moveOrder(ord({ type: "buy_stop_limit" }), 4150, 3);
     expect(sendModify).toHaveBeenCalled();
     expect(sendPending).not.toHaveBeenCalled();
+  });
+});
+
+describe("moveStop", () => {
+  const pos = { target: "position" as const, ticket: 111, symbol: "XAUUSDm", field: "sl" as const, from: 4115 };
+
+  it("vị thế: đổi đúng trường qua API vị thế, toast kèm lãi/lỗi và nút Hoàn tác", async () => {
+    sendModifyPos.mockResolvedValue(done());
+    expect(await moveStop(pos, 4118.5, 3, " (-35.00 USD)")).toBe(true);
+    expect(sendModifyPos).toHaveBeenCalledWith("S:1", 111, { sl: 4118.5 });
+    expect(sendModify).not.toHaveBeenCalled();
+    const [text, opts] = toastMock.mock.calls[0];
+    expect(text).toBe("Đã đổi SL XAUUSDm #111 → 4118.500 (-35.00 USD)");
+    expect(opts.action.label).toBe("Hoàn tác");
+  });
+
+  it("lệnh chờ: dùng API sửa lệnh với trường tp", async () => {
+    sendModify.mockResolvedValue(done());
+    await moveStop({ target: "order", ticket: 222, symbol: "XAUUSDm", field: "tp", from: 4150 }, 4160, 3);
+    expect(sendModify).toHaveBeenCalledWith("S:1", 222, { tp: 4160 });
+    expect(sendModifyPos).not.toHaveBeenCalled();
+    expect(toastMock.mock.calls[0][0]).toBe("Đã đổi TP XAUUSDm #222 → 4160.000");
+  });
+
+  it("Hoàn tác đặt lại mức cũ", async () => {
+    sendModifyPos.mockResolvedValue(done());
+    await moveStop(pos, 4118.5, 3);
+    toastMock.mock.calls[0][1].action.run();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendModifyPos).toHaveBeenLastCalledWith("S:1", 111, { sl: 4115 });
+    expect(toastMock).toHaveBeenLastCalledWith("Đã hoàn tác SL XAUUSDm #111 → 4115.000", { ms: 4000 });
+  });
+
+  it("sàn từ chối → toast message, không có nút Hoàn tác, trả false", async () => {
+    sendModifyPos.mockResolvedValue(done({ ok: false, message: "SL/TP không hợp lệ (quá gần giá)" }));
+    expect(await moveStop(pos, 4129.9, 3)).toBe(false);
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(toastMock.mock.calls[0]).toEqual(["SL/TP không hợp lệ (quá gần giá)", { ms: 7000 }]);
+  });
+
+  it("EA cũ (409 cần >= 2.14) → báo rõ, false", async () => {
+    sendModifyPos.mockResolvedValue({ kind: "error", status: 409, message: "Đổi SL/TP vị thế cần EA TVBridge >= 2.14", unknown: false } satisfies TradeOutcome);
+    expect(await moveStop(pos, 4118, 3)).toBe(false);
+    expect(toastMock.mock.calls[0][0]).toMatch(/2\.14/);
+  });
+
+  it("chưa đăng nhập → không gửi", async () => {
+    requireLogin.mockResolvedValue(false);
+    expect(await moveStop(pos, 4118, 3)).toBe(false);
+    expect(sendModifyPos).not.toHaveBeenCalled();
   });
 });

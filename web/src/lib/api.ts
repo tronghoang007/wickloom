@@ -4,6 +4,7 @@ export type SymbolInfo = {
   // thông số giao dịch (EA >= 2.12); null/thiếu = EA cũ chưa báo
   volume_min?: number | null; volume_max?: number | null; volume_step?: number | null;
   contract_size?: number | null; stops_level?: number | null; freeze_level?: number | null;
+  tick_value?: number | null; tick_value_loss?: number | null; // giá trị một tick lãi / lỗi theo tiền account (EA >= 2.14)
 };
 
 export const TF_SECONDS: Record<string, number> = {

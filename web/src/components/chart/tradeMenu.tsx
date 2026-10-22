@@ -58,7 +58,7 @@ export function tradeMenuItems(symbol: string, price: number | null, digits: num
       onSelect: () => {
         if (price === null) return;
         const cur = useQuoteStore.getState().quotes[symbol];
-        useTicketStore.getState().show({ symbol, price, side: cur ? defaultSide(price, cur.bid, cur.ask) : limitSide });
+        useTicketStore.getState().open({ symbol, price: snapPrice(price, sym?.tick_size ?? 10 ** -digits, digits), digits, mode: "pending", side: cur ? defaultSide(price, cur.bid, cur.ask) : limitSide });
       },
     },
   ];

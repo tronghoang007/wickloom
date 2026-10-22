@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, closeTrade, useOrderState } from "@/trading/actions";
-import { dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel, totalPnl } from "@/trading/format";
+import { accountProfit, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel } from "@/trading/format";
 import { tradeBlock, webTrading } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
@@ -51,7 +51,7 @@ export default function TradingPanel() {
   if (status !== "user" || !loaded || !activeId || !data) return null;
   const stale = isStale(data, now);
   const a = data.account;
-  const pnl = totalPnl(data.positions);
+  const pnl = accountProfit(data);
 
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg)]" data-testid="trading-panel">
@@ -288,7 +288,7 @@ function AccountInfo({ data }: { data: TradeData }) {
   const rows: [string, ReactNode][] = [
     ["Balance", fmtMoney(a.balance, ccy)],
     ["Equity", fmtMoney(a.equity, ccy)],
-    ["Open P/L", <span key="p" className={pnlClass(totalPnl(data.positions))}>{fmtPnl(totalPnl(data.positions))}</span>],
+    ["Profit", <span key="p" className={pnlClass(accountProfit(data))}>{fmtPnl(accountProfit(data))}{ccy ? ` ${ccy}` : ""}</span>],
     ["Margin", fmtMoney(a.margin, ccy)],
     ["Free margin", fmtMoney(a.margin_free, ccy)],
     ["Margin level", a.margin_level ? `${a.margin_level.toLocaleString("en-US", { maximumFractionDigits: 2 })}%` : "—"],

@@ -1,4 +1,4 @@
-"""Gửi lệnh từ web xuống EA (docs/trade-plan.md T2-T3): Buy/Sell market, đóng (một phần) vị thế, đặt / sửa / xoá lệnh chờ. CHỈ account demo.
+"""Gửi lệnh từ web xuống EA (docs/trade-plan.md T2-T4): Buy/Sell market, đóng (một phần) vị thế, đặt / sửa / xoá lệnh chờ, đổi SL/TP vị thế. CHỈ account demo.
 
 Mọi endpoint cần phiên đăng nhập Wickloom (OriginGuard chặn thêm Origin lạ trên POST/DELETE) và nhận `account_id` tường minh.
 Backend đẩy lệnh xuống đúng EA của account rồi ĐỢI `trade_result` theo `req_id`. Không tự gửi lại: quá hạn (EA không trả lời)
@@ -43,6 +43,7 @@ REASONS = {
     "type_would_change": "Giá mới đã vượt qua giá thị trường nên đổi loại lệnh",
     "no_order": "Không còn lệnh chờ này (đã khớp hoặc bị huỷ?)",
     "bad_expiration": "Thời điểm hết hạn không hợp lệ",
+    "bad_stops": "SL/TP phải nằm đúng phía giá thị trường (Buy: SL dưới, TP trên; Sell ngược lại)",
 }
 
 PENDING_TYPES = ("buy_limit", "sell_limit", "buy_stop", "sell_stop")
@@ -342,6 +343,34 @@ async def close_position(account_id: str, ticket: int, volume: float = Query(0, 
         raise HTTPException(422, "Ticket không hợp lệ")
     info, writer = _ready(account_id)
     cmd = {"type": "position_close", "ticket": ticket, "volume": volume}
+    return await broker.run(account_id, writer, user["id"], cmd, None)
+
+
+class PositionPatch(BaseModel):
+    """Đổi SL/TP của vị thế đang mở: trường nào có thì đổi, vắng thì giữ nguyên (0 = bỏ)."""
+    sl: Optional[float] = Field(None, ge=0, allow_inf_nan=False)
+    tp: Optional[float] = Field(None, ge=0, allow_inf_nan=False)
+
+
+def _known_position(account_id: str, ticket: int) -> Dict[str, Any]:
+    t = registry.trade(account_id)
+    pos = next((p for p in (t["positions"] if t else []) if p["ticket"] == ticket), None)
+    if pos is None:
+        raise HTTPException(404, REASONS["no_position"])
+    return pos
+
+
+@router.patch("/accounts/{account_id}/positions/{ticket}")
+async def modify_position(account_id: str, ticket: int, body: PositionPatch, user=Depends(current_user)):
+    """Đổi SL/TP của vị thế (kéo đường SL/TP trên chart). Gửi đủ bộ sl + tp xuống EA (trường vắng lấy theo vị thế EA báo gần nhất)."""
+    if ticket < 1:
+        raise HTTPException(422, "Ticket không hợp lệ")
+    if body.sl is None and body.tp is None:
+        raise HTTPException(422, "Không có gì để sửa")
+    info, writer = _ready(account_id)
+    _need_ea(info, "2.14", "Đổi SL/TP vị thế")
+    cur = _known_position(account_id, ticket)
+    cmd = {"type": "position_modify", "ticket": ticket, "sl": body.sl if body.sl is not None else cur["sl"], "tp": body.tp if body.tp is not None else cur["tp"]}
     return await broker.run(account_id, writer, user["id"], cmd, None)
 
 

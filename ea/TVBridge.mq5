@@ -49,14 +49,17 @@
 //|   type thì từ chối), "order_modify" (đổi giá/SL/TP/hết hạn, không |
 //|   đổi loại), "order_delete". Kiểm tra stops level. Thời gian      |
 //|   time/time_setup/expiration gửi lên là UTC (trước đây giờ server)|
+//| - 2.14: "symbols" thêm tick_value / tick_value_loss (giá trị một   |
+//|   tick theo tiền account, để web tính lãi/lỗi dự kiến của SL/TP);  |
+//|   "position_modify" (đổi SL/TP của vị thế đang mở, kéo trên chart) |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.13"
+#property version "2.14"
 
-#define EA_VERSION "2.13"
+#define EA_VERSION "2.14"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -451,6 +454,8 @@ void PostSymbols()
         + ",\"volume_max\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_VOLUME_MAX), 8)
         + ",\"volume_step\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_VOLUME_STEP), 8)
         + ",\"contract_size\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_TRADE_CONTRACT_SIZE), 8)
+        + ",\"tick_value\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_TRADE_TICK_VALUE_PROFIT), 8)
+        + ",\"tick_value_loss\":" + DoubleToString(SymbolInfoDouble(s, SYMBOL_TRADE_TICK_VALUE_LOSS), 8)
         + ",\"stops_level\":" + IntegerToString((int)SymbolInfoInteger(s, SYMBOL_TRADE_STOPS_LEVEL))
         + ",\"freeze_level\":" + IntegerToString((int)SymbolInfoInteger(s, SYMBOL_TRADE_FREEZE_LEVEL)) + "}";
   }
@@ -1138,6 +1143,60 @@ void HandleOrderDelete(string line)
   ExecuteRequest(req, rq, OrderTypeStr(OrderGetInteger(ORDER_TYPE)), false);
 }
 
+// Doi SL/TP cua vi the dang mo (keo tren chart). SL/TP do tu gia DONG vi the (Buy dong o Bid, Sell o Ask) va phai cach it nhat stops level; 0 = bo
+void HandlePositionModify(string line)
+{
+  string req = JsonStr(line, "req_id");
+  ulong ticket = (ulong)JsonInt(line, "ticket");
+  double sl = JsonDbl(line, "sl");
+  double tp = JsonDbl(line, "tp");
+
+  string why = TradeGuard();
+  if (why != "")
+  {
+    SendTradeResult(req, false, 0, why, "");
+    return;
+  }
+  if (ticket == 0 || !PositionSelectByTicket(ticket))
+  {
+    SendTradeResult(req, false, 0, "no_position", "");
+    return;
+  }
+  string sym = PositionGetString(POSITION_SYMBOL);
+  bool buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+  MqlTick tick;
+  if (!SymbolInfoTick(sym, tick) || tick.ask <= 0 || tick.bid <= 0)
+  {
+    SendTradeResult(req, false, 0, "no_quote", "");
+    return;
+  }
+  int dg = PriceDigits(sym);
+  double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+  double lv = (double)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL) * point;
+  double ref = buy ? tick.bid : tick.ask;
+  sl = sl > 0 ? NormalizeDouble(sl, dg) : 0;
+  tp = tp > 0 ? NormalizeDouble(tp, dg) : 0;
+  bool wrongSide = (sl > 0 && (buy ? sl >= ref : sl <= ref)) || (tp > 0 && (buy ? tp <= ref : tp >= ref));
+  if (wrongSide)
+  {
+    SendTradeResult(req, false, 0, "bad_stops", "");
+    return;
+  }
+  if (lv > 0 && ((sl > 0 && MathAbs(sl - ref) < lv - point / 2) || (tp > 0 && MathAbs(tp - ref) < lv - point / 2)))
+  {
+    SendTradeResult(req, false, 0, "too_close", StopsLevelPoints(sym));
+    return;
+  }
+  MqlTradeRequest rq;
+  ZeroMemory(rq);
+  rq.action = TRADE_ACTION_SLTP;
+  rq.position = ticket;
+  rq.symbol = sym;
+  rq.sl = sl;
+  rq.tp = tp;
+  ExecuteRequest(req, rq, "", false);
+}
+
 //--- nhận lệnh từ backend ---------------------------------------------
 void HandleCommand(string line)
 {
@@ -1148,6 +1207,8 @@ void HandleCommand(string line)
     HandleOrderSend(line);
   else if (type == "position_close")
     HandlePositionClose(line);
+  else if (type == "position_modify")
+    HandlePositionModify(line);
   else if (type == "order_pending")
     HandleOrderPending(line);
   else if (type == "order_modify")

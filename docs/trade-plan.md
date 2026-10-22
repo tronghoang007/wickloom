@@ -163,7 +163,15 @@ T1 làm được ngay sau Phase 2 của multi-account vì chỉ đọc. T2–T4 
   thị trường → đặt lệnh mới đúng loại TRƯỚC rồi mới xoá cũ; vùng cấm stops level bị chặn ở web và EA), Cancel ở tab Orders, `POST /accounts/{id}/orders` có `price`,
   `PATCH` / `DELETE /accounts/{id}/orders/{ticket}`; backend chặn sớm nếu EA < 2.13. EA 2.13 cũng gửi time/time_setup/expiration theo UTC (trước đó là giờ server).
   Chưa có: nút × xoá ngay trên chart (xoá ở tab Orders), Stop Limit, margin/lời lỗ xem trước trong ticket, kéo SL/TP (T4).
-- Để bật: gắn EA 2.13 với `TradingEnabled = true` (và "Allow Algo Trading") trên account **demo**; real vẫn bị chặn ở cả web, backend và EA.
+- **Bảng đặt lệnh (chưa commit):** bấm SELL / BUY không còn đặt market ngay như T2 mà mở bảng nổi (`OrderTicket`, không chặn chart): chọn Buy/Sell, Market hoặc Limit/Stop, lot,
+  SL/TP (nút "+" tạo đường), hết hạn cho lệnh chờ. Entry/SL/TP của bản nháp vẽ trên chart thành đường kéo được (`trading/lineDrag.ts` kéo mọi loại đường; `trading/draft.ts` giữ bản nháp), kéo
+  thì ô nhập đổi theo và ngược lại, nhãn Limit/Stop đổi theo giá. Tab Account có dòng "Profit" (ACCOUNT_PROFIT). Chưa có: kéo SL/TP của vị thế / lệnh chờ đã đặt (T4), tuỳ chọn "đặt nhanh không hỏi lại".
+- **Bảng đặt lệnh ở thanh bên phải + T4 (chưa commit):** panel "Order" nằm trong thanh bên phải như TV (mở khi bấm SELL/BUY hoặc "Add order", icon ở thanh chỉ hiện khi đang soạn): hai ô SELL/BUY giá lớn + spread,
+  Market / Limit-Stop, lot, Take profit và Stop loss mỗi dòng có ba ô **Giá | Điểm | Lãi (Lỗ) theo tiền account** liên thông (sửa ô nào hai ô kia tính lại), Risk/Reward và rủi ro % equity.
+  Lãi/lỗ tính từ `tick_value` của MT5 (EA 2.14 báo trong `symbols`), chưa có thì không hiện số thay vì hiện sai (`web/src/trading/pnl.ts`). Nhãn đường SL/TP trên chart (bản nháp, vị thế, lệnh chờ) kèm lãi/lỗ
+  ("TP +20.00 USD"). Kéo thả SL/TP của vị thế đang mở (EA 2.14 `position_modify`, `PATCH /accounts/{id}/positions/{ticket}`) và của lệnh chờ (`PATCH …/orders/{ticket}`): nhãn đổi theo số lãi/lỗ lúc kéo, kiểm tra
+  phía + stops level trước khi gửi, toast có nút "Hoàn tác". Tab Account có dòng Profit. Chưa có: thêm SL/TP cho vị thế chưa có bằng cách kéo (hiện chỉ kéo đường đã có), tuỳ chọn "đặt nhanh không hỏi lại".
+- Để bật: gắn EA 2.14 với `TradingEnabled = true` (và "Allow Algo Trading") trên account **demo**; real vẫn bị chặn ở cả web, backend và EA.
 
 ## 8. An toàn cho real
 

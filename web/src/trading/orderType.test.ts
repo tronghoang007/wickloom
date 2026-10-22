@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultSide, isPendingType, marketDistance, pendingLabel, resolveOrderType, sideOfType, snapPrice, tooClose, validatePending, type PendingInput } from "./orderType";
+import { defaultSide, isPendingType, marketDistance, pendingLabel, resolveOrderType, sideOfType, snapPrice, tooClose, checkStopMove, validateMarket, validatePending, type MarketInput, type StopMoveInput, type PendingInput } from "./orderType";
 
 const BID = 4130;
 const ASK = 4130.2;
@@ -104,5 +104,66 @@ describe("validatePending", () => {
     expect(v({ expiration: 1_000_030 })).toMatch(/hết hạn/);
     expect(v({ expiration: 999_000 })).toMatch(/hết hạn/);
     expect(v({ expiration: 1_003_600 })).toBeNull();
+  });
+});
+
+const mk: MarketInput = { side: "buy", lot: 0.1, sl: 0, tp: 0, bid: BID, ask: ASK, digits: 3, stopsLevel: 0, spec: { min: 0.01, max: 1, step: 0.01 } };
+const m = (o: Partial<MarketInput> = {}) => validateMarket({ ...mk, ...o });
+
+describe("validateMarket", () => {
+  it("không SL/TP là hợp lệ; SL/TP đúng phía thì hợp lệ", () => {
+    expect(m()).toBeNull();
+    expect(m({ sl: 4120, tp: 4140 })).toBeNull();
+    expect(m({ side: "sell", sl: 4140, tp: 4120 })).toBeNull();
+  });
+  it("Buy đo từ Bid, Sell đo từ Ask", () => {
+    expect(m({ sl: 4130 })).toMatch(/SL của lệnh Buy/); // = Bid
+    expect(m({ sl: 4130.1 })).toMatch(/SL của lệnh Buy/); // giữa Bid và Ask vẫn sai phía
+    expect(m({ tp: 4130 })).toMatch(/TP của lệnh Buy/);
+    expect(m({ side: "sell", sl: 4130.2 })).toMatch(/SL của lệnh Sell/); // = Ask
+    expect(m({ side: "sell", tp: 4131 })).toMatch(/TP của lệnh Sell/);
+  });
+  it("vùng cấm theo stops level", () => {
+    expect(m({ sl: 4129.9, stopsLevel: 300 })).toMatch(/SL quá gần.*300 điểm/);
+    expect(m({ tp: 4130.2, stopsLevel: 300 })).toMatch(/TP quá gần/);
+    expect(m({ sl: 4129.7, stopsLevel: 300 })).toBeNull();
+  });
+  it("lot, thông số lot, giá thị trường", () => {
+    expect(m({ spec: null })).toMatch(/thông số lot/);
+    expect(m({ lot: 0 })).toMatch(/Lot phải/);
+    expect(m({ lot: 2 })).toMatch(/Lot phải/);
+    expect(m({ bid: 0, ask: 0 })).toMatch(/Chưa có giá/);
+  });
+});
+
+const sm: StopMoveInput = { target: "position", side: "buy", kind: "sl", price: 4120, entry: 0, bid: BID, ask: ASK, digits: 3, stopsLevel: 0 };
+const mv = (o: Partial<StopMoveInput> = {}) => checkStopMove({ ...sm, ...o });
+
+describe("checkStopMove", () => {
+  it("vị thế: đo từ giá đóng, đúng phía thì được", () => {
+    expect(mv()).toBeNull(); // Buy SL dưới Bid
+    expect(mv({ kind: "tp", price: 4140 })).toBeNull();
+    expect(mv({ side: "sell", kind: "sl", price: 4140 })).toBeNull(); // Sell SL trên Ask
+    expect(mv({ side: "sell", kind: "tp", price: 4120 })).toBeNull();
+  });
+  it("vị thế: sai phía", () => {
+    expect(mv({ price: 4130 })).toMatch(/SL của lệnh Buy phải thấp hơn giá thị trường/); // = Bid
+    expect(mv({ kind: "tp", price: 4125 })).toMatch(/TP của lệnh Buy phải cao hơn/);
+    expect(mv({ side: "sell", kind: "sl", price: 4130.2 })).toMatch(/SL của lệnh Sell phải cao hơn/); // = Ask
+    expect(mv({ side: "sell", kind: "tp", price: 4135 })).toMatch(/TP của lệnh Sell phải thấp hơn/);
+  });
+  it("lệnh chờ: đo từ giá vào của lệnh, không phải giá thị trường", () => {
+    const o = { target: "order" as const, entry: 4100 };
+    expect(mv({ ...o, price: 4090 })).toBeNull(); // dưới giá vào 4100 dù trên/dưới thị trường
+    expect(mv({ ...o, price: 4110 })).toMatch(/SL của lệnh Buy phải thấp hơn giá vào/);
+    expect(mv({ ...o, kind: "tp", price: 4120 })).toBeNull();
+  });
+  it("vùng cấm theo stops level", () => {
+    expect(mv({ price: 4129.9, stopsLevel: 300 })).toMatch(/SL quá gần giá thị trường \(tối thiểu 300 điểm\)/);
+    expect(mv({ price: 4129.5, stopsLevel: 300 })).toBeNull();
+    expect(mv({ target: "order", entry: 4100, price: 4099.9, stopsLevel: 300 })).toMatch(/quá gần giá vào/);
+  });
+  it("chưa có giá để so thì để EA quyết", () => {
+    expect(mv({ bid: 0, ask: 0, price: 1 })).toBeNull();
   });
 });

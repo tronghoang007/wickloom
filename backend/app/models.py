@@ -33,6 +33,8 @@ class SymbolInfo(BaseModel):
     volume_max: Optional[float] = None
     volume_step: Optional[float] = None
     contract_size: Optional[float] = None
+    tick_value: Optional[float] = None  # giá trị một tick lãi / lỗi theo tiền account (EA >= 2.14): web tính lãi/lỗi dự kiến của SL/TP
+    tick_value_loss: Optional[float] = None
     stops_level: Optional[int] = None
     freeze_level: Optional[int] = None
 

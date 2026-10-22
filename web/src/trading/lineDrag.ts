@@ -1,46 +1,45 @@
 import type { IChartApi, ISeriesApi, SeriesType } from "lightweight-charts";
-import type { PendingOrder } from "@/lib/mt5Api";
-import type { DragPreview } from "./format";
 import { snapPrice } from "./orderType";
 
-// Kéo đường lệnh chờ trên chart để đổi giá (docs/trade-plan.md T3). Đường lệnh chờ là price line của lightweight-charts nên không tự kéo được: lớp này nghe
-// chuột ở phần tử bao quanh chart (pha capture, chạy TRƯỚC DrawingManager), nhận ra chuột đang ở gần đường nào, theo dõi giá dưới con trỏ và báo cho Chart vẽ lại
-// đường xem trước. Không biết gì về gửi lệnh: thả tay thì gọi `onDrop`.
+// Kéo các đường giao dịch trên chart để đổi giá (docs/trade-plan.md T3-T4): đường lệnh chờ, entry/SL/TP của bảng đặt lệnh. Đường là price line của lightweight-charts nên không
+// tự kéo được: lớp này nghe chuột ở phần tử bao quanh chart (pha capture, chạy TRƯỚC DrawingManager), nhận ra chuột đang ở gần đường nào, theo dõi giá dưới con trỏ và báo
+// cho bên dùng. Không biết gì về lệnh hay gửi lệnh: ai dùng quyết định cái gì kéo được và làm gì khi thả.
 
 /** Đường gần `y` nhất trong ngưỡng `tol` px (null nếu không có). Hai đường cách nhau gần hơn ngưỡng thì lấy đường sát hơn. */
-export function hitLine(y: number, lines: { ticket: number; y: number }[], tol = 6): number | null {
-  let best: { ticket: number; d: number } | null = null;
+export function hitLine(y: number, lines: { id: string; y: number }[], tol = 6): string | null {
+  let best: { id: string; d: number } | null = null;
   for (const l of lines) {
     const d = Math.abs(l.y - y);
-    if (d <= tol && (!best || d < best.d)) best = { ticket: l.ticket, d };
+    if (d <= tol && (!best || d < best.d)) best = { id: l.id, d };
   }
-  return best ? best.ticket : null;
+  return best ? best.id : null;
 }
 
-export type OrderDragHost = {
+export type DragTarget = { id: string; price: number };
+
+export type LineDragHost = {
   chart: IChartApi;
   container: HTMLElement; // phần tử chứa chart: gốc toạ độ của y
   listenOn: HTMLElement; // phần tử bao quanh (nghe pha capture)
   getSeries: () => ISeriesApi<SeriesType> | null;
-  getOrders: () => PendingOrder[]; // lệnh chờ của symbol đang xem, dữ liệu còn mới
-  canDrag: () => boolean; // chỉ kéo khi giao dịch được (demo, EA bật, không Replay, không đang vẽ)
+  getTargets: () => DragTarget[]; // các đường kéo được lúc này (rỗng = không kéo gì)
   digits: () => number;
   tickSize: () => number;
-  labelAt: (order: PendingOrder, price: number) => string; // tên loại lệnh sẽ thành nếu thả tay ở `price`
-  onPreview: (p: DragPreview | null) => void;
-  onDrop: (order: PendingOrder, price: number) => void;
+  onMove: (id: string, price: number) => void; // giá xem trước trong lúc kéo
+  onDrop: (id: string, price: number, from: number) => void; // thả tay ở giá khác giá ban đầu
+  onAbort: (id: string, from: number) => void; // huỷ (Esc / mất con trỏ) hoặc thả mà chưa dời đi đâu
 };
 
 const TOL = 6;
 
-export class OrderDrag {
-  private drag: { order: PendingOrder; price: number } | null = null;
+export class LineDrag {
+  private drag: { id: string; from: number; price: number } | null = null;
   private lock: { handleScroll: unknown; handleScale: unknown } | null = null;
   private hovering = false;
 
-  constructor(private h: OrderDragHost) {
+  constructor(private h: LineDragHost) {
     h.listenOn.addEventListener("pointerdown", this.onDown, true);
-    h.listenOn.addEventListener("pointermove", this.onMove, true);
+    h.listenOn.addEventListener("pointermove", this.onMoveEv, true);
     window.addEventListener("pointerup", this.onUp);
     window.addEventListener("pointercancel", this.onCancel);
     window.addEventListener("keydown", this.onKey);
@@ -48,7 +47,7 @@ export class OrderDrag {
 
   destroy() {
     this.h.listenOn.removeEventListener("pointerdown", this.onDown, true);
-    this.h.listenOn.removeEventListener("pointermove", this.onMove, true);
+    this.h.listenOn.removeEventListener("pointermove", this.onMoveEv, true);
     window.removeEventListener("pointerup", this.onUp);
     window.removeEventListener("pointercancel", this.onCancel);
     window.removeEventListener("keydown", this.onKey);
@@ -60,20 +59,21 @@ export class OrderDrag {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  // Lệnh chờ có đường nằm sát con trỏ (chỉ trong vùng vẽ, không phải trục giá / widget SELL-BUY đè lên chart)
-  private pick(e: PointerEvent): PendingOrder | null {
-    if (!this.h.container.contains(e.target as Node) || !this.h.canDrag()) return null;
+  // Đường sát con trỏ (chỉ trong vùng vẽ, không phải trục giá / widget SELL-BUY đè lên chart)
+  private pick(e: PointerEvent): DragTarget | null {
+    if (!this.h.container.contains(e.target as Node)) return null;
+    const targets = this.h.getTargets();
+    if (targets.length === 0) return null;
     const series = this.h.getSeries();
     if (!series) return null;
     const { x, y } = this.local(e);
     if (x < 0 || x > this.h.chart.timeScale().width()) return null;
-    const orders = this.h.getOrders();
-    const lines = orders.flatMap((o) => {
-      const ly = series.priceToCoordinate(o.price_open);
-      return ly === null ? [] : [{ ticket: o.ticket, y: ly as number }];
+    const lines = targets.flatMap((t) => {
+      const ly = series.priceToCoordinate(t.price);
+      return ly === null ? [] : [{ id: t.id, y: ly as number }];
     });
-    const t = hitLine(y, lines, TOL);
-    return t === null ? null : (orders.find((o) => o.ticket === t) ?? null);
+    const id = hitLine(y, lines, TOL);
+    return id === null ? null : (targets.find((t) => t.id === id) ?? null);
   }
 
   private consume(e: Event) {
@@ -101,8 +101,8 @@ export class OrderDrag {
 
   private onDown = (e: PointerEvent) => {
     if (e.button !== 0 || this.drag) return;
-    const order = this.pick(e);
-    if (!order) return;
+    const t = this.pick(e);
+    if (!t) return;
     this.consume(e);
     try {
       this.h.container.setPointerCapture(e.pointerId); // nhả chuột ngoài chart vẫn nhận được pointerup
@@ -110,20 +110,19 @@ export class OrderDrag {
       /* pointer đã biến mất */
     }
     this.lockChart();
-    this.drag = { order, price: order.price_open };
+    this.drag = { id: t.id, from: t.price, price: t.price };
     this.h.container.style.cursor = "ns-resize";
   };
 
-  private onMove = (e: PointerEvent) => {
+  private onMoveEv = (e: PointerEvent) => {
     if (this.drag) {
       this.consume(e);
-      const series = this.h.getSeries();
-      const raw = series?.coordinateToPrice(this.local(e).y);
+      const raw = this.h.getSeries()?.coordinateToPrice(this.local(e).y);
       if (raw == null) return;
       const price = snapPrice(raw as number, this.h.tickSize(), this.h.digits());
       if (price <= 0) return;
       this.drag.price = price;
-      this.h.onPreview({ ticket: this.drag.order.ticket, price, label: this.h.labelAt(this.drag.order, price) });
+      this.h.onMove(this.drag.id, price);
       return;
     }
     if (this.pick(e)) {
@@ -146,14 +145,15 @@ export class OrderDrag {
       /* đã nhả */
     }
     this.finish();
-    if (Math.abs(d.price - d.order.price_open) < this.h.tickSize() / 2) this.h.onPreview(null); // chưa dời đi đâu
-    else this.h.onDrop(d.order, d.price);
+    if (Math.abs(d.price - d.from) < this.h.tickSize() / 2) this.h.onAbort(d.id, d.from); // chưa dời đi đâu
+    else this.h.onDrop(d.id, d.price, d.from);
   };
 
   private onCancel = () => {
-    if (!this.drag) return;
+    const d = this.drag;
+    if (!d) return;
     this.finish();
-    this.h.onPreview(null);
+    this.h.onAbort(d.id, d.from);
   };
 
   private onKey = (e: KeyboardEvent) => {

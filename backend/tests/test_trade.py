@@ -553,3 +553,62 @@ def test_old_ea_cannot_take_pending_commands_but_market_still_works():
     online(FakeEA(lambda m: placed()), ea_version="")  # không báo version
     assert c.post(f"/accounts/{aid}/orders", json=pending(client_id="click-0009-abcd")).status_code == 409
     assert trade._version("2.13") > trade._version("2.9") and trade._version("garbage") == ()
+
+
+# --- T4: SL/TP của vị thế -------------------------------------------------------------------------------------------------------
+def known_position(ea, **kw):
+    mt5.registry.update_trade(ea, {"type": "trade", "orders": [], "positions": [{
+        "ticket": 111, "symbol": "XAUUSDm", "type": "buy", "volume": 0.1, "price_open": 4125.0, "sl": 4115.0, "tp": 4145.0, "price_current": 4130.0,
+        "profit": 50.0, "swap": 0, "time": 1_700_000_000, "magic": 0, "comment": "", **kw}]})
+
+
+def test_position_sltp_merges_with_the_known_position():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea, ea_version="2.14")
+    known_position(ea)
+    url = f"/accounts/{aid}/positions/111"
+    assert c.patch(url, json={"sl": 4118.5}).json()["ok"] is True
+    cmd = ea.sent[0]
+    assert cmd["type"] == "position_modify" and cmd["ticket"] == 111 and cmd["sl"] == 4118.5 and cmd["tp"] == 4145.0  # TP giữ nguyên
+    c.patch(url, json={"tp": 0})  # 0 = bỏ TP
+    assert ea.sent[1]["sl"] == 4115.0 and ea.sent[1]["tp"] == 0
+
+
+def test_position_sltp_validation_and_gates():
+    c = logged_in()
+    ea = FakeEA(lambda m: placed())
+    aid = online(ea, ea_version="2.14")
+    known_position(ea)
+    url = f"/accounts/{aid}/positions/111"
+    assert c.patch(url, json={}).status_code == 422
+    assert c.patch(url, json={"sl": -1}).status_code == 422
+    assert c.patch(f"/accounts/{aid}/positions/999", json={"sl": 1}).status_code == 404  # không có vị thế này
+    assert c.patch(f"/accounts/{aid}/positions/0", json={"sl": 1}).status_code == 422
+    assert c.patch(f"/accounts/{aid}/positions/abc", json={"sl": 1}).status_code == 422
+    assert ea.sent == []
+    mt5.registry.clear()
+    old = FakeEA(lambda m: placed())
+    online(old, ea_version="2.13")  # EA cũ không hiểu position_modify
+    known_position(old)
+    r = c.patch(url, json={"sl": 4118})
+    assert r.status_code == 409 and "2.14" in r.json()["detail"] and old.sent == []
+    mt5.registry.clear()
+    real = FakeEA(lambda m: placed())
+    mt5.registry.register(real, {**HELLO, "mode": "real"})
+    assert c.patch(url, json={"sl": 4118}).status_code == 403
+
+
+def test_position_sltp_rejections_are_translated():
+    c = logged_in()
+    aid = online(FakeEA(lambda m: {"type": "trade_result", "ok": False, "retcode": 0, "reason": "bad_stops"}), ea_version="2.14")
+    known_position(next(iter(mt5.registry._by_writer)))
+    r = c.patch(f"/accounts/{aid}/positions/111", json={"sl": 4140}).json()
+    assert r["ok"] is False and "đúng phía" in r["message"]
+
+
+def test_symbol_tick_values_are_kept():
+    from app.models import SymbolInfo
+
+    assert SymbolInfo(name="X", tick_value=0.1, tick_value_loss=0.1).model_dump()["tick_value"] == 0.1
+    assert SymbolInfo(name="X").model_dump()["tick_value"] is None  # EA < 2.14: web không đoán lãi/lỗi

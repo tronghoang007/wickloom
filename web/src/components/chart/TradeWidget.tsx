@@ -4,17 +4,18 @@ import { useAuthStore } from "@/store/auth";
 import { chartGlobal } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
-import { placeMarket, useOrderState } from "@/trading/actions";
+import { useOrderState } from "@/trading/actions";
 import { tradeBlock } from "@/trading/gate";
 import { fmtLotValue, lotSpec, normalizeLot, readLot, stepLot, writeLot } from "@/trading/lot";
 import { useQuoteStore } from "@/trading/quote";
+import { useTicketStore } from "@/trading/ticket";
 import { useMemo, useState } from "react";
 
 const px = (v: number, digits: number) => v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const sideBtn = "flex min-w-[68px] flex-col items-center justify-center px-2.5 text-white";
 
-/** Widget SELL | lot | BUY như TradingView, dưới dòng tiêu đề của chart (docs/trade-plan.md T2): lệnh market trên account MT5 đang cấp dữ liệu.
- *  Chưa gửi được thì nút mờ đi và tooltip/toast nói lý do (tradeBlock); khách bấm thì ra popup đăng nhập. */
+/** Widget SELL | lot | BUY như TradingView, dưới dòng tiêu đề của chart (docs/trade-plan.md T2-T3): bấm thì mở bảng đặt lệnh (OrderTicket) cho account MT5 đang cấp dữ liệu.
+ *  Chưa đặt được thì nút mờ đi và tooltip/toast nói lý do (tradeBlock); khách bấm thì ra popup đăng nhập. */
 export default function TradeWidget({ symbol, digits, replay }: { symbol: string; digits: number; replay: boolean }) {
   const quote = useQuoteStore((s) => s.quotes[symbol]);
   const status = useAuthStore((s) => s.status);
@@ -60,8 +61,11 @@ export default function TradeWidget({ symbol, digits, replay }: { symbol: string
       toast(block, { ms: 6000 });
       return;
     }
-    const lot = commit();
-    if (lot !== null) void placeMarket(side, symbol, lot, digits);
+    if (commit() === null) return; // nhớ lot đang nhập: bảng đặt lệnh lấy lot từ đây
+    // Bấm SELL / BUY mở bảng đặt lệnh (Market hoặc lệnh chờ, SL/TP, kéo đường trên chart) như TradingView; bảng đang mở cho symbol này thì chỉ đổi hướng, giữ SL/TP đã soạn
+    const t = useTicketStore.getState();
+    if (t.draft && t.draft.symbol === symbol) t.patch({ side });
+    else t.open({ symbol, side, mode: "market", digits });
   };
 
   const dim = block !== null || busy ? "opacity-50" : "";

@@ -86,5 +86,9 @@ export const sendPendingOrder = (accountId: string, o: PendingRequest): Promise<
 export const sendModifyOrder = (accountId: string, ticket: number, patch: { price?: number; sl?: number; tp?: number; expiration?: number }): Promise<TradeOutcome> =>
   outcome(() => apiFetch(`/accounts/${encodeURIComponent(accountId)}/orders/${ticket}`, { method: "PATCH", body: JSON.stringify(patch) }));
 
+/** Đổi SL/TP của vị thế đang mở (trường nào có thì đổi, vắng thì giữ; 0 = bỏ). Cần EA >= 2.14. */
+export const sendModifyPosition = (accountId: string, ticket: number, patch: { sl?: number; tp?: number }): Promise<TradeOutcome> =>
+  outcome(() => apiFetch(`/accounts/${encodeURIComponent(accountId)}/positions/${ticket}`, { method: "PATCH", body: JSON.stringify(patch) }));
+
 export const sendCancelOrder = (accountId: string, ticket: number): Promise<TradeOutcome> =>
   outcome(() => apiFetch(`/accounts/${encodeURIComponent(accountId)}/orders/${ticket}`, { method: "DELETE" }));

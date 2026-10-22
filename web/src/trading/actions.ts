@@ -1,4 +1,4 @@
-import { sendCancelOrder, sendClosePosition, sendMarketOrder, sendModifyOrder, sendPendingOrder, type PendingRequest, type TradeOutcome, type TradeResult } from "@/lib/tradeApi";
+import { sendCancelOrder, sendClosePosition, sendMarketOrder, sendModifyOrder, sendModifyPosition, sendPendingOrder, type PendingRequest, type TradeOutcome, type TradeResult } from "@/lib/tradeApi";
 import type { PendingOrder } from "@/lib/mt5Api";
 import { useAuthStore } from "@/store/auth";
 import { useMt5Store } from "@/store/mt5";
@@ -58,13 +58,14 @@ async function run<T>(reason: string, task: (accountId: string) => Promise<T>): 
   }
 }
 
-/** Buy/Sell market `volume` lot (đã chuẩn hoá theo step). */
-export function placeMarket(side: "buy" | "sell", symbol: string, volume: number, digits?: number): Promise<void> {
-  return run("Đăng nhập để giao dịch", async (accountId) => {
-    const o = await sendMarketOrder(accountId, { symbol, side, volume, clientId: newClientId() });
+/** Buy/Sell market `volume` lot (đã chuẩn hoá theo step), kèm SL/TP tuỳ chọn (0 = không đặt). Trả true nếu sàn đã khớp. */
+export async function placeMarket(side: "buy" | "sell", symbol: string, volume: number, digits?: number, stops: { sl?: number; tp?: number } = {}): Promise<boolean> {
+  const done = await run("Đăng nhập để giao dịch", async (accountId) => {
+    const o = await sendMarketOrder(accountId, { symbol, side, volume, sl: stops.sl, tp: stops.tp, clientId: newClientId() });
     const price = o.kind === "done" && o.result.price > 0 ? ` @ ${fmtPx(o.result.price, digits)}` : "";
-    report(o, `${side === "buy" ? "Buy" : "Sell"} ${fmtLot(volume)} ${symbol}${price}`);
-  }).then(() => undefined);
+    return report(o, `${side === "buy" ? "Buy" : "Sell"} ${fmtLot(volume)} ${symbol}${price}`);
+  });
+  return done === true;
 }
 
 /** Đóng vị thế `ticket`; `volume` = 0 đóng hết, khác 0 đóng một phần. */
@@ -133,6 +134,29 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
     }
     refreshSoon();
     return true;
+  });
+  return done === true;
+}
+
+export type StopTarget = { target: "position" | "order"; ticket: number; symbol: string; field: "sl" | "tp"; from: number };
+
+/** Kéo SL/TP của vị thế / lệnh chờ tới `price`. Thành công thì toast kèm nút "Hoàn tác" (đặt lại mức cũ). `pnlText` = " (+78.30 USD)" nếu biết lãi/lỗi tại mức mới. */
+export async function moveStop(t: StopTarget, price: number, digits?: number, pnlText = ""): Promise<boolean> {
+  const name = t.field.toUpperCase();
+  const call = (accountId: string, p: number) =>
+    t.target === "position" ? sendModifyPosition(accountId, t.ticket, { [t.field]: p }) : sendModifyOrder(accountId, t.ticket, { [t.field]: p });
+  const undo = () =>
+    void run("Đăng nhập để giao dịch", async (accountId) => {
+      report(await call(accountId, t.from), `Đã hoàn tác ${name} ${t.symbol} #${t.ticket} → ${fmtPx(t.from, digits)}`);
+    });
+  const done = await run("Đăng nhập để giao dịch", async (accountId) => {
+    const o = await call(accountId, price);
+    if (o.kind === "done" && o.result.ok) {
+      toast(`Đã đổi ${name} ${t.symbol} #${t.ticket} → ${fmtPx(price, digits)}${pnlText}`, { ms: 8000, action: { label: "Hoàn tác", run: undo } });
+      refreshSoon();
+      return true;
+    }
+    return report(o, "");
   });
   return done === true;
 }

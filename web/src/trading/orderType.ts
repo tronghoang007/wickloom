@@ -79,3 +79,64 @@ export function validatePending(i: PendingInput): string | null {
   if (i.expiration && i.expiration <= i.nowSec + 60) return "Thời điểm hết hạn phải sau hiện tại ít nhất 1 phút";
   return null;
 }
+
+export type MarketInput = {
+  side: Side;
+  lot: number;
+  sl: number; // 0 = không đặt
+  tp: number;
+  bid: number;
+  ask: number;
+  digits: number;
+  stopsLevel?: number | null;
+  spec: LotSpec | null;
+};
+
+/** Lệnh market: vì sao chưa gửi được (null = được). SL/TP đo từ giá ĐÓNG vị thế (Buy đóng ở Bid, Sell đóng ở Ask) và phải cách ít nhất stops level. */
+export function validateMarket(i: MarketInput): string | null {
+  if (!i.spec) return "Chưa có thông số lot của symbol (cần EA ≥ 2.12)";
+  if (!(i.lot >= i.spec.min - 1e-9) || i.lot > i.spec.max + 1e-9) return `Lot phải trong khoảng ${i.spec.min}–${i.spec.max}`;
+  if (!(i.bid > 0) || !(i.ask > 0)) return "Chưa có giá thị trường";
+  const level = i.stopsLevel ?? 0;
+  const gap = level * pointOf(i.digits) - pointOf(i.digits) / 2;
+  const buy = i.side === "buy";
+  const ref = buy ? i.bid : i.ask;
+  if (i.sl > 0) {
+    if (buy ? i.sl >= ref : i.sl <= ref) return buy ? "SL của lệnh Buy phải thấp hơn giá thị trường" : "SL của lệnh Sell phải cao hơn giá thị trường";
+    if (Math.abs(i.sl - ref) < gap) return `SL quá gần giá thị trường (tối thiểu ${level} điểm)`;
+  }
+  if (i.tp > 0) {
+    if (buy ? i.tp <= ref : i.tp >= ref) return buy ? "TP của lệnh Buy phải cao hơn giá thị trường" : "TP của lệnh Sell phải thấp hơn giá thị trường";
+    if (Math.abs(i.tp - ref) < gap) return `TP quá gần giá thị trường (tối thiểu ${level} điểm)`;
+  }
+  return null;
+}
+
+export type StopMoveInput = {
+  target: "position" | "order";
+  side: Side;
+  kind: "sl" | "tp";
+  price: number;
+  entry: number; // giá vào của lệnh chờ (vị thế đang mở thì không dùng: đo từ giá đóng)
+  bid: number;
+  ask: number;
+  digits: number;
+  stopsLevel?: number | null;
+};
+
+/** Kéo SL/TP của vị thế / lệnh chờ tới `price`: vì sao không được (null = được). Vị thế đo từ giá ĐÓNG (Buy đóng ở Bid, Sell ở Ask), lệnh chờ đo từ giá vào của nó; cả hai phải đúng phía
+ *  và cách ít nhất stops level. Báo sớm ở web, EA và sàn vẫn kiểm lại. */
+export function checkStopMove(i: StopMoveInput): string | null {
+  const buy = i.side === "buy";
+  const position = i.target === "position";
+  const ref = position ? (buy ? i.bid : i.ask) : i.entry;
+  if (!(ref > 0)) return null; // chưa có giá để so: để EA quyết
+  const upper = i.kind === "tp" ? buy : !buy; // TP của Buy và SL của Sell nằm trên mức tham chiếu
+  const wrong = upper ? i.price <= ref : i.price >= ref;
+  const name = i.kind.toUpperCase();
+  const what = position ? "giá thị trường" : "giá vào";
+  if (wrong) return `${name} của lệnh ${buy ? "Buy" : "Sell"} phải ${upper ? "cao" : "thấp"} hơn ${what}`;
+  const level = i.stopsLevel ?? 0;
+  if (level > 0 && Math.abs(i.price - ref) < level * pointOf(i.digits) - pointOf(i.digits) / 2) return `${name} quá gần ${what} (tối thiểu ${level} điểm)`;
+  return null;
+}
