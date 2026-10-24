@@ -255,7 +255,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
               // bấm (không kéo: kéo thì LineDrag giữ con trỏ nên không có click ở đây) vào thẻ của lệnh đã đặt = chọn lệnh, mở bảng Modify; nút trên thẻ tự xử lý
               if (tag.owner.t !== "draft" && !(e.target as Element).closest("button")) useTicketStore.getState().select(mine);
             }}
-            className="absolute left-auto top-0 hidden select-none items-center gap-1 text-[12px] font-medium leading-none"
+            className="absolute left-auto top-0 hidden select-none items-center gap-2 text-[12px] font-medium leading-none"
             style={{ height: TAG_H, opacity: fade, zIndex: focus === mine ? 2 : undefined }}
           >
             {tag.kind === "entry" && live && pendingOwners.has(OWNER_ID(tag.owner)) && (
@@ -295,7 +295,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
                     e.stopPropagation();
                     onGhost(tag.owner, k, e.nativeEvent);
                   }}
-                  className={`${events} cursor-grab rounded border border-dotted px-2 font-semibold opacity-70 hover:opacity-100 active:cursor-grabbing`}
+                  className={`${events} min-w-[38px] cursor-grab rounded border border-dotted px-3 font-semibold opacity-70 hover:opacity-100 active:cursor-grabbing`}
                   style={{ height: TAG_H, color: k === "tp" ? "#089981" : "#ff9800", borderColor: k === "tp" ? "#089981" : "#ff9800", background: bg }}
                 >
                   {KIND_NAME[k]}
@@ -320,10 +320,13 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
                   title={closeTitle}
                   aria-label={closeTitle}
                   onClick={() => (isSim ? closeSim(paneId, tag.kind, symInfo, ccy) : closeFromTag(l, symbol, digits))}
-                  className="flex w-6 cursor-pointer items-center justify-center border-l text-[15px] hover:bg-white/10"
+                  className="flex w-6 cursor-pointer items-center justify-center border-l hover:bg-white/10"
                   style={{ borderColor: c }}
                 >
-                  ×
+                  {/* vẽ bằng SVG để dấu × nằm đúng tâm nút (ký tự × lệch xuống theo đường cơ sở của chữ) */}
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden>
+                    <path d="M1 1l6 6M7 1L1 7" />
+                  </svg>
                 </button>
               )}
             </div>
@@ -333,7 +336,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
                 data-tag-btn
                 title={tag.label === "Market" ? `${tag.place} market` : `Đặt ${tag.label}`}
                 onClick={placeFromTag}
-                className={`${events} ml-2 cursor-pointer rounded px-3 text-[12px] font-semibold text-white hover:brightness-110`}
+                className={`${events} ml-6 cursor-pointer rounded px-3 text-[12px] font-semibold text-white hover:brightness-110`}
                 style={{ height: TAG_H, background: c }}
               >
                 {tag.place}
