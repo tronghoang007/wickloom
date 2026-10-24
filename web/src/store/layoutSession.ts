@@ -12,10 +12,12 @@ import { LayoutSync, type SaveState } from "./layoutSync";
 import { buildTemplate } from "./layoutTree";
 import { bindPanePersistence, loadPaneInit } from "./paneStorage";
 import { createPane, type PaneInit } from "./paneStores";
+import { useSettingsStore } from "./settings";
+import { bindSettingsPersistence, loadSettings } from "./settingsStorage";
 import { toast } from "./toast";
 
 // Điều phối layout theo phiên đăng nhập:
-//  - khách: layout nằm trong bộ nhớ (pane chính vẫn nhớ symbol/khung... qua `wickloom-pane1`), không gì lên server;
+//  - khách: layout nằm trong bộ nhớ (pane chính vẫn nhớ symbol/khung... qua `wickloom-pane1`, setting chart qua `tv-chart-settings`), không gì lên server;
 //  - user: layout lưu ở `/me/layouts/<id>`, autosave (LayoutSync), nhớ layout đang mở theo user (+ cache để mở nhanh khi backend chưa lên).
 // Khách bấm Save → đăng nhập → lưu chart hiện tại vào tài khoản (không ghi đè layout có sẵn). Layout cuối được cache trong localStorage để
 // reload khi backend tắt vẫn thấy đúng bố cục; không bao giờ PUT bản mặc định đè lên layout đã có khi load lỗi.
@@ -84,6 +86,7 @@ export function createLayoutSession(
   let sync: LayoutSync | null = null;
   let unwatch: (() => void) | null = null;
   let unbindGuest: (() => void) | null = null;
+  let unbindSettings: (() => void) | null = null;
   let entering: Promise<void> | null = null;
   let pending: Pending | null = null;
   let saveIntent = false;
@@ -132,6 +135,7 @@ export function createLayoutSession(
       ]);
     };
     bind();
+    const offSettings = useSettingsStore.subscribe((s, prev) => { if (s.s !== prev.s) onChange(); });
     const offLayout = useLayoutStore.subscribe((s, prev) => {
       if (s.panes !== prev.panes) bind();
       if (s.panes !== prev.panes || s.tree !== prev.tree || s.templateId !== prev.templateId || s.name !== prev.name || s.sync !== prev.sync) onChange();
@@ -139,6 +143,7 @@ export function createLayoutSession(
     return () => {
       offs.forEach((f) => f());
       offLayout();
+      offSettings();
     };
   }
 
@@ -163,6 +168,8 @@ export function createLayoutSession(
     const init = early ?? loadPaneInit(kv);
     if (!first) useLayoutStore.getState().applyLayout(guestDoc(init), DEFAULT_LAYOUT_ID); // từ user về khách: dựng lại 1 chart từ prefs
     unbindGuest = bindPanePersistence(getPane(PRIMARY_PANE_ID), kv, { init, onUnload: opts.onUnload });
+    unbindSettings?.();
+    unbindSettings = bindSettingsPersistence(kv); // nạp lại setting của khách (user về khách: bỏ setting của layout vừa rời)
     mode = "guest";
     uid = null;
     set({ saveState: "guest", entries: null });
@@ -213,13 +220,15 @@ export function createLayoutSession(
     const doc = e.doc!;
     const L = useLayoutStore.getState();
     if (wasOptimistic && L.layoutId === e.id) {
-      const screenKey = docKey(snapshotLayout());
+      const screen = snapshotLayout();
+      const screenKey = docKey(screen);
       if (optimisticKey !== null && screenKey !== optimisticKey) {
         await startSync(doc, e.id); // đã sửa lúc backend chưa trả lời: bản trên máy thắng, lưu lên
         sync!.schedule();
         return;
       }
-      if (screenKey === docKey(doc)) {
+      // doc cũ chưa có setting thì màn hình đang dùng setting của khách: coi là cùng bản
+      if (screenKey === docKey(doc.settings ? doc : { ...doc, settings: screen.settings })) {
         await startSync(doc, e.id); // đang hiện đúng bản này (từ cache): khỏi dựng lại chart
         return;
       }
@@ -236,6 +245,8 @@ export function createLayoutSession(
     // chế độ user: prefs khách (wickloom-pane1) dừng ghi, giữ nguyên bản lúc đăng nhập cho lần quay về khách
     unbindGuest?.();
     unbindGuest = null;
+    unbindSettings?.(); // chế độ user: setting nằm trong layout, key của khách dừng ghi (giữ bản lúc đăng nhập)
+    unbindSettings = null;
     uid = user.id;
     set({ saveState: "loading" });
     try {
@@ -335,8 +346,9 @@ export function createLayoutSession(
         // Mở nhanh bằng layout cache trong lúc chờ /auth/me + server: reload không chớp về 1 chart, backend tắt vẫn thấy bố cục
         uid = hint.id;
         mode = "optimistic";
-        optimisticKey = docKey(cached.doc);
+        useSettingsStore.getState().replace(loadSettings(kv)); // layout cache cũ chưa có setting thì dùng bản đã lưu của khách
         useLayoutStore.getState().applyLayout(cached.doc, cached.id);
+        optimisticKey = docKey(snapshotLayout()); // chụp SAU khi áp: doc cũ thiếu setting vẫn khớp màn hình, khỏi bị coi là "đã sửa"
         unwatch = watch();
         set({ saveState: "loading" });
       } else enterGuest(true, startOpts.guestInit);
@@ -350,11 +362,12 @@ export function createLayoutSession(
       offUnload?.();
       unwatch?.();
       unbindGuest?.();
+      unbindSettings?.();
       sync?.abandon();
       clearRetry();
       if (cacheTimer) clearTimeout(cacheTimer);
       if (retryTimer) clearTimeout(retryTimer);
-      offAuth = offUnload = unwatch = unbindGuest = sync = null;
+      offAuth = offUnload = unwatch = unbindGuest = unbindSettings = sync = null;
       mode = "init";
       uid = null;
       entering = null;
@@ -397,7 +410,7 @@ export function createLayoutSession(
       const src = activePane().chart.getState();
       const pane = createPane(PRIMARY_PANE_ID, { chart: { symbol: src.symbol, tf: src.tf, chartType: src.chartType } });
       const doc = buildDoc(
-        { name: cleanName(name, "Unnamed layout"), templateId: "s", tree: buildTemplate("s", [PRIMARY_PANE_ID]), order: [PRIMARY_PANE_ID], panes: { [PRIMARY_PANE_ID]: pane }, activeId: PRIMARY_PANE_ID },
+        { name: cleanName(name, "Unnamed layout"), templateId: "s", tree: buildTemplate("s", [PRIMARY_PANE_ID]), order: [PRIMARY_PANE_ID], panes: { [PRIMARY_PANE_ID]: pane }, activeId: PRIMARY_PANE_ID, settings: useSettingsStore.getState().s },
         now(),
       );
       const id = crypto.randomUUID();

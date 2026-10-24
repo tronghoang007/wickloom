@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { DEFAULT_SYNC, buildDoc, cleanName, type LayoutDoc, type SyncFlags } from "./layoutDoc";
 import { buildTemplate, canonicalTemplateId, paneIds, retarget, templateById, withSizes, type Node } from "./layoutTree";
 import { createPane, type Pane } from "./paneStores";
+import { mergeSettings, useSettingsStore } from "./settings";
 
 // Registry các chart (pane) đang có + pane active. Toolbar, thanh vẽ, hộp tìm symbol... luôn tác động lên pane active
 // (như TradingView); chỉ Chart/DrawingManager của từng pane gắn thẳng vào store của pane đó.
@@ -115,6 +116,8 @@ export const useLayoutStore = create<State>()((set, get) => ({
         volume: saved.volume,
       });
     }
+    // doc cũ chưa có setting: giữ nguyên setting đang hiện (người dùng khỏi mất cách chỉnh của mình)
+    if (doc.settings) useSettingsStore.getState().replace(mergeSettings(doc.settings));
     set((s) => ({
       layoutId,
       name: doc.name,
@@ -133,7 +136,10 @@ export const useLayoutStore = create<State>()((set, get) => ({
 /** Document của layout đang mở (để lưu / tạo bản sao). */
 export const snapshotLayout = () => {
   const s = useLayoutStore.getState();
-  return buildDoc({ name: s.name, templateId: s.templateId, tree: s.tree, order: s.order, panes: s.panes, activeId: s.activeId, sync: s.sync });
+  return buildDoc({
+    name: s.name, templateId: s.templateId, tree: s.tree, order: s.order, panes: s.panes, activeId: s.activeId, sync: s.sync,
+    settings: useSettingsStore.getState().s,
+  });
 };
 
 export const getPane = (id: string): Pane => useLayoutStore.getState().panes[id];

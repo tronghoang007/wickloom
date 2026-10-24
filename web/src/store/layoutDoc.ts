@@ -2,10 +2,11 @@ import { TF_SECONDS } from "@/lib/api";
 import { MAX_PANES, canonicalTemplateId, paneIds, type Node } from "./layoutTree";
 import { snapshotPane, type PaneInit } from "./paneStores";
 import { parsePaneInit } from "./paneStorage";
+import { parseSettings, type ChartSettings } from "./settings";
 import type { Pane } from "./paneStores";
 
 // Document của một layout lưu trên server (`/me/layouts/<id>`): bố cục + state từng chart. KHÔNG lưu: bars, drawings (nằm riêng theo
-// `<symbol>__<layoutId>`), góc nhìn, công cụ/con trỏ, Replay, theme/favTfs/ChartSettings (toàn cục).
+// `<symbol>__<layoutId>`), góc nhìn, công cụ/con trỏ, Replay, theme/favTfs (toàn cục). Có `settings`: ChartSettings của layout (Canvas, Scales, Status line...).
 export const LAYOUT_VERSION = 1;
 
 export type PaneSaved = ReturnType<typeof snapshotPane>;
@@ -32,6 +33,8 @@ export type LayoutDoc = {
   active: string;
   panes: Record<string, PaneSaved>;
   sync: SyncFlags;
+  /** Doc cũ chưa lưu setting (thêm sau, vẫn version 1): không có field này → layout dùng setting đang hiện trên màn hình. */
+  settings?: ChartSettings;
   updatedAt: number;
 };
 
@@ -51,6 +54,7 @@ export type LayoutInput = {
   panes: Record<string, Pane>;
   activeId: string;
   sync?: SyncFlags;
+  settings?: ChartSettings;
 };
 
 export function buildDoc(s: LayoutInput, now = Date.now()): LayoutDoc {
@@ -62,6 +66,7 @@ export function buildDoc(s: LayoutInput, now = Date.now()): LayoutDoc {
     active: s.activeId,
     panes: Object.fromEntries(s.order.map((id) => [id, snapshotPane(s.panes[id])])),
     sync: { ...(s.sync ?? DEFAULT_SYNC) },
+    ...(s.settings ? { settings: parseSettings(s.settings) } : {}),
     updatedAt: now,
   };
 }
@@ -116,6 +121,7 @@ export function parseLayoutDoc(raw: unknown): ParsedDoc {
     };
   }
   const order = paneIds(tree);
+  const settings = parseSettings(o.settings);
   return {
     ok: true,
     doc: {
@@ -126,6 +132,7 @@ export function parseLayoutDoc(raw: unknown): ParsedDoc {
       active: typeof o.active === "string" && order.includes(o.active) ? o.active : order[0],
       panes,
       sync: parseSync(o.sync),
+      ...(settings ? { settings } : {}),
       updatedAt: typeof o.updatedAt === "number" && Number.isFinite(o.updatedAt) ? o.updatedAt : 0,
     },
   };

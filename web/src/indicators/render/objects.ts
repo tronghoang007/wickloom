@@ -181,17 +181,15 @@ export class ObjectsPrimitive implements ISeriesPrimitive<Time> {
             ctx.fillStyle = b.bg;
             ctx.fill();
             if (!isClear(b.border)) {
-              ctx.lineWidth = Math.max(1, Math.round(hpr));
+              ctx.lineWidth = Math.max(1, Math.round((b.borderWidth ?? 1) * hpr));
               ctx.strokeStyle = b.border;
               ctx.stroke();
             }
             if (b.text) {
-              // chữ chỉ vẽ khi lọt vào bubble: bubble nhỏ để trống thay vì chữ tràn ra ngoài
-              ctx.font = `${Math.round(Math.min(12 * vpr, r * 0.9))}px -apple-system, "Trebuchet MS", sans-serif`;
-              if (ctx.measureText(b.text).width <= r * 1.7) {
-                ctx.fillStyle = b.textColor ?? "#ffffff";
-                ctx.fillText(b.text, x * hpr, y * vpr);
-              }
+              // số luôn được vẽ với cỡ chữ cố định (Text Size như DeepCharts), bubble nhỏ hơn chữ thì chữ tràn ra ngoài
+              ctx.font = `${Math.round((b.textSize ?? 11) * vpr)}px -apple-system, "Trebuchet MS", sans-serif`;
+              ctx.fillStyle = b.textColor ?? "#ffffff";
+              ctx.fillText(b.text, x * hpr, y * vpr);
             }
           }
         });

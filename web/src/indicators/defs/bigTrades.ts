@@ -5,7 +5,7 @@ import { num, type Ctx, type IndicatorDef, type InputDef, type ItemDef, type Obj
 import { withAlpha } from "../style";
 import { barStep } from "./pivots";
 
-// Big Trades (bubble kiểu ATAS): mỗi bubble là một lượng tick lớn ở cùng một giá. Tick của MT5 CFD không có khối lượng từng lệnh (mỗi tick tính 1),
+// Big Trades (bubble kiểu ATAS, cách vẽ theo DeepCharts: Hollow Fill, Min/Max Opacity, Text Size/Color, cỡ theo Standard Deviation): mỗi bubble là một lượng tick lớn ở cùng một giá. Tick của MT5 CFD không có khối lượng từng lệnh (mỗi tick tính 1),
 // nên "lệnh lớn" ở đây là ô (phút, giá) của lịch sử tick mà backend giữ (bảng tickvp) có nhiều tick: bubble nằm ở nến chứa phút đó, tại giá đó, màu theo
 // bên chiếm nhiều volume hơn (quy tắc tick như CVD), cỡ theo volume, số ở giữa là tổng tick. Bubble phủ tối đa độ sâu tick (14 ngày) tính từ nến cuối.
 // Giá được gom vào row (Price grouping): mã nhiều tick như BTC hiếm khi có 2 tick cùng đúng một giá trong một phút nên không gom thì bubble nào cũng chỉ 1-4 tick.
@@ -13,6 +13,7 @@ import { barStep } from "./pivots";
 const ITEMS: ItemDef[] = [
   { id: "buy", title: "Buy", color: "#26a69a", group: "Bubbles", plain: true },
   { id: "sell", title: "Sell", color: "#f23645", group: "Bubbles", plain: true },
+  { id: "text", title: "Volume text", color: "#ffffff", group: "Bubbles", plain: true },
 ];
 
 const INPUTS: InputDef[] = [
@@ -29,10 +30,17 @@ const INPUTS: InputDef[] = [
     key: "group", label: "Price grouping (ticks)", type: "int", default: 0, min: 0, group: "Filter",
     tooltip: "Height of a price row in ticks: the ticks of one minute within a row make one bubble. 0 = automatic, about 1/20 of a typical candle.",
   },
-  { key: "minSize", label: "Minimum size", type: "int", default: 10, min: 4, max: 200, group: "Bubbles", tooltip: "Diameter of the smallest bubble, in pixels." },
-  { key: "maxSize", label: "Maximum size", type: "int", default: 48, min: 4, max: 200, group: "Bubbles", tooltip: "Diameter of the biggest bubble, in pixels." },
-  { key: "opacity", label: "Opacity (%)", type: "int", default: 72, min: 5, max: 100, group: "Bubbles" },
+  { key: "minSize", label: "Minimum size", type: "int", default: 5, min: 4, max: 200, group: "Bubbles", tooltip: "Diameter of the smallest bubble, in pixels." },
+  { key: "maxSize", label: "Maximum size", type: "int", default: 50, min: 4, max: 200, group: "Bubbles", tooltip: "Diameter of the biggest bubble, in pixels." },
+  {
+    key: "dev", label: "Standard deviation", type: "float", default: 2, min: 0, max: 10, step: 0.5, group: "Bubbles",
+    tooltip: "Size scaling: the average bubble gets the middle size and a bubble this many standard deviations above (below) the average gets the maximum (minimum) size, so a few huge bubbles do not shrink all the others. 0 = by area between Minimum and Maximum volume.",
+  },
+  { key: "opacityMin", label: "Minimum opacity (%)", type: "int", default: 40, min: 5, max: 100, group: "Bubbles", tooltip: "Opacity of the smallest bubble; bigger bubbles get more opaque." },
+  { key: "opacityMax", label: "Maximum opacity (%)", type: "int", default: 90, min: 5, max: 100, group: "Bubbles", tooltip: "Opacity of the biggest bubble." },
+  { key: "hollow", label: "Hollow fill", type: "bool", default: false, group: "Bubbles", tooltip: "Draw only the outline of each bubble." },
   { key: "text", label: "Show volume", type: "bool", default: true, group: "Bubbles" },
+  { key: "textSize", label: "Text size", type: "int", default: 11, min: 6, max: 40, group: "Bubbles", enabledIf: (i) => !!i.text },
 ];
 
 /** Pha `color` (`#rrggbb`) với trắng `t` (0..1): viền bubble sáng hơn nền để tách khỏi thân nến cùng màu xanh / đỏ; màu khác định dạng giữ nguyên. */
@@ -64,10 +72,21 @@ export function rowSize(bars: Bar[], tick: number, ticks: number): number {
   return median > 0 ? Math.max(1, Math.round(niceStep(median / 20) / tick)) * tick : tick;
 }
 
+/** Phần (0..1) giữa cỡ nhỏ nhất và lớn nhất của bubble có volume `v`: diện tích tăng theo volume từ `lo` tới `hi`. */
+const areaFrac = (v: number, lo: number, hi: number): number => Math.sqrt(hi > lo ? Math.min(1, Math.max(0, (v - lo) / (hi - lo))) : 0);
+
 /** Đường kính (px) của bubble có volume `v`: diện tích tăng theo volume từ `lo` (cỡ nhỏ nhất) tới `hi` (cỡ lớn nhất). */
 export function bubbleSize(v: number, lo: number, hi: number, minSize: number, maxSize: number): number {
-  const t = hi > lo ? Math.min(1, Math.max(0, (v - lo) / (hi - lo))) : 0;
-  return minSize + (maxSize - minSize) * Math.sqrt(t);
+  return minSize + (maxSize - minSize) * areaFrac(v, lo, hi);
+}
+
+/** Phần (0..1) giữa cỡ nhỏ nhất và lớn nhất của từng bubble. `dev` > 0: theo độ lệch chuẩn của volume các bubble đang hiện (trung bình = giữa, ±`dev` độ lệch chuẩn = hai đầu) để vài bubble khổng lồ không ép mọi bubble khác về cỡ nhỏ nhất;
+ *  `dev` = 0: theo diện tích giữa `lo` và `hi`. Mọi bubble cùng volume thì cùng ở giữa. */
+export function sizeFractions(vols: number[], lo: number, hi: number, dev: number): number[] {
+  if (dev <= 0) return vols.map((v) => areaFrac(v, lo, hi));
+  const mean = vols.reduce((a, b) => a + b, 0) / vols.length;
+  const sd = Math.sqrt(vols.reduce((a, b) => a + (b - mean) ** 2, 0) / vols.length);
+  return vols.map((v) => (sd > 0 ? Math.min(1, Math.max(0, 0.5 + (v - mean) / (2 * dev * sd))) : 0.5));
 }
 
 /** Bubble của các ô tick `cells`: x = chỉ số nến chứa phút của ô (`times` tăng dần, `step` giây một nến), y = giá. Bubble lớn vẽ trước để bubble nhỏ cùng chỗ nằm trên. */
@@ -79,14 +98,19 @@ export function bubblesOf(cells: TickCell[], times: number[], step: number, c: C
   const hi = num(inputs, "max") > 0 ? num(inputs, "max") : Math.max(...vols);
   const minSize = num(inputs, "minSize");
   const maxSize = Math.max(minSize, num(inputs, "maxSize"));
-  const alpha = num(inputs, "opacity") / 100;
+  const opMin = num(inputs, "opacityMin") / 100;
+  const opMax = Math.max(opMin, num(inputs, "opacityMax") / 100);
+  const hollow = !!inputs.hollow;
   const text = !!inputs.text;
+  const fr = sizeFractions(vols, lo, hi, num(inputs, "dev"));
   return cells
     .map((k, i): ObjBubble => {
       const color = k.up >= k.dn ? items.buy.color : items.sell.color;
+      const alpha = opMin + (opMax - opMin) * fr[i]; // bubble càng lớn càng đậm
       return {
-        x: Math.floor(indexAtTime(times, k.t, step)), y: k.p, r: bubbleSize(vols[i], lo, hi, minSize, maxSize) / 2,
-        bg: withAlpha(color, alpha), border: lighten(color, 0.6), ...(text ? { text: compact(vols[i]), textColor: "#ffffff" } : {}),
+        x: Math.floor(indexAtTime(times, k.t, step)), y: k.p, r: (minSize + (maxSize - minSize) * fr[i]) / 2,
+        ...(hollow ? { bg: withAlpha(color, 0), border: withAlpha(color, alpha), borderWidth: 2 } : { bg: withAlpha(color, alpha), border: lighten(color, 0.6) }),
+        ...(text ? { text: compact(vols[i]), textColor: items.text.color, textSize: num(inputs, "textSize") } : {}),
       };
     })
     .sort((a, b) => b.r - a.r);

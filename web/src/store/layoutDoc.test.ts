@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_SYNC, LAYOUT_VERSION, NO_SYNC, buildDoc, cleanName, docKey, parseLayoutDoc, summarizeDoc, tfShort, type LayoutDoc } from "./layoutDoc";
 import { buildTemplate } from "./layoutTree";
 import { createPane } from "./paneStores";
+import { mergeSettings } from "./settings";
 
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i + 1}`);
 
@@ -148,5 +149,27 @@ describe("summarizeDoc / tfShort / cleanName", () => {
     expect(cleanName("x".repeat(500)).length).toBe(100);
     expect(cleanName("", "Fallback")).toBe("Fallback");
     expect(cleanName(42)).toBe("Unnamed");
+  });
+});
+
+describe("settings của layout", () => {
+  const withSettings = (s = mergeSettings({ bg: "#101010" })) =>
+    buildDoc({ name: "A", templateId: "s", tree: buildTemplate("s", ["p1"]), order: ["p1"], panes: { p1: createPane("p1") }, activeId: "p1", settings: s }, 1);
+
+  it("lưu vào doc, round-trip qua JSON giữ nguyên, đổi setting là có thay đổi cần lưu", () => {
+    const d = withSettings();
+    expect(d.settings?.bg).toBe("#101010");
+    const r = parseLayoutDoc(JSON.parse(JSON.stringify(d)));
+    expect(r.ok && docKey(r.doc)).toBe(docKey(d));
+    expect(docKey(withSettings(mergeSettings({ bg: "#202020" })))).not.toBe(docKey(d));
+  });
+
+  it("doc cũ chưa có setting → không có field (layout dùng setting đang hiện); field hỏng → bỏ", () => {
+    const old = JSON.parse(JSON.stringify(twoPaneDoc()));
+    expect(old.settings).toBeUndefined();
+    const a = parseLayoutDoc(old);
+    expect(a.ok && "settings" in a.doc).toBe(false);
+    const b = parseLayoutDoc({ ...old, settings: "x" });
+    expect(b.ok && "settings" in b.doc).toBe(false);
   });
 });

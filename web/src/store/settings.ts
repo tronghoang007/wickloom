@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
 // Chart settings (dialog "Settings" kiểu TradingView). Màu `null` = theo theme sáng/tối.
 // Mặc định giữ đúng giao diện trước khi có dialog.
@@ -138,6 +137,20 @@ export function mergeSettings(saved: (Partial<ChartSettings> & { confirmClose?: 
   return { ...DEFAULT_SETTINGS, ...saved, ...legacy };
 }
 
+/** Setting đọc từ layout trên server: chỉ nhận field đúng kiểu (sai/thiếu → mặc định), xếp theo thứ tự DEFAULT_SETTINGS để `docKey` (so chuỗi JSON) ổn định.
+ *  Không phải object → undefined (layout cũ chưa lưu setting). Field mặc định `null` là màu/số tuỳ chọn nên nhận string | number | null. */
+export function parseSettings(raw: unknown): ChartSettings | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, d] of Object.entries(DEFAULT_SETTINGS)) {
+    const v = o[k];
+    const ok = d === null ? v === null || typeof v === "string" || typeof v === "number" : typeof v === typeof d;
+    out[k] = ok ? v : d;
+  }
+  return out as ChartSettings;
+}
+
 type State = {
   s: ChartSettings;
   open: boolean;
@@ -145,28 +158,10 @@ type State = {
   replace: (s: ChartSettings) => void;
 };
 
-export const useSettingsStore = create<State>()(
-  persist(
-    (set) => ({
-      s: DEFAULT_SETTINGS,
-      open: false,
-      set: (patch) => set((st) => ({ s: { ...st.s, ...patch } })),
-      replace: (s) => set({ s }),
-    }),
-    {
-      name: "tv-chart-settings",
-      version: 2,
-      // v0 lưu sẵn titleMode "name" (giá trị mặc định cũ) -> chuyển sang tên mô tả như mặc định mới
-      // v1 lưu sẵn marginBottom 25 (mặc định cũ) -> 8 như TV; giá trị khác 25 là người dùng tự chỉnh nên giữ
-      migrate: (saved, version) => {
-        const st = saved as { s?: Partial<ChartSettings> };
-        if (version < 1 && st?.s) st.s.titleMode = "description";
-        if (version < 2 && st?.s?.marginBottom === 25) st.s.marginBottom = 8;
-        return st as State;
-      },
-      partialize: (st) => ({ s: st.s }),
-      // thêm field mới vào DEFAULT_SETTINGS không làm mất setting đã lưu
-      merge: (saved, cur) => ({ ...cur, s: mergeSettings((saved as { s?: Partial<ChartSettings> })?.s) }),
-    },
-  ),
-);
+/** Setting của layout đang mở. Lưu cùng layout (store/layoutDoc.ts); khách không có layout trên server nên nhớ vào localStorage (store/settingsStorage.ts). */
+export const useSettingsStore = create<State>()((set) => ({
+  s: DEFAULT_SETTINGS,
+  open: false,
+  set: (patch) => set((st) => ({ s: { ...st.s, ...patch } })),
+  replace: (s) => set({ s }),
+}));

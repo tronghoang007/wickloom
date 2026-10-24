@@ -69,8 +69,8 @@ export type LabelStyle = "none" | "up" | "down" | "left" | "right" | "center";
 export type LabelSize = "tiny" | "small" | "normal" | "large" | "huge";
 export type ObjLabel = { x: number; y: number; text: string; color: string; bg?: string; style?: LabelStyle; size?: LabelSize };
 export type ObjBox = { x1: number; y1: number; x2: number; y2: number; bg?: string; border?: string; borderWidth?: number; borderStyle?: LineStyleName; extendRight?: boolean };
-/** Bubble tròn (Big Trades): tâm ở (x, y), bán kính `r` là px nên không đổi theo zoom; `text` (nếu có) vẽ giữa bubble. */
-export type ObjBubble = { x: number; y: number; r: number; bg: string; border?: string; text?: string; textColor?: string };
+/** Bubble tròn (Big Trades): tâm ở (x, y), bán kính `r` là px nên không đổi theo zoom; `text` (nếu có) vẽ giữa bubble với cỡ `textSize` px (mặc định 11), bubble nhỏ hơn chữ thì chữ tràn ra ngoài. */
+export type ObjBubble = { x: number; y: number; r: number; bg: string; border?: string; borderWidth?: number; text?: string; textColor?: string; textSize?: number };
 export type ObjectSet = { lines: ObjLine[]; labels: ObjLabel[]; boxes: ObjBox[]; bubbles?: ObjBubble[] };
 
 /** Một volume profile đã tính (`computeProfile`) kèm vị trí ngang: `x1..x2` = chỉ số nến đầu/cuối của phiên (không dùng khi `style.pinned`). */
