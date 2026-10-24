@@ -7,12 +7,15 @@ import { useMt5Store } from "@/store/mt5";
 import { useOrderState } from "@/trading/actions";
 import { parseNum, type Draft } from "@/trading/draft";
 import { draftError } from "@/trading/draftCheck";
-import { fmtLot } from "@/trading/format";
+import { cancelOwnerEdits, confirmOwnerEdits, pendingFor, useEditBridge } from "@/trading/editBridge";
+import { fmtLot, fmtPnl, fmtPx, orderLabel, positionPnl, sideLabel } from "@/trading/format";
 import { currentLot, fmtLotValue, lotSpec, normalizeLot, stepLot, writeLot } from "@/trading/lot";
 import { pendingLabel, resolveOrderType, snapPrice } from "@/trading/orderType";
 import { estimatePnl, pnlSpec, pointsBetween, priceForPnl, priceFromPoints, type PnlSpec } from "@/trading/pnl";
 import { spreadPips, useQuoteStore } from "@/trading/quote";
 import { seedDraftStop, setDraftMode, submitDraft } from "@/trading/submit";
+import { useTradeStore } from "@/trading/store";
+import { askCancelOrder, askClosePosition } from "@/trading/tagActions";
 import { useTicketStore, type TicketRest } from "@/trading/ticket";
 import { useEffect, useState } from "react";
 import { Close } from "../icons";
@@ -28,9 +31,106 @@ export default function OrderTicket() {
   const draft = useTicketStore((s) => s.draft);
   const rest = useTicketStore((s) => s.rest);
   const id = useTicketStore((s) => s.id);
+  const modifyOwner = useTicketStore((s) => s.modifyOwner);
+  if (modifyOwner && !draft) return <ModifyPanel key={`${modifyOwner}:${id}`} owner={modifyOwner} />;
   if (draft) return <TicketPanel key={id} d={draft} />;
   if (rest) return <RestPanel rest={rest} />;
   return <div className="px-4 py-6 text-sm text-[var(--muted)]">Bấm SELL / BUY trên chart để đặt lệnh.</div>;
+}
+
+/** Bấm chọn một vị thế / lệnh chờ trên chart (không kéo): bảng của lệnh đó. Hiện thông số hiện tại; SL / TP / giá vào vừa kéo trên chart (đang chờ xác nhận) hiện giá mới kèm giá cũ.
+ *  Modify = gửi các thay đổi đang chờ, Discard = trả về giá cũ, Delete = huỷ lệnh chờ / đóng vị thế (có hộp thoại xác nhận như dấu × trên thẻ). */
+function ModifyPanel({ owner }: { owner: string }) {
+  const data = useTradeStore((s) => s.data);
+  const byPane = useEditBridge((s) => s.byPane);
+  const account = useMt5Store((s) => s.accounts.find((a) => a.active));
+  const busy = useOrderState((s) => s.busy);
+  const symbols = useChartStore((s) => s.symbols);
+  const [kind, tk] = owner.split(":");
+  const ticket = Number(tk);
+  const pos = kind === "position" ? data?.positions.find((p) => p.ticket === ticket) : undefined;
+  const ord = kind === "order" ? data?.orders.find((o) => o.ticket === ticket) : undefined;
+  const item = pos ?? ord;
+  useEffect(() => {
+    // lệnh không còn (đã đóng / huỷ / khớp): bảng về trạng thái chờ
+    if (data && !item) useTicketStore.setState({ modifyOwner: null });
+  }, [data, item]);
+  if (!item) return <div className="px-4 py-6 text-sm text-[var(--muted)]">Đang tải lệnh…</div>;
+
+  const digits = symbols.find((x) => x.name === item.symbol)?.digits;
+  const edits = pendingFor(byPane, owner);
+  const pending = edits.length > 0;
+  const pick = (key: string, was: number) => {
+    const e = edits.find((x) => x.key === key);
+    return e ? { now: e.price, was, changed: e.price !== was } : { now: was, was, changed: false };
+  };
+  const p = kind === "position" ? "p" : "o";
+  const rows: { label: string; v: { now: number; was: number; changed: boolean } | null }[] = [
+    ...(ord ? [{ label: "Giá vào", v: pick(`o:${ticket}`, ord.price_open) }] : [{ label: "Giá vào", v: { now: pos!.price_open, was: pos!.price_open, changed: false } }]),
+    { label: "Take profit", v: item.tp > 0 || edits.some((x) => x.key === `${p}tp:${ticket}`) ? pick(`${p}tp:${ticket}`, item.tp) : null },
+    { label: "Stop loss", v: item.sl > 0 || edits.some((x) => x.key === `${p}sl:${ticket}`) ? pick(`${p}sl:${ticket}`, item.sl) : null },
+  ];
+  const buy = (pos ? pos.type : ord!.type).startsWith("buy");
+  const ccy = account?.currency ?? "";
+  const what = pos ? `${sideLabel(pos.type)} ${fmtLot(pos.volume)}` : `${orderLabel(ord!.type)} ${fmtLot(ord!.volume)}`;
+  const profit = pos ? positionPnl(pos) : null;
+  const btn = "flex h-11 w-full cursor-pointer items-center justify-center rounded-lg text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40";
+  return (
+    <div role="dialog" aria-label="Modify order" className="flex min-h-0 flex-1 flex-col text-[var(--fg)]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-3">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-[15px] font-semibold">{item.symbol}</span>
+          {account && MODE_LABEL[account.mode] && (
+            <span className="rounded px-1.5 py-px text-[10px] font-bold text-white" style={{ background: MODE_COLOR[account.mode] }}>
+              {MODE_LABEL[account.mode]}
+            </span>
+          )}
+          <span className="min-w-0 flex-1 truncate text-xs text-[var(--muted)]">{account ? account.name || account.broker || account.server : ""}</span>
+          <button type="button" className="cursor-pointer rounded p-0.5 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={() => useTicketStore.getState().close()} aria-label="Close order panel">
+            <Close size={20} />
+          </button>
+        </div>
+        <div className="mb-4 rounded-lg px-3.5 py-3 text-white" style={{ background: buy ? "#2962ff" : "#f23645" }}>
+          <div className="text-xs text-white/80">{pos ? "Vị thế" : "Lệnh chờ"} #{ticket}</div>
+          <div className="mt-1 text-[17px] font-semibold leading-none">{what}</div>
+          {profit !== null && (
+            <div className="mt-1.5 text-sm tabular-nums text-white/90">
+              {fmtPnl(profit)} {ccy}
+            </div>
+          )}
+        </div>
+        <div className="space-y-2.5 text-sm">
+          {rows.map((r) => (
+            <div key={r.label} className="flex items-baseline justify-between">
+              <span className="text-[var(--muted)]">{r.label}</span>
+              {r.v === null ? (
+                <span className="text-[var(--muted)]">—</span>
+              ) : (
+                <span className="tabular-nums" data-testid={`modify-${r.label}`}>
+                  {r.v.changed && <span className="mr-2 text-xs text-[var(--muted)] line-through">{r.v.was > 0 ? fmtPx(r.v.was, digits) : "—"}</span>}
+                  <span className={r.v.changed ? "font-semibold text-[var(--accent)]" : ""}>{fmtPx(r.v.now, digits)}</span>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 text-xs text-[var(--muted)]">Kéo đường SL / TP / giá vào trên chart để đổi, rồi bấm Modify.</div>
+      </div>
+      <div className="shrink-0 space-y-2 border-t border-[var(--border)] px-4 pb-3 pt-3">
+        <button type="button" disabled={!pending || busy} onClick={() => confirmOwnerEdits(owner)} className={`${btn} bg-[var(--accent)] text-white hover:brightness-110`}>
+          Modify
+        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" disabled={!pending} onClick={() => cancelOwnerEdits(owner)} className={`${btn} border border-[var(--border)] hover:bg-[var(--hover)]`}>
+            Discard
+          </button>
+          <button type="button" disabled={busy} onClick={() => (pos ? askClosePosition(pos) : askCancelOrder(ord!))} className={`${btn} border border-[#f23645] text-[#f23645] hover:bg-[#f23645]/10`}>
+            {pos ? "Close" : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Sau khi đặt xong bảng KHÔNG đóng mà ở trạng thái chờ như TradingView ("Start creating order"): vẫn hiện symbol đang xem và giá Sell / Buy, các ô còn lại mờ + không bấm được;

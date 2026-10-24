@@ -8,6 +8,7 @@ import { useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
 import { moveOrder, moveStops, type StopChange } from "./actions";
 import { DRAFT_IDS, defaultStop, draftLines, parseNum } from "./draft";
+import { registerEditHandlers, useEditBridge } from "./editBridge";
 import { useTradeFocus } from "./focus";
 import { fmtLot, isStale, orderLabel, type DragPreview, type StopTitleFn, type TagOwner } from "./format";
 import { tradeBlock } from "./gate";
@@ -114,7 +115,12 @@ export function createLineDrag(o: Opts): ChartDrag {
   const edits = new Map<string, Edit>(); // chờ xác nhận, theo khoá đường
   const sent = new Map<string, DragPreview>(); // đã gửi, giữ đường ở giá mới tới khi dữ liệu mới của EA về
   let live: DragPreview | null = null; // đang kéo
-  const publish = () => o.setPreview([...sent.values(), ...[...edits.values()].map((e) => ({ ...e.preview, pending: true })), ...(live ? [live] : [])]);
+  const publish = () => {
+    o.setPreview([...sent.values(), ...[...edits.values()].map((e) => ({ ...e.preview, pending: true })), ...(live ? [live] : [])]);
+    const byOwner: Record<string, DragPreview[]> = {};
+    for (const e of edits.values()) (byOwner[e.owner] ??= []).push(e.preview);
+    useEditBridge.getState().setPane(o.paneId, byOwner);
+  };
   const ownerOf = (id: string) => {
     const m = /^(p|o)(?:sl|tp)?:(\d+)$/.exec(id);
     return m ? `${m[1] === "p" ? "position" : "order"}:${m[2]}` : null;
@@ -235,7 +241,10 @@ export function createLineDrag(o: Opts): ChartDrag {
         useReplaySim.getState().setStop(o.paneId, sim[1] as "sl" | "tp", from); // Esc / bấm không kéo: về mức cũ (0 = bỏ mức vừa kéo ra)
         return;
       }
-      focusLine(id); // bấm vào đường mà không kéo cũng là chọn lệnh đó
+      // bấm vào đường mà không kéo = chọn lệnh đó (mở bảng Modify ở thanh bên phải); kéo thì chỉ focus, không mở bảng
+      const clicked = id in DRAFT_IDS ? null : ownerOf(id);
+      if (clicked) useTicketStore.getState().select(clicked);
+      else focusLine(id);
       if (id in DRAFT_IDS) return patchDraft(id, null, from); // trả ô nhập về giá cũ
       live = null; // đường quay về giá đang chờ xác nhận (nếu có) hoặc giá thật
       publish();
@@ -312,8 +321,10 @@ export function createLineDrag(o: Opts): ChartDrag {
     drag.begin(e, key, 0, seed);
   };
 
+  const unregister = registerEditHandlers(o.paneId, { confirm: confirmEdit, cancel: cancelEdit });
   return {
     destroy: () => {
+      unregister();
       window.removeEventListener("keydown", onEsc);
       o.chart.unsubscribeClick(onChartClick);
       drag.destroy();

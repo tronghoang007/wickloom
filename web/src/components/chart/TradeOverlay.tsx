@@ -251,6 +251,10 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
             data-testid="trade-tag"
             data-tag={l.key}
             onPointerDownCapture={() => useTradeFocus.getState().set(mine)} // chạm vào bất cứ phần nào của thẻ (kể cả bắt đầu kéo) = focus lệnh này
+            onClick={(e) => {
+              // bấm (không kéo: kéo thì LineDrag giữ con trỏ nên không có click ở đây) vào thẻ của lệnh đã đặt = chọn lệnh, mở bảng Modify; nút trên thẻ tự xử lý
+              if (tag.owner.t !== "draft" && !(e.target as Element).closest("button")) useTicketStore.getState().select(mine);
+            }}
             className="absolute left-auto top-0 hidden select-none items-center gap-1 text-[12px] font-medium leading-none"
             style={{ height: TAG_H, opacity: fade, zIndex: focus === mine ? 2 : undefined }}
           >
