@@ -77,7 +77,7 @@ export type ObjectSet = { lines: ObjLine[]; labels: ObjLabel[]; boxes: ObjBox[];
 export type PlacedProfile = Profile & { x1: number; x2: number };
 export type ProfileLine = { show: boolean; color: string; width: number; style: LineStyleName };
 export type ProfileStyle = {
-  volume: "updown" | "total" | "delta";
+  volume: "updown" | "total" | "delta" | "deltatotal"; // deltatotal: Delta bên trái trục, Total bên phải (Deep Profile "Delta and Total Volume")
   width: number; // % bề rộng phiên (hoặc pane nếu pinned)
   place: "left" | "right";
   values: boolean;
@@ -87,6 +87,28 @@ export type ProfileStyle = {
   poc: ProfileLine; vah: ProfileLine; val: ProfileLine;
 };
 export type ProfileSet = { profiles: PlacedProfile[]; style: ProfileStyle };
+
+/** Một row giá của footprint một nến: row phủ giá [p, p + size), volume lên (mua) / xuống (bán) của tick trong nến. */
+export type FpRow = { p: number; up: number; dn: number };
+/** Footprint của một nến chart: `x` = chỉ số nến (như object), `rows` liên tục từ row thấp nhất tới cao nhất có tick (row không tick có up = dn = 0), tăng dần theo giá.
+ *  `poc` / `vl` / `vh` = chỉ số trong `rows` của POC và hai đầu Value Area (-1 nếu không có volume). `buyImb` / `sellImb`: row có imbalance mua / bán; `stackBuy` / `stackSell`: thuộc chuỗi imbalance liên tiếp. */
+export type FpBar = {
+  x: number; o: number; h: number; l: number; c: number; size: number; rows: FpRow[];
+  poc: number; vl: number; vh: number;
+  buyImb: boolean[]; sellImb: boolean[]; stackBuy: boolean[]; stackSell: boolean[];
+};
+export type FpType = "bidask" | "delta" | "volume" | "deltavol";
+export type FpStyle = {
+  type: FpType; // bidask: Sell bên trái nến, Buy bên phải; delta / volume: một cột bên phải nến; deltavol: hai cột (delta, total)
+  mode: "profile" | "box"; // profile: bề rộng ô theo volume; box: mọi ô cùng bề rộng
+  color: "fading" | "fixed" | "none"; // nền ô: đậm dần theo volume / cố định / không nền
+  textSize: number; textFormat: "auto" | "normal" | "k";
+  summary: boolean; // Info box dưới nến: total volume, delta
+  imbalance: boolean; stacked: boolean;
+  poc: boolean; va: boolean;
+  up: string; down: string; buy: string; sell: string; text: string; imbBuy: string; imbSell: string; pocColor: string; vaColor: string;
+};
+export type FootprintSet = { bars: FpBar[]; style: FpStyle };
 
 export type Ctx = {
   bars: Bar[]; // đã gồm cả lịch sử nạp ngầm phía trước (xem engine)
@@ -131,6 +153,8 @@ export type IndicatorDef = {
   /** Cần mốc ngày của broker (VWAP, Pivot...): nạp thêm D1 để ranh giới phiên đúng qua DST. */
   needsCalendar?: boolean;
   compute: (ctx: Ctx) => Record<string, Num | PlotData>;
+  /** Footprint từng nến (Volume footprint / Deep Print): vẽ bằng `FootprintPrimitive`; chart chính ẩn nến của nó đi (indicator tự vẽ nến). */
+  footprints?: (ctx: Ctx) => FootprintSet | null;
   /** Line/label/box của indicator (SMC: BOS/CHoCH, order block, FVG...). Dựng bằng `ObjectBuilder` để có giới hạn 500/loại như Pine. */
   objects?: (ctx: Ctx) => ObjectSet;
   /** Ghi đè màu nến của chart chính (plotcandle "Color Candles"): mỗi nến một màu, "" = giữ màu mặc định. Dài đúng `bars.length`. */

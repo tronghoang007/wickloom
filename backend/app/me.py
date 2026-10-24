@@ -11,6 +11,7 @@ from .auth import current_user
 router = APIRouter(prefix="/me")
 
 WATCHLIST_ID = "default"
+PREFS_ID = "default"
 
 
 def _key(user: Dict[str, Any], id: str) -> str:
@@ -32,6 +33,21 @@ def get_watchlist(user: Dict[str, Any] = Depends(current_user)):
 @router.put("/watchlist")
 def put_watchlist(body: Dict[str, Any], user: Dict[str, Any] = Depends(current_user)):
     state.meta.put("watchlists", _key(user, WATCHLIST_ID), user["id"], body)
+    return {"ok": True}
+
+
+@router.get("/prefs")
+def get_prefs(user: Dict[str, Any] = Depends(current_user)):
+    """Tuỳ chọn của tài khoản dùng chung mọi layout / thiết bị (mặc định công cụ vẽ...): 1 document JSON, web tự định nghĩa nội dung."""
+    row = state.meta.get("prefs", _key(user, PREFS_ID))
+    if not row:
+        raise HTTPException(404)
+    return _doc(user, row)
+
+
+@router.put("/prefs")
+def put_prefs(body: Dict[str, Any], user: Dict[str, Any] = Depends(current_user)):
+    state.meta.put("prefs", _key(user, PREFS_ID), user["id"], body)
     return {"ok": True}
 
 

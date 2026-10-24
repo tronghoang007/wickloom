@@ -942,7 +942,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     if (patch.width !== undefined) savePatch.width = patch.width;
     if (patch.dash !== undefined) savePatch.dash = patch.dash;
     if (patch.textColor !== undefined) savePatch.textColor = patch.textColor;
-    if (opts !== undefined) savePatch.opts = defaultOpts(next.opts);
+    if (opts !== undefined) savePatch.opts = defaultOpts(next.opts, next.type);
     if (Object.keys(savePatch).length > 0) {
       setToolDefault(d.type, savePatch);
     }
@@ -979,7 +979,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       width: next.width,
       dash: next.dash,
       textColor: next.textColor,
-      opts: defaultOpts(next.opts),
+      opts: defaultOpts(next.opts, next.type),
     });
   }
 

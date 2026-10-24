@@ -2,7 +2,7 @@
 
 import { useDrawingStore } from "@/drawings/store";
 import ColorPicker from "./ColorPicker";
-import { DEFAULT_COLOR, encodeFibLevels, fibLevelsOf, optOf, POS_DEFAULTS, SPEC, VP_BY, VP_DEFAULTS, type FibLevel } from "@/drawings/tools";
+import { DEFAULT_COLOR, defaultOpts, encodeFibLevels, fibLevelsOf, optOf, POS_DEFAULTS, SPEC, VP_BY, VP_DEFAULTS, type FibLevel } from "@/drawings/tools";
 import type { Drawing } from "@/drawings/types";
 import { UNITS, type Unit } from "@/drawings/visibility";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -224,6 +224,9 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   </option>
                   <option value="delta" className="text-black">
                     Delta
+                  </option>
+                  <option value="deltatotal" className="text-black">
+                    Delta + Total
                   </option>
                 </select>
               </Row>
@@ -619,7 +622,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                         width: d.width,
                         dash: d.dash,
                         textColor: d.textColor,
-                        opts: d.opts ? { ...d.opts } : undefined,
+                        opts: defaultOpts(d.opts, d.type),
                       });
                       setTemplateMenu(false);
                     }}

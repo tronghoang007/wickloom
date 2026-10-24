@@ -163,6 +163,31 @@ def test_tickbig_groups_prices_into_rows():
     assert len(st.tickbig("S", 0, 120, 1, 10)) == 4
 
 
+def test_tickfp_groups_minutes_into_bars_and_price_rows():
+    from app.store import BarStore
+
+    st = BarStore(__import__("pathlib").Path(tempfile.mkdtemp()) / "b.sqlite")
+    # nến 0 = [0, 120) gồm phút 0 và 60; nến 1 = [120, 240) gồm phút 120; phút 240 ngoài `end`
+    st.put_tickvp("S", 0, 240, [(0, 100.2, 3.0, 0.0), (0, 100.8, 1.0, 2.0), (60, 100.5, 2.0, 0.0), (60, 101.5, 0.0, 4.0), (120, 99.5, 5.0, 1.0), (240, 100.0, 9.0, 9.0)])
+    assert st.tickfp("S", [0, 120], 240, 1.0) == [(0, 100, 6.0, 2.0), (0, 101, 0.0, 4.0), (1, 99, 5.0, 1.0)]
+    # nến cuối chỉ tới `end`; phút trước nến đầu không tính; symbol khác không lẫn
+    assert st.tickfp("S", [60, 120], 120, 1.0) == [(0, 100, 2.0, 0.0), (0, 101, 0.0, 4.0)]
+    assert st.tickfp("Other", [0, 120], 240, 1.0) == []
+    assert st.tickfp("S", [], 240, 1.0) == [] and st.tickfp("S", [0], 240, 0) == [] and st.tickfp("S", [300], 240, 1.0) == []
+
+
+def test_tickfp_endpoint():
+    sym = "TDFP"
+    # phút 0: 10 lên (pb 9), 12 lên, 11 xuống; phút 1: 11 bằng nên giữ xuống
+    send_ea([{"type": "ticks_hist", "symbol": sym, "broker_utc_offset": 0, "t": [1000, 2000, 3000, 61000], "p": [10, 12, 11, 11], "pb": 9, "done": True}])
+    c = TestClient(app)
+    r = c.get("/tickfp", params={"symbol": sym, "bars": "0,60", "end": 120, "size": 2}).json()
+    assert r == {"rows": [[0, 5, 1.0, 1.0], [0, 6, 1.0, 0.0], [1, 5, 0.0, 1.0]]}  # size 2: giá 10 (lên) và 11 (xuống) cùng row 5, 12 (lên) row 6
+    for bad in ({"bars": "", "end": 120, "size": 1}, {"bars": "60,0", "end": 120, "size": 1}, {"bars": "x", "end": 120, "size": 1}, {"bars": "0", "end": 120, "size": 0}):
+        assert c.get("/tickfp", params={"symbol": sym, **bad}).status_code == 422
+    assert c.get("/tickfp", params={"symbol": sym, "bars": ",".join(str(i) for i in range(1001)), "end": 5000, "size": 1}).status_code == 422
+
+
 # --- realtime (Live) -----------------------------------------------------------------------------------------------------------------------------------
 
 def _live(asked):

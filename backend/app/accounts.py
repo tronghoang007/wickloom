@@ -24,7 +24,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Bảng dữ liệu người dùng: id lưu dạng "<user_id>:<id client>", scope = user_id (khoá chính chỉ là `id`
 # nên hai user cùng "XAUUSD__default" không đè nhau). Hàng chưa có tiền tố là dữ liệu từ trước khi có tài khoản.
-USER_TABLES = ("watchlists", "drawings", "layouts")
+USER_TABLES = ("watchlists", "drawings", "layouts", "prefs")
 _OWNED_RE = re.compile(r"^[0-9a-f]{32}:")
 LEGACY_FLAG = "auth_legacy_claimed"
 

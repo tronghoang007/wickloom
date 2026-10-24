@@ -81,3 +81,52 @@ describe("layoutProfile", () => {
     expect(Math.max(...l.rows.map((r) => r.len))).toBeCloseTo(20, 6);
   });
 });
+
+describe("layoutProfile: Delta + Total", () => {
+  const st = (over: Partial<ProfileStyle> = {}) => style({ volume: "deltatotal", values: true, ...over });
+
+  it("chia đôi bề rộng quanh một trục: delta sang trái, total sang phải, mỗi bên chuẩn hoá theo row lớn nhất của nó", () => {
+    const l = layoutProfile(vp, st(), 100, 300); // khoảng 200, width 50% = 100 -> trục ở 100 + 50, mỗi nửa 50
+    expect(l.axis).toBe(150);
+    const left = (r: (typeof l.rows)[number]) => r.segs.find((s) => s.x1 < s.x0);
+    const right = (r: (typeof l.rows)[number]) => r.segs.find((s) => s.x1 > s.x0);
+    expect(Math.max(...l.rows.map((r) => (left(r) ? Math.abs(left(r)!.x1 - 150) : 0)))).toBeCloseTo(50, 6);
+    expect(Math.max(...l.rows.map((r) => (right(r) ? right(r)!.x1 - 150 : 0)))).toBeCloseTo(50, 6);
+    for (const r of l.rows) for (const s of r.segs) expect(s.x0).toBe(150); // mọi đoạn đi ra từ trục
+    const poc = l.rows[vp.poc];
+    expect(right(poc)!.x1 - 150).toBeCloseTo(50, 6); // row total lớn nhất = POC dài hết nửa phải
+  });
+
+  it("màu delta theo dấu (mua hơn bán: Up, ngược lại: Down), total dùng màu Up", () => {
+    const l = layoutProfile(vp, st(), 0, 200);
+    const delta = vp.up.map((u, i) => u - vp.dn[i]);
+    l.rows.forEach((r, i) => {
+      const d = r.segs.find((s) => s.x1 < s.x0);
+      if (!d) return;
+      const inVa = i >= vp.vl && i <= vp.vh;
+      expect(d.color).toBe(delta[i] > 0 ? (inVa ? "#vaup" : "#up") : inVa ? "#vadn" : "#dn");
+    });
+    for (const r of l.rows) for (const s of r.segs.filter((x) => x.x1 > x.x0)) expect(["#up", "#vaup"]).toContain(s.color);
+  });
+
+  it("nhãn: delta (căn phải, bên trái đầu thanh) và total (căn trái, bên phải đầu thanh); row 0 volume không có nhãn", () => {
+    const l = layoutProfile(vp, st(), 0, 200);
+    const poc = l.rows[vp.poc];
+    expect(poc.labels).toEqual([
+      { x: expect.any(Number), text: String(Math.round(vp.up[vp.poc] - vp.dn[vp.poc])), align: "right" },
+      { x: l.axis! + poc.len + 3, text: String(Math.round(vp.total[vp.poc])), align: "left" },
+    ]);
+    expect(l.rows.find((r) => vp.total[r.i] === 0)!.labels).toEqual([]);
+  });
+
+  it("Placement Right: dải histogram nằm sát mép phải nhưng delta vẫn bên trái trục, total bên phải", () => {
+    const l = layoutProfile(vp, st({ place: "right" }), 100, 300);
+    expect(l.axis).toBe(300 - 50); // dải [200, 300], trục giữa dải
+    for (const r of l.rows) for (const s of r.segs) expect(Math.min(s.x0, s.x1)).toBeGreaterThanOrEqual(200);
+  });
+
+  it("kiểu khác không có trục", () => {
+    expect(layoutProfile(vp, style({ volume: "delta" }), 0, 200).axis).toBeUndefined();
+  });
+});
+

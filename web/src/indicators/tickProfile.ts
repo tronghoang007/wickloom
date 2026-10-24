@@ -1,4 +1,4 @@
-import type { Bar, TickCell } from "@/lib/api";
+import type { Bar, FpCell, TickCell } from "@/lib/api";
 import type { Layout } from "@/volumeProfile/compute";
 
 // Volume Profile "1 tick" (Session / Visible Range): mỗi tick rơi đúng vào row chứa giá của nó. Backend giữ histogram giá theo phút (bảng tickvp) và gom sẵn
@@ -12,6 +12,7 @@ export type TickHist = { up: number[]; dn: number[] };
 export type LiveMinute = { t: number; cells: [number, number, number][] };
 type Fetch = (symbol: string, from: number, to: number, lay: Layout) => Promise<TickHist | null>;
 type FetchBig = (symbol: string, from: number, to: number, min: number, limit: number, size: number) => Promise<TickCell[] | null>;
+type FetchFp = (symbol: string, bars: number[], end: number, size: number) => Promise<FpCell[] | null>;
 type Entry<T> = { sig: string; data: T | null; busy: boolean; retryAt: number; upTo: number };
 
 const MAX_ACTIVE = 2; // số yêu cầu backend chạy cùng lúc
@@ -143,6 +144,30 @@ export class TickBigFeed {
   }
 }
 
+/** Như `TickBigFeed` cho Footprint: ô (nến, row giá) của các phút [bars[0], end). Khoá theo (symbol, nến đầu, size) chứ không theo số nến / `end`: nến mới nối đuôi (cùng nến đầu) chỉ đổi `sig` nên
+ *  bản cũ vẫn hiện trong lúc nạp lại; chỉ số nến trong bản cũ vẫn đúng vì danh sách nến chỉ dài thêm ở cuối. */
+export class TickFpFeed {
+  private feed: SigFeed<FpCell[]>;
+
+  constructor(private fetch: FetchFp, onChange: () => void, now: () => number = Date.now) {
+    this.feed = new SigFeed(onChange, now);
+  }
+
+  get(symbol: string, bars: number[], end: number, size: number, sig: string, upTo = end): FpCell[] | null {
+    return this.feed.get(this.key(symbol, bars, size), sig, () => this.fetch(symbol, bars, upTo, size), upTo);
+  }
+
+  heldUpTo(symbol: string, bars: number[], size: number): number | undefined {
+    return this.feed.heldUpTo(this.key(symbol, bars, size));
+  }
+
+  private key = (symbol: string, bars: number[], size: number) => `${symbol}|${bars[0]}|${size}`;
+
+  clear() {
+    this.feed.clear();
+  }
+}
+
 /** Phút đang chạy nằm trong [t0, t1) thì DB chỉ cần đọc tới đầu phút đó (phút đó lấy từ `live`); không thì đọc hết t1. */
 export const liveCut = (live: LiveMinute | undefined, t0: number, t1: number): number => (live && live.t >= t0 && live.t < t1 ? live.t : t1);
 
@@ -202,4 +227,31 @@ export function mergeLiveBig(base: TickCell[], lives: LiveMinute[], min: number,
     .sort((a, b) => b.up + b.dn - (a.up + a.dn) || b.t - a.t)
     .slice(0, limit)
     .sort((a, b) => a.t - b.t || a.p - b.p);
+}
+
+/** Cộng các phút `lives` vào ô footprint `base`: mỗi tick ở giá `p` vào row `floor(p / size)` (như backend) của nến chứa phút đó (`bars` = giờ mở các nến tăng dần, nến cuối tới `end`); phút ngoài [bars[0], end) bỏ. */
+export function mergeLiveFp(base: FpCell[], lives: LiveMinute[], bars: number[], end: number, size: number): FpCell[] {
+  if (lives.length === 0 || bars.length === 0) return base;
+  const acc = new Map<string, FpCell>(base.map((c) => [`${c[0]}:${c[1]}`, [...c] as FpCell]));
+  for (const live of lives) {
+    if (live.t < bars[0] || live.t >= end) continue;
+    let lo = 0;
+    let hi = bars.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (bars[mid] <= live.t) lo = mid;
+      else hi = mid - 1;
+    }
+    for (const [p, up, dn] of live.cells) {
+      if (up + dn <= 0) continue;
+      const row = Math.floor(p / size + 1e-6);
+      const key = `${lo}:${row}`;
+      const c = acc.get(key);
+      if (c) {
+        c[2] += up;
+        c[3] += dn;
+      } else acc.set(key, [lo, row, up, dn]);
+    }
+  }
+  return [...acc.values()].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 }

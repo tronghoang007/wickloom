@@ -1,4 +1,4 @@
-import { TF_SECONDS, fetchBars, fetchBrokerOffset, fetchTickBig, fetchTickProfile, triggerBackfillAt, type Bar } from "@/lib/api";
+import { TF_SECONDS, fetchBars, fetchBrokerOffset, fetchTickBig, fetchTickFp, fetchTickProfile, triggerBackfillAt, type Bar } from "@/lib/api";
 import type { IChartApi, IPaneApi, IPriceLine, ISeriesApi, SeriesType, Time, UTCTimestamp } from "lightweight-charts";
 import { byId } from "./catalog";
 import { mergeCandleColors, planCandleColors } from "./candleColors";
@@ -8,14 +8,15 @@ import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } 
 import { instanceShown, plotColor, resolveInputs, showsPriceLabel, type IndicatorInstance } from "./instance";
 import { clampSlot, effectiveScale, otherPaneKeys, paneIndices, paneKeyOf } from "./layout";
 import { LowerFeed, TICK_TF } from "./lower";
-import { trimObjects, trimProfiles } from "./objects";
+import { trimFootprints, trimObjects, trimProfiles } from "./objects";
 import { FillPrimitive, type FillEdge } from "./render/fill";
+import { FootprintPrimitive } from "./render/footprint";
 import { ObjectsPrimitive } from "./render/objects";
 import { ProfilePrimitive } from "./render/profile";
 import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions, scaleId } from "./render/series";
 import type { IndicatorDef, PlotData, TickSource } from "./schema";
 import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
-import { TickBigFeed, TickProfileFeed, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, type LiveMinute } from "./tickProfile";
+import { TickBigFeed, TickFpFeed, TickProfileFeed, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, mergeLiveFp, type LiveMinute } from "./tickProfile";
 
 type Live = {
   inst: IndicatorInstance;
@@ -26,6 +27,7 @@ type Live = {
   fills: FillPrimitive[]; // theo def.fills
   objects: ObjectsPrimitive | null; // line/label/box của def.objects
   profiles: ProfilePrimitive | null; // volume profile của def.profiles
+  footprints: FootprintPrimitive | null; // footprint của def.footprints
   candleColors: string[] | null; // màu ghi đè nến chart chính (đã cắt theo nến chart), null = không tô
   lastNa: boolean[]; // theo plot: giá trị ở nến cuối là na (không hiện nhãn giá cuối, như TV)
   snaps: (Snap | null)[];
@@ -41,6 +43,9 @@ export type CandleColorSink = (colors: Map<number, string> | null, from: number 
 
 /** Giá trị 1 plot ở một nến, cho legend. Plot candles cho 4 giá trị (O, H, L, C), cùng `plot` = id plot. */
 export type PlotValue = { id: string; plot: string; title: string; value: number; color: string };
+
+/** Báo chart chính có indicator footprint đang hiện không (có thì ẩn nến chính đi, footprint tự vẽ nến). */
+export type FootprintSink = (on: boolean) => void;
 
 const DEFAULT_FORMAT = { type: "price" as const, precision: 2, minMove: 0.01 };
 
@@ -90,8 +95,10 @@ export class IndicatorManager {
   });
   private tickProfiles = new TickProfileFeed((symbol, from, to, lay) => fetchTickProfile(symbol, from, to, lay.lo, lay.size, lay.N), () => this.schedule());
   private tickBig = new TickBigFeed(fetchTickBig, () => this.schedule());
+  private tickFp = new TickFpFeed(fetchTickFp, () => this.schedule());
   private liveMinute = new Map<string, LiveMinute[]>(); // symbol -> vài phút tick gần nhất, cuối là phút đang chạy (backend đẩy sau mỗi lô tick)
   private prevColors: string[] | null = null;
+  private fpOn = false;
 
   /** `onSync`: báo sau mỗi lần tính lại để legend đọc giá trị mới. `onCandleColors`: báo khi indicator (Color Candles) đổi màu nến chart. */
   constructor(
@@ -101,6 +108,7 @@ export class IndicatorManager {
     private getTick: () => number = () => 0,
     private getMainSlot: () => number = () => 0, // số pane riêng nằm trên pane chính
     private getMainPane: () => IPaneApi<Time> | null = () => null, // pane chứa nến chính (để đặt vào đúng vị trí sau khi dựng)
+    private onFootprint: FootprintSink = () => {},
   ) {
     chart.timeScale().subscribeVisibleLogicalRangeChange(this.onRange);
   }
@@ -194,7 +202,7 @@ export class IndicatorManager {
       const paneIndex = indices[n];
       const sid = scaleId(effectiveScale(inst, def, keys[n]), inst.uid);
       const series = def.plots.map((p) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, sid));
-      const hasAnchor = !!(def.levels?.length || def.fills?.length || def.objects || def.profiles);
+      const hasAnchor = !!(def.levels?.length || def.fills?.length || def.objects || def.profiles || def.footprints);
       const anchor = hasAnchor ? addAnchorSeries(this.chart, paneIndex, sid) : null;
       if (sid === "left") this.chart.priceScale("left", paneIndex).applyOptions({ visible: true });
       else if (sid !== "right") this.chart.priceScale(sid, paneIndex).applyOptions({ visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } });
@@ -216,7 +224,12 @@ export class IndicatorManager {
         profiles = new ProfilePrimitive();
         anchor!.attachPrimitive(profiles);
       }
-      this.live.push({ inst, def, series, anchor, lines, fills, objects, profiles, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
+      let footprints: FootprintPrimitive | null = null;
+      if (def.footprints) {
+        footprints = new FootprintPrimitive();
+        anchor!.attachPrimitive(footprints);
+      }
+      this.live.push({ inst, def, series, anchor, lines, fills, objects, profiles, footprints, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
     });
     // Series trên được dựng với pane chính ở trên cùng (pane riêng 1..n); đặt pane chính vào đúng chỗ giữa các pane riêng
     const main = this.getMainPane();
@@ -292,6 +305,7 @@ export class IndicatorManager {
     }
     if (this.live.length === 0 || this.bars.length === 0) {
       this.pushCandleColors();
+      this.pushFootprint();
       this.onSync();
       return;
     }
@@ -340,15 +354,24 @@ export class IndicatorManager {
       }
       const shown = instanceShown(l.inst, tf);
       this.applyFills(l, shown);
-      if (l.objects || l.profiles || l.def.candleColors) {
-        const ex = shown ? computeExtras(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars, env) : { objects: null, candleColors: null, profiles: null };
+      if (l.objects || l.profiles || l.footprints || l.def.candleColors) {
+        const ex = shown ? computeExtras(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars, env) : { objects: null, candleColors: null, profiles: null, footprints: null };
         l.objects?.set(ex.objects ? trimObjects(ex.objects, cut) : null);
         l.profiles?.set(ex.profiles ? trimProfiles(ex.profiles, cut) : null);
+        l.footprints?.set(ex.footprints ? trimFootprints(ex.footprints, cut) : null);
         l.candleColors = ex.candleColors ? ex.candleColors.slice(cut) : null;
       }
     }
     this.pushCandleColors();
+    this.pushFootprint();
     this.onSync();
+  }
+
+  private pushFootprint() {
+    const on = this.live.some((l) => l.footprints && instanceShown(l.inst, this.feed.tf));
+    if (on === this.fpOn) return;
+    this.fpOn = on;
+    this.onFootprint(on);
   }
 
   /** Vùng đang nhìn thấy theo chỉ số trong `all` (chart bắt đầu ở `cut`); undefined nếu chưa biết. */
@@ -382,6 +405,11 @@ export class IndicatorManager {
         const cut = liveCut(newest, t0, t1);
         const cells = this.tickBig.get(symbol, t0, t1, min, limit, size, `${cut}:${coverSig(cover, t0, cut)}`, cut);
         return cells && mergeLiveBig(cells, liveFrom(lives, this.tickBig.heldUpTo(symbol, t0, t1, min, limit, size) ?? cut, t0, t1), min, limit, size);
+      },
+      fp: (bars, end, size) => {
+        const cut = liveCut(newest, bars[0], end);
+        const cells = this.tickFp.get(symbol, bars, end, size, `${cut}:${bars.length}:${coverSig(cover, bars[0], cut)}`, cut);
+        return cells && mergeLiveFp(cells, liveFrom(lives, this.tickFp.heldUpTo(symbol, bars, size) ?? cut, bars[0], end), bars, end, size);
       },
     };
   }

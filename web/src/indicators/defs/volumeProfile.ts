@@ -17,7 +17,7 @@ const SESSIONS: Record<string, Period> = { Day: "day", Week: "week", Month: "mon
 
 const layoutInput: InputDef = { key: "layout", label: "Rows Layout", type: "select", default: "Number Of Rows", options: ["Number Of Rows", "Ticks Per Row"] };
 const rowsInput: InputDef = { key: "rows", label: "Row Size", type: "int", default: 24, min: 1, max: 1000 };
-const volumeInput: InputDef = { key: "volume", label: "Volume", type: "select", default: "Up/Down", options: ["Up/Down", "Total", "Delta"] };
+const volumeInput: InputDef = { key: "volume", label: "Volume", type: "select", default: "Up/Down", options: ["Up/Down", "Total", "Delta", "Delta + Total"] };
 const TICKS = "1 tick";
 const aggInput: InputDef = {
   key: "agg", label: "Data aggregation", type: "select", default: TICKS, options: ["Time", TICKS],
@@ -42,7 +42,7 @@ function styleOf(c: Ctx, pinned: boolean): ProfileStyle {
   const { inputs, items } = c;
   const line = (id: string) => ({ show: items[id].visible, color: items[id].color, width: items[id].width, style: items[id].style });
   return {
-    volume: str(inputs, "volume") === "Total" ? "total" : str(inputs, "volume") === "Delta" ? "delta" : "updown",
+    volume: ({ Total: "total", Delta: "delta", "Delta + Total": "deltatotal" } as const)[str(inputs, "volume") as "Total" | "Delta" | "Delta + Total"] ?? "updown",
     width: num(inputs, "width"),
     place: str(inputs, "place") === "Right" ? "right" : "left",
     values: !!inputs.values,

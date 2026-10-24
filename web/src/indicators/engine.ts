@@ -3,7 +3,7 @@ import type { CalendarOpts } from "./calendar";
 import { resolveInputs, type IndicatorInstance } from "./instance";
 import { sanitizeObjects } from "./objects";
 import { itemStyles } from "./style";
-import type { Computed, Ctx, IndicatorDef, ObjectSet, PlotData, ProfileSet, TickSource } from "./schema";
+import type { Computed, Ctx, FootprintSet, IndicatorDef, ObjectSet, PlotData, ProfileSet, TickSource } from "./schema";
 import { nan, source, type Num } from "./ta";
 
 /** Dịch `a` sang phải `offset` phần tử (âm = sang trái); dương thì mảng dài thêm `offset` (vùng tương lai). Chỗ trống là `fill`. */
@@ -59,14 +59,19 @@ export function computeInstance(def: IndicatorDef, inst: IndicatorInstance, bars
 }
 
 /** Phần không phải chuỗi theo nến: object line/label/box và màu ghi đè nến chart chính (null = def không có / trả sai độ dài). */
-export type Extras = { objects: ObjectSet | null; candleColors: string[] | null; profiles: ProfileSet | null };
+export type Extras = { objects: ObjectSet | null; candleColors: string[] | null; profiles: ProfileSet | null; footprints: FootprintSet | null };
 
 export function computeExtras(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = [], env: Env = {}): Extras {
-  if (!def.objects && !def.candleColors && !def.profiles) return { objects: null, candleColors: null, profiles: null };
+  if (!def.objects && !def.candleColors && !def.profiles && !def.footprints) return { objects: null, candleColors: null, profiles: null, footprints: null };
   const ctx = makeCtx(def, inst, bars, calendar, lower, env);
   const objects = def.objects ? sanitizeObjects(def.objects(ctx)) : null;
   const colors = def.candleColors?.(ctx);
-  return { objects, candleColors: colors && colors.length === bars.length ? colors : null, profiles: def.profiles ? def.profiles(ctx) : null };
+  return {
+    objects,
+    candleColors: colors && colors.length === bars.length ? colors : null,
+    profiles: def.profiles ? def.profiles(ctx) : null,
+    footprints: def.footprints ? def.footprints(ctx) : null,
+  };
 }
 
 /** Bỏ `cut` nến đầu (lịch sử nạp ngầm): chỉ phần trùng với nến chart mới được vẽ, để trục thời gian của chart không đổi. */

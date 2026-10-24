@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import threading
+from bisect import bisect_right
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -83,6 +84,22 @@ class BarStore:
         rows.sort(key=lambda r: (r[0], r[1]))
         return rows
 
+    def tickfp(self, symbol: str, bars: List[int], end: int, size: float) -> List[Tuple[int, int, float, float]]:
+        """Footprint: tick của các phút [bars[0], end) gom theo (nến, row giá). `bars` = giờ mở các nến tăng dần (nến k phủ [bars[k], bars[k+1]), nến cuối tới `end`),
+        row i phủ giá [i*size, (i+1)*size). Trả (k, i, volume lên, volume xuống) tăng dần theo k rồi i."""
+        if not bars or size <= 0 or end <= bars[0]:
+            return []
+        sql = ("SELECT t, CAST(p / ? + 1e-6 AS INTEGER) AS i, SUM(up), SUM(dn) FROM tickvp WHERE symbol=? AND t>=? AND t<? AND up+dn>0 GROUP BY t, i")
+        with self._rlock:
+            rows = self.rdb.execute(sql, (size, symbol, bars[0], end)).fetchall()
+        acc: Dict[Tuple[int, int], List[float]] = {}
+        for t, i, u, d in rows:
+            k = bisect_right(bars, t) - 1
+            cell = acc.setdefault((k, i), [0.0, 0.0])
+            cell[0] += u
+            cell[1] += d
+        return [(k, i, u, d) for (k, i), (u, d) in sorted(acc.items())]
+
     def upsert(self, symbol: str, tf: str, bars: List[Dict[str, Any]]) -> None:
         rows = [(symbol, tf, int(b["t"]), b["o"], b["h"], b["l"], b["c"], b["v"]) for b in bars]
         with self._lock:
@@ -119,7 +136,7 @@ class BarStore:
         return dest
 
 
-TABLES = ("layouts", "drawings", "scripts", "watchlists", "settings", "symbols")
+TABLES = ("layouts", "drawings", "scripts", "watchlists", "settings", "symbols", "prefs")
 
 
 class MetaStore:

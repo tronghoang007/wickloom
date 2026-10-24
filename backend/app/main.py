@@ -88,6 +88,19 @@ def get_tickbig(symbol: str, frm: int = Query(alias="from"), to: int = 0, min: f
     return {"rows": [list(r) for r in state.bars.tickbig(symbol, frm, to, min, limit, size)]}
 
 
+@app.get("/tickfp")
+def get_tickfp(symbol: str, bars: str, end: int, size: float = Query(gt=0)):
+    """Footprint "1 tick": tick của các phút [bars[0], end) gom theo (nến, row giá cao `size`, row i phủ [i*size, (i+1)*size)). `bars` = giờ mở các nến, cách nhau dấu phẩy, tăng dần (tối đa 1000).
+    rows = [chỉ số nến trong `bars`, row, volume lên, volume xuống]."""
+    try:
+        starts = [int(x) for x in bars.split(",") if x]
+    except ValueError:
+        raise HTTPException(422, "bars must be comma separated integers")
+    if not starts or len(starts) > 1000 or any(b <= a for a, b in zip(starts, starts[1:])):
+        raise HTTPException(422, "bars must be 1..1000 ascending times")
+    return {"rows": [list(r) for r in state.bars.tickfp(symbol, starts, end, size)]}
+
+
 @app.post("/backfill")
 def backfill(symbol: str, tf: str, count: int = 500, pos: int = 0, before: int = 0):
     request_backfill(symbol, tf, count, pos, before)

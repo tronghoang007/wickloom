@@ -1,4 +1,4 @@
-import type { ObjBox, ObjLabel, ObjLine, ObjectSet, ProfileSet } from "./schema";
+import type { FootprintSet, ObjBox, ObjLabel, ObjLine, ObjectSet, ProfileSet } from "./schema";
 
 /** `max_lines_count` / `max_labels_count` / `max_boxes_count` lớn nhất của Pine. */
 export const MAX_OBJECTS = 500;
@@ -54,6 +54,11 @@ export function trimObjects(s: ObjectSet, cut: number): ObjectSet {
 /** Như `trimObjects` cho volume profile: dịch chỉ số nến đầu/cuối của từng phiên sang trái `cut` (profile ghim không dùng x nên giữ nguyên). */
 export function trimProfiles(s: ProfileSet, cut: number): ProfileSet {
   return cut === 0 || s.style.pinned ? s : { ...s, profiles: s.profiles.map((p) => ({ ...p, x1: p.x1 - cut, x2: p.x2 - cut })) };
+}
+
+/** Như `trimObjects` cho footprint: bỏ nến lịch sử ngầm (x < cut) và dịch chỉ số nến sang trái `cut`. */
+export function trimFootprints(s: FootprintSet, cut: number): FootprintSet {
+  return cut === 0 ? s : { ...s, bars: s.bars.filter((b) => b.x >= cut).map((b) => ({ ...b, x: b.x - cut })) };
 }
 
 /** Chỉ số (lẻ) của mốc thời gian `t` trong `times` tăng dần: nến có `t` thì đúng chỉ số đó, giữa hai nến thì nến đứng trước,

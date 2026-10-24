@@ -151,6 +151,12 @@ export const AreaIcon = () => (
     <path d="M4.5 19.5l6-7 4 4 8.5-9.5V22.5h-18.5z" />
   </Svg>
 );
+export const FootprintI = () => (
+  <Svg>
+    <path d="M14 3.5v21" />
+    <path d="M7.5 8.5h4.5M7.5 12.5h4.5M7.5 16.5h4.5M7.5 20.5h4.5M16 8.5h4.5M16 12.5h4.5M16 16.5h4.5M16 20.5h4.5" />
+  </Svg>
+);
 export const Heikin = () => (
   <Svg>
     <path d="M10.5 4.5v4M10.5 19.5v4M17.5 6.5v4M17.5 18.5v4" />

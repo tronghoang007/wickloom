@@ -13,13 +13,17 @@ import type {
 import type { LineStyleName, ProfileSet, ProfileStyle } from "../schema";
 
 export type RowSeg = { x0: number; x1: number; color: string; alpha: number };
-export type RowLayout = { i: number; priceLo: number; priceHi: number; segs: RowSeg[]; len: number; shown: number };
-export type ProfileLayout = { rows: RowLayout[]; lines: { kind: "poc" | "vah" | "val"; price: number }[]; base: number; dir: 1 | -1 };
+export type RowLabel = { x: number; text: string; align: "left" | "right" };
+/** `labels`: nhãn riêng của row (Delta + Total: delta bên trái, total bên phải); không có thì một nhãn `shown` ở cuối thanh. */
+export type RowLayout = { i: number; priceLo: number; priceHi: number; segs: RowSeg[]; len: number; shown: number; labels?: RowLabel[] };
+/** `axis`: hoành độ trục giữa của Delta + Total (delta kéo sang trái, total sang phải). */
+export type ProfileLayout = { rows: RowLayout[]; lines: { kind: "poc" | "vah" | "val"; price: number }[]; base: number; dir: 1 | -1; axis?: number };
 
 const VA_ALPHA = 0.75;
 const OUT_ALPHA = 0.4;
 
 /** Bố cục histogram của một profile trong khoảng ngang [left, right] (cùng đơn vị): mỗi row là một hoặc hai đoạn ngang (Up/Down) hay một đoạn (Total / Delta),
+ *  hoặc hai đoạn ngược chiều quanh một trục (Delta + Total: bề rộng histogram chia đôi, delta theo |delta| / row lệch nhất sang trái, total theo volume / row lớn nhất sang phải);
  *  row nằm trong Value Area đậm hơn; kèm giá POC / VAH / VAL. Cùng cách vẽ với FRVP / AVP của drawings. */
 export function layoutProfile(vp: Profile, st: ProfileStyle, left: number, right: number): ProfileLayout {
   const { lo, hi, size, N, up, dn, total, mv, poc, vl, vh } = vp;
@@ -28,6 +32,7 @@ export function layoutProfile(vp: Profile, st: ProfileStyle, left: number, right
   const base = dir === 1 ? left : right;
   const delta = up.map((u, i) => u - dn[i]);
   const maxDelta = Math.max(...delta.map(Math.abs));
+  const axis = (dir === 1 ? base : base - histW) + histW / 2;
   const rows: RowLayout[] = [];
   for (let i = 0; i < N; i++) {
     const inVa = i >= vl && i <= vh;
@@ -36,7 +41,17 @@ export function layoutProfile(vp: Profile, st: ProfileStyle, left: number, right
     const downColor = inVa ? st.vaDown : st.down;
     const segs: RowSeg[] = [];
     let len = (total[i] / mv) * histW;
-    if (st.volume === "delta") {
+    let labels: RowLabel[] | undefined;
+    if (st.volume === "deltatotal") {
+      const lenD = maxDelta > 0 ? (Math.abs(delta[i]) / maxDelta) * (histW / 2) : 0;
+      len = (total[i] / mv) * (histW / 2);
+      if (lenD > 0) segs.push({ x0: axis, x1: axis - lenD, color: delta[i] > 0 ? upColor : downColor, alpha });
+      if (len > 0) segs.push({ x0: axis, x1: axis + len, color: upColor, alpha });
+      labels = [
+        ...(Math.round(delta[i]) !== 0 ? [{ x: axis - lenD - 3, text: String(Math.round(delta[i])), align: "right" as const }] : []),
+        ...(Math.round(total[i]) !== 0 ? [{ x: axis + len + 3, text: String(Math.round(total[i])), align: "left" as const }] : []),
+      ];
+    } else if (st.volume === "delta") {
       len = maxDelta > 0 ? (Math.abs(delta[i]) / maxDelta) * histW : 0;
       if (len > 0) segs.push({ x0: base, x1: base + dir * len, color: delta[i] > 0 ? upColor : downColor, alpha });
     } else if (st.volume === "total") {
@@ -47,12 +62,13 @@ export function layoutProfile(vp: Profile, st: ProfileStyle, left: number, right
       if (wUp > 0) segs.push({ x0: base, x1: base + dir * wUp, color: upColor, alpha });
       if (wDn > 0) segs.push({ x0: base + dir * wUp, x1: base + dir * (wUp + wDn), color: downColor, alpha });
     }
-    rows.push({ i, priceLo: lo + size * i, priceHi: Math.min(hi, lo + size * (i + 1)), segs, len, shown: st.volume === "delta" ? delta[i] : total[i] });
+    rows.push({ i, priceLo: lo + size * i, priceHi: Math.min(hi, lo + size * (i + 1)), segs, len, shown: st.volume === "delta" ? delta[i] : total[i], ...(labels ? { labels } : {}) });
   }
   return {
     rows,
     base,
     dir,
+    ...(st.volume === "deltatotal" ? { axis } : {}),
     lines: [
       { kind: "vah", price: Math.min(hi, lo + size * (vh + 1)) },
       { kind: "val", price: lo + size * vl },
@@ -132,9 +148,30 @@ export class ProfilePrimitive implements ISeriesPrimitive<Time> {
                 ctx.fillRect(Math.min(s.x0, s.x1) * hpr, top * vpr, Math.abs(s.x1 - s.x0) * hpr, (barBottom - top) * vpr);
               }
               ctx.globalAlpha = 1;
-              if (st.values && Math.round(r.shown) !== 0) {
+              if (st.values && r.labels) {
+                ctx.fillStyle = "#b2b5be";
+                for (const l of r.labels) {
+                  ctx.textAlign = l.align;
+                  ctx.fillText(l.text, l.x * hpr, ((yb + yt) / 2) * vpr);
+                }
+                ctx.textAlign = lay.dir === 1 ? "left" : "right";
+              } else if (st.values && Math.round(r.shown) !== 0) {
                 ctx.fillStyle = "#b2b5be";
                 ctx.fillText(String(Math.round(r.shown)), (lay.base + lay.dir * (r.len + 3)) * hpr, ((yb + yt) / 2) * vpr);
+              }
+            }
+            if (lay.axis !== undefined && lay.rows.length > 0) {
+              // trục giữa của Delta + Total: nét mảnh từ đáy row thấp nhất tới đỉnh row cao nhất
+              const yLow = series.priceToCoordinate(lay.rows[0].priceLo);
+              const yHigh = series.priceToCoordinate(lay.rows[lay.rows.length - 1].priceHi);
+              if (yLow !== null && yHigh !== null) {
+                ctx.strokeStyle = "#787b86";
+                ctx.lineWidth = Math.max(1, Math.round(hpr));
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                ctx.moveTo(Math.round(lay.axis * hpr) + 0.5, yLow * vpr);
+                ctx.lineTo(Math.round(lay.axis * hpr) + 0.5, yHigh * vpr);
+                ctx.stroke();
               }
             }
             const xEnd = st.extend || st.pinned ? W : right;

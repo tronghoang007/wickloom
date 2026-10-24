@@ -9,7 +9,7 @@ import { byId } from "@/indicators/catalog";
 import type { IndicatorInstance } from "@/indicators/instance";
 import { MAIN_PANE, clampSlot, otherPaneKeys, paneIndices, paneKeyOf } from "@/indicators/layout";
 import PaneChrome, { type PaneGroup } from "./PaneChrome";
-import { paneAt, paneRects } from "./panes";
+import { VERT_DRAG_PX, paneAt, paneRects, panPriceRange } from "./panes";
 
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay } from "@/replay/store";
@@ -73,15 +73,19 @@ import { heikinAshi } from "./transform";
 type Fmt = { precision: number };
 
 // Màu nến/bar + nhãn giá cuối theo Settings (Symbol / Scales and lines).
-function seriesStyle(cs: ChartSettings, type: ChartType) {
+function seriesStyle(cs: ChartSettings, type: ChartType, hideCandles = false) {
   const label = {
     // Nhãn giá cuối tự vẽ (xem effect "last price label") nên tắt nhãn của lightweight-charts.
     lastValueVisible: false,
     priceLineVisible: cs.symbolLabel === "value_line" || cs.symbolLabel === "line",
   };
+  const clear = "rgba(0,0,0,0)";
+  // Volume footprint tự vẽ nến của nó: series chính vẫn còn (thang giá, đường giá cuối, crosshair) nhưng trong suốt
+  if (hideCandles && (type === "candles" || type === "heikin"))
+    return { ...label, upColor: clear, downColor: clear, borderVisible: false, wickVisible: false };
+  if (hideCandles && type === "bars") return { ...label, upColor: clear, downColor: clear };
   if (type === "bars") return { ...label, upColor: cs.bodyUp, downColor: cs.bodyDown };
   if (type === "line" || type === "area") return label;
-  const clear = "rgba(0,0,0,0)";
   return {
     ...label,
     upColor: cs.body ? cs.bodyUp : clear,
@@ -339,6 +343,8 @@ export default function Chart({ paneId }: { paneId: string }) {
   const [mainTop, setMainTop] = useState(0); // mép trên pane chính trong khung chart (0 khi nó nằm trên cùng)
   const [mainSqueezed, setMainSqueezed] = useState(false); // pane chính bị ép thấp (pane khác đang phóng to): legend chính bớt hàng
   const [indVer, setIndVer] = useState(0); // indicator vừa tính lại: render lại để legend đọc giá trị mới
+  const [autoOn, setAutoOn] = useState(true); // thang giá pane chính đang tự co giãn (nút "auto" ở thanh dưới)
+  const [fpOn, setFpOn] = useState(false); // có Volume footprint đang hiện: nến chính trong suốt (footprint tự vẽ nến)
   const [hover, setHover] = useState<{
     x: number;
     y: number;
@@ -707,6 +713,62 @@ export default function Chart({ paneId }: { paneId: string }) {
       passive: false,
     });
 
+    // Kéo chart lên / xuống như TV: lightweight-charts chỉ dịch giá khi thang giá KHÔNG tự co giãn (sau F5 nó đang tự co giãn nên kéo dọc không làm gì).
+    // Lần kéo dọc đầu tiên (>= VERT_DRAG_PX) tắt tự co giãn của pane đó rồi dịch khoảng giá theo chuột; kéo ngang thì thang giá vẫn tự co giãn.
+    // Bật lại bằng nút "auto" (hoặc double-click trục giá, lightweight-charts có sẵn). Chế độ log / % do lightweight-charts tự xử lý (không dịch tay được).
+    type PriceDrag = { pi: number; y0: number; range: { from: number; to: number } | null; engaged: boolean };
+    let priceDrag: PriceDrag | null = null;
+    const syncAuto = () => setAutoOn(chart.priceScale("right", mainIndex()).options().autoScale);
+    const scrollOn = () => {
+      const hs = chart.options().handleScroll;
+      return typeof hs === "object" ? !!hs.pressedMouseMove : !!hs; // DrawingManager tắt khi đang vẽ / kéo hình
+    };
+    const onPriceDragDown = (e: PointerEvent) => {
+      priceDrag = null;
+      if (e.button !== 0 || !(e.target instanceof HTMLCanvasElement)) return;
+      const r = box.getBoundingClientRect();
+      const x = e.clientX - r.left;
+      const y = e.clientY - r.top;
+      if (x >= chart.timeScale().width() || y >= r.height - chart.timeScale().height()) return; // trục giá / trục thời gian
+      const pi = paneAt(paneRects(chart, box), y);
+      if (pi < 0) return;
+      const scale = chart.priceScale("right", pi);
+      if (!scale.options().autoScale || scale.options().mode !== PriceScaleMode.Normal) return; // đã tắt tự co giãn thì lightweight-charts tự dịch
+      priceDrag = { pi, y0: e.clientY, range: null, engaged: false };
+    };
+    const onPriceDragMove = (e: PointerEvent) => {
+      const d = priceDrag;
+      if (!d) return;
+      if (!(e.buttons & 1) || !scrollOn()) {
+        priceDrag = null;
+        return;
+      }
+      const scale = chart.priceScale("right", d.pi);
+      if (!d.engaged) {
+        if (Math.abs(e.clientY - d.y0) < VERT_DRAG_PX) return;
+        d.range = scale.getVisibleRange();
+        if (!d.range) {
+          priceDrag = null;
+          return;
+        }
+        d.engaged = true;
+        scale.setAutoScale(false);
+        syncAuto();
+      }
+      if (d.range) scale.setVisibleRange(panPriceRange(d.range, e.clientY - d.y0, chart.paneSize(d.pi).height));
+    };
+    const onPriceDragEnd = () => {
+      priceDrag = null;
+      syncAuto();
+    };
+    box.addEventListener("pointerdown", onPriceDragDown, true);
+    box.addEventListener("pointermove", onPriceDragMove, true);
+    box.addEventListener("pointerup", onPriceDragEnd, true);
+    box.addEventListener("pointercancel", onPriceDragEnd, true);
+    box.addEventListener("wheel", syncAuto, { capture: true, passive: true });
+    box.addEventListener("dblclick", syncAuto, true);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(syncAuto); // đổi symbol / khung nạp lại dữ liệu cũng bật lại tự co giãn
+
     volRef.current = chart.addSeries(HistogramSeries, {
       priceScaleId: "vol",
       priceFormat: { type: "volume" },
@@ -744,6 +806,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           ?.tick_size ?? 10 ** -digitsRef.current,
       () => pane.indicators.getState().mainSlot,
       mainPane,
+      (on) => setFpOn(on),
     );
     drawRef.current = new DrawingManager({
       pane,
@@ -957,6 +1020,13 @@ export default function Chart({ paneId }: { paneId: string }) {
       box.removeEventListener("mouseenter", onEnter);
       box.removeEventListener("mouseleave", onLeave);
       box.removeEventListener("wheel", onAxisWheel, { capture: true });
+      box.removeEventListener("pointerdown", onPriceDragDown, true);
+      box.removeEventListener("pointermove", onPriceDragMove, true);
+      box.removeEventListener("pointerup", onPriceDragEnd, true);
+      box.removeEventListener("pointercancel", onPriceDragEnd, true);
+      box.removeEventListener("wheel", syncAuto, true);
+      box.removeEventListener("dblclick", syncAuto, true);
+      try { chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncAuto); } catch { /* chart đã bị huỷ */ }
       drawRef.current?.destroy();
       indRef.current?.destroy();
       drawRef.current = null;
@@ -1012,11 +1082,11 @@ export default function Chart({ paneId }: { paneId: string }) {
 
   // Symbol settings: màu nến, nhãn/đường giá cuối, các đường giá phụ
   useEffect(() => {
-    seriesRef.current?.applyOptions(seriesStyle(cs, chartType));
+    seriesRef.current?.applyOptions(seriesStyle(cs, chartType, fpOn));
     render();
     updateLines();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cs, chartType]);
+  }, [cs, chartType, fpOn]);
 
   // Volume theo Settings riêng của nó (hiện/ẩn, nhãn trục, độ chính xác, màu, MA); chỉnh là áp ngay
   const vs = usePaneState(pane.volume, (st) => st.s);
@@ -1911,6 +1981,18 @@ export default function Chart({ paneId }: { paneId: string }) {
           <TimezoneMenu clock={clock} />
           {scaleBtn("percent", "%")}
           {scaleBtn("log", "log")}
+          <button
+            title="Auto (fits data to screen)"
+            onClick={() => {
+              const s = chartRef.current?.priceScale("right", mainIndex());
+              if (!s) return;
+              s.setAutoScale(!s.options().autoScale);
+              setAutoOn(s.options().autoScale);
+            }}
+            className={`rounded px-1.5 py-0.5 hover:bg-[var(--hover)] ${autoOn ? "text-[var(--accent-text)]" : ""}`}
+          >
+            auto
+          </button>
         </div>
       </div>
     </div>

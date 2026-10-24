@@ -229,9 +229,10 @@ def two_users():
 
 def test_me_requires_login():
     c = client()
-    for path in ("/me/watchlist", "/me/layouts", "/me/layouts/x", "/me/drawings", "/me/drawings/x"):
+    for path in ("/me/watchlist", "/me/prefs", "/me/layouts", "/me/layouts/x", "/me/drawings", "/me/drawings/x"):
         assert c.get(path).status_code == 401, path
     assert c.put("/me/watchlist", json={"symbols": []}).status_code == 401
+    assert c.put("/me/prefs", json={"toolDefaults": {}}).status_code == 401
     assert c.put("/me/layouts/x", json={}).status_code == 401
     assert c.delete("/me/drawings/x").status_code == 401
 
@@ -243,6 +244,23 @@ def test_me_watchlist_roundtrip_hides_user_prefix():
     assert c.put("/me/watchlist", json={"symbols": ["XAUUSDm", "BTCUSDm"]}).status_code == 200
     r = c.get("/me/watchlist").json()
     assert r == {"id": "default", "data": {"symbols": ["XAUUSDm", "BTCUSDm"]}}
+
+
+def test_me_prefs_roundtrip_isolation_and_owner():
+    a, b = two_users()
+    assert a.get("/me/prefs").status_code == 404
+    doc = {"v": 1, "toolDefaults": {"frvp": {"color": "#2962ff", "opts": {"rows": 240}}}}
+    assert a.put("/me/prefs", json=doc).status_code == 200
+    assert a.get("/me/prefs").json() == {"id": "default", "data": doc}
+    assert b.get("/me/prefs").status_code == 404  # user khác không thấy
+    b.put("/me/prefs", json={"toolDefaults": {}})
+    assert a.get("/me/prefs").json()["data"] == doc  # và không đè được
+    assert a.put("/me/prefs", json={"toolDefaults": {"avp": {}}}).status_code == 200  # PUT thay cả document
+    assert a.get("/me/prefs").json()["data"] == {"toolDefaults": {"avp": {}}}
+    uid = a.get("/auth/me").json()["user"]["id"]
+    row = state.meta.get("prefs", f"{uid}:default")
+    assert row and row["scope"] == uid
+    assert state.meta.get("prefs", "default") is None
 
 
 @pytest.mark.parametrize("table", ["layouts", "drawings"])

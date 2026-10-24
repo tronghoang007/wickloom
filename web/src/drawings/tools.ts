@@ -63,10 +63,12 @@ export type ToolSpec = {
   colorLabel?: string; // tên ô màu đường trong Settings (Table của TV: "Border")
 };
 
-// opts riêng của từng hình (nội dung Table, vị trí ghim): không lưu làm mặc định cho lần vẽ sau
-const INSTANCE_OPTS = ["cells", "rows", "cols", "anchored", "ax", "ay"];
-export const defaultOpts = (opts: Drawing["opts"]) =>
-  opts && Object.fromEntries(Object.entries(opts).filter(([k]) => !INSTANCE_OPTS.includes(k)));
+// opts riêng của từng hình (nội dung Table, vị trí ghim): không lưu làm mặc định cho lần vẽ sau.
+// `rows` / `cols` chỉ là số hàng / cột của Table; ở FRVP / AVP `rows` là Row Size nên PHẢI lưu (trước đây bị loại chung: đổi Row Size 24 -> 240, vẽ lại thì về 24).
+const INSTANCE_OPTS = ["cells", "anchored", "ax", "ay"];
+const TABLE_OPTS = ["rows", "cols"];
+export const defaultOpts = (opts: Drawing["opts"], type?: string) =>
+  opts && Object.fromEntries(Object.entries(opts).filter(([k]) => !INSTANCE_OPTS.includes(k) && !(type === "table" && TABLE_OPTS.includes(k))));
 
 // Tùy chọn dạng bật/tắt hoặc chọn 1 trong danh sách, đặt tên theo thuộc tính của TV
 export type ToolOption = { key: string; label: string; section?: string } & (
@@ -552,6 +554,8 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
   // Delta = up − down của từng row: thanh dài theo |delta| (so với row lệch nhất), màu theo dấu
   const delta = up.map((u, i) => u - dn[i]);
   const maxDelta = Math.max(...delta.map(Math.abs));
+  // Delta + Total: histogram chia đôi quanh một trục, delta (theo |delta| / row lệch nhất) sang trái, total (theo volume / row lớn nhất) sang phải
+  const axis = (dir === 1 ? base : base - histW) + histW / 2;
 
   for (let i = 0; i < N; i++) {
     const rowLow = lo + size * i, rowHigh = Math.min(hi, lo + size * (i + 1));
@@ -567,6 +571,18 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
       poly([{ x: a, y: barBottom }, { x: b, y: barBottom }, { x: b, y: top }, { x: a, y: top }], { closed: true, fill: color.length > 7 ? 1 : inVa ? 0.75 : 0.4, noStroke: true, color });
     const wUp = (up[i] / mv) * histW, wDn = (dn[i] / mv) * histW;
     let len = (total[i] / mv) * histW; // chiều dài thanh, để đặt nhãn Values
+    if (o.volume === "deltatotal") {
+      const lenD = maxDelta > 0 ? (Math.abs(delta[i]) / maxDelta) * (histW / 2) : 0;
+      len = (total[i] / mv) * (histW / 2);
+      if (lenD > 0) out.push(rect(axis, axis - lenD, delta[i] > 0 ? (inVa ? o.vaUp : o.up) : inVa ? o.vaDown : o.down));
+      if (len > 0) out.push(rect(axis, axis + len, inVa ? o.vaUp : o.up));
+      if (o.values) {
+        const y = (yb + yt) / 2;
+        if (Math.round(delta[i]) !== 0) out.push(txt({ x: axis - lenD - 3, y }, String(Math.round(delta[i])), { size: 9, align: "right" }));
+        if (Math.round(total[i]) !== 0) out.push(txt({ x: axis + len + 3, y }, String(Math.round(total[i])), { size: 9, align: "left" }));
+      }
+      continue;
+    }
     if (o.volume === "delta") {
       len = maxDelta > 0 ? (Math.abs(delta[i]) / maxDelta) * histW : 0;
       if (len > 0) out.push(rect(base, base + dir * len, delta[i] > 0 ? (inVa ? o.vaUp : o.up) : inVa ? o.vaDown : o.down));
@@ -579,6 +595,10 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
     if (o.values && Math.round(shown) !== 0) out.push(txt({ x: base + dir * (len + 3), y: (yb + yt) / 2 }, String(Math.round(shown)), { size: 9, align: dir === 1 ? "left" : "right" }));
   }
 
+  if (o.volume === "deltatotal") {
+    const yLow = c.Y(lo), yHigh = c.Y(hi);
+    if (yLow !== null && yHigh !== null) out.push(seg({ x: axis, y: yLow }, { x: axis, y: yHigh }, { color: "#787b86", w: 1 }));
+  }
   const line = (price: number, color: string, extra: O) => {
     const y = c.Y(price);
     if (y === null) return;

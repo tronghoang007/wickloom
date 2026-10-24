@@ -56,7 +56,7 @@ describe("catalog toàn vẹn", () => {
         if (f.colorDown) expect(f.colorDown).toMatch(hex);
       }
       for (const i of d.inputs) if (i.type === "select") expect(i.options, `${d.id}.${i.key}`).toContain(i.default);
-      expect(d.plots.some((p) => !p.hidden) || !!d.objects || !!d.profiles, d.id).toBe(true); // vẽ bằng plot, object hoặc profile
+      expect(d.plots.some((p) => !p.hidden) || !!d.objects || !!d.profiles || !!d.footprints, d.id).toBe(true); // vẽ bằng plot, object, profile hoặc footprint
     }
   });
 

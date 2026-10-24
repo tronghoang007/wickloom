@@ -85,6 +85,21 @@ export async function fetchTickBig(symbol: string, from: number, to: number, min
   }
 }
 
+/** Một ô footprint: [chỉ số nến trong danh sách gửi đi, row giá (phủ [row*size, (row+1)*size)), volume lên, volume xuống]. */
+export type FpCell = [bar: number, row: number, up: number, dn: number];
+
+/** Tick của các phút [bars[0], end) gom theo (nến, row giá cao `size`) (backend /tickfp); `bars` = giờ mở các nến tăng dần (tối đa 1000). null nếu lỗi. */
+export async function fetchTickFp(symbol: string, bars: number[], end: number, size: number): Promise<FpCell[] | null> {
+  const q = new URLSearchParams({ symbol, bars: bars.join(","), end: String(end), size: String(size) });
+  try {
+    const r = await fetch(`${API}/tickfp?${q}`);
+    const j = r.ok ? await r.json() : null;
+    return j && Array.isArray(j.rows) ? (j.rows as FpCell[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Giây: giờ broker − UTC (EA báo cho backend); 0 nếu backend chưa biết / không trả lời. */
 export async function fetchBrokerOffset(): Promise<number> {
   try {

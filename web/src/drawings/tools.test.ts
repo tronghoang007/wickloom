@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import { textBox, type Shape } from "./shapes";
-import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, profileSource, regression, SPEC, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
+import { computeProfile, defaultOpts, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, profileSource, regression, SPEC, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
 import type { TickSource } from "@/volumeProfile/compute";
 import type { Anchor } from "./types";
 
@@ -1113,3 +1113,18 @@ describe("FRVP giống TV: hộp, đường, màu, handle", () => {
     expect(SPEC.frvp.inBars).toBe(true);
   });
 });
+
+describe("defaultOpts: tuỳ chọn lưu làm mặc định cho lần vẽ sau", () => {
+  it("FRVP / AVP giữ Row Size (rows): đổi 24 -> 240 thì lần vẽ sau vẫn 240", () => {
+    expect(defaultOpts({ layout: "rows", rows: 240, volume: "deltatotal" }, "frvp")).toEqual({ layout: "rows", rows: 240, volume: "deltatotal" });
+    expect(defaultOpts({ rows: 240 }, "avp")).toEqual({ rows: 240 });
+  });
+  it("Table không lưu số hàng / cột / ô; mọi hình không lưu vị trí ghim", () => {
+    expect(defaultOpts({ rows: 5, cols: 4, cells: "x", fontSize: "12" }, "table")).toEqual({ fontSize: "12" });
+    expect(defaultOpts({ anchored: true, ax: 10, ay: 20, extend: true }, "frvp")).toEqual({ extend: true });
+  });
+  it("không có opts: undefined", () => {
+    expect(defaultOpts(undefined, "frvp")).toBeUndefined();
+  });
+});
+

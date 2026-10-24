@@ -32,3 +32,13 @@ export function squeezedHeights(total: number, weights: number[], squeezed: Set<
   const sum = free.reduce((s, i) => s + weights[i], 0);
   return weights.map((_, i) => (squeezed.has(i) ? min : sum > 0 ? (rest * weights[i]) / sum : rest / free.length));
 }
+
+/** Kéo chart lên / xuống `dy` px (dương = chuột đi xuống = nội dung đi xuống, khoảng giá nhìn thấy dịch lên) trong pane cao `height` px: dịch khoảng giá theo số giá mỗi px, như `scrollTo` của lightweight-charts. */
+export function panPriceRange(range: { from: number; to: number }, dy: number, height: number): { from: number; to: number } {
+  const shift = (dy * (range.to - range.from)) / Math.max(1, height - 1);
+  return { from: range.from + shift, to: range.to + shift };
+}
+
+/** Kéo dọc chừng này px thì coi là kéo giá (dưới ngưỡng: kéo ngang có rung tay thì thang giá vẫn tự co giãn như TV). */
+export const VERT_DRAG_PX = 3;
+

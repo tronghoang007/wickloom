@@ -17,6 +17,7 @@ import { drawingGlobal } from "@/drawings/store";
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal, useChartStore } from "@/store/chart";
 import { appSession } from "@/store/appSession";
+import { PrefsSync } from "@/store/prefsSync";
 import { loadPaneInit } from "@/store/paneStorage";
 import { useEffect, useState } from "react";
 
@@ -31,18 +32,21 @@ export default function Page() {
   useEffect(() => {
     let active = true;
     let started = false;
+    const prefs = new PrefsSync(); // mặc định công cụ vẽ theo tài khoản
     // Đọc state chart đã lưu (kể cả key cũ cần migrate) TRƯỚC khi các store chung rehydrate: chúng ghi lại các key cũ
     const init = loadPaneInit(localStorage);
     Promise.all([chartGlobal.persist.rehydrate(), drawingGlobal.persist.rehydrate()]).then(() => {
       if (!active) return;
       // chọn layout ban đầu (cache của user lần trước / khách), nghe đăng nhập–đăng xuất, tự lưu
       appSession().start({ guestInit: init });
+      prefs.start();
       started = true;
       setPrefsReady(true);
     });
     return () => {
       active = false;
       if (started) appSession().stop();
+      prefs.stop();
     };
   }, []);
 
