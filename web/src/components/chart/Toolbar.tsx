@@ -116,7 +116,7 @@ export default function Toolbar() {
       : document.documentElement.requestFullscreen();
 
   return (
-    <div className="flex h-[38px] items-center border-b border-[var(--border)] pr-1">
+    <div className="flex h-[38px] items-center border-b border-[var(--border)] bg-[var(--page)] pr-1">
       <div className="flex w-[52px] shrink-0 items-center justify-center">
         <AccountMenu />
       </div>

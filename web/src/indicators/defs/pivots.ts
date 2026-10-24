@@ -2,7 +2,7 @@ import type { Bar } from "@/lib/api";
 import { periodKeys, type Period } from "../calendar";
 import { ObjectBuilder } from "../objects";
 import { num, str, type IndicatorDef, type ItemDef } from "../schema";
-import { length } from "./common";
+import { length, sessionInputs, withSession } from "./common";
 
 // Pivot Points Standard: từ H/L/C (và O) của kỳ TRƯỚC tính các mức, vẽ ngang suốt kỳ HIỆN TẠI. Kỳ theo giờ broker.
 
@@ -110,6 +110,7 @@ export const pivots: IndicatorDef = {
     { key: "labels", label: "Show Labels", type: "bool", default: true },
     { key: "labelsPos", label: "Labels Position", type: "select", default: "Left", options: ["Left", "Right"] },
     { key: "prices", label: "Show Prices", type: "bool", default: true },
+    ...sessionInputs(),
   ],
   plots: [],
   items: ITEMS,
@@ -121,7 +122,7 @@ export const pivots: IndicatorDef = {
     if (bars.length < 2) return out.set;
     const frame = str(inputs, "frame");
     const period = PERIOD_OF[frame] ?? autoPeriod(barStep(bars));
-    const periods = groupPeriods(bars, periodKeys(bars.map((b) => b.t), period, calendar));
+    const periods = groupPeriods(bars, periodKeys(bars.map((b) => b.t), period, withSession(calendar, inputs)));
     const dec = decimalsOf(bars);
     const back = num(inputs, "back");
     // Kỳ đầu của lịch sử đã nạp có thể bị cắt dở nên không dùng làm gốc tính; kỳ cuối (đang chạy) kéo dài sang phải

@@ -2,7 +2,7 @@
 
 import { useDrawingStore } from "@/drawings/store";
 import ColorPicker from "./ColorPicker";
-import { encodeFibLevels, fibLevelsOf, optOf, POS_DEFAULTS, SPEC, VP_BY, VP_DEFAULTS, type FibLevel } from "@/drawings/tools";
+import { DEFAULT_COLOR, encodeFibLevels, fibLevelsOf, optOf, POS_DEFAULTS, SPEC, VP_BY, VP_DEFAULTS, type FibLevel } from "@/drawings/tools";
 import type { Drawing } from "@/drawings/types";
 import { UNITS, type Unit } from "@/drawings/visibility";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -102,11 +102,18 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
     r.to = Math.max(r.from, Math.min(max, r.to));
     setD({ ...d, visibility: { ...d.visibility, [u]: r } });
   };
-  const check = (label: string, key: string, color?: string) => (
+  const check = (label: string, key: string, color?: string, dash?: string) => (
     <Row label={label}>
       <span className="flex items-center gap-3">
         {color && (
           <ColorPicker value={String(v[color as keyof typeof v])} onChange={(c) => setOpt(color, c)} className="h-8 w-12 p-1" />
+        )}
+        {dash && (
+          <select className={`${input} w-24`} value={Number(v[dash as keyof typeof v])} onChange={(e) => setOpt(dash, Number(e.target.value))}>
+            <option value={0} className="text-black">Solid</option>
+            <option value={1} className="text-black">Dashed</option>
+            <option value={2} className="text-black">Dotted</option>
+          </select>
         )}
         <input
           type="checkbox"
@@ -289,9 +296,10 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
               {colorRow("Down Volume", "down")}
               {colorRow("Value Area Up", "vaUp")}
               {colorRow("Value Area Down", "vaDown")}
-              {check("VAH", "showVah", "vahColor")}
-              {check("VAL", "showVal", "valColor")}
-              {check("POC", "showPoc", "pocColor")}
+              {check("VAH", "showVah", "vahColor", "vahDash")}
+              {check("VAL", "showVal", "valColor", "valDash")}
+              {check("POC", "showPoc", "pocColor", "pocDash")}
+              {colorRow("Histogram Box", "box")}
             </>
           )}
 
@@ -626,7 +634,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                       const st = SPEC[d.type].style ?? {};
                       setD({
                         ...d,
-                        color: st.color ?? "#2962ff",
+                        color: st.color ?? DEFAULT_COLOR,
                         width: st.width ?? 2,
                         dash: st.dash,
                         textColor: undefined,

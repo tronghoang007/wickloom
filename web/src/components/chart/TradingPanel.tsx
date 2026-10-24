@@ -12,7 +12,6 @@ import { tradeBlock } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
 import { useEffect, useState, type ReactNode } from "react";
-import { Chevron } from "../icons";
 import { SymbolBadge } from "../SymbolIcon";
 
 const TABS: { id: TradeTab; label: string }[] = [
@@ -35,9 +34,11 @@ function SymbolCell({ symbol }: { symbol: string }) {
     </span>
   );
 }
+// Buy xanh lá, Sell đỏ (màu lên / xuống của chart) ở cả 3 bảng
+const SIDE_COLOR = { buy: "#089981", sell: "#f23645" };
 const SideCell = ({ side, label = sideLabel(side) }: { side: "buy" | "sell"; label?: string }) => (
-  <span className="flex items-center gap-1.5">
-    <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: side === "buy" ? "#2962ff" : "#ff9800" }} />
+  <span className="flex items-center gap-1.5 font-medium" style={{ color: SIDE_COLOR[side] }}>
+    <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: SIDE_COLOR[side] }} />
     {label}
   </span>
 );
@@ -109,18 +110,8 @@ export default function TradingPanel() {
 
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg)]" data-testid="trading-panel">
-      <div className="flex h-[34px] items-center gap-1 px-2 text-sm">
-        <button
-          className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 hover:bg-[var(--hover)]"
-          title={open ? "Thu gọn" : "Mở panel Trading"}
-          aria-expanded={open}
-          onClick={() => useTradeStore.getState().setOpen(!open)}
-        >
-          <span className={`transition-transform ${open ? "" : "-rotate-90"}`}>
-            <Chevron />
-          </span>
-          <span className="font-semibold">Trading</span>
-        </button>
+      <div className="flex h-[34px] items-center gap-1 pl-2 text-sm">
+        <span className="px-1.5 font-semibold">Trading</span>
         <span className="flex items-center gap-1.5 px-1 text-xs text-[var(--muted)]">
           <span className="max-w-[160px] truncate">{a.name || a.broker || a.server}</span>
           {MODE_LABEL[a.mode] && (
@@ -146,12 +137,26 @@ export default function TradingPanel() {
             );
           })}
         </div>
-        <div className={`ml-auto flex min-w-0 items-center gap-4 overflow-hidden pr-1 text-xs tabular-nums ${stale ? "opacity-50" : ""}`} data-testid="account-summary">
+        <div className={`ml-auto flex min-w-0 items-center gap-4 overflow-hidden pr-3 text-xs tabular-nums ${stale ? "opacity-50" : ""}`} data-testid="account-summary">
           {stats.map(([k, v, cls]) => (
             <span key={k} className="whitespace-nowrap text-[var(--muted)]">
               {k} <span className={cls ?? "text-[var(--fg)]"}>{v}</span>
             </span>
           ))}
+        </div>
+        {/* Ô cùng bề rộng (w-12) và đường kẻ dọc với thanh icon bên phải chart: nút nằm thẳng cột với các icon trên và đường kẻ nối liền xuống */}
+        <div className="flex h-full w-12 shrink-0 items-center justify-center border-l border-[var(--border)]">
+          <button
+            className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--fg)_22%,transparent)] bg-[color-mix(in_srgb,var(--fg)_8%,transparent)] text-[var(--fg)] hover:border-[color-mix(in_srgb,var(--fg)_40%,transparent)] hover:bg-[color-mix(in_srgb,var(--fg)_16%,transparent)]"
+            title={open ? "Collapse panel" : "Expand panel"}
+            aria-label={open ? "Collapse trading panel" : "Expand trading panel"}
+            aria-expanded={open}
+            onClick={() => useTradeStore.getState().setOpen(!open)}
+          >
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? "rotate-180" : ""}`}>
+              <path d="M3.5 10l4.5-4.5L12.5 10" />
+            </svg>
+          </button>
         </div>
       </div>
       {open && (

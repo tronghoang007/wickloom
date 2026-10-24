@@ -59,6 +59,7 @@ type Props = {
   preview: DragPreview[]; // đường đang kéo / chờ xác nhận / vừa gửi
   getChart: () => IChartApi | null;
   getSeries: () => ISeriesApi<SeriesType> | null;
+  getMainRect: () => { top: number; height: number }; // pane chính trong khung chart: toạ độ y của series là theo pane đó, pane chính có thể không nằm trên cùng
   getDigits: () => number;
   onGhost: (owner: TagOwner, kind: "sl" | "tp", e: PointerEvent) => void;
   onConfirmEdit: (owner: string) => void; // Confirm / Discard trên thẻ giá vào của chủ (vị thế / lệnh) có thay đổi chờ xác nhận sau khi kéo; owner = OWNER_ID
@@ -68,7 +69,7 @@ type Props = {
 /** Vị thế, lệnh chờ và bản nháp lệnh trên chart kiểu TradingView (docs/trade-plan.md T3-T4): đường giá (price line: nền liền cho lệnh đã đặt, nét đứt cho bản nháp, chấm cho SL/TP)
  *  cùng các thẻ DOM nằm trên đường: [Buy/Sell của bản nháp] [TP+] [SL+] [lot | loại lệnh hoặc lãi/lỗi | ×], và đường nối dọc giữa giá vào với SL/TP. Kéo thẻ = kéo đường (LineDrag
  *  nhận ra thẻ qua `data-line-key`); kéo nút TP/SL mờ ra giá cần đặt để tạo mới. Vị trí cập nhật mỗi khung hình vì chart không báo khi trục giá đổi. */
-export default function TradeOverlay({ paneId, symbol, chartType, replay, preview, getChart, getSeries, getDigits, onGhost, onConfirmEdit, onCancelEdit }: Props) {
+export default function TradeOverlay({ paneId, symbol, chartType, replay, preview, getChart, getSeries, getMainRect, getDigits, onGhost, onConfirmEdit, onCancelEdit }: Props) {
   const tradeData = useTradeStore((s) => s.data);
   const draft = useTicketStore((s) => s.draft);
   const quote = useQuoteStore((s) => s.quotes[symbol]);
@@ -141,6 +142,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
     let synced: ISeriesApi<SeriesType> | null = null;
     let priceLines = new Map<string, IPriceLine>();
     let lastLink = "";
+    let placedAt = ""; // vị trí pane chính đã áp cho lớp phủ
     const placed = new WeakMap<HTMLDivElement, string>(); // phần tử thẻ → "right|y" đã ghi, tránh ghi lại DOM khi không đổi (theo phần tử, không theo khoá: thẻ dựng lại cùng khoá phải được đặt lại vị trí)
 
     const syncPriceLines = (series: ISeriesApi<SeriesType>) => {
@@ -172,13 +174,21 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
       const series = getSeries();
       const box = root.current;
       if (!chart || !series || !box) return;
+      // lớp phủ chỉ phủ đúng pane chính (đường giá / thẻ lệnh nằm trong pane này và bị cắt ở mép pane)
+      const mr = getMainRect();
+      const place = `${mr.top}|${mr.height}`;
+      if (placedAt !== place) {
+        placedAt = place;
+        box.style.top = `${mr.top}px`;
+        box.style.height = `${mr.height}px`;
+      }
       if (dirty.current || synced !== series) {
         dirty.current = false;
         syncPriceLines(series);
       }
       const wantLines = linesRef.current;
       if (wantLines.length === 0 && els.current.size === 0 && lastLink === "") return; // không có gì để vẽ: khỏi đo layout mỗi khung hình
-      const h = box.clientHeight;
+      const h = mr.height;
       const right = box.clientWidth - chart.timeScale().width() + RIGHT_GAP;
       const linkX = chart.timeScale().width() - LINK_X;
       const ys = new Map<string, number>();
@@ -192,7 +202,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
       if (ze) {
         if (!zone || zy === undefined) ze.style.display = "none";
         else {
-          const ph = chart.paneSize(0).height;
+          const ph = h;
           const y = Math.min(Math.max(zy, 0), ph);
           ze.style.display = "block";
           ze.style.width = `${chart.timeScale().width()}px`;
@@ -250,13 +260,13 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
       const series = synced;
       if (series) for (const l of priceLines.values()) series.removePriceLine(l);
     };
-  }, [getChart, getSeries]);
+  }, [getChart, getSeries, getMainRect]);
 
   const events = tool ? "pointer-events-none" : "pointer-events-auto";
   const digits = getDigits();
 
   return (
-    <div ref={root} className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" data-testid="trade-overlay">
+    <div ref={root} className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-full overflow-hidden" data-testid="trade-overlay">
       <svg ref={link} className="absolute inset-0 h-full w-full" aria-hidden />
       <div ref={zoneEl} className="absolute left-0 hidden" aria-hidden />
       {lines.flatMap((l) => {

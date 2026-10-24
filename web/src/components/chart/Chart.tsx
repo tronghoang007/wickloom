@@ -5,6 +5,11 @@ import { AlertI, Chevron, ResetViewI, SettingsI, SkipToLatest } from "../icons";
 import { useDrawingStore } from "@/drawings/store";
 import { overridePoint } from "@/indicators/candleColors";
 import { IndicatorManager } from "@/indicators/manager";
+import { byId } from "@/indicators/catalog";
+import type { IndicatorInstance } from "@/indicators/instance";
+import { MAIN_PANE, clampSlot, otherPaneKeys, paneIndices, paneKeyOf } from "@/indicators/layout";
+import PaneChrome, { type PaneGroup } from "./PaneChrome";
+import { paneAt, paneRects } from "./panes";
 
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay } from "@/replay/store";
@@ -15,6 +20,8 @@ import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
 import { createLineDrag, type ChartDrag } from "@/trading/chartOrders";
 import type { DragPreview } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
+import { parseNum } from "@/trading/draft";
+import { useTicketStore } from "@/trading/ticket";
 import { useReplaySim } from "@/trading/replaySim";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
@@ -91,6 +98,7 @@ function createSeries(
   chart: IChartApi,
   type: ChartType,
   f: Fmt,
+  paneIndex = 0, // pane chính có thể đã bị dời khỏi vị trí 0
 ): ISeriesApi<SeriesType> {
   const priceFormat = {
     type: "price" as const,
@@ -100,24 +108,32 @@ function createSeries(
   const style = seriesStyle(useSettingsStore.getState().s, type);
   switch (type) {
     case "bars":
-      return chart.addSeries(BarSeries, { ...style, priceFormat });
+      return chart.addSeries(BarSeries, { ...style, priceFormat }, paneIndex);
     case "line":
-      return chart.addSeries(LineSeries, {
-        ...style,
-        color: "#2962ff",
-        lineWidth: 2,
-        priceFormat,
-      });
+      return chart.addSeries(
+        LineSeries,
+        {
+          ...style,
+          color: "#2962ff",
+          lineWidth: 2,
+          priceFormat,
+        },
+        paneIndex,
+      );
     case "area":
-      return chart.addSeries(AreaSeries, {
-        ...style,
-        lineColor: "#2962ff",
-        topColor: "rgba(41,98,255,0.4)",
-        bottomColor: "rgba(41,98,255,0)",
-        priceFormat,
-      });
+      return chart.addSeries(
+        AreaSeries,
+        {
+          ...style,
+          lineColor: "#2962ff",
+          topColor: "rgba(41,98,255,0.4)",
+          bottomColor: "rgba(41,98,255,0)",
+          priceFormat,
+        },
+        paneIndex,
+      );
     default:
-      return chart.addSeries(CandlestickSeries, { ...style, priceFormat });
+      return chart.addSeries(CandlestickSeries, { ...style, priceFormat }, paneIndex);
   }
 }
 
@@ -216,11 +232,14 @@ function defaultRange(chart: IChartApi, n: number) {
 }
 
 // "Reset chart view" (⌥R): về đúng góc nhìn lúc mới tải, auto-scale giá.
-function resetChartView(chart: IChartApi | null, n: number) {
+function resetChartView(chart: IChartApi | null, n: number, mainIdx = 0) {
   if (!chart || !n) return;
-  chart.priceScale("right").setAutoScale(true);
+  chart.priceScale("right", mainIdx).setAutoScale(true);
   chart.timeScale().setVisibleLogicalRange(defaultRange(chart, n));
 }
+
+// Nền nhãn giá hiện tại trong lúc đặt lệnh (không xanh / đỏ như nến, vì nhãn giá vào lệnh đã dùng màu chiều lệnh)
+const ORDERING_LAST_BG = "#434651";
 
 function setTabTitle(title: string) {
   if (document.title !== title) document.title = title;
@@ -290,7 +309,34 @@ export default function Chart({ paneId }: { paneId: string }) {
   const prevSymbolRef = useRef(symbol);
   const wasActiveRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
-  const [, setIndVer] = useState(0); // indicator vừa tính lại: render lại để legend đọc giá trị mới
+  // Pane chính (nến + volume + hình vẽ + lệnh) có thể bị dời khỏi vị trí trên cùng khi đổi chỗ pane: chỉ số và vị trí của nó lấy từ chính series
+  const mainPane = useCallback(() => {
+    try {
+      return seriesRef.current?.getPane() ?? volRef.current?.getPane() ?? null;
+    } catch {
+      return null; // series vừa bị gỡ
+    }
+  }, []);
+  const mainIndex = useCallback(() => {
+    try {
+      return mainPane()?.paneIndex() ?? 0;
+    } catch {
+      return 0;
+    }
+  }, [mainPane]);
+  /** Vị trí / chiều cao pane chính so với khung chart (gốc toạ độ của mọi thứ tính từ series). */
+  const getMainRect = useCallback(() => {
+    const box = boxRef.current;
+    const el = mainPane()?.getHTMLElement();
+    if (!box || !el) return { top: 0, height: box?.clientHeight ?? 0 };
+    const r = el.getBoundingClientRect();
+    return { top: r.top - box.getBoundingClientRect().top, height: r.height };
+  }, [mainPane]);
+  const mainSlot = usePaneState(pane.indicators, (s) => s.mainSlot);
+  const [mainLegendHover, setMainLegendHover] = useState(false); // con trỏ trên legend chính: pane chính hiện cụm nút pane
+  const [mainTop, setMainTop] = useState(0); // mép trên pane chính trong khung chart (0 khi nó nằm trên cùng)
+  const [mainSqueezed, setMainSqueezed] = useState(false); // pane chính bị ép thấp (pane khác đang phóng to): legend chính bớt hàng
+  const [indVer, setIndVer] = useState(0); // indicator vừa tính lại: render lại để legend đọc giá trị mới
   const [hover, setHover] = useState<{
     x: number;
     y: number;
@@ -563,6 +609,7 @@ export default function Chart({ paneId }: { paneId: string }) {
 
     // Wheel over the price axis pans prices; over the time axis pans time.
     const box = boxRef.current!;
+    const paneSpan = new Map<number, number>(); // pane indicator -> độ rộng giá lúc còn tự co giãn
     const onAxisWheel = (e: WheelEvent) => {
       const r = box.getBoundingClientRect();
       const x = e.clientX - r.left;
@@ -570,15 +617,40 @@ export default function Chart({ paneId }: { paneId: string }) {
       const paneW = chart.timeScale().width();
       const paneH = r.height - chart.timeScale().height();
       if (x > paneW && y < paneH) {
+        const rects = paneRects(chart, box);
+        const pi = paneAt(rects, y);
+        const mi = mainIndex();
+        if (pi < 0) return; // đường ngăn giữa các pane
+        if (pi !== mi) {
+          // Pane indicator: lăn trên trục giá giãn / co thang giá của chính pane đó quanh con trỏ, như TV
+          const s = chart.panes()[pi].getSeries().find((x) => (x.options() as { priceScaleId?: string }).priceScaleId === "right");
+          const scale = chart.priceScale("right", pi);
+          const range = scale.getVisibleRange();
+          const { top, height } = rects[pi];
+          const anchor = s?.coordinateToPrice(Math.max(0, Math.min(height, y - top)));
+          if (!s || !range || anchor == null) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const span = range.to - range.from;
+          // tự co giãn đang bật: nhớ độ rộng gốc để giới hạn thu / phóng (không có nến để tính như pane chính)
+          if (scale.options().autoScale) paneSpan.set(pi, span);
+          const base = paneSpan.get(pi) ?? span;
+          const factor = Math.exp(Math.max(-300, Math.min(300, e.deltaY)) * 0.001);
+          const nextSpan = Math.max(base * 0.001, Math.min(base * 20, span * factor));
+          const ratio = nextSpan / span;
+          scale.setAutoScale(false);
+          scale.setVisibleRange({ from: anchor - (anchor - range.from) * ratio, to: anchor + (range.to - anchor) * ratio });
+          return;
+        }
         const s = seriesRef.current;
         const bars = barsRef.current;
-        const scale = chart.priceScale("right");
+        const scale = chart.priceScale("right", mi);
         const range = scale.getVisibleRange();
         if (!s || !bars.length || !range) return;
         const { from: bottom, to: top } = range;
-        const paneHeight = chart.paneSize(0).height;
+        const paneHeight = chart.paneSize(mi).height;
         const anchor = s.coordinateToPrice(
-          Math.max(0, Math.min(paneHeight, y)),
+          Math.max(0, Math.min(paneHeight, y - rects[mi].top)), // y theo pane chính (pane chính có thể không nằm trên cùng)
         );
         if (anchor == null) return;
         e.preventDefault();
@@ -667,6 +739,8 @@ export default function Chart({ paneId }: { paneId: string }) {
           .getState()
           .symbols.find((item) => item.name === pane.chart.getState().symbol)
           ?.tick_size ?? 10 ** -digitsRef.current,
+      () => pane.indicators.getState().mainSlot,
+      mainPane,
     );
     drawRef.current = new DrawingManager({
       pane,
@@ -907,6 +981,8 @@ export default function Chart({ paneId }: { paneId: string }) {
             : { type: ColorType.Solid, color: cs.bg ?? t.bg },
         textColor: cs.scaleTextColor ?? t.text,
         fontSize: cs.fontSize,
+        // đường ngăn pane mảnh màu #2e2e2e (mặc định của LWC là trắng #e0e3eb); rê vào thì phủ xanh nhạt như TV
+        panes: { separatorColor: t.sep, separatorHoverColor: "rgba(68, 138, 255, 0.2)" },
       },
       grid: {
         vertLines: { visible: cs.vertGrid, color: grid, style: LineStyle.Dotted },
@@ -986,8 +1062,8 @@ export default function Chart({ paneId }: { paneId: string }) {
       log: PriceScaleMode.Logarithmic,
       percent: PriceScaleMode.Percentage,
     }[scaleMode];
-    chartRef.current?.priceScale("right").applyOptions({ mode });
-  }, [scaleMode]);
+    chartRef.current?.priceScale("right", mainIndex()).applyOptions({ mode });
+  }, [scaleMode, mainIndex]);
 
   // series type
   useEffect(() => {
@@ -996,9 +1072,12 @@ export default function Chart({ paneId }: { paneId: string }) {
     if (seriesRef.current) chart.removeSeries(seriesRef.current);
     linesRef.current = {}; // price line thuộc series cũ đã bị xoá cùng series
     typeRef.current = chartType;
-    seriesRef.current = createSeries(chart, chartType, {
-      precision: digitsRef.current,
-    });
+    seriesRef.current = createSeries(
+      chart,
+      chartType,
+      { precision: digitsRef.current },
+      volRef.current?.getPane().paneIndex() ?? 0, // vào đúng pane chính (đã chứa series volume)
+    );
     drawRef.current?.attachTo(seriesRef.current);
     render();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1008,6 +1087,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   const [dragPreview, setDragPreview] = useState<DragPreview[]>([]); // đường giao dịch đang kéo / chờ xác nhận
   const lineDragRef = useRef<ChartDrag | null>(null);
   const getChart = useCallback(() => chartRef.current, []);
+  const getBox = useCallback(() => boxRef.current, []);
   const getSeries = useCallback(() => seriesRef.current, []);
   const getDigits = useCallback(() => digitsRef.current, []);
   const getBars = useCallback(() => barsRef.current, []);
@@ -1204,7 +1284,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       );
       render();
       refreshExtras();
-      chartRef.current?.priceScale("right").setAutoScale(true);
+      chartRef.current?.priceScale("right", mainIndex()).setAutoScale(true);
       if (bars.length) {
         if (chartRef.current) {
           const mid = keepView ? indexAt(bars, TF_SECONDS[tf], keepView.t) : null;
@@ -1357,6 +1437,16 @@ export default function Chart({ paneId }: { paneId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indicators]);
 
+  // Giá vào của bản nháp lệnh đang soạn (bảng đặt lệnh mở, không phải Replay): Market = Ask khi Buy / Bid khi Sell, lệnh chờ = giá đã nhập.
+  // TradeOverlay đã vẽ nhãn giá vào này trên trục giá (màu theo chiều lệnh); null = không có bản nháp.
+  const draftEntry = (): number | null => {
+    const d = useTicketStore.getState().draft;
+    if (!d || d.symbol !== pane.chart.getState().symbol || pane.replay.getState().active) return null;
+    const q = useQuoteStore.getState().quotes[d.symbol];
+    const p = d.mode === "pending" ? parseNum(d.price) : q ? (d.side === "buy" ? q.ask : q.bid) : 0;
+    return p > 0 ? p : null;
+  };
+
   // Nhãn giá cuối trên trục giá như TradingView: khối liền (giá + đếm ngược đóng nến bên dưới),
   // chữ canh trái. Thay hẳn nhãn của lightweight-charts (chữ canh giữa, không nối được với đếm
   // ngược), nên series đặt lastValueVisible=false. Kích thước đo từ canvas TV: khối rộng
@@ -1375,18 +1465,27 @@ export default function Chart({ paneId }: { paneId: string }) {
       const bars = barsRef.current;
       const last = bars[bars.length - 1];
       const st = useSettingsStore.getState().s;
-      const shown = st.symbolLabel === "value_line" || st.symbolLabel === "value";
+      const shown = (st.symbolLabel === "value_line" || st.symbolLabel === "value");
       const y = shown && series && last ? series.priceToCoordinate(last.c) : null;
       if (!el || !box || !txt || !chart || y === null || !last) {
         if (el) el.style.display = "none";
         return;
       }
-      const scale = chart.priceScale("right");
+      const scale = chart.priceScale("right", mainIndex());
       const up = isUp(last, bars[bars.length - 2]?.c, st);
       const priceH = st.fontSize + 4;
       const total = priceH + (box.childElementCount > 1 ? st.fontSize + 3 : 0);
-      const paneH = chart.paneSize(0).height;
+      const mr = getMainRect(); // pane chính có thể không nằm trên cùng: y của series là theo pane, nhãn đặt theo khung chart
+      const paneH = mr.height;
       let top = y - priceH / 2;
+      // Đang đặt lệnh: nhãn giá vào (xanh khi Buy, đỏ khi Sell) và nhãn giá cuối xếp liền nhau như trang web trading, không đè lên nhau;
+      // giá vào ở trên (Ask khi Buy, hoặc Bid = giá cuối khi Sell) thì nhãn giá cuối nằm dưới nó
+      const ep = draftEntry();
+      const ey = ep !== null && series ? series.priceToCoordinate(ep) : null;
+      if (ey !== null) {
+        const half = (st.fontSize + 6) / 2; // nửa chiều cao nhãn của lightweight-charts
+        top = ey <= y ? Math.max(top, ey + half) : Math.min(top, ey - half - total);
+      }
       if (paneH > total) top = Math.min(Math.max(top, 0), paneH - total);
 
       // Chế độ % của trục: nhãn là % so với giá đóng của nến đầu tiên đang thấy (như lightweight-charts).
@@ -1402,9 +1501,9 @@ export default function Chart({ paneId }: { paneId: string }) {
 
       el.style.display = "block";
       el.style.width = `${scale.width()}px`;
-      el.style.transform = `translateY(${Math.round(top)}px)`;
+      el.style.transform = `translateY(${Math.round(top + mr.top)}px)`;
       box.style.width = `${scale.width() - 6}px`;
-      box.style.background = up ? st.bodyUp : st.bodyDown;
+      box.style.background = ep !== null ? ORDERING_LAST_BG : up ? st.bodyUp : st.bodyDown; // đang đặt lệnh: xám trung tính, khỏi lẫn với nhãn giá vào xanh / đỏ
       box.style.fontSize = `${st.fontSize}px`;
       txt.style.height = `${priceH}px`;
       const cd = box.children[1] as HTMLElement | undefined;
@@ -1445,10 +1544,37 @@ export default function Chart({ paneId }: { paneId: string }) {
     </button>
   );
 
-  const resetView = () => resetChartView(chartRef.current, barsRef.current.length);
+  // Indicator theo pane: pane chính (overlay, 0) hiện trong legend chính, mỗi pane riêng có legend + nút pane ở đầu pane đó
+  const indKeys = indicators.map((i) => paneKeyOf(i, byId(i.id)));
+  const indPane = paneIndices(indKeys, mainSlot);
+  const mainPaneIdx = clampSlot(mainSlot, otherPaneKeys(indKeys).length); // chỉ số LWC của pane chính
+  const mainIndicators = indicators.filter((_, n) => indKeys[n] === MAIN_PANE);
+  const paneGroups: PaneGroup[] = [];
+  indicators.forEach((inst, n) => {
+    if (indKeys[n] === MAIN_PANE) return;
+    let g = paneGroups.find((x) => x.index === indPane[n]);
+    if (!g) paneGroups.push((g = { index: indPane[n], key: indKeys[n], insts: [] }));
+    g.insts.push(inst);
+  });
+  const indicatorRow = (inst: IndicatorInstance) => (
+    <IndicatorLegend
+      key={inst.uid}
+      inst={inst}
+      tf={tf}
+      symbolDigits={digits}
+      getValues={(uid) => (L ? indRef.current?.valuesAt(uid, L.t) : undefined)}
+      onHide={() => pane.indicators.getState().update(inst.uid, { hidden: inst.hidden ? undefined : true })}
+      onSettings={() => pane.indicators.getState().openSettings(inst.uid)}
+      onRemove={() => removeIndicator(inst.uid)}
+      onMenu={(x, y) => setCtxMenu({ x, y, items: indicatorMenuItems(pane.indicators, inst, tf) })}
+    />
+  );
+
+  const resetView = () => resetChartView(chartRef.current, barsRef.current.length, mainIndex());
 
   const onChartContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    if (drawRef.current?.cancelByRightClick()) return; // đang cầm tool / vẽ dở: chuột phải = huỷ, không hiện menu (như TV)
     const chart = chartRef.current;
     const box = boxRef.current;
     if (!chart || !box) return;
@@ -1456,23 +1582,27 @@ export default function Chart({ paneId }: { paneId: string }) {
     const x = e.clientX - r.left;
     const y = e.clientY - r.top;
     if (x > chart.timeScale().width() || y > r.height - chart.timeScale().height()) return; // trục giá/thời gian
+    // y theo pane chính; con trỏ ở pane indicator thì không có giá để hiện (menu chart chung, không có hình / volume để chọn)
+    const mr = getMainRect();
+    const py = y - mr.top;
+    const inMain = py >= 0 && py <= mr.height;
     // Chuột phải lên hình: chọn hình và hiện menu riêng của hình (như TV), không phải menu chart
-    const hit = drawRef.current?.pickAt(e.nativeEvent);
+    const hit = inMain ? drawRef.current?.pickAt(e.nativeEvent) : null;
     if (drawRef.current && hit) {
       setCtxMenu({ x: e.clientX, y: e.clientY, items: drawingMenuItems(drawRef.current, hit, tf) });
       return;
     }
     // Chuột phải lên cột volume: menu của indicator Volume (như TV)
-    if (volShown(pane.volume.getState().s, tf)) {
+    if (inMain && volShown(pane.volume.getState().s, tf)) {
       const logical = chart.timeScale().coordinateToLogical(x);
       const bar = logical === null ? undefined : barsRef.current[Math.round(logical)];
       const top = bar ? volRef.current?.priceToCoordinate(bar.v) : null;
-      if (top != null && y >= top) {
+      if (top != null && py >= top) {
         setCtxMenu({ x: e.clientX, y: e.clientY, items: volumeMenuItems(tf) });
         return;
       }
     }
-    setCtxMenu({ x: e.clientX, y: e.clientY, items: menuItems(seriesRef.current?.coordinateToPrice(y) ?? null) });
+    setCtxMenu({ x: e.clientX, y: e.clientY, items: menuItems(inMain ? (seriesRef.current?.coordinateToPrice(py) ?? null) : null) });
   };
 
   const menuItems = (price: number | null): MenuItem[] => {
@@ -1509,7 +1639,7 @@ export default function Chart({ paneId }: { paneId: string }) {
     if (indicators.length > 0)
       removals.push({
         label: `Remove ${indicators.length} indicator${indicators.length > 1 ? "s" : ""}`,
-        onSelect: () => pane.indicators.setState({ list: [] }),
+        onSelect: () => pane.indicators.setState({ list: [], mainSlot: 0 }),
       });
     if (removals.length) items.push("sep", ...removals);
     items.push("sep", {
@@ -1536,6 +1666,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           preview={dragPreview}
           getChart={getChart}
           getSeries={getSeries}
+          getMainRect={getMainRect}
           getDigits={getDigits}
           onGhost={(owner, kind, e) => lineDragRef.current?.beginStop(owner, kind, e)}
           onConfirmEdit={(owner) => lineDragRef.current?.confirmEdit(owner)}
@@ -1564,8 +1695,14 @@ export default function Chart({ paneId }: { paneId: string }) {
             <SkipToLatest />
           </button>
         )}
-        <div className="pointer-events-none absolute left-3 top-2 z-10 text-[13px] leading-[20px]">
-          <div className="flex flex-wrap items-baseline gap-x-3">
+        {/* Nền mờ cho từng hàng legend: như TV (titlesWrapper = nền chart 50%, đo từ TradingView) để chữ không chìm vào nến phía sau */}
+        <div
+          className="pointer-events-none absolute left-3 z-10 text-[13px] leading-[20px]"
+          onMouseEnter={() => setMainLegendHover(true)}
+          onMouseLeave={() => setMainLegendHover(false)}
+          style={{ top: mainTop + 8, "--legend-bg": `color-mix(in srgb, ${cs.bg ?? CHART_THEMES[theme].bg} 50%, transparent)` } as React.CSSProperties}
+        >
+          <div className="-ml-1 flex w-fit flex-wrap items-baseline gap-x-3 rounded bg-[var(--legend-bg)] pl-1 pr-1">
             {cs.showTitle && (
               <span className="flex items-center whitespace-nowrap text-[16px] text-[var(--fg)]">
                 <span className="mr-2 flex">
@@ -1615,8 +1752,8 @@ export default function Chart({ paneId }: { paneId: string }) {
               </span>
             )}
           </div>
-          <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />
-          {!legendCollapsed && (
+          {!mainSqueezed && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
+          {!legendCollapsed && !mainSqueezed && (
             <VolumeLegend
               getBars={() => barsRef.current}
               bar={L}
@@ -1624,20 +1761,8 @@ export default function Chart({ paneId }: { paneId: string }) {
               onMenu={(x, y) => setCtxMenu({ x, y, items: volumeMenuItems(tf) })}
             />
           )}
-          {!legendCollapsed && indicators.map((inst) => (
-            <IndicatorLegend
-              key={inst.uid}
-              inst={inst}
-              tf={tf}
-              symbolDigits={digits}
-              getValues={(uid) => (L ? indRef.current?.valuesAt(uid, L.t) : undefined)}
-              onHide={() => pane.indicators.getState().update(inst.uid, { hidden: inst.hidden ? undefined : true })}
-              onSettings={() => pane.indicators.getState().openSettings(inst.uid)}
-              onRemove={() => removeIndicator(inst.uid)}
-              onMenu={(x, y) => setCtxMenu({ x, y, items: indicatorMenuItems(pane.indicators, inst, tf) })}
-            />
-          ))}
-          {(!vs.removed || indicators.length > 0) && (
+          {!legendCollapsed && !mainSqueezed && mainIndicators.map(indicatorRow)}
+          {!mainSqueezed && (!vs.removed || indicators.length > 0) && (
             <button
               type="button"
               aria-label={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
@@ -1650,8 +1775,23 @@ export default function Chart({ paneId }: { paneId: string }) {
               </span>
             </button>
           )}
-          {status && <div className="mt-1 text-[var(--muted)]">{status}</div>}
+          {!mainSqueezed && status && <div className="mt-1 text-[var(--muted)]">{status}</div>}
         </div>
+        {/* Indicator có pane riêng: legend nằm đầu pane của nó + cụm nút Move / Delete / Collapse / Maximize như TV */}
+        <PaneChrome
+          getChart={getChart}
+          getBox={getBox}
+          ver={indVer}
+          groups={paneGroups}
+          bg={cs.bg ?? CHART_THEMES[theme].bg}
+          renderLegend={indicatorRow}
+          mainIndex={mainPaneIdx}
+          onMove={(key, dir) => pane.indicators.getState().movePane(key, dir)}
+          onMainSqueezed={setMainSqueezed}
+          onMainTop={setMainTop}
+          mainLegendHover={mainLegendHover}
+          onDelete={(key) => pane.indicators.getState().removeMany(paneGroups.find((g) => g.key === key)?.insts.map((i) => i.uid) ?? [])}
+        />
         <div ref={lblRef} className="pointer-events-none absolute right-0 top-0 z-10 hidden">
           <div
             ref={lblBoxRef}
@@ -1676,7 +1816,7 @@ export default function Chart({ paneId }: { paneId: string }) {
         {selecting && (
           <div
             className="absolute inset-y-0 left-0 z-30 cursor-pointer"
-            style={{ right: chartRef.current?.priceScale("right").width() ?? 70 }}
+            style={{ right: chartRef.current?.priceScale("right", mainPaneIdx).width() ?? 70 }}
             onMouseMove={onSelectMove}
             onMouseLeave={() => setHover(null)}
             onClick={() => hover && startReplay(hover.idx)}

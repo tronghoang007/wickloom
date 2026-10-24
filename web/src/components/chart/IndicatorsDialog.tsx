@@ -1,15 +1,12 @@
 "use client";
 
-import { INDICATORS, byId } from "@/indicators/catalog";
-import { plotColor, resolveInputs, withPlotColor } from "@/indicators/instance";
-import { SOURCES } from "@/indicators/ta";
-import ColorPicker from "./ColorPicker";
+import { INDICATORS } from "@/indicators/catalog";
 import { useIndicatorStore } from "@/indicators/store";
 import { useVolumeStore } from "@/store/volume";
 import { useState, type ReactNode } from "react";
-import { Close, Search, StarI, Svg24 as Svg, Trash } from "../icons";
+import { Close, Search, StarI, Svg24 as Svg } from "../icons";
 
-type Tab = "fav" | "tech" | "onchart";
+type Tab = "fav" | "tech";
 
 function Ico({ children }: { children: ReactNode }) {
   return <Svg>{children}</Svg>;
@@ -49,106 +46,6 @@ const NAV: {
   },
 ];
 
-const removeBtn = "flex h-7 w-7 items-center justify-center rounded text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[#f23645]";
-
-const field =
-  "w-20 rounded border border-[var(--border)] bg-transparent px-1 py-0.5 text-sm";
-
-function OnChart() {
-  const { list, remove, update } = useIndicatorStore();
-  const volOn = useVolumeStore((s) => !s.s.removed);
-  if (list.length === 0 && !volOn)
-    return (
-      <div className="px-4 py-6 text-sm text-[var(--muted)]">
-        Chưa có indicator nào trên chart.
-      </div>
-    );
-  return (
-    <div className="space-y-2 p-3">
-      {/* Volume không nằm trong indicator store (có store riêng) nên liệt kê riêng */}
-      {volOn && (
-        <div className="rounded border border-[var(--border)] p-3">
-          <div className="flex items-center justify-between text-sm font-semibold">
-            Volume
-            <button
-              className={removeBtn}
-              title="Remove"
-              aria-label="Remove Volume"
-              onClick={() => useVolumeStore.getState().set({ removed: true })}
-            >
-              <Trash />
-            </button>
-          </div>
-        </div>
-      )}
-      {list.map((inst) => {
-        const def = byId(inst.id);
-        return (
-          <div
-            key={inst.uid}
-            className="rounded border border-[var(--border)] p-3"
-          >
-            <div className="mb-2 flex items-center justify-between text-sm font-semibold">
-              {def.title}
-              <button
-                className={removeBtn}
-                title="Remove"
-                aria-label={`Remove ${def.title}`}
-                onClick={() => remove(inst.uid)}
-              >
-                <Trash />
-              </button>
-            </div>
-            {def.inputs.map((inp) => {
-              const set = (v: number | string | boolean) => update(inst.uid, { inputs: { ...inst.inputs, [inp.key]: v } });
-              const value = resolveInputs(def, inst.inputs)[inp.key];
-              return (
-                <label key={inp.key} className="mb-1 flex items-center justify-between text-xs">
-                  {inp.label}
-                  {inp.type === "int" || inp.type === "float" ? (
-                    <input
-                      type="number"
-                      className={field}
-                      min={inp.min}
-                      max={inp.max}
-                      step={inp.step ?? (inp.type === "int" ? 1 : "any")}
-                      value={value as number}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        if (e.target.value !== "" && Number.isFinite(v) && v >= (inp.min ?? -Infinity) && v <= (inp.max ?? Infinity)) set(v);
-                      }}
-                    />
-                  ) : inp.type === "bool" ? (
-                    <input type="checkbox" checked={value as boolean} onChange={(e) => set(e.target.checked)} />
-                  ) : (
-                    <select className={field} value={value as string} onChange={(e) => set(e.target.value)}>
-                      {(inp.type === "source" ? [...SOURCES] : inp.options).map((o) => (
-                        <option key={o} className="text-black">
-                          {o}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-              );
-            })}
-            <div className="flex gap-2 pt-1">
-              {def.plots.map((p) => (
-                <ColorPicker
-                  key={p.id}
-                  value={plotColor(inst, def, p.id)}
-                  className="h-5 w-6 p-0.5"
-                  onChange={(v) => update(inst.uid, { style: withPlotColor(inst, p.id, v).style })}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function IndicatorsDialog({
   className = "",
   icon,
@@ -174,13 +71,12 @@ export default function IndicatorsDialog({
   });
   const count = (id: string) =>
     id === "volume" ? (volOn ? 1 : 0) : list.filter((x) => x.id === id).length;
-  const onChartTotal = list.length + (volOn ? 1 : 0);
 
   return (
     <>
       <button className={className} onClick={() => setOpen(true)}>
         {icon}
-        Indicators{list.length ? ` (${list.length})` : ""}
+        Indicators
       </button>
       {open && (
         <div
@@ -239,76 +135,58 @@ export default function IndicatorsDialog({
                     ))}
                   </div>
                 ))}
-                <button
-                  onClick={() => {
-                    setTab("onchart");
-                    setQ("");
-                  }}
-                  className={`mt-2 flex w-full items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2.5 text-left text-sm ${tab === "onchart" && !query ? "bg-[var(--hover)]" : "hover:bg-[var(--hover)]/60"}`}
-                >
-                  On chart{" "}
-                  <span className="text-xs text-[var(--muted)]">
-                    {onChartTotal}
-                  </span>
-                </button>
               </nav>
 
               <div className="min-w-0 flex-1 overflow-y-auto pr-3">
-                {tab === "onchart" && !query ? (
-                  <OnChart />
-                ) : (
-                  <>
-                    <div className="grid grid-cols-[1fr_120px_80px] px-3 pb-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
-                      <span className="pl-8">NAME</span>
-                      <span>AUTHOR</span>
-                      <span>BOOSTS</span>
-                    </div>
-                    {rows.length === 0 && (
-                      <div className="px-3 py-6 text-sm text-[var(--muted)]">
-                        {query
-                          ? "Không tìm thấy kết quả."
-                          : "Chưa có indicator yêu thích. Bấm ngôi sao ở Technicals."}
-                      </div>
-                    )}
-                    {rows.map((d) => (
-                      <div
-                        key={d.id}
-                        // Volume đã có sẵn trên chart (indicator "Vol · Ticks"): chọn lại chỉ để thêm lại / hiện lại nó, không thêm pane trùng
-                        onClick={() => (d.id === "volume" ? useVolumeStore.getState().set({ removed: false, hidden: false }) : add(d.id))}
-                        className="group grid cursor-pointer grid-cols-[1fr_120px_80px] items-center rounded px-3 py-2 text-sm hover:bg-[var(--hover)]"
-                      >
-                        <span className="flex min-w-0 items-center gap-3">
-                          <button
-                            className={
-                              favorites.includes(d.id)
-                                ? "text-[var(--fg)]"
-                                : "text-[var(--muted)] opacity-0 group-hover:opacity-100"
-                            }
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleFavorite(d.id);
-                            }}
-                            title="Favorite"
-                          >
-                            <StarI on={favorites.includes(d.id)} />
-                          </button>
-                          <span className="truncate">
-                            {d.title}
-                          </span>
-                          {count(d.id) > 0 && (
-                            <span className="rounded bg-[var(--accent)]/20 px-1.5 text-xs text-[var(--accent)]">
-                              {count(d.id)} on chart
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-[var(--muted)]">Built-in</span>
-                        <span className="text-[var(--muted)]">
-                          {d.overlay ? "overlay" : "pane"}
-                        </span>
-                      </div>
-                    ))}
-                  </>
+                <div className="grid grid-cols-[1fr_120px_80px] px-3 pb-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
+                  <span className="pl-8">NAME</span>
+                  <span>AUTHOR</span>
+                  <span>BOOSTS</span>
+                </div>
+                {rows.length === 0 && (
+                  <div className="px-3 py-6 text-sm text-[var(--muted)]">
+                    {query
+                      ? "Không tìm thấy kết quả."
+                      : "Chưa có indicator yêu thích. Bấm ngôi sao ở Technicals."}
+                  </div>
                 )}
+                {rows.map((d) => (
+                  <div
+                    key={d.id}
+                    // Volume đã có sẵn trên chart (indicator "Vol · Ticks"): chọn lại chỉ để thêm lại / hiện lại nó, không thêm pane trùng
+                    onClick={() => (d.id === "volume" ? useVolumeStore.getState().set({ removed: false, hidden: false }) : add(d.id))}
+                    className="group grid cursor-pointer grid-cols-[1fr_120px_80px] items-center rounded px-3 py-2 text-sm hover:bg-[var(--hover)]"
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      <button
+                        className={
+                          favorites.includes(d.id)
+                            ? "text-[var(--fg)]"
+                            : "text-[var(--muted)] opacity-0 group-hover:opacity-100"
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(d.id);
+                        }}
+                        title="Favorite"
+                      >
+                        <StarI on={favorites.includes(d.id)} />
+                      </button>
+                      <span className="truncate">
+                        {d.title}
+                      </span>
+                      {count(d.id) > 0 && (
+                        <span className="rounded bg-[var(--accent)]/20 px-1.5 text-xs text-[var(--accent)]">
+                          {count(d.id)} on chart
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[var(--muted)]">Built-in</span>
+                    <span className="text-[var(--muted)]">
+                      {d.overlay ? "overlay" : "pane"}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>

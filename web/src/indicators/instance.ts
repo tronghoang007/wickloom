@@ -200,5 +200,5 @@ export function migrateInstances(raw: unknown): IndicatorInstance[] {
 /** Tham số hiện trên legend: "20 close". Bool không hiện (như TV). */
 export function inputsText(def: IndicatorDef, inst: IndicatorInstance): string {
   const r = resolveInputs(def, inst.inputs);
-  return def.inputs.filter((i) => i.type !== "bool").map((i) => r[i.key]).join(" ");
+  return def.inputs.filter((i) => i.type !== "bool" && !i.hideInLegend).map((i) => r[i.key]).join(" ");
 }

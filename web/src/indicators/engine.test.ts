@@ -98,6 +98,57 @@ describe("VWAP theo giờ broker", () => {
     expect(run("vwap", {}, flat).vwap.values.every(Number.isNaN)).toBe(true);
   });
 
+  it("Session start = Custom hour: reset lúc giờ đó, không còn reset lúc 00:00 broker", () => {
+    // nến 0 = 00:00 broker, 48 nến/ngày: phiên mở lúc 06:00 broker = nến 12 và 60
+    const v = run("vwap", { sessionStart: "Custom hour", sessionHour: 6 }, bars).vwap.values;
+    expect(v[12]).toBeCloseTo(hlc3[12], 9);
+    expect(v[60]).toBeCloseTo(hlc3[60], 9);
+    expect(v[48]).not.toBeCloseTo(hlc3[48], 3);
+  });
+
+  it("band: VWAP ± hệ số × độ lệch chuẩn có trọng số volume; mặc định 1 band, hệ số 2 và 3", () => {
+    const o = run("vwap", { showBand2: true, bandMult2: 1.5 }, bars);
+    let pv = 0, pv2 = 0, vv = 0;
+    for (let i = 48; i <= 60; i++) { pv += hlc3[i] * bars[i].v; pv2 += hlc3[i] ** 2 * bars[i].v; vv += bars[i].v; }
+    const w = pv / vv, sd = Math.sqrt(pv2 / vv - w * w);
+    expect(o.upper1.values[60]).toBeCloseTo(w + sd, 9);
+    expect(o.lower1.values[60]).toBeCloseTo(w - sd, 9);
+    expect(o.upper2.values[60]).toBeCloseTo(w + 1.5 * sd, 9);
+    expect(o.lower3.values[60]).toBeCloseTo(w - 3 * sd, 9);
+    expect(o.upper1.values[48]).toBeCloseTo(hlc3[48], 9); // nến đầu kỳ: độ lệch 0
+  });
+
+  it("band theo Percentage: hệ số 1 = 1% của VWAP", () => {
+    const o = run("vwap", { bandsMode: "Percentage", bandMult1: 2 }, bars);
+    const w = o.vwap.values[60];
+    expect(o.upper1.values[60]).toBeCloseTo(w * 1.02, 9);
+    expect(o.lower1.values[60]).toBeCloseTo(w * 0.98, 9);
+  });
+
+  it("showIf: band tắt thì plot và fill của nó không hoạt động (legend / vẽ bỏ qua)", () => {
+    const def = byId("vwap");
+    const inp = resolveInputs(def, {});
+    const active = (id: string) => def.plots.find((p) => p.id === id)!.showIf?.(inp) ?? true;
+    expect([active("vwap"), active("upper1"), active("lower1"), active("upper2"), active("lower3")]).toEqual([true, true, true, false, false]);
+    expect(def.fills!.map((f) => f.showIf!(inp))).toEqual([true, false, false]);
+    expect(def.plots.find((p) => p.id === "upper3")!.showIf!(resolveInputs(def, { showBand3: true }))).toBe(true);
+  });
+
+  it("Hide VWAP on 1D or Above: D1 trở lên toàn na", () => {
+    const d1 = mk(10, utc("2026-03-09T00:00:00"), 86400);
+    expect(run("vwap", { hideDWM: true }, d1).vwap.values.every(Number.isNaN)).toBe(true);
+    expect(run("vwap", {}, d1).vwap.values.some((x) => !Number.isNaN(x))).toBe(true);
+    expect(run("vwap", { hideDWM: true }, bars).vwap.values.some((x) => !Number.isNaN(x))).toBe(true);
+  });
+
+  it("anchor Quarter / Year gộp nhiều tháng", () => {
+    const long = mk(1000, utc("2026-01-01T00:00:00"), 6 * 3600);
+    const q = run("vwap", { anchor: "Quarter" }, long, { offset: 0 }).vwap.values;
+    const day = run("vwap", {}, long, { offset: 0 }).vwap.values;
+    expect(q[0]).toBeCloseTo(day[0], 9);
+    expect(q[500]).not.toBeCloseTo(day[500], 3);
+  });
+
   it("ranh giới ngày đúng qua DST khi có dayOpens", () => {
     // offset hiện tại +3 nhưng ngày mùa đông mở 22:00 UTC (= +2): chỉ đúng nếu dùng mốc D1 thật
     const opens = [0, 1, 2].map((d) => utc("2026-03-09T22:00:00") + d * 86400);

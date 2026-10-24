@@ -44,6 +44,7 @@ export type ToolSpec = {
   style?: Partial<Pick<Drawing, "color" | "width" | "dash" | "textColor">>;
   prompt?: string; // có text sửa được (mở ô sửa inline khi tạo / double-click); cũng là text mặc định
   axes?: "price" | "time"; // nhãn điểm trên trục khi chọn: chỉ giá / chỉ thời gian (mặc định cả hai)
+  inBars?: boolean; // điểm neo chỉ nằm trong khoảng nến đã có (FRVP của TV không cho kéo ra quá nến cuối / trước nến đầu)
   ephemeral?: boolean;
   panel?: "position" | "volume";
   // tick: kẹp/làm tròn giá khi kéo trên chart; prev: các điểm trước khi đổi
@@ -434,10 +435,12 @@ const elliott = (names: string[]) => (c: Ctx): Shape[] => [poly(c.p), ...letters
 
 export { computeProfile }; // nay nằm ở volumeProfile/compute.ts (dùng chung với indicator)
 
+// Màu mặc định đo từ FRVP của TV: thanh ngoài Value Area mờ 25%, trong Value Area đục 70% (cùng tông xanh ngọc / hồng), POC cam nét liền,
+// VAH / VAL xanh dương nét đứt, đều dày 1px; "Histogram Box" là nền hộp của profile (đục 6%). Màu 6 chữ số (bản lưu cũ) vẫn vẽ như trước (0.4 / 0.75).
 export const VP_DEFAULTS = {
   layout: "rows", rows: 24, volume: "updown", va: 70, agg: "ticks", extend: false, width: 30, place: "left", values: false,
-  up: "#26a69a", down: "#f23645", vaUp: "#00bcd4", vaDown: "#e91e63",
-  showVah: true, vahColor: "#2962ff", showVal: true, valColor: "#2962ff", showPoc: true, pocColor: "#ff9800",
+  up: "#26c6da40", down: "#ec407a40", vaUp: "#26c6dab3", vaDown: "#ec407ab3", box: "#26c6da0f",
+  showVah: true, vahColor: "#2962ff", vahDash: 1, showVal: true, valColor: "#2962ff", valDash: 1, showPoc: true, pocColor: "#ff9800", pocDash: 0,
 };
 
 export const VP_BY: Record<string, typeof VP_DEFAULTS> = {
@@ -475,17 +478,51 @@ export function profileSpan(d: Drawing, lastT: number): { t0: number; t1: number
   return { t0, t1: d.opts?.extend ? Math.max(t1, lastT) : t1 };
 }
 
+/** Bề ngang một nến (px) quanh thời điểm `t`: profile như TV tính từ mép trái nến đầu tới mép phải nến cuối (không phải từ tâm nến). */
+function barWidth(c: Ctx, t: number): number {
+  const a = c.X(t), b = c.X(t + c.step);
+  return a === null || b === null ? 0 : Math.abs(b - a);
+}
+
+/** Giá cao nhất / thấp nhất của các nến mà profile gom (cả phần Extend Right): hai đầu dọc của hộp, nơi TV đặt handle và nhãn trục giá. */
+export function profileRange(c: Ctx): { hi: number; lo: number } | null {
+  const lastT = c.bars[c.bars.length - 1]?.t ?? 0;
+  const span = profileSpan(c.d, lastT);
+  if (!span) return null;
+  let hi = -Infinity, lo = Infinity;
+  for (const b of c.bars) {
+    if (b.t < span.t0 || b.t >= span.t1 + c.step) continue;
+    hi = Math.max(hi, b.h);
+    lo = Math.min(lo, b.l);
+  }
+  return hi >= lo ? { hi, lo } : null;
+}
+
+/** FRVP như TV: 2 handle ở hai góc chéo của hộp (trái-trên là nến đầu, phải-dưới là nến cuối), chỉ kéo ngang. */
+function profileHandles(c: Ctx): Pt[] {
+  const r = profileRange(c);
+  const [a, b] = c.d.points;
+  if (!r || !a || !b) return c.p.slice(0, 2);
+  const topFirst = a.time <= b.time;
+  const y = (top: boolean) => c.Y(top ? r.hi : r.lo);
+  const ys = [y(topFirst), y(!topFirst)];
+  return c.p.slice(0, 2).map((p, i) => ({ x: p.x, y: ys[i] ?? p.y }));
+}
+
 function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[] {
-  // Như TV: lúc vẽ / kéo chỉ có vạch dọc ở mép khoảng, nhả chuột mới hiện profile (khỏi tưởng profile đang nhấp nháy)
+  // Như TV: lúc vẽ / kéo chỉ có vạch dọc ở mép khoảng (và FRVP thêm đường chéo nối 2 điểm), đều xám #808080 đặc 1px;
+  // nhả chuột mới hiện profile (khỏi tưởng profile đang nhấp nháy)
   if (c.dragging) {
-    return (anchored ? [t0] : [t0, t1]).flatMap((t) => {
+    const grey = { w: 1, color: "#808080" };
+    const verticals = (anchored ? [t0] : [t0, t1]).flatMap((t) => {
       const x = c.X(t);
-      return x === null ? [] : [seg({ x, y: 0 }, { x, y: c.h }, { w: 1 })];
+      return x === null ? [] : [seg({ x, y: 0 }, { x, y: c.h }, grey)];
     });
+    return anchored || c.p.length < 2 ? verticals : [...verticals, seg(c.p[0], c.p[1], grey)];
   }
   const o = { ...(VP_BY[c.d.type] ?? VP_DEFAULTS), ...c.d.opts } as typeof VP_DEFAULTS;
   const tick = c.tickSize > 0 ? c.tickSize : 10 ** -c.digits;
-  // Extend Right (và AVP): profile gom volume tới nến mới nhất, hộp kéo hết bề ngang chart
+  // Extend Right (và AVP): profile gom volume tới nến mới nhất
   const lastT = c.bars[c.bars.length - 1]?.t ?? t1;
   const toLast = anchored || o.extend;
   const end = (toLast ? Math.max(t1, lastT) : t1) + c.step;
@@ -496,13 +533,22 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
   if (!vp) return [];
   const { lo, hi, size, N, up, dn, total, mv, poc, vl, vh } = vp;
 
-  const x0 = c.X(t0), x1 = toLast ? c.w : c.X(t1);
-  if (x0 === null || x1 === null) return [];
-  const left = Math.min(x0, x1), right = Math.max(x0, x1);
-  const histW = Math.max(20, ((right - left) * o.width) / 100);
+  // Hộp từ mép trái nến đầu tới mép phải nến cuối của khoảng neo; Extend Right / AVP kéo vạch POC / VAH / VAL và hộp tới mép phải của nến mới nhất
+  // (không tới mép chart). Bề rộng histogram (% of the box) tính theo hộp của khoảng neo, không theo phần kéo dài.
+  const xa = c.X(t0), xb = c.X(t1), xl = c.X(Math.max(t1, lastT));
+  if (xa === null || xb === null || xl === null) return [];
+  const half = barWidth(c, t0) / 2;
+  const left = Math.min(xa, xb) - half, right = Math.max(xa, xb) + half;
+  const xEnd = toLast ? Math.max(right, xl + half) : right;
+  const histW = Math.max(20, ((anchored ? xEnd - left : right - left) * o.width) / 100);
   const dir = o.place === "right" ? -1 : 1;
-  const base = dir === 1 ? left : right;
+  const base = dir === 1 ? left : anchored ? xEnd : right;
   const out: Shape[] = [];
+  // Histogram Box: nền của cả hộp (từ giá thấp nhất tới cao nhất của các nến gom), vẽ dưới histogram
+  const yTop = c.Y(hi), yBot = c.Y(lo);
+  if (o.box && yTop !== null && yBot !== null) {
+    out.push(poly([{ x: left, y: yBot }, { x: xEnd, y: yBot }, { x: xEnd, y: yTop }, { x: left, y: yTop }], { closed: true, fill: 1, noStroke: true, color: o.box }));
+  }
   // Delta = up − down của từng row: thanh dài theo |delta| (so với row lệch nhất), màu theo dấu
   const delta = up.map((u, i) => u - dn[i]);
   const maxDelta = Math.max(...delta.map(Math.abs));
@@ -516,8 +562,9 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
     // row quá thấp thì để liền, khỏi mất thanh.
     const top = Math.min(yb, yt), bottom = Math.max(yb, yt);
     const barBottom = bottom - top >= 3 ? bottom - 1 : bottom;
+    // màu có alpha riêng (mặc định như TV) thì vẽ nguyên; màu 6 chữ số của bản lưu cũ giữ độ đục cũ
     const rect = (a: number, b: number, color: string) =>
-      poly([{ x: a, y: barBottom }, { x: b, y: barBottom }, { x: b, y: top }, { x: a, y: top }], { closed: true, fill: inVa ? 0.75 : 0.4, noStroke: true, color });
+      poly([{ x: a, y: barBottom }, { x: b, y: barBottom }, { x: b, y: top }, { x: a, y: top }], { closed: true, fill: color.length > 7 ? 1 : inVa ? 0.75 : 0.4, noStroke: true, color });
     const wUp = (up[i] / mv) * histW, wDn = (dn[i] / mv) * histW;
     let len = (total[i] / mv) * histW; // chiều dài thanh, để đặt nhãn Values
     if (o.volume === "delta") {
@@ -532,16 +579,19 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
     if (o.values && Math.round(shown) !== 0) out.push(txt({ x: base + dir * (len + 3), y: (yb + yt) / 2 }, String(Math.round(shown)), { size: 9, align: dir === 1 ? "left" : "right" }));
   }
 
-  const xEnd = toLast ? c.w : right;
   const line = (price: number, color: string, extra: O) => {
     const y = c.Y(price);
     if (y === null) return;
     out.push(seg({ x: left, y }, { x: xEnd, y }, { color, w: 1, ...extra }));
-    out.push({ k: "axis", y, text: c.fp(price), bg: color, color: axisText(color) });
   };
-  if (o.showVah) line(Math.min(hi, lo + size * (vh + 1)), o.vahColor, { dash: 1 });
-  if (o.showVal) line(lo + size * vl, o.valColor, { dash: 1 });
-  if (o.showPoc) line((lo + size * poc + Math.min(hi, lo + size * (poc + 1))) / 2, o.pocColor, { dash: 0, w: 1.5 });
+  const dashOf = (v: number) => (v === 1 || v === 2 ? v : 0) as 0 | 1 | 2;
+  if (o.showVah) line(Math.min(hi, lo + size * (vh + 1)), o.vahColor, { dash: dashOf(o.vahDash) });
+  if (o.showVal) line(lo + size * vl, o.valColor, { dash: dashOf(o.valDash) });
+  if (o.showPoc) line((lo + size * poc + Math.min(hi, lo + size * (poc + 1))) / 2, o.pocColor, { dash: dashOf(o.pocDash) });
+  // Khi chọn: nhãn trục giá ở hai đầu hộp (xanh dương) và dải sáng giữa chúng, như TV
+  if (c.selected && yTop !== null && yBot !== null) {
+    out.push({ k: "axis", y: yTop, text: c.fp(hi), bg: "#2962ff", color: "#ffffff", band: true }, { k: "axis", y: yBot, text: c.fp(lo), bg: "#2962ff", color: "#ffffff", band: true });
+  }
   return out;
 }
 
@@ -1489,7 +1539,13 @@ export const TOOLS: ToolSpec[] = [
       return [poly(pts)];
     },
   },
-  { id: "frvp", label: "Fixed range volume profile", n: 2, panel: "volume", axes: "time", build: (c) => volumeProfile(c, span(c).t0, span(c).t1) },
+  {
+    id: "frvp", label: "Fixed range volume profile", n: 2, panel: "volume", axes: "time", inBars: true,
+    build: (c) => volumeProfile(c, span(c).t0, span(c).t1),
+    handles: profileHandles,
+    // chỉ có thời gian (như tab Coordinates của TV: #1 (bar), #2 (bar)): kéo handle chỉ đổi nến, giá giữ nguyên
+    moveHandle: (pts, handle, a) => pts.map((q, i) => (i === handle ? { time: a.time, price: q.price } : q)),
+  },
   { id: "avp", label: "Anchored volume profile", n: 1, panel: "volume", axes: "time", build: (c) => volumeProfile(c, pt(c, 0).time, c.bars[c.bars.length - 1]?.t ?? pt(c, 0).time, true) },
   // Measurers
   {
@@ -1595,7 +1651,7 @@ export const TOOLS: ToolSpec[] = [
       return [poly(pts, { closed: true, fill: 0.2, noStroke: true }), poly(pts)];
     },
   },
-  { id: "curve", label: "Curve", n: 2, style: { color: "#2962ff" }, build: (c) => [poly(bezier(c.p[0], { x: c.p[1].x, y: c.p[0].y }, { x: c.p[1].x, y: c.p[0].y }, c.p[1]))] },
+  { id: "curve", label: "Curve", n: 2, build: (c) => [poly(bezier(c.p[0], { x: c.p[1].x, y: c.p[0].y }, { x: c.p[1].x, y: c.p[0].y }, c.p[1]))] },
   {
     id: "doublecurve", label: "Double curve", n: 2, style: { color: "#673ab7" },
     build: (c) => {
@@ -1691,6 +1747,9 @@ export const TOOLS: ToolSpec[] = [
 ];
 
 export const SPEC = Object.fromEntries(TOOLS.map((t) => [t.id, t])) as Record<string, ToolSpec>;
+
+// Màu của hình mới khi tool không có màu riêng (style.color): xám trung tính, không mặc định xanh
+export const DEFAULT_COLOR = "#787b86";
 
 export type Section = { title?: string; ids: string[] };
 export type Group = { id: string; label: string; icon: string; sections: Section[] };

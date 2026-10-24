@@ -94,6 +94,23 @@ describe("def CVD", () => {
     expect(d.candle!.o[95]).not.toBe(0);
   });
 
+  it("Session start = Custom hour: về 0 lúc 22:00 broker, không về 0 lúc 00:00", () => {
+    const d = run({ sessionStart: "Custom hour", sessionHour: 22 }, fineM1(t0, 192 * 15));
+    expect(d.candle!.o[88]).toBe(0); // 22:00 ngày đầu
+    expect(d.candle!.o[87]).not.toBe(0);
+    expect(d.candle!.o[96]).not.toBe(0); // 00:00 ngày thứ hai không còn reset
+    expect(d.candle!.o[184]).toBe(0); // 22:00 ngày thứ hai
+  });
+
+  it("Session start = After break: về 0 ở nến đầu tiên sau khoảng trống", () => {
+    const gap = bars.filter((b) => b.t < t0 + 21 * 3600 || b.t >= t0 + 22 * 3600); // nghỉ 21:00–22:00 ngày đầu
+    const d = run({ sessionStart: "After break" }, fineM1(t0, 192 * 15), gap);
+    const i = gap.findIndex((b) => b.t === t0 + 22 * 3600);
+    expect(d.candle!.o[i]).toBe(0);
+    expect(d.candle!.o[i - 1]).not.toBe(0);
+    expect(d.candle!.o[gap.findIndex((b) => b.t === t0 + DAY)]).not.toBe(0); // 00:00 không reset
+  });
+
   it("anchor 1W không reset giữa hai ngày cùng tuần", () => {
     // ngày 100 từ 1970-04-11 (thứ Bảy) và 101 (Chủ nhật) cùng tuần ISO với nhau? chọn ngày 102,103 (thứ Hai, thứ Ba)
     const b = chart(102 * DAY, 192);
@@ -134,6 +151,10 @@ describe("def.lower của CVD", () => {
   });
   it("khung riêng không nhỏ hơn khung chart: null (dùng nến chart)", () => {
     expect(need({ custom: true, tf: "15" })).toBeNull();
+  });
+  it("Custom hour: nạp từ đầu phiên (22:00 hôm trước) chứa nến chart đầu tiên", () => {
+    const n = need({ sessionStart: "Custom hour", sessionHour: 22 })!;
+    expect(n.from).toBe(Math.floor(all[cut].t / DAY) * DAY - 2 * 3600);
   });
   it("anchor tuần cần nạp từ đầu tuần", () => {
     const w = need({ anchor: "1W" })!;

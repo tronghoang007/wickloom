@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import { textBox, type Shape } from "./shapes";
-import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, profileSource, regression, SPEC, tableCellAt, tableCells, volumeIn, type Ctx } from "./tools";
+import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, profileSource, regression, SPEC, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
 import type { TickSource } from "@/volumeProfile/compute";
 import type { Anchor } from "./types";
 
@@ -256,7 +256,7 @@ describe("volume profile vẽ dạng thanh", () => {
   // khoảng y [trên, dưới] của từng thanh nền (poly kín có fill), xếp từ trên xuống
   const bands = (shapes: Shape[]) =>
     shapes
-      .filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill)
+      .filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill && s.color !== VP_DEFAULTS.box)
       .map((s) => [Math.min(...s.pts.map((q) => q.y)), Math.max(...s.pts.map((q) => q.y))])
       .sort((a, b) => a[0] - b[0]);
 
@@ -266,17 +266,21 @@ describe("volume profile vẽ dạng thanh", () => {
     for (let i = 1; i < rows.length; i++) expect(rows[i][0] - rows[i - 1][1]).toBeCloseTo(1, 9);
   });
 
-  it("đang vẽ / kéo chỉ có vạch dọc ở 2 mép khoảng, không có thanh", () => {
-    const shapes = SPEC.frvp.build({ ...ctx("frvp", 10), dragging: true });
-    expect(shapes).toHaveLength(2);
+  it("đang vẽ / kéo: 2 vạch dọc ở 2 mép khoảng + đường chéo nối 2 điểm, đều xám #808080, không có thanh", () => {
+    const c = ctx("frvp", 10);
+    const shapes = SPEC.frvp.build({ ...c, dragging: true });
+    expect(shapes).toHaveLength(3);
     for (const s of shapes) {
       expect(s.k).toBe("line");
-      if (s.k === "line") {
-        expect(s.a.x).toBe(s.b.x);
-        expect([s.a.y, s.b.y]).toEqual([0, 500]);
-      }
+      if (s.k === "line") expect(s.color).toBe("#808080");
     }
-    expect(shapes.map((s) => (s.k === "line" ? s.a.x : -1))).toEqual([0, 190]);
+    const [v0, v1, diag] = shapes.map((s) => (s.k === "line" ? s : null));
+    for (const v of [v0, v1]) {
+      expect(v!.a.x).toBe(v!.b.x);
+      expect([v!.a.y, v!.b.y]).toEqual([0, 500]);
+    }
+    expect([v0!.a.x, v1!.a.x]).toEqual([0, 190]);
+    expect([diag!.a, diag!.b]).toEqual(c.p);
   });
 
   it("Anchored VP khi kéo chỉ có 1 vạch ở điểm neo", () => {
@@ -297,7 +301,7 @@ describe("volume profile vẽ dạng thanh", () => {
       return SPEC.frvp.build({ ...c, bars: dbars, d: { ...c.d, opts: { rows: 3, volume, ...extra } } });
     };
     const rects = (shapes: Shape[]) =>
-      shapes.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill)
+      shapes.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill && s.color !== VP_DEFAULTS.box)
         .map((s) => ({ w: Math.max(...s.pts.map((q) => q.x)) - Math.min(...s.pts.map((q) => q.x)), color: s.color }))
         .sort((a, b) => a.w - b.w);
 
@@ -338,7 +342,7 @@ describe("volume profile vẽ dạng thanh", () => {
       return SPEC[type].build({ ...c, d: { ...c.d, opts: { rows: 10, ...opts } }, ...(ticks ? { ticks } : {}) });
     };
     const widths = (shapes: Shape[]) =>
-      shapes.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill).map((s) => Math.max(...s.pts.map((q) => q.x)) - Math.min(...s.pts.map((q) => q.x)));
+      shapes.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill && s.color !== VP_DEFAULTS.box).map((s) => Math.max(...s.pts.map((q) => q.x)) - Math.min(...s.pts.map((q) => q.x)));
 
     it("dùng histogram tick: chỉ row đầu có thanh (up + dn), cả khoảng [t0, nến cuối + step)", () => {
       const { ticks, asked } = fake();
@@ -1036,5 +1040,76 @@ describe("Table (như TV)", () => {
     expect(texts.map((t) => t.k === "text" && [t.text, t.at.x, t.at.y])).toEqual([["Entry", 108, 65.5], ["4140", 348, 65.5]]);
     // nền + viền ngoài + 2 đường dọc + 2 đường ngang
     expect(sh.filter((s) => s.k === "line")).toHaveLength(4);
+  });
+});
+
+describe("FRVP giống TV: hộp, đường, màu, handle", () => {
+  // 20 nến t = 0..19 (mỗi nến rộng 10px, X = t·10), giá 0..105, trục giá y = 500 − 4·price
+  const bars: Bar[] = Array.from({ length: 20 }, (_, i) => ({ t: i, o: 5 * i, h: 5 * i + 10, l: 5 * i, c: 5 * i + 10, v: 100 }));
+  const ctx = (opts: Record<string, unknown> = {}, t1 = 19, selected = false): Ctx => ({
+    d: { id: "x", type: "frvp", points: [{ time: 0, price: 0 }, { time: t1, price: 100 }], color: "#2962ff", width: 1, locked: false, hidden: false, opts: { rows: 10, ...opts } },
+    p: [{ x: 0, y: 500 }, { x: t1 * 10, y: 100 }],
+    w: 400, h: 500, bars, tickSize: 1, hovered: false, selected, step: 1,
+    barsBetween: (t0, t1b) => t1b - t0,
+    X: (t) => t * 10, Y: (price) => 500 - 4 * price, fp: (v) => v.toFixed(2), digits: 0,
+  });
+  type Line = Extract<Shape, { k: "line" }>;
+  const lines = (shapes: Shape[]) => shapes.filter((s): s is Line => s.k === "line");
+  const polys = (shapes: Shape[]) => shapes.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly");
+
+  it("hộp từ mép trái nến đầu tới mép phải nến cuối (không phải từ tâm nến)", () => {
+    const shapes = SPEC.frvp.build(ctx());
+    const box = polys(shapes).find((s) => s.color === VP_DEFAULTS.box)!;
+    expect([Math.min(...box.pts.map((q) => q.x)), Math.max(...box.pts.map((q) => q.x))]).toEqual([-5, 195]);
+    for (const l of lines(shapes)) expect([l.a.x, l.b.x]).toEqual([-5, 195]);
+  });
+
+  it("Extend Right: vạch kéo tới mép phải nến mới nhất, không tới mép chart; histogram vẫn theo hộp của khoảng neo", () => {
+    const shapes = SPEC.frvp.build(ctx({ extend: true }, 9));
+    for (const l of lines(shapes)) expect(l.b.x).toBe(195); // nến cuối t = 19 → 190 + 5, chart rộng 400
+    const bar = polys(shapes).filter((s) => s.color !== VP_DEFAULTS.box).map((s) => Math.max(...s.pts.map((q) => q.x)) - Math.min(...s.pts.map((q) => q.x)));
+    expect(Math.max(...bar)).toBeCloseTo(0.3 * 100, 6); // hộp neo: −5 → 95
+  });
+
+  it("vạch: POC cam nét liền 1px, VAH / VAL xanh nét đứt 1px", () => {
+    const [vah, val, poc] = lines(SPEC.frvp.build(ctx()));
+    expect([vah.color, vah.dash, vah.w]).toEqual(["#2962ff", 1, 1]);
+    expect([val.color, val.dash, val.w]).toEqual(["#2962ff", 1, 1]);
+    expect([poc.color, poc.dash, poc.w]).toEqual(["#ff9800", 0, 1]);
+    const custom = lines(SPEC.frvp.build(ctx({ pocDash: 2, vahDash: 0 })));
+    expect([custom[0].dash, custom[2].dash]).toEqual([0, 2]);
+  });
+
+  it("màu có alpha riêng thì vẽ nguyên; màu 6 chữ số của bản lưu cũ giữ độ đục 0.4 / 0.75", () => {
+    const fills = (o: Record<string, unknown>) => new Set(polys(SPEC.frvp.build(ctx(o))).filter((s) => s.color !== VP_DEFAULTS.box).map((s) => s.fill));
+    expect(fills({})).toEqual(new Set([1]));
+    expect(fills({ up: "#26a69a", down: "#f23645", vaUp: "#00bcd4", vaDown: "#e91e63" })).toEqual(new Set([0.4, 0.75]));
+    expect(VP_DEFAULTS.up).toBe("#26c6da40"); // 25% đục: transparency 75 của TV
+    expect(VP_DEFAULTS.vaUp).toBe("#26c6dab3"); // 70% đục: transparency 30 của TV
+  });
+
+  it("Histogram Box tắt được (màu rỗng)", () => {
+    expect(polys(SPEC.frvp.build(ctx({ box: "" }))).some((s) => s.color === VP_DEFAULTS.box)).toBe(false);
+  });
+
+  it("handle ở hai góc chéo của hộp: nến đầu ở giá cao nhất, nến cuối ở giá thấp nhất; moveHandle chỉ đổi thời gian", () => {
+    const [a, b] = SPEC.frvp.handles!(ctx());
+    expect([a.x, a.y]).toEqual([0, 500 - 4 * 105]);
+    expect([b.x, b.y]).toEqual([190, 500]);
+    const pts = SPEC.frvp.moveHandle!([{ time: 0, price: 7 }, { time: 19, price: 9 }], 1, { time: 15, price: 55 });
+    expect(pts).toEqual([{ time: 0, price: 7 }, { time: 15, price: 9 }]);
+  });
+
+  it("handle theo cả phần Extend Right (giá cao / thấp của các nến tới nến mới nhất)", () => {
+    const [a, b] = SPEC.frvp.handles!(ctx({ extend: true }, 5));
+    expect(a.y).toBe(500 - 4 * 105);
+    expect(b.y).toBe(500);
+  });
+
+  it("chọn hình: nhãn trục giá ở hai đầu hộp, kèm cờ band cho dải sáng", () => {
+    const axis = SPEC.frvp.build(ctx({}, 19, true)).filter((s): s is Extract<Shape, { k: "axis" }> => s.k === "axis" && !!s.band);
+    expect(axis.map((s) => s.text).sort()).toEqual(["0.00", "105.00"]);
+    expect(SPEC.frvp.build(ctx()).some((s) => s.k === "axis" && s.band)).toBe(false);
+    expect(SPEC.frvp.inBars).toBe(true);
   });
 });

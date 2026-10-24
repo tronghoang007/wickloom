@@ -16,7 +16,7 @@ export type Shape =
       alpha?: number;
       color?: string;
     }
-  | { k: "axis"; y: number; text: string; bg: string; color: string; always?: boolean } // always: hiện cả khi không chọn
+  | { k: "axis"; y: number; text: string; bg: string; color: string; always?: boolean; band?: boolean } // always: hiện cả khi không chọn; band: dải sáng giữa các nhãn band trên trục giá
   | {
       k: "text";
       at: Pt;

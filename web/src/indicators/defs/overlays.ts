@@ -1,7 +1,9 @@
 import { periodKeys, type Period } from "../calendar";
-import { num, str, type IndicatorDef } from "../schema";
+import { num, str, type FillRef, type IndicatorDef, type InputDef, type Inputs, type PlotDef } from "../schema";
 import * as ta from "../ta";
-import { SRC, length, maTypeInput, maWarmup, offsetInput, sourceInput, warm } from "./common";
+import type { Num } from "../ta";
+import { SRC, length, maTypeInput, maWarmup, offsetInput, sessionInputs, sourceInput, warm, withSession } from "./common";
+import { barStep } from "./pivots";
 
 export const sma: IndicatorDef = {
   id: "sma", name: "SMA", title: "Simple moving average", overlay: true,
@@ -68,29 +70,64 @@ export const bb: IndicatorDef = {
   },
 };
 
-const ANCHORS: Record<string, Period> = { Session: "day", Week: "week", Month: "month", Year: "year" };
+const ANCHORS: Record<string, Period> = { Session: "day", Week: "week", Month: "month", Quarter: "quarter", Year: "year", Decade: "decade", Century: "century" };
+const BAND_COLORS = ["#4caf50", "#808000", "#00897b"]; // green, olive, teal của Pine (nền 5% đục)
+const BANDS = [1, 2, 3];
+const bandOn = (n: number) => (i: Inputs) => !!i[`showBand${n}`];
 
-/** VWAP cộng dồn, reset khi sang kỳ mới theo giờ broker (không còn reset theo ngày UTC). Volume = 0 -> na (không còn `v || 1`). */
+/** VWAP như indicator có sẵn của TV: cộng dồn Σ(giá·vol)/Σvol, reset khi sang kỳ Anchor theo giờ broker (hoặc mốc Session start). Dải trên / dưới = VWAP ± hệ số × độ lệch chuẩn
+ *  có trọng số volume (hoặc % của VWAP). Volume = 0 -> na (không còn `v || 1`). */
 export const vwap: IndicatorDef = {
   id: "vwap", name: "VWAP", title: "Volume-weighted average price", overlay: true,
   inputs: [
-    { key: "anchor", label: "Anchor Period", type: "select", default: "Session", options: Object.keys(ANCHORS) },
-    sourceInput("hlc3"),
+    { key: "hideDWM", label: "Hide VWAP on 1D or Above", type: "bool", default: false, group: "VWAP Settings" },
+    { key: "anchor", label: "Anchor Period", type: "select", default: "Session", options: Object.keys(ANCHORS), group: "VWAP Settings" },
+    { ...sourceInput("hlc3"), group: "VWAP Settings" },
+    { ...offsetInput(), group: "VWAP Settings" },
+    ...sessionInputs(),
+    {
+      key: "bandsMode", label: "Bands Calculation Mode", type: "select", default: "Standard Deviation", options: ["Standard Deviation", "Percentage"], group: "Bands Settings", hideInLegend: true,
+      tooltip: "Determines the units used to calculate the distance of the bands. When \"Percentage\" is selected, a multiplier of 1 corresponds to 1% of the VWAP value.",
+    },
+    ...BANDS.flatMap((n): InputDef[] => [
+      { key: `showBand${n}`, label: `Show Band #${n}`, type: "bool", default: n === 1, group: "Bands Settings" },
+      { key: `bandMult${n}`, label: `Bands Multiplier #${n}`, type: "float", default: n, min: 0, step: 0.5, group: "Bands Settings", hideInLegend: true, enabledIf: bandOn(n) },
+    ]),
   ],
-  plots: [{ id: "vwap", title: "VWAP", type: "line", color: "#9c27b0" }],
+  plots: [
+    { id: "vwap", title: "VWAP", type: "line", color: "#2962ff", offset: "offset" },
+    ...BANDS.flatMap((n): PlotDef[] => [
+      { id: `upper${n}`, title: `Upper Band #${n}`, type: "line", color: BAND_COLORS[n - 1], offset: "offset", showIf: bandOn(n) },
+      { id: `lower${n}`, title: `Lower Band #${n}`, type: "line", color: BAND_COLORS[n - 1], offset: "offset", showIf: bandOn(n) },
+    ]),
+  ],
+  fills: BANDS.map((n) => ({ id: `fill${n}`, title: `Bands Fill #${n}`, between: [{ plot: `upper${n}` }, { plot: `lower${n}` }] as [FillRef, FillRef], color: `${BAND_COLORS[n - 1]}0d`, showIf: bandOn(n) })),
   needsCalendar: true,
   warmup: () => 0,
   compute: ({ bars, inputs, src, calendar }) => {
     const s = src(str(inputs, "src"));
-    const keys = periodKeys(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", calendar);
-    const out = ta.nan(bars.length);
-    let pv = 0, vv = 0;
-    for (let i = 0; i < bars.length; i++) {
-      if (i > 0 && keys[i] !== keys[i - 1]) { pv = 0; vv = 0; }
+    const keys = periodKeys(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", withSession(calendar, inputs));
+    const n = bars.length;
+    const out: Record<string, Num> = { vwap: ta.nan(n) };
+    for (const k of BANDS) { out[`upper${k}`] = ta.nan(n); out[`lower${k}`] = ta.nan(n); }
+    if (inputs.hideDWM && barStep(bars) >= 86400) return out; // D1 trở lên: như TV, không vẽ
+    const pct = str(inputs, "bandsMode") === "Percentage";
+    let pv = 0, pv2 = 0, vv = 0;
+    for (let i = 0; i < n; i++) {
+      if (i > 0 && keys[i] !== keys[i - 1]) { pv = 0; pv2 = 0; vv = 0; }
       pv += s[i] * bars[i].v;
+      pv2 += s[i] * s[i] * bars[i].v;
       vv += bars[i].v;
-      if (vv > 0) out[i] = pv / vv;
+      if (vv <= 0) continue;
+      const w = pv / vv;
+      out.vwap[i] = w;
+      const basis = pct ? w * 0.01 : Math.sqrt(Math.max(0, pv2 / vv - w * w));
+      for (const k of BANDS) {
+        const d = basis * num(inputs, `bandMult${k}`);
+        out[`upper${k}`][i] = w + d;
+        out[`lower${k}`][i] = w - d;
+      }
     }
-    return { vwap: out };
+    return out;
   },
 };

@@ -23,7 +23,7 @@ import { isActivePane, useLayoutStore } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
 import { visibleOn } from "./visibility";
-import { defaultOpts, GROUPS, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, VP_BY, type Ctx, type OneClickView } from "./tools";
+import { DEFAULT_COLOR, defaultOpts, GROUPS, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, VP_BY, type Ctx, type OneClickView } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
 
 type Opts = {
@@ -153,7 +153,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   // kèm dải tô giữa điểm thấp nhất và cao nhất.
   updateAllViews() {
     this.axis = [];
-    this.timeAxis = [];
+    this.timeLabels = [];
     this.bands = { price: null, time: null };
     const st = this.st;
     if (st.hideAll || !this.series) return;
@@ -175,6 +175,9 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       for (const s of b?.shapes ?? []) {
         if (s.k === "axis") this.axis.push({ coordinate: () => s.y, text: () => s.text, textColor: () => s.color, backColor: () => s.bg });
       }
+      // nhãn "band" (FRVP: hai đầu giá của hộp) kèm dải sáng giữa chúng trên trục giá
+      const ys = (b?.shapes ?? []).flatMap((s) => (s.k === "axis" && s.band ? [s.y] : []));
+      if (ys.length > 1) this.bands.price = [Math.min(...ys), Math.max(...ys)];
     }
     const label = (coordinate: number, text: string): ISeriesPrimitiveAxisView =>
       ({ coordinate: () => coordinate, text: () => text, textColor: () => "#ffffff", backColor: () => AXIS_BG });
@@ -192,22 +195,76 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     }
     if (spec.axes !== "price") {
       const xs: number[] = [];
+      // điểm đang vẽ / đang kéo nằm đúng chỗ con trỏ: nhãn của nó chính là nhãn crosshair, không vẽ thêm nhãn xanh chồng lên
+      const live = m.k === "drafting" ? d.points[m.placed]?.time : m.k === "dragPoint" && m.moved ? d.points[m.index]?.time : undefined;
       for (const t of new Set(d.points.map((a) => a.time))) {
         const x = this.timeToX(t);
         if (x === null) continue;
         xs.push(x);
-        this.timeAxis.push(label(x, crosshairLabel(t)));
+        if (t !== live) this.timeLabels.push({ x, text: crosshairLabel(t) });
       }
       if (xs.length > 1) this.bands.time = [Math.min(...xs), Math.max(...xs)];
     }
   }
   priceAxisViews(): readonly ISeriesPrimitiveAxisView[] { return this.axis; }
-  timeAxisViews(): readonly ISeriesPrimitiveAxisView[] { return this.timeAxis; }
   priceAxisPaneViews(): readonly IPrimitivePaneView[] { return [this.bandView("price")]; }
-  timeAxisPaneViews(): readonly IPrimitivePaneView[] { return [this.bandView("time")]; }
+  timeAxisPaneViews(): readonly IPrimitivePaneView[] { return [this.bandView("time"), this.timeLabelView()]; }
   private axis: ISeriesPrimitiveAxisView[] = [];
-  private timeAxis: ISeriesPrimitiveAxisView[] = [];
+  private timeLabels: { x: number; text: string }[] = [];
   private bands: { price: [number, number] | null; time: [number, number] | null } = { price: null, time: null };
+
+  // Nhãn giờ xanh của các điểm neo. LWC vẽ nhãn crosshair SAU nhãn của axis view nên nhãn crosshair đè lên nhãn neo;
+  // vẽ ở lớp "top" của trục thời gian (sau cả nhãn crosshair) để nhãn neo nổi lên trên. Hình học y hệt TimeAxisViewRenderer của LWC.
+  private timeLabelView(): IPrimitivePaneView {
+    return {
+      zOrder: () => "top",
+      renderer: (): IPrimitivePaneRenderer => ({
+        draw: (target) => {
+          const labels = this.timeLabels;
+          if (!labels.length) return;
+          const { fontSize: fs, fontFamily } = this.o.chart.options().layout;
+          const font = `${fs}px ${fontFamily}`;
+          const padX = (9 * fs) / 12, padY = (3 * fs) / 12;
+          const bottom = Math.ceil(1 + 5 + padY + fs + padY); // viền + vạch chia + padding + chữ
+          const maxW = this.o.chart.timeScale().width();
+          const boxes = target.useMediaCoordinateSpace(({ context: ctx }) => {
+            ctx.font = font;
+            return labels.map(({ x, text }) => {
+              const w = Math.round(ctx.measureText(text.replace(/[1-9]/g, "0")).width) + 2 * padX;
+              let x1 = Math.floor(x - w / 2) + 0.5;
+              if (x1 < 0) x1 = Math.floor(x - x1 - w / 2) + 0.5;
+              else if (x1 + w > maxW) x1 = Math.floor(x - (x1 + w - maxW) - w / 2) + 0.5;
+              return { x1, w, text };
+            });
+          });
+          target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
+            ctx.fillStyle = AXIS_BG;
+            const y2 = Math.round(bottom * vpr), r = Math.round(2 * hpr);
+            for (const b of boxes) {
+              const xa = Math.round(b.x1 * hpr), xb = Math.round((b.x1 + b.w) * hpr);
+              ctx.beginPath();
+              ctx.moveTo(xa, 0);
+              ctx.lineTo(xa, y2 - r);
+              ctx.arcTo(xa, y2, xa + r, y2, r);
+              ctx.lineTo(xb - r, y2);
+              ctx.arcTo(xb, y2, xb, y2 - r, r);
+              ctx.lineTo(xb, 0);
+              ctx.fill();
+            }
+          });
+          target.useMediaCoordinateSpace(({ context: ctx }) => {
+            ctx.font = font;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "#ffffff";
+            const m = ctx.measureText("Apr0");
+            const yText = 1 + 5 + padY + fs / 2 + ((m.actualBoundingBoxAscent || 0) - (m.actualBoundingBoxDescent || 0)) / 2;
+            for (const b of boxes) ctx.fillText(b.text, b.x1 + padX, yText);
+          });
+        },
+      }),
+    };
+  }
 
   private bandView(which: "price" | "time"): IPrimitivePaneView {
     return {
@@ -323,6 +380,13 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       }
     }
     return { time, price: pr };
+  }
+
+  // Tool có `inBars` (FRVP): thời gian neo kẹp trong [nến đầu, nến cuối] đã có, như TV không cho kéo ra khoảng trống bên phải
+  private fit(type: DrawingType, a: Anchor): Anchor {
+    const bars = this.o.getBars();
+    if (!SPEC[type].inBars || bars.length === 0) return a;
+    return { ...a, time: Math.min(bars[bars.length - 1].t, Math.max(bars[0].t, a.time)) };
   }
 
   // Điểm neo dưới con trỏ khi vẽ / kéo điểm, như TV:
@@ -467,13 +531,30 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   }
 
   // --- tương tác ---
+  // Pane chứa nến chính có thể không nằm trên cùng (đã đổi chỗ với pane indicator): mọi toạ độ y của series / hình vẽ là theo pane đó
+  private mainPane() {
+    try {
+      return this.series?.getPane() ?? null;
+    } catch {
+      return null; // series vừa bị gỡ
+    }
+  }
+
+  /** Mép trên pane chính trong khung chart (px). */
+  private mainTop(): number {
+    const el = this.mainPane()?.getHTMLElement();
+    return el ? el.getBoundingClientRect().top - this.o.container.getBoundingClientRect().top : 0;
+  }
+
+  // Toạ độ chuột theo pane chính (x theo khung chart, y theo mép trên pane chính)
   private rel(e: PointerEvent | MouseEvent): Pt {
     const r = this.o.container.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    const top = this.mainPane()?.getHTMLElement()?.getBoundingClientRect().top ?? r.top;
+    return { x: e.clientX - r.left, y: e.clientY - top };
   }
 
   private paneSize() {
-    return { w: this.o.chart.timeScale().width(), h: this.o.chart.paneSize(0).height };
+    return { w: this.o.chart.timeScale().width(), h: this.o.chart.paneSize(this.mainPane()?.paneIndex() ?? 0).height };
   }
 
   // Hình đang ghim (Anchor của TV): vị trí theo tỉ lệ khung chart, không theo thời gian / giá
@@ -532,7 +613,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       id: crypto.randomUUID(),
       type,
       points: [],
-      color: saved.color ?? st.color ?? "#2962ff",
+      color: saved.color ?? st.color ?? DEFAULT_COLOR,
       width: saved.width ?? st.width ?? 2,
       dash: saved.dash !== undefined ? saved.dash : st.dash,
       textColor: saved.textColor ?? st.textColor,
@@ -588,13 +669,14 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private place(tool: DrawingType, p: Pt, e: Mods) {
     const spec = SPEC[tool];
     const m = this.mode;
-    const a = this.anchorAt(p, e, m.k === "drafting" ? this.draftRef(m) : null, spec.shift === "square");
-    if (!a) return;
+    const a0 = this.anchorAt(p, e, m.k === "drafting" ? this.draftRef(m) : null, spec.shift === "square");
+    if (!a0) return;
+    const a = this.fit(tool, a0);
     if (m.k !== "drafting") {
       const d = this.newDraft(tool);
       if (spec.oneClick) {
         const top = this.series?.coordinateToPrice(0);
-        const bot = this.series?.coordinateToPrice(this.o.container.clientHeight);
+        const bot = this.series?.coordinateToPrice(this.paneSize().h);
         const span = top != null && bot != null ? Math.abs(top - bot) : 0;
         return this.finish(d, spec.oneClick(a, this.oneClickView(span)));
       }
@@ -683,7 +765,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     const p = this.rel(e);
     const m = this.mode;
     if (m.k === "drafting") {
-      const a = this.anchorAt(p, e, this.draftRef(m), SPEC[m.d.type].shift === "square");
+      const a0 = this.anchorAt(p, e, this.draftRef(m), SPEC[m.d.type].shift === "square");
+      const a = a0 && this.fit(m.d.type, a0);
       if (SPEC[m.d.type].n === -1) {
         if (m.pressed && a) { m.d.points.push(a); this.refresh(); }
       } else if (a) {
@@ -702,8 +785,9 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
         // Shift: so với điểm kề (handle riêng: chỉ 2 góc neo của rectangle, so với góc đối diện)
         const other = spec.moveHandle ? (m.index < 2 ? 1 - m.index : -1) : m.index > 0 ? m.index - 1 : 1;
         const ref = this.shiftable(d.type) && other >= 0 ? d.points[other] : null;
-        const a = this.anchorAt(p, e, ref, spec.shift === "square");
-        if (!a) return;
+        const a0 = this.anchorAt(p, e, ref, spec.shift === "square");
+        if (!a0) return;
+        const a = this.fit(d.type, a0);
         let pts: Anchor[];
         if (spec.moveHandle) pts = spec.moveHandle(d.points, m.index, a);
         else {
@@ -727,6 +811,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
         const p0 = this.series?.coordinateToPrice(m.start.y), p1 = this.series?.coordinateToPrice(p.y);
         if (l0 === null || l1 === null || p0 == null || p1 == null) return;
         const pts = shiftAnchors(this.o.getBars(), this.step(), m.orig, Math.round(l1 - l0), p1 - p0);
+        if (pts && SPEC[d.type].inBars && pts.some((q) => this.fit(d.type, q).time !== q.time)) return; // ra ngoài khoảng nến: giữ vị trí cũ
         if (pts) this.moveTo(m, d, pts);
       }
       return;
@@ -802,6 +887,14 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   };
 
   // --- API cho UI ---
+  /** Chuột phải khi đang cầm tool hoặc đang vẽ dở: huỷ bản vẽ và bỏ tool về con trỏ (như Esc, nhưng không bỏ chọn hình), như TV. Trả true nếu có gì để huỷ (khi đó không mở menu chuột phải). */
+  cancelByRightClick(): boolean {
+    if (this.st.tool === null && this.mode.k !== "drafting") return false;
+    this.cancelDraft();
+    this.setSt({ tool: null });
+    return true;
+  }
+
   setTool(tool: DrawingType | null, text?: string) {
     this.cancelDraft();
     this.pendingText = text;
@@ -933,9 +1026,10 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     const cell = this.st.editing?.cell;
     if (cell) {
       const rh = tableRowH(d), o = b.c.p[0];
-      return { x: o.x + TABLE_COL_W * cell[1] + 4, y: o.y + rh * cell[0] + rh / 2 };
+      return { x: o.x + TABLE_COL_W * cell[1] + 4, y: o.y + rh * cell[0] + rh / 2 + this.mainTop() };
     }
-    return SPEC[d.type].n === 2 ? b.c.p[1] : b.c.p[0];
+    const p = SPEC[d.type].n === 2 ? b.c.p[1] : b.c.p[0];
+    return { x: p.x, y: p.y + this.mainTop() }; // theo khung chart (ô sửa text nằm trong khung chart, không phải trong pane)
   }
 
   // text = null: hủy (Esc). Hình mới tạo mà hủy / để trống thì bỏ luôn, kể cả bước undo lúc tạo.

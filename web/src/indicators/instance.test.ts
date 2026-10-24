@@ -14,8 +14,9 @@ describe("resolveInputs", () => {
 
   it("bool và select", () => {
     const vwap = byId("vwap");
-    expect(resolveInputs(vwap, { anchor: "Week" })).toEqual({ anchor: "Week", src: "hlc3" });
-    expect(resolveInputs(vwap, { anchor: "Decade" })).toEqual({ anchor: "Session", src: "hlc3" });
+    expect(resolveInputs(vwap, { anchor: "Week" })).toMatchObject({ anchor: "Week", src: "hlc3", hideDWM: false, sessionStart: "After break", showBand1: true, showBand2: false, bandMult2: 2 });
+    expect(resolveInputs(vwap, { anchor: "Decade" })).toMatchObject({ anchor: "Decade" });
+    expect(resolveInputs(vwap, { anchor: "Epoch" })).toMatchObject({ anchor: "Session", src: "hlc3" });
     expect(coerceInput({ key: "k", label: "k", type: "bool", default: false }, true)).toBe(true);
     expect(coerceInput({ key: "k", label: "k", type: "bool", default: false }, 1)).toBeUndefined();
     expect(coerceInput({ key: "k", label: "k", type: "float", default: 1 }, NaN)).toBeUndefined();
@@ -82,7 +83,8 @@ describe("plotColor / withPlotColor / inputsText", () => {
   it("legend: giá trị đã điền mặc định, bool không hiện", () => {
     expect(inputsText(def, inst)).toBe("14 close");
     expect(inputsText(byId("sma"), newInstance("sma"))).toBe("20 close 0");
-    expect(inputsText(byId("vwap"), { ...newInstance("vwap"), inputs: { anchor: "Week" } })).toBe("Week hlc3");
+    expect(inputsText(byId("vwap"), { ...newInstance("vwap"), inputs: { anchor: "Week" } })).toBe("Week hlc3 0"); // Session start và các ô của band không in lên legend
+    expect(inputsText(byId("cvd"), newInstance("cvd"))).toBe("1D Time 1");
   });
 });
 

@@ -1,12 +1,12 @@
 import { TF_SECONDS, fetchBars, fetchBrokerOffset, fetchTickBig, fetchTickProfile, triggerBackfillAt, type Bar } from "@/lib/api";
-import type { IChartApi, IPriceLine, ISeriesApi, SeriesType, UTCTimestamp } from "lightweight-charts";
+import type { IChartApi, IPaneApi, IPriceLine, ISeriesApi, SeriesType, Time, UTCTimestamp } from "lightweight-charts";
 import { byId } from "./catalog";
 import { mergeCandleColors, planCandleColors } from "./candleColors";
 import { BarHistory, CalendarFeed, HISTORY_BARS } from "./data";
 import { planUpdate, type Snap } from "./diff";
 import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
 import { instanceShown, plotColor, resolveInputs, showsPriceLabel, type IndicatorInstance } from "./instance";
-import { effectiveScale, paneIndices, paneKeyOf } from "./layout";
+import { clampSlot, effectiveScale, otherPaneKeys, paneIndices, paneKeyOf } from "./layout";
 import { LowerFeed, TICK_TF } from "./lower";
 import { trimObjects, trimProfiles } from "./objects";
 import { FillPrimitive, type FillEdge } from "./render/fill";
@@ -57,11 +57,14 @@ function indexOfTime(times: number[], t: number): number {
 }
 
 /** Khoá "cấu trúc" của cả danh sách: đổi khoá = phải dựng lại series (thêm/gỡ indicator, đổi kiểu plot, chuyển pane/thang giá). */
-function structSig(list: IndicatorInstance[]): string {
+function structSig(list: IndicatorInstance[], mainSlot: number): string {
   const keys = list.map((i) => paneKeyOf(i, byId(i.id)));
-  return list
-    .map((i, k) => `${i.uid}:${i.id}:${byId(i.id).plots.map((p) => plotStyle(i, p).type).join("/")}@${keys[k]}/${effectiveScale(i, byId(i.id), keys[k])}`)
-    .join(",");
+  const slot = clampSlot(mainSlot, otherPaneKeys(keys).length);
+  return (
+    list
+      .map((i, k) => `${i.uid}:${i.id}:${byId(i.id).plots.map((p) => plotStyle(i, p).type).join("/")}@${keys[k]}/${effectiveScale(i, byId(i.id), keys[k])}`)
+      .join(",") + `#${slot}`
+  );
 }
 
 export class IndicatorManager {
@@ -96,6 +99,8 @@ export class IndicatorManager {
     private onSync: () => void = () => {},
     private onCandleColors: CandleColorSink = () => {},
     private getTick: () => number = () => 0,
+    private getMainSlot: () => number = () => 0, // số pane riêng nằm trên pane chính
+    private getMainPane: () => IPaneApi<Time> | null = () => null, // pane chứa nến chính (để đặt vào đúng vị trí sau khi dựng)
   ) {
     chart.timeScale().subscribeVisibleLogicalRangeChange(this.onRange);
   }
@@ -141,8 +146,9 @@ export class IndicatorManager {
     if (!l) return undefined;
     const i = indexOfTime(this.times, t);
     if (i < 0 || l.data.length === 0) return undefined;
+    const inputs = resolveInputs(l.def, l.inst.inputs);
     return l.def.plots.flatMap((p, k): PlotValue[] => {
-      if (p.hidden) return [];
+      if (p.hidden || (p.showIf && !p.showIf(inputs))) return [];
       const d = l.data[k];
       const c = d.candle;
       if (c) {
@@ -187,7 +193,7 @@ export class IndicatorManager {
       const def = byId(inst.id);
       const paneIndex = indices[n];
       const sid = scaleId(effectiveScale(inst, def, keys[n]), inst.uid);
-      const series = def.plots.map((p, k) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, k === 0 ? def.name : "", sid));
+      const series = def.plots.map((p) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, sid));
       const hasAnchor = !!(def.levels?.length || def.fills?.length || def.objects || def.profiles);
       const anchor = hasAnchor ? addAnchorSeries(this.chart, paneIndex, sid) : null;
       if (sid === "left") this.chart.priceScale("left", paneIndex).applyOptions({ visible: true });
@@ -212,6 +218,12 @@ export class IndicatorManager {
       }
       this.live.push({ inst, def, series, anchor, lines, fills, objects, profiles, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
     });
+    // Series trên được dựng với pane chính ở trên cùng (pane riêng 1..n); đặt pane chính vào đúng chỗ giữa các pane riêng
+    const main = this.getMainPane();
+    const slot = clampSlot(this.getMainSlot(), otherPaneKeys(keys).length);
+    try {
+      if (main && main.paneIndex() !== slot) main.moveTo(slot);
+    } catch { /* chart đã bị huỷ */ }
   }
 
   // Phần hiển thị (màu, nét, độ dày, ẩn, nhãn, số chữ số, levels) đổi bằng applyOptions: series giữ nguyên nên xem trước trong Settings không nháy
@@ -220,12 +232,14 @@ export class IndicatorManager {
     const shown = instanceShown(inst, this.feed.tf);
     const plots = def.plots.map((p) => plotStyle(inst, p));
     const levels = (def.levels ?? []).map((lv) => levelStyle(inst, lv));
-    const key = JSON.stringify([shown, plots, levels, showsPriceLabel(inst, def), inst.precision ?? null, l.lastNa]);
+    const inputs = resolveInputs(def, inst.inputs);
+    const active = def.plots.map((p) => p.showIf?.(inputs) ?? true);
+    const key = JSON.stringify([shown, plots, levels, active, showsPriceLabel(inst, def), inst.precision ?? null, l.lastNa]);
     if (key === l.styleKey) return;
     l.styleKey = key;
     def.plots.forEach((p, k) => {
       const st = plots[k];
-      const opts: Record<string, unknown> = { ...plotOptions(st), visible: shown && st.visible && !p.hidden, lastValueVisible: showsPriceLabel(inst, def) && !p.hidden && !l.lastNa[k] };
+      const opts: Record<string, unknown> = { ...plotOptions(st), visible: shown && st.visible && !p.hidden && active[k], lastValueVisible: showsPriceLabel(inst, def) && !p.hidden && !l.lastNa[k] };
       if (st.type !== "histogram") {
         const volume = def.format === "volume";
         opts.priceFormat = volume
@@ -244,8 +258,9 @@ export class IndicatorManager {
   // LWC vẫn vẽ primitive của series đã ẩn, nên indicator ẩn / ngoài khung hiện thì phải xoá dữ liệu của fill và object
   private applyFills(l: Live, shown: boolean) {
     const { inst, def } = l;
+    const inputs = resolveInputs(def, inst.inputs);
     (def.fills ?? []).forEach((f, k) => {
-      if (!shown || !fillShown(inst, def, f)) return l.fills[k].set(null);
+      if (!shown || (f.showIf && !f.showIf(inputs)) || !fillShown(inst, def, f)) return l.fills[k].set(null);
       const edge = (r: (typeof f.between)[number]): FillEdge => {
         if ("plot" in r) return l.data[def.plots.findIndex((p) => p.id === r.plot)]?.values ?? [];
         const lv = def.levels?.find((x) => x.id === r.level);
@@ -270,7 +285,7 @@ export class IndicatorManager {
   }
 
   private sync() {
-    const sig = structSig(this.list);
+    const sig = structSig(this.list, this.getMainSlot());
     if (sig !== this.sig) {
       this.sig = sig;
       this.build();

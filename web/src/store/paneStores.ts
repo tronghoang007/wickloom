@@ -4,7 +4,9 @@
 import type { DrawingManager } from "@/drawings/manager";
 import type { Drawing } from "@/drawings/types";
 import type { Visibility } from "@/drawings/visibility";
+import { byId } from "@/indicators/catalog";
 import { newInstance, type IndicatorInstance } from "@/indicators/instance";
+import { reslot, stepPane } from "@/indicators/layout";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 export type ChartType = "candles" | "bars" | "line" | "area" | "heikin";
@@ -23,6 +25,12 @@ export type IndicatorsPane = {
   setCollapsed: (v: boolean) => void;
   add: (id: string) => void;
   remove: (uid: string) => void;
+  /** Gỡ nhiều indicator một lần (nút "Delete pane": cả pane). */
+  removeMany: (uids: string[]) => void;
+  /** Số pane riêng nằm TRÊN pane chính (0 = pane chính trên cùng). Trạng thái chạy, không lưu. */
+  mainSlot: number;
+  /** Đổi chỗ pane `key` (hoặc pane chính nếu key = "main") với pane liền trên / dưới. */
+  movePane: (key: string, dir: -1 | 1) => void;
   /** Đổi field của 1 instance; field có giá trị `undefined` thì bị bỏ (về mặc định). */
   update: (uid: string, patch: IndicatorPatch) => void;
   /** Thay nguyên instance (Cancel / Reset trong Settings). */
@@ -119,18 +127,35 @@ export function createPane(id: string, init: PaneInit = {}): Pane {
     collapsed: init.legendCollapsed ?? false,
     setCollapsed: (collapsed) => set({ collapsed }),
     settingsUid: null,
+    mainSlot: 0,
+    movePane: (key, dir) => set((s) => stepPane(s.list, byId, s.mainSlot, key, dir)),
+    // đổi danh sách = có thể gỡ / gộp pane: giữ pane chính ở đúng chỗ so với các pane còn lại (reslot)
     add: (defId) => set((s) => ({ list: [...s.list, newInstance(defId)] })),
-    remove: (uid) => set((s) => ({ list: s.list.filter((x) => x.uid !== uid), settingsUid: s.settingsUid === uid ? null : s.settingsUid })),
+    remove: (uid) =>
+      set((s) => {
+        const list = s.list.filter((x) => x.uid !== uid);
+        return { list, mainSlot: reslot(s.list, list, byId, s.mainSlot), settingsUid: s.settingsUid === uid ? null : s.settingsUid };
+      }),
+    removeMany: (uids) =>
+      set((s) => {
+        const list = s.list.filter((x) => !uids.includes(x.uid));
+        return { list, mainSlot: reslot(s.list, list, byId, s.mainSlot), settingsUid: s.settingsUid && uids.includes(s.settingsUid) ? null : s.settingsUid };
+      }),
     update: (uid, patch) =>
-      set((s) => ({
-        list: s.list.map((x) => {
+      set((s) => {
+        const list = s.list.map((x) => {
           if (x.uid !== uid) return x;
           const next = { ...x, ...patch };
           for (const k of Object.keys(patch) as (keyof IndicatorPatch)[]) if (patch[k] === undefined) delete next[k];
           return next;
-        }),
-      })),
-    replace: (inst) => set((s) => ({ list: s.list.map((x) => (x.uid === inst.uid ? inst : x)) })),
+        });
+        return { list, mainSlot: reslot(s.list, list, byId, s.mainSlot) };
+      }),
+    replace: (inst) =>
+      set((s) => {
+        const list = s.list.map((x) => (x.uid === inst.uid ? inst : x));
+        return { list, mainSlot: reslot(s.list, list, byId, s.mainSlot) };
+      }),
     openSettings: (uid) => set({ settingsUid: uid }),
     closeSettings: () => set({ settingsUid: null }),
   }));
@@ -176,6 +201,6 @@ export function snapshotPane(p: Pane): Required<PaneInit> & { chart: ChartPane }
 export function applyPaneInit(p: Pane, init: PaneInit) {
   if (init.chart) p.chart.setState({ ...DEFAULT_CHART, ...init.chart });
   if (init.indicators || init.legendCollapsed !== undefined)
-    p.indicators.setState({ list: init.indicators ?? [], collapsed: init.legendCollapsed ?? false, settingsUid: null });
+    p.indicators.setState({ list: init.indicators ?? [], collapsed: init.legendCollapsed ?? false, settingsUid: null, mainSlot: 0 });
   if (init.volume) p.volume.setState({ s: { ...DEFAULT_VOLUME, ...init.volume } });
 }

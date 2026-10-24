@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { byId } from "./catalog";
 import { newInstance, migrateInstance } from "./instance";
-import { MAIN_PANE, effectiveScale, otherPanes, ownPane, paneIndices, paneKeyOf } from "./layout";
+import { MAIN_PANE, effectiveScale, movePane, otherPanes, ownPane, paneIndices, paneKeyOf, reslot, stepPane } from "./layout";
 
 const inst = (id: string, uid: string, extra: object = {}) => ({ ...newInstance(id), uid, ...extra });
 
@@ -34,6 +34,57 @@ describe("pane / thang giá", () => {
       { key: ownPane("b"), label: "RSI" },
       { key: ownPane("c"), label: "MACD" },
     ]);
+  });
+
+  it("movePane: đổi chỗ pane với pane liền kề, pane chính đứng đầu, trong pane giữ thứ tự", () => {
+    const list = [inst("rsi", "r"), inst("sma", "s"), inst("macd", "m"), inst("atr", "a", { pane: ownPane("r") })];
+    const uids = (l: typeof list) => l.map((i) => i.uid);
+    // pane: main(s) | r(r, a) | m  ->  main(s) | m | r(r, a)
+    expect(uids(movePane(list, byId, ownPane("r"), 1))).toEqual(["s", "m", "r", "a"]);
+    expect(uids(movePane(list, byId, ownPane("m"), -1))).toEqual(["s", "m", "r", "a"]);
+    // không đi quá hai đầu, không có pane đó thì giữ nguyên
+    expect(movePane(list, byId, ownPane("r"), -1)).toBe(list);
+    expect(movePane(list, byId, ownPane("m"), 1)).toBe(list);
+    expect(movePane(list, byId, ownPane("zzz"), 1)).toBe(list);
+  });
+
+  it("chỉ số pane với vị trí pane chính: pane chính chen vào mainSlot, pane riêng dịch xuống", () => {
+    const keys = [MAIN_PANE, "own:a", "own:b", "own:a"];
+    expect(paneIndices(keys, 0)).toEqual([0, 1, 2, 1]);
+    expect(paneIndices(keys, 1)).toEqual([1, 0, 2, 0]);
+    expect(paneIndices(keys, 2)).toEqual([2, 0, 1, 0]);
+    expect(paneIndices(keys, 9)).toEqual([2, 0, 1, 0]); // kẹp theo số pane riêng
+    expect(paneIndices(keys, -3)).toEqual([0, 1, 2, 1]);
+  });
+
+  it("stepPane: pane riêng đi lên qua pane chính / xuống qua pane chính / đổi chỗ pane riêng với nhau", () => {
+    const list = [inst("rsi", "r"), inst("sma", "s"), inst("macd", "m")]; // pane: main(s) | r | m
+    const uids = (l: typeof list) => l.map((i) => i.uid);
+    // r đi lên: vượt pane chính -> pane chính xuống 1
+    expect(stepPane(list, byId, 0, ownPane("r"), -1)).toEqual({ list, mainSlot: 1 });
+    // r (đang trên pane chính) đi xuống: vượt pane chính -> pane chính lên 0
+    expect(stepPane(list, byId, 1, ownPane("r"), 1)).toEqual({ list, mainSlot: 0 });
+    // pane chính đi xuống / đi lên
+    expect(stepPane(list, byId, 0, MAIN_PANE, 1)).toEqual({ list, mainSlot: 1 });
+    expect(stepPane(list, byId, 2, MAIN_PANE, -1)).toEqual({ list, mainSlot: 1 });
+    // hai pane riêng liền nhau (cùng một phía của pane chính): đổi chỗ trong list, mainSlot giữ
+    const swapped = stepPane(list, byId, 0, ownPane("m"), -1);
+    expect(uids(swapped.list)).toEqual(["s", "m", "r"]);
+    expect(swapped.mainSlot).toBe(0);
+    // hết đường: trả nguyên
+    expect(stepPane(list, byId, 0, MAIN_PANE, -1)).toEqual({ list, mainSlot: 0 });
+    expect(stepPane(list, byId, 2, MAIN_PANE, 1)).toEqual({ list, mainSlot: 2 });
+    expect(stepPane(list, byId, 0, ownPane("m"), 1)).toEqual({ list, mainSlot: 0 });
+  });
+
+  it("reslot: gỡ pane nằm trên pane chính thì pane chính tụt lên, gỡ pane dưới thì giữ nguyên", () => {
+    const list = [inst("rsi", "r"), inst("sma", "s"), inst("macd", "m")]; // order r, m
+    const without = (uid: string) => list.filter((i) => i.uid !== uid);
+    expect(reslot(list, without("r"), byId, 2)).toBe(1); // trên pane chính: r, m -> gỡ r còn m
+    expect(reslot(list, without("m"), byId, 1)).toBe(1); // m nằm dưới pane chính (slot 1 = chỉ r ở trên)
+    expect(reslot(list, without("m"), byId, 2)).toBe(1);
+    expect(reslot(list, list, byId, 1)).toBe(1);
+    expect(reslot(list, without("r"), byId, 0)).toBe(0);
   });
 
   it("đi vòng lưu/đọc pane và scale; giá trị lạ bị bỏ", () => {

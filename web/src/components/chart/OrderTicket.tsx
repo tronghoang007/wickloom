@@ -22,8 +22,10 @@ import { useEffect, useState } from "react";
 import { Close } from "../icons";
 import PriceText from "./PriceText";
 
-const field = "h-10 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 text-sm tabular-nums outline-none focus:border-[var(--accent)] disabled:opacity-40";
-const cellField = "h-9 w-full rounded-lg border border-[var(--border)] bg-transparent px-2.5 text-[13px] tabular-nums outline-none focus:border-[var(--accent)] disabled:opacity-40";
+// Ô nhập nổi lên khỏi nền tối: nền sáng hơn một chút + viền rõ hơn (tính từ màu chữ nên đúng cả theme sáng). Ô bị khoá (TP / SL chưa bật) vẫn thấy khung, chỉ mờ chữ, không mờ cả ô
+const fieldBase = "w-full rounded-lg border border-[color-mix(in_srgb,var(--fg)_24%,transparent)] bg-[color-mix(in_srgb,var(--fg)_6%,transparent)] tabular-nums outline-none placeholder:text-[var(--muted)] hover:border-[color-mix(in_srgb,var(--fg)_38%,transparent)] focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:border-[color-mix(in_srgb,var(--fg)_14%,transparent)] disabled:bg-transparent disabled:text-[var(--muted)] disabled:hover:border-[color-mix(in_srgb,var(--fg)_14%,transparent)]";
+const field = `h-10 px-3 text-sm ${fieldBase}`;
+const cellField = `h-9 px-2.5 text-[13px] ${fieldBase}`;
 const px = (v: number, digits: number) => v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 /** Bảng đặt lệnh trong thanh bên phải (docs/trade-plan.md T3-T4), bố cục như TradingView: hai ô SELL / BUY giá lớn, Market hoặc Limit/Stop, lot, Take profit / Stop loss mỗi dòng có Giá + Điểm
@@ -264,7 +266,7 @@ function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
       aria-checked={on}
       aria-label={label}
       onClick={() => onChange(!on)}
-      className={`relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${on ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`}
+      className={`relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${on ? "bg-[var(--accent)]" : "bg-[color-mix(in_srgb,var(--fg)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--fg)_40%,transparent)]"}`}
     >
       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
     </button>
@@ -485,11 +487,11 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
         <div className="mb-4">
           <span className={lab}>Lot</span>
           <div className="relative">
-            <button type="button" aria-label="Decrease lot" disabled={!spec} className="absolute left-1 top-1 h-8 w-8 cursor-pointer rounded-md text-base text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40" onClick={() => spec && setLot(stepLot(normalizeLot(lot, spec), -1, spec))}>
+            <button type="button" aria-label="Decrease lot" disabled={!spec} className="absolute left-1 top-1 h-8 w-8 cursor-pointer rounded-md text-lg leading-none text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-40" onClick={() => spec && setLot(stepLot(normalizeLot(lot, spec), -1, spec))}>
               −
             </button>
             <input aria-label="Lot" className={`${field} px-10 text-center`} inputMode="decimal" value={d.lot} onChange={(e) => patch({ lot: e.target.value })} onBlur={() => spec && setLot(normalizeLot(lot, spec))} onKeyDown={(e) => e.stopPropagation()} />
-            <button type="button" aria-label="Increase lot" disabled={!spec} className="absolute right-1 top-1 h-8 w-8 cursor-pointer rounded-md text-base text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40" onClick={() => spec && setLot(stepLot(normalizeLot(lot, spec), 1, spec))}>
+            <button type="button" aria-label="Increase lot" disabled={!spec} className="absolute right-1 top-1 h-8 w-8 cursor-pointer rounded-md text-lg leading-none text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-40" onClick={() => spec && setLot(stepLot(normalizeLot(lot, spec), 1, spec))}>
               +
             </button>
           </div>

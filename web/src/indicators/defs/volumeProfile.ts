@@ -4,6 +4,7 @@ import { periodKeys, periodStarts, type Period } from "../calendar";
 import { TICK_DEPTH, lowerCandidates, overlaps, tickStart, withinBudget } from "../lower";
 import { num, str, type Ctx, type IndicatorDef, type InputDef, type ItemDef, type PlacedProfile, type ProfileSet, type ProfileStyle } from "../schema";
 import { TF_SECONDS } from "@/lib/api";
+import { sessionInputs, withSession } from "./common";
 import { barStep, groupPeriods } from "./pivots";
 
 // Session Volume Profile và Visible Range Volume Profile: cùng họ với FRVP / AVP của drawings (volumeProfile/compute.ts),
@@ -83,6 +84,7 @@ export const svp: IndicatorDef = {
   inputs: [
     layoutInput, rowsInput, volumeInput, vaInput, aggInput,
     { key: "session", label: "Session", type: "select", default: "Day", options: Object.keys(SESSIONS) },
+    ...sessionInputs(),
     widthInput(30), placeInput("Left"), valuesInput,
     { key: "extend", label: "Extend POC/VAH/VAL", type: "bool", default: false },
   ],
@@ -93,14 +95,14 @@ export const svp: IndicatorDef = {
   compute: () => ({}),
   lower: (inputs, { bars, cut, step, calendar }) => {
     if (bars.length === 0 || step >= 86400) return null;
-    const starts = periodStarts(bars.map((b) => b.t), SESSIONS[str(inputs, "session")] ?? "day", calendar);
+    const starts = periodStarts(bars.map((b) => b.t), SESSIONS[str(inputs, "session")] ?? "day", withSession(calendar, inputs));
     const from = bars[starts.filter((s) => s <= cut).pop() ?? 0].t; // đầu phiên chứa nến đầu tiên của chart
     const tfs = withinBudget(lowerCandidates(step, "M1"), from, bars[bars.length - 1].t + step, BUDGET);
     return tfs.length ? { tfs, from } : null;
   },
   ticks: (inputs, { bars, cut, step, calendar }) => {
     if (inputs.agg !== TICKS || bars.length === 0 || step >= 86400) return null;
-    const starts = periodStarts(bars.map((b) => b.t), SESSIONS[str(inputs, "session")] ?? "day", calendar);
+    const starts = periodStarts(bars.map((b) => b.t), SESSIONS[str(inputs, "session")] ?? "day", withSession(calendar, inputs));
     // phiên cũ hơn độ sâu tick không tính bằng tick (dùng nến), phiên đầu tiên trong độ sâu bắt đầu nạp tick
     const start = tickStart(bars, starts, starts.filter((s) => s <= cut).pop() ?? 0, step);
     return start === undefined ? null : { from: bars[start].t };
@@ -111,7 +113,7 @@ export const svp: IndicatorDef = {
     if (bars.length === 0) return { profiles: [], style };
     const step = barStep(bars);
     if (step >= 86400) return { profiles: [], style }; // từ D1 trở lên không có phiên để chia
-    const sessions = groupPeriods(bars, periodKeys(bars.map((b) => b.t), SESSIONS[str(c.inputs, "session")] ?? "day", c.calendar));
+    const sessions = groupPeriods(bars, periodKeys(bars.map((b) => b.t), SESSIONS[str(c.inputs, "session")] ?? "day", withSession(c.calendar, c.inputs)));
     const profiles: PlacedProfile[] = [];
     for (const s of sessions) {
       if (s.last < c.cut) continue; // phiên nằm hẳn trong lịch sử ẩn

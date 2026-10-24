@@ -61,9 +61,21 @@ export class LineDrag {
     this.finish();
   }
 
+  // Pane chứa series chính (nằm trên cùng hoặc đã bị đổi chỗ với pane indicator): toạ độ y của series là theo mép trên pane đó
+  private paneRect(): { top: number; height: number } | null {
+    try {
+      const el = this.h.getSeries()?.getPane?.()?.getHTMLElement();
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: r.top, height: r.height };
+    } catch {
+      return null; // series vừa bị gỡ
+    }
+  }
+
   private local(e: PointerEvent) {
     const r = this.h.container.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: e.clientX - r.left, y: e.clientY - (this.paneRect()?.top ?? r.top) };
   }
 
   // Đường sát con trỏ (chỉ trong vùng vẽ, không phải trục giá / widget SELL-BUY đè lên chart). Con trỏ ở trên thẻ của một đường (`data-line-key`) thì kéo đúng đường đó, bất kể
@@ -80,6 +92,8 @@ export class LineDrag {
     if (!series) return null;
     const { x, y } = this.local(e);
     if (x < 0 || x > this.h.chart.timeScale().width()) return null;
+    const pr = this.paneRect();
+    if (pr && (y < 0 || y > pr.height)) return null; // con trỏ ở pane khác (indicator) hoặc đường ngăn: không kéo đường lệnh
     const lines = targets.flatMap((t) => {
       const ly = series.priceToCoordinate(t.price);
       return ly === null ? [] : [{ id: t.id, y: ly as number }];

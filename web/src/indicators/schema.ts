@@ -13,7 +13,7 @@ import type { Num, SourceName } from "./ta";
 export type InputValue = number | string | boolean;
 export type Inputs = Record<string, InputValue>;
 
-type InputBase = { key: string; label: string; group?: string; tooltip?: string; enabledIf?: (inputs: Inputs) => boolean }; // enabledIf: input chỉ có tác dụng khi điều kiện đúng (xám đi nếu sai)
+type InputBase = { key: string; label: string; group?: string; tooltip?: string; enabledIf?: (inputs: Inputs) => boolean; hideInLegend?: boolean }; // enabledIf: input chỉ có tác dụng khi điều kiện đúng (xám đi nếu sai); hideInLegend: không in giá trị trên legend (input không có trong TV)
 
 export type InputDef = InputBase &
   (
@@ -38,6 +38,7 @@ export type PlotDef = {
   perBar?: boolean; // màu do compute quyết định theo từng nến (histogram MACD...): Settings không cho chọn màu/kiểu
   offset?: string | ((inputs: Inputs) => number); // key của input (hoặc hàm của inputs) dịch plot theo số nến (Offset của MA, Ichimoku; dương = sang phải, vào vùng tương lai)
   hidden?: boolean; // plot chỉ để tính (đầu của fill, vd thân nến của Supertrend): không vẽ, không có hàng Style, không hiện trên legend
+  showIf?: (inputs: Inputs) => boolean; // plot chỉ vẽ / hiện trên legend khi điều kiện đúng (band VWAP bật bằng ô tick trong Inputs); không đặt = luôn hiện
 };
 
 /** Đường ngang trong pane (hline của Pine): 30/70 của RSI... */
@@ -47,7 +48,7 @@ export type LevelDef = { id: string; title: string; value: number; color: string
 export type FillRef = { plot: string } | { level: string };
 /** Vùng tô nền giữa hai plot / hai level (fill của Pine): dải Bollinger, vùng 30–70 của RSI. */
 /** `colorDown` (nếu có): màu khi đầu thứ nhất không cao hơn đầu thứ hai, tách theo từng nến (mây Ichimoku xanh/đỏ); `color` là màu khi cao hơn. */
-export type FillDef = { id: string; title: string; between: [FillRef, FillRef]; color: string; colorDown?: string };
+export type FillDef = { id: string; title: string; between: [FillRef, FillRef]; color: string; colorDown?: string; showIf?: (inputs: Inputs) => boolean };
 
 /** Phần tử vẽ có style riêng nhưng không phải plot / level / fill: các mức của Pivot Points, histogram và POC/VAH/VAL của volume profile.
  *  Mỗi cái một hàng trong tab Style (bật/tắt, màu, và nét + độ dày nếu có `line`); compute đọc style hiệu lực qua `ctx.items`. */

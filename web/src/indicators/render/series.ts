@@ -23,8 +23,9 @@ export const LWC_LINE_STYLE: Record<LineStyleName, LineStyle> = {
 export const scaleId = (scale: "right" | "left" | "none", uid: string): string => (scale === "none" ? `ov-${uid}` : scale);
 
 /** Dựng series cho một plot theo kiểu của nó (đổi kiểu = dựng lại series). Tuỳ chọn hiển thị đặt sau bằng `plotOptions`. */
-export function addPlotSeries(chart: IChartApi, type: PlotType, paneIndex: number, title: string, priceScaleId = "right"): ISeriesApi<SeriesType> {
-  const common = { priceLineVisible: false, title, priceScaleId };
+export function addPlotSeries(chart: IChartApi, type: PlotType, paneIndex: number, priceScaleId = "right"): ISeriesApi<SeriesType> {
+  // không đặt title: nhãn trên trục giá chỉ có giá trị như TV, tên indicator nằm ở legend của pane
+  const common = { priceLineVisible: false, priceScaleId };
   switch (type) {
     case "histogram":
       return chart.addSeries(HistogramSeries, { ...common, priceFormat: { type: "volume" } }, paneIndex) as ISeriesApi<SeriesType>;

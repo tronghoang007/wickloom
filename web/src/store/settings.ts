@@ -76,8 +76,9 @@ export const DOWN = "#f23645";
 
 // Màu mặc định theo theme cho các setting màu đang để `null`.
 export const CHART_THEMES = {
-  dark: { bg: "#0f0f0f", text: "#b2b5be", grid: "#242424", label: "#363a45", crosshair: "#758696" },
-  light: { bg: "#ffffff", text: "#131722", grid: "#f0f3fa", label: "#131722", crosshair: "#758696" },
+  // sep: đường ngăn giữa các pane (đo từ TV: #2e2e2e trên nền tối)
+  dark: { bg: "#0f0f0f", text: "#b2b5be", grid: "#242424", label: "#363a45", crosshair: "#758696", sep: "#2e2e2e" },
+  light: { bg: "#ffffff", text: "#131722", grid: "#f0f3fa", label: "#131722", crosshair: "#758696", sep: "#e0e3eb" },
 };
 
 export const DEFAULT_SETTINGS: ChartSettings = {

@@ -3,6 +3,7 @@ import { periodKeys, periodStarts, type Period } from "../calendar";
 import { TICK_TF, autoLowerTf, lowerCandidates, tickStart, withinBudget } from "../lower";
 import { str, type IndicatorDef } from "../schema";
 import { nan } from "../ta";
+import { sessionInputs, withSession } from "./common";
 
 // Cumulative Volume Delta dạng nến (Pine v6 "Cumulative volume delta" của TV, docs/reference/cvd.pine): mỗi nến chart là một
 // nến O/H/L/C của delta tích luỹ từ đầu kỳ Anchor; delta lấy từ nến khung nhỏ (volume = tick volume của MT5).
@@ -76,13 +77,15 @@ export const cvd: IndicatorDef = {
     { key: "agg", label: "Data aggregation", type: "select", default: "Time", options: ["Time", TICKS], tooltip: "Defines how lower timeframe data is aggregated for the delta calculation. \"1 tick\" computes the delta on tick data (the broker's tick history, requested from MetaTrader; each tick counts as tick volume 1) and covers only a few weeks." },
     { key: "custom", label: "Use custom timeframe", type: "bool", default: false, enabledIf: (i) => i.agg !== TICKS, tooltip: "The indicator scans lower timeframe data to approximate up and down volume used in the delta calculation. By default, the timeframe is chosen automatically. Higher timeframes provide more historical data, but the data will be less precise." },
     { key: "tf", label: "Timeframe", type: "select", default: "1", options: Object.keys(TF_OF), enabledIf: (i) => !!i.custom && i.agg !== TICKS },
+    ...sessionInputs(),
   ],
   plots: [{ id: "cvd", title: "CVD", type: "candles", color: "#089981", colorDown: "#f23645" }],
   levels: [{ id: "zero", title: "Zero", value: 0, color: "#787b86" }],
   warmup: () => 0,
   needsCalendar: true,
-  lower: (inputs, { bars, cut, step, calendar }) => {
+  lower: (inputs, { bars, cut, step, calendar: cal }) => {
     if (bars.length === 0) return null;
+    const calendar = withSession(cal, inputs);
     if (inputs.agg === TICKS) {
       // chart nạp cả tháng nến nhưng chỉ độ sâu tick gần đây mới tính được: bắt đầu từ kỳ đầu tiên nằm trong ngân sách, nến chart cũ hơn để trống
       const starts = periodStarts(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", calendar);
@@ -101,7 +104,7 @@ export const cvd: IndicatorDef = {
     return ok.length ? { tfs: ok, from } : null;
   },
   compute: ({ bars, inputs, lower, calendar }) => {
-    const keys = periodKeys(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", calendar);
+    const keys = periodKeys(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", withSession(calendar, inputs));
     // "1 tick": chỉ dùng nến delta theo tick; chưa nạp tới / ngoài độ sâu tick thì để trống (TV báo thiếu độ sâu tick) thay vì đoán từ nến chart
     if (inputs.agg === TICKS) {
       const t = cumulativeDelta(bars, keys, lower, true);

@@ -159,6 +159,12 @@ describe("object của Pivot Points", () => {
     expect(w.lines.length).toBeLessThan(5 * 11); // 5 ngày chỉ nằm trong 1–2 tuần, kỳ đầu bị bỏ
   });
 
+  it("Session start = Custom hour: ngày pivot bắt đầu lúc giờ đó (22:00 broker = nến thứ 88 của ngày)", () => {
+    const o = run({ back: 2, sessionStart: "Custom hour", sessionHour: 22 });
+    expect(new Set(o.lines.map((l) => l.x1))).toEqual(new Set([4 * 96 - 8, 5 * 96 - 8])); // hai phiên cuối mở lúc 22:00 của ngày 13 và 14
+    expect(o.lines.filter((l) => l.x1 === 4 * 96 - 8).every((l) => l.x2 === 5 * 96 - 9)).toBe(true);
+  });
+
   it("quá ít nến / không nến: không ném lỗi", () => {
     expect(computeExtras(def, newInstance("pivots"), [], { offset: 0 }).objects).toEqual({ lines: [], labels: [], boxes: [] });
     expect(computeExtras(def, newInstance("pivots"), bars.slice(0, 1), { offset: 0 }).objects!.lines).toHaveLength(0);

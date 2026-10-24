@@ -99,6 +99,34 @@ describe("Session Volume Profile", () => {
     expect(s.poc).toMatchObject({ color: "#123456", width: 3, show: true });
   });
 
+  it("Session start = Custom hour: phiên đổi lúc 22:00 broker thay vì 00:00 (ngày 20 từ 22:00 hôm trước)", () => {
+    const p = run({ sessionStart: "Custom hour", sessionHour: 22 });
+    expect(p.profiles.map((x) => [x.x1, x.x2])).toEqual([[0, 87], [88, 183], [184, 279], [280, 287]]); // 22:00 = nến thứ 88 của mỗi ngày
+  });
+
+  it("Session start = After break: cắt sau khoảng trống; không có khoảng trống thì như Broker midnight", () => {
+    const gap = [...chart(20, 96).filter((b) => b.t < 20 * DAY + 21 * 3600 || b.t >= 20 * DAY + 22 * 3600), ...chart(21, 96)]; // nghỉ 21:00–22:00 ngày 20
+    const p = run({ sessionStart: "After break" }, 0, gap, []);
+    expect(p.profiles.map((x) => x.x1)).toEqual([0, gap.findIndex((b) => b.t === 20 * DAY + 22 * 3600)]); // phiên mở 22:00 chạy qua 00:00, không cắt
+    expect(run({ sessionStart: "After break" }).profiles.map((x) => [x.x1, x.x2])).toEqual([[0, 95], [96, 191], [192, 287]]);
+  });
+
+  it("lower: Custom hour phủ từ đầu phiên chứa nến chart đầu tiên", () => {
+    const info = { bars, cut: 100, step: M15, calendar: { offset: 0 } };
+    const n = svp.lower!({ session: "Day", sessionStart: "Custom hour", sessionHour: 22 }, info)!;
+    expect(n.from).toBe(20 * DAY + 22 * 3600); // nến thứ 100 (ngày 21 01:00) thuộc phiên mở 22:00 ngày 20
+  });
+
+  it("def: Start hour / Min break chỉ bật theo Session start", () => {
+    const hour = svp.inputs.find((i) => i.key === "sessionHour")!;
+    const gap = svp.inputs.find((i) => i.key === "sessionBreak")!;
+    expect(svp.inputs.find((i) => i.key === "sessionStart")).toMatchObject({ default: "After break" });
+    expect([hour.enabledIf!({ sessionStart: "Custom hour" }), hour.enabledIf!({ sessionStart: "After break" })]).toEqual([true, false]);
+    expect([gap.enabledIf!({ sessionStart: "After break" }), gap.enabledIf!({ sessionStart: "Broker midnight" })]).toEqual([true, false]);
+    const day = svp.inputs.find((i) => i.key === "sessionStart")!;
+    expect(day.type === "select" && day.options).toEqual(["Broker midnight", "Custom hour", "After break"]);
+  });
+
   it("không nến / ít nến: không ném lỗi", () => {
     expect(run({}, 0, [], []).profiles).toEqual([]);
     expect(run({}, 0, bars.slice(0, 1), []).profiles.length).toBeLessThanOrEqual(1);
