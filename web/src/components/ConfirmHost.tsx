@@ -35,7 +35,7 @@ export default function ConfirmHost() {
       onMouseDown={(e) => e.target === e.currentTarget && !busy && close()}
       onKeyDown={(e) => e.key === "Escape" && !busy && close()}
     >
-      <div role="alertdialog" aria-label={request.title} className="w-[400px] max-w-[94vw] rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-5 text-[var(--fg)] shadow-2xl">
+      <div role="alertdialog" aria-label={request.title} className="w-[400px] max-w-[94vw] rounded-2xl popup p-5">
         <div className="mb-3 flex items-center justify-between">
           <span className="text-lg font-semibold">{request.title}</span>
           <button type="button" className="rounded p-1 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={close} aria-label="Close">

@@ -13,7 +13,7 @@ export type MenuItem =
       children?: MenuItem[];
     };
 
-const panel = "rounded-md border border-[var(--border)] bg-[var(--bg)] py-1 text-[13px] text-[var(--fg)] shadow-2xl";
+const panel = "popup rounded-md py-1.5 text-sm";
 
 // Menu con mở sang phải của hàng cha (lật sang trái nếu tràn mép màn hình).
 function SubMenu({ items, onClose }: { items: MenuItem[]; onClose: () => void }) {
@@ -36,7 +36,7 @@ function MenuList({ items, onClose }: { items: MenuItem[]; onClose: () => void }
     <>
       {items.map((it, i) =>
         it === "sep" ? (
-          <div key={i} className="my-1 h-px bg-[var(--border)]" />
+          <div key={i} className="my-1.5 h-px bg-[var(--border)]" />
         ) : (
           <div key={i} className="relative" onMouseEnter={() => setOpen(it.children && !it.disabled ? i : null)}>
             <button

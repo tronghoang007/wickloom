@@ -158,7 +158,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="flex max-h-[85vh] w-[420px] flex-col rounded-2xl border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] shadow-2xl"
+        className="flex max-h-[85vh] w-[420px] flex-col rounded-2xl popup"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
@@ -609,7 +609,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   className="fixed inset-0 z-30"
                   onClick={() => setTemplateMenu(false)}
                 />
-                <div className="absolute bottom-9 left-0 z-40 min-w-44 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-1 text-sm shadow-xl">
+                <div className="absolute bottom-9 left-0 z-40 min-w-44 rounded-lg popup p-1 text-sm">
                   <button
                     type="button"
                     className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-xs hover:bg-[var(--hover)]"

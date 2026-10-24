@@ -53,7 +53,7 @@ export default function PromptDialog({
       onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}
       onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}
     >
-      <form onSubmit={submit} className="w-[380px] max-w-[94vw] rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-5 text-[var(--fg)] shadow-2xl" role="dialog" aria-label={title}>
+      <form onSubmit={submit} className="w-[380px] max-w-[94vw] rounded-2xl popup p-5" role="dialog" aria-label={title}>
         <div className="mb-3 flex items-center justify-between">
           <span className="text-lg font-semibold">{title}</span>
           <button type="button" className="rounded p-1 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={onClose} aria-label="Close">

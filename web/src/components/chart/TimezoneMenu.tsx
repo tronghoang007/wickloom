@@ -37,7 +37,7 @@ export default function TimezoneMenu({ clock }: { clock: string }) {
           <div className="fixed inset-0 z-30" onClick={() => setList(null)} />
           <div
             role="listbox"
-            className="absolute bottom-full right-0 z-40 mb-1 max-h-[min(440px,calc(100vh-120px))] w-[240px] overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--panel)] py-1 text-sm shadow-[0_2px_4px_rgba(0,0,0,0.4)]"
+            className="absolute bottom-full right-0 z-40 mb-1 max-h-[min(440px,calc(100vh-120px))] w-[240px] overflow-y-auto popup rounded-md py-1 text-sm"
           >
             {list.map((z) => {
               const on = z.id === tz;

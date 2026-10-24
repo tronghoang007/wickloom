@@ -12,7 +12,7 @@ import { useTicketStore } from "@/trading/ticket";
 import { useMemo } from "react";
 import PriceText from "./PriceText";
 
-const sideBtn = "flex min-w-[84px] cursor-pointer flex-col items-center justify-center rounded px-2.5 text-white";
+const sideBtn = "flex min-w-[72px] cursor-pointer flex-col items-center justify-center rounded-md px-2.5 pb-px text-white";
 
 /** Widget SELL | spread | BUY như TradingView, dưới dòng tiêu đề của chart (docs/trade-plan.md T2-T3): bấm thì mở bảng đặt lệnh (OrderTicket, nơi chỉnh lot) cho account MT5 đang cấp dữ liệu.
  *  Chưa đặt được thì nút mờ đi và tooltip/toast nói lý do (tradeBlock); khách bấm thì ra popup đăng nhập. */
@@ -44,17 +44,17 @@ export default function TradeWidget({ symbol, digits, replay }: { symbol: string
 
   const dim = block !== null || busy ? "opacity-60" : "";
   return (
-    <div className="pointer-events-auto mt-1 flex h-[38px] select-none items-stretch gap-1 text-[11px]" data-testid="trade-widget" title={block ?? undefined}>
+    <div className="pointer-events-auto mt-1 flex h-[34px] select-none items-stretch gap-1 text-[11px]" data-testid="trade-widget" title={block ?? undefined}>
       <button type="button" aria-label="Sell at market" onClick={() => click("sell")} className={`${sideBtn} ${dim} bg-[#f23645] hover:brightness-110`}>
-        <span className="text-[14px] font-semibold leading-tight tabular-nums">{quote ? <PriceText value={quote.bid} digits={digits} /> : "—"}</span>
-        <span className="text-[9px] font-medium leading-none">SELL</span>
+        <span className="text-[12px] font-semibold leading-4 tabular-nums">{quote ? <PriceText value={quote.bid} digits={digits} /> : "—"}</span>
+        <span className="text-[11px] leading-3">SELL</span>
       </button>
-      <span className="flex min-w-[28px] items-center justify-center text-[11px] text-[var(--muted)] tabular-nums" data-testid="trade-spread" title="Spread (pip)">
+      <span className="flex min-w-[24px] items-center justify-center text-[10px] text-[var(--muted)] tabular-nums" data-testid="trade-spread" title="Spread (pip)">
         {quote ? spreadPips(quote.bid, quote.ask, digits) : "—"}
       </span>
       <button type="button" aria-label="Buy at market" onClick={() => click("buy")} className={`${sideBtn} ${dim} bg-[#2962ff] hover:brightness-110`}>
-        <span className="text-[14px] font-semibold leading-tight tabular-nums">{quote ? <PriceText value={quote.ask} digits={digits} /> : "—"}</span>
-        <span className="text-[9px] font-medium leading-none">BUY</span>
+        <span className="text-[12px] font-semibold leading-4 tabular-nums">{quote ? <PriceText value={quote.ask} digits={digits} /> : "—"}</span>
+        <span className="text-[11px] leading-3">BUY</span>
       </button>
     </div>
   );

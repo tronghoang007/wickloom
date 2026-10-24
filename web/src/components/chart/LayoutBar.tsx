@@ -94,7 +94,7 @@ export default function LayoutBar() {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-10 z-40 min-w-[230px] rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl">
+          <div className="absolute right-0 top-10 z-40 min-w-[230px] rounded-lg popup py-1">
             <button className={item} onClick={() => { setOpen(false); void appSession().save(); }}>
               Save layout <span className="text-xs text-[var(--muted)]">Ctrl S</span>
             </button>

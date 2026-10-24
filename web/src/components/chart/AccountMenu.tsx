@@ -76,7 +76,7 @@ export default function AccountMenu() {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-1 top-10 z-40 w-[320px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] shadow-xl">
+          <div className="absolute left-1 top-10 z-40 w-[320px] overflow-hidden rounded-lg popup">
             {user ? (
               <>
                 <div className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">

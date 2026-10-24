@@ -84,7 +84,7 @@ function Pop({
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-10 left-0 z-40 min-w-24 rounded border border-[var(--border)] bg-[var(--bg)] py-1 shadow-xl">
+          <div className="absolute bottom-10 left-0 z-40 min-w-24 rounded popup py-1">
             {options.map((o) => (
               <button
                 key={o.v}

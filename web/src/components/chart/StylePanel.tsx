@@ -88,7 +88,7 @@ export default function StylePanel() {
   const po = { ...POS_DEFAULTS, ...d.opts } as typeof POS_DEFAULTS;
   // Menu thả xuống của nút width / style: dòng đang chọn đảo màu như TV
   const popup = (items: ReactNode) => (
-    <div className="absolute left-0 top-[38px] z-40 min-w-[120px] whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl">
+    <div className="absolute left-0 top-[38px] z-40 min-w-[120px] whitespace-nowrap rounded-md popup py-1">
       {items}
     </div>
   );

@@ -42,7 +42,7 @@ function Flyout({
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
-        className="drawing-flyout fixed z-50 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl"
+        className="drawing-flyout fixed z-50 overflow-y-auto rounded-md popup py-1"
         // cao tối đa tới đáy cửa sổ (max-h-screen tính từ top sẽ tràn ra ngoài, mục cuối không cuộn tới được)
         style={{ left: rect.right, top, width, maxHeight: window.innerHeight - top }}
       >

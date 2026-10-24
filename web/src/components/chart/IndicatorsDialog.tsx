@@ -5,13 +5,9 @@ import { useIndicatorStore } from "@/indicators/store";
 import { useVolumeStore } from "@/store/volume";
 import { useState, type ReactNode } from "react";
 import EmptyState from "../EmptyState";
-import { Close, EmptySearchI, Search, StarI, Svg24 as Svg } from "../icons";
+import { Close, EmptySearchI, Search, StarI, Tv } from "../icons";
 
 type Tab = "fav" | "tech";
-
-function Ico({ children }: { children: ReactNode }) {
-  return <Svg>{children}</Svg>;
-}
 
 const NAV: {
   title: string;
@@ -23,11 +19,7 @@ const NAV: {
       {
         id: "fav",
         label: "Favorites",
-        icon: (
-          <Ico>
-            <path d="M12 3l2.700 5.600 6.100.9-4.400 4.300 1 6.100L12 17l-5.400 2.900 1-6.100L3.200 9.500l6.100-.9z" />
-          </Ico>
-        ),
+        icon: <StarI on={false} />, // 28 như TV: sao 21x20
       },
     ],
   },
@@ -38,9 +30,9 @@ const NAV: {
         id: "tech",
         label: "Technicals",
         icon: (
-          <Ico>
-            <path d="M3 20h18M5 16V9M9 16V5M13 16v-5M17 16V8" />
-          </Ico>
+          <Tv>
+            <path d="M4.5 22h19M7.5 18v-6M11.5 18V7.5M15.5 18v-5M19.5 18v-8" />
+          </Tv>
         ),
       },
     ],
@@ -85,7 +77,7 @@ export default function IndicatorsDialog({
           onClick={() => setOpen(false)}
         >
           <div
-            className="flex h-[88vh] w-[860px] max-w-[96vw] flex-col rounded-2xl border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] shadow-2xl"
+            className="flex h-[88vh] w-[860px] max-w-[96vw] flex-col rounded-2xl popup"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 pb-3 pt-5">
@@ -128,7 +120,7 @@ export default function IndicatorsDialog({
                           setTab(it.id);
                           setQ("");
                         }}
-                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${tab === it.id && !query ? "bg-[var(--hover)]" : "hover:bg-[var(--hover)]/60"}`}
+                        className={`flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-sm ${tab === it.id && !query ? "bg-[var(--hover)]" : "hover:bg-[var(--hover)]/60"}`}
                       >
                         {it.icon}
                         {it.label}
@@ -140,7 +132,7 @@ export default function IndicatorsDialog({
 
               <div className="min-w-0 flex-1 overflow-y-auto pr-3">
                 <div className="grid grid-cols-[1fr_120px_80px] px-3 pb-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
-                  <span className="pl-8">NAME</span>
+                  <span className="pl-6">NAME</span>
                   <span>AUTHOR</span>
                   <span>BOOSTS</span>
                 </div>
@@ -160,18 +152,19 @@ export default function IndicatorsDialog({
                   >
                     <span className="flex min-w-0 items-center gap-3">
                       <button
-                        className={
+                        // ô 22x22, sao 15x14 như danh sách indicator của TV (đo: svg 18, sao 15.2x14.5, tên cách mép hàng 30px); -mr-2.5 trừ bớt khoảng gap-3
+                        className={`-mr-2.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center ${
                           favorites.includes(d.id)
-                            ? "text-[var(--fg)]"
+                            ? "text-[var(--solid,#f2f2f2)]"
                             : "text-[var(--muted)] opacity-0 group-hover:opacity-100"
-                        }
+                        }`}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleFavorite(d.id);
                         }}
                         title="Favorite"
                       >
-                        <StarI on={favorites.includes(d.id)} />
+                        <StarI on={favorites.includes(d.id)} size={20} />
                       </button>
                       <span className="truncate">
                         {d.title}

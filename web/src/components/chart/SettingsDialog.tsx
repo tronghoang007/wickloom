@@ -444,7 +444,7 @@ export default function SettingsDialog() {
       <div
         role="dialog"
         aria-label="Settings"
-        className="flex h-[min(640px,92vh)] w-[min(640px,96vw)] flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[13px] text-[var(--fg)] shadow-2xl"
+        className="flex h-[min(640px,92vh)] w-[min(640px,96vw)] flex-col rounded-lg popup text-sm"
       >
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <h2 className="text-lg font-semibold">Settings</h2>
@@ -453,7 +453,7 @@ export default function SettingsDialog() {
           </button>
         </div>
         <div className="flex min-h-0 flex-1">
-          <nav className="w-44 shrink-0 px-3 py-2">
+          <nav className="w-48 shrink-0 px-3 py-2">
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -461,7 +461,7 @@ export default function SettingsDialog() {
                 disabled={t.soon}
                 title={t.soon ? SOON : undefined}
                 onClick={() => setTab(t.id)}
-                className={`mb-0.5 flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left disabled:opacity-55 ${
+                className={`mb-0.5 flex h-9 w-full items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 text-left disabled:opacity-55 ${
                   tab === t.id ? "bg-[var(--hover)] font-medium" : "enabled:hover:bg-[var(--hover)]"
                 }`}
               >
@@ -489,7 +489,7 @@ export default function SettingsDialog() {
               Template <Chevron />
             </button>
             {tplOpen && (
-              <div className="absolute bottom-10 left-0 z-10 w-44 rounded-md border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl">
+              <div className="absolute bottom-10 left-0 z-10 w-44 rounded-md popup py-1">
                 <button
                   type="button"
                   onClick={() => {

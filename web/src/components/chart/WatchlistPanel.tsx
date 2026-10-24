@@ -193,7 +193,7 @@ export default function WatchlistPanel() {
     <div className="flex h-full flex-col">
       {title}
 
-      <div className="grid shrink-0 grid-cols-[1fr_66px_54px_52px_18px] items-center gap-x-1 px-4 pb-1 text-[11px] text-[var(--muted)]">
+      <div className="grid shrink-0 grid-cols-[1fr_76px_64px_60px_18px] items-center gap-x-1 px-4 pb-1 text-[14px] text-[var(--muted)]">
         <span>Symbol</span>
         <span className="text-right">Last</span>
         <span className="text-right">Chg</span>
@@ -216,12 +216,12 @@ export default function WatchlistPanel() {
             <div
               key={s}
               onClick={() => set({ symbol: s })}
-              className={`group grid h-7 cursor-pointer grid-cols-[1fr_66px_54px_52px_18px] items-center gap-x-1 border-b border-[var(--border)] px-2 text-[13px] hover:bg-[var(--hover)] ${s === current ? "ring-1 ring-[var(--muted)]" : ""}`}
+              className={`group grid h-[30px] cursor-pointer rounded grid-cols-[1fr_76px_64px_60px_18px] items-center gap-x-1 border-b border-[var(--border)] px-2 text-[14px] hover:bg-[var(--hover)] ${s === current ? "ring-1 ring-[var(--muted)]" : ""}`}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <SymbolBadge name={s} type={meta(s)?.type} size={20} />
-                <span className="truncate" title={s}>
-                  {meta(s)?.description || s}
+                <span className="truncate" title={meta(s)?.description || s}>
+                  {s}
                 </span>
               </span>
               <span className="text-right tabular-nums">
@@ -252,16 +252,16 @@ export default function WatchlistPanel() {
         <div className="shrink-0 border-t border-[var(--border)] px-4 py-3">
           <div className="flex items-center gap-2">
             <SymbolBadge name={sel} type={sm?.type} size={24} />
-            <span className="truncate text-[16px] font-semibold">{sm?.description || sel}</span>
+            <span className="truncate text-[14px] font-semibold">{sel}</span>
           </div>
-          <div className="mt-1 truncate text-[12px] text-[var(--muted)]">
-            {[sel, sm?.broker?.split(" ")[0]].filter(Boolean).join(" · ")}
+          <div className="mt-1 truncate text-[12px] text-[var(--fg)]">
+            {[sm?.description, sm?.broker?.split(" ")[0]].filter(Boolean).join(" · ")}
           </div>
           <div className="mt-3 flex items-baseline gap-1.5">
             <span className="text-[28px] font-semibold leading-none tabular-nums">{fmt(sq.last, digits(sel))}</span>
           </div>
           {sChg !== null && sq.prev && (
-            <div className="mt-1.5 text-[13px] tabular-nums" style={{ color: color(sChg) }}>
+            <div className="mt-1.5 text-[16px] font-semibold tabular-nums" style={{ color: color(sChg) }}>
               {sign(sChg)}
               {fmt(Math.abs(sChg), digits(sel))} {sign(sChg)}
               {Math.abs((sChg / sq.prev) * 100).toFixed(2)}%
@@ -278,7 +278,7 @@ export default function WatchlistPanel() {
             ).map(([k, v]) => (
               <div key={k} className="flex justify-between">
                 <span className="text-[var(--muted)]">{k}</span>
-                <span className="tabular-nums">{v !== null ? fmt(v, digits(sel)) : "—"}</span>
+                <span className="text-[13px] tabular-nums">{v !== null ? fmt(v, digits(sel)) : "—"}</span>
               </div>
             ))}
           </div>

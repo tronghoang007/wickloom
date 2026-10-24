@@ -18,7 +18,6 @@ import {
   IndicatorsI,
   LineIcon,
   MoonI,
-  PlusCircle,
   Redo,
   Replay,
   SettingsI,
@@ -64,7 +63,7 @@ function Menu({
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-10 z-40 min-w-40 rounded border border-[var(--border)] bg-[var(--bg)] py-1 shadow-xl">
+          <div className="absolute left-0 top-10 z-40 min-w-40 rounded popup py-1">
             {children}
           </div>
         </>
@@ -121,13 +120,6 @@ export default function Toolbar() {
         <AccountMenu />
       </div>
       <SymbolSearch />
-      <button
-        className={`${iconBtn} ml-1`}
-        disabled
-        title="Compare or add symbol (sắp có)"
-      >
-        <PlusCircle />
-      </button>
       {sep}
       <TimeframeBar className={btn} />
       {sep}

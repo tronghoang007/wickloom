@@ -1871,7 +1871,7 @@ export default function Chart({ paneId }: { paneId: string }) {
         )}
       </div>
       {(selecting || replayActive) && <ReplayBar paneId={paneId} symbol={symbol} onStep={() => stepReplay()} />}
-      <div className="flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-xs">
+      <div className="flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm">
         <div className="flex gap-0.5">
           {RANGES.map((r) => (
             <button

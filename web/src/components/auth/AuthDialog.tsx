@@ -82,7 +82,7 @@ function Form({ initial }: { initial: NonNullable<DialogState> }) {
     >
       <form
         onSubmit={submit}
-        className="w-[400px] max-w-[94vw] rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-6 text-[var(--fg)] shadow-2xl"
+        className="w-[400px] max-w-[94vw] rounded-2xl popup p-6"
         role="dialog"
         aria-label="Wickloom account"
       >

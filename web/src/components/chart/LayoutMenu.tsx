@@ -78,7 +78,7 @@ export default function LayoutMenu({ className }: { className: string }) {
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div
-            className="absolute right-0 top-10 z-40 max-h-[calc(100vh-56px)] w-[428px] max-w-[96vw] overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg)] pb-2 pt-3 shadow-2xl"
+            className="absolute right-0 top-10 z-40 max-h-[calc(100vh-56px)] w-[428px] max-w-[96vw] overflow-y-auto rounded-md popup pb-2 pt-3"
             role="dialog"
             aria-label="Select layout"
           >

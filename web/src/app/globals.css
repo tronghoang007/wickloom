@@ -88,6 +88,11 @@ textarea,
   --on-solid: #0f0f0f;
   --scroll-thumb: #555966;
   --scroll-thumb-hover: #787b86;
+  /* menu / dropdown / hộp thoại. TV đo được #131313 + hover #1a1a1a + chữ #b8b8b8 + đường kẻ #464646, không viền; nhưng #131313 chỉ hơn chart (#0f0f0f) một nấc nên user thấy "chìm" -> dùng #1f1f1f (= --panel đo từ TV) + hover #2a2a2a, giữ chữ/đường kẻ của TV */
+  --popup: #1f1f1f;
+  --popup-hover: #2a2a2a;
+  --popup-fg: #b8b8b8;
+  --popup-line: #464646;
 }
 
 [data-theme="light"] {
@@ -105,6 +110,25 @@ textarea,
   --on-solid: #ffffff;
   --scroll-thumb: #c1c4cd;
   --scroll-thumb-hover: #9598a1;
+  --popup: #ffffff;
+  --popup-hover: #f0f3fa;
+  --popup-fg: #131722;
+  --popup-line: #e0e3eb;
+}
+
+/* Bề mặt nổi (context menu, dropdown, hộp thoại) giống TradingView (cùng bộ token --popup-* ở trên, chỉnh màu ở đó). Đặt NGOÀI @layer để thắng class tiện ích của từng chỗ. Gán lại --bg/--hover/--fg/--border trong cây con để ô nhập, hàng hover, đường kẻ bên trong tự theo màu popup mà không phải sửa từng component. Viền trong suốt ở theme tối (TV không viền) nên kích thước hộp không đổi. */
+.popup {
+  --bg: var(--popup);
+  --hover: var(--popup-hover);
+  --fg: var(--popup-fg);
+  --border: var(--popup-line);
+  background: var(--popup);
+  color: var(--popup-fg);
+  border: 1px solid transparent;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+[data-theme="light"] .popup {
+  border-color: var(--popup-line);
 }
 
 /* Thanh cuộn mảnh kiểu TradingView: 8px, chỉ có thumb bo tròn, không track/nút mũi tên. */

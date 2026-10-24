@@ -46,7 +46,7 @@ export default function AccountSettings({ onClose }: { onClose: () => void }) {
       onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}
       onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}
     >
-      <form onSubmit={save} className="w-[400px] max-w-[94vw] rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-6 text-[var(--fg)] shadow-2xl">
+      <form onSubmit={save} className="w-[400px] max-w-[94vw] rounded-2xl popup p-6">
         <div className="mb-4 flex items-center justify-between">
           <span className="text-xl font-semibold">Account settings</span>
           <button type="button" className="rounded p-1 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={onClose} aria-label="Close">

@@ -108,7 +108,7 @@ export function SettingsFrame({
         role="dialog"
         aria-label={label}
         style={{ width: `min(${width}px, 96vw)` }}
-        className="flex max-h-[85vh] flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[13px] text-[var(--fg)] shadow-2xl"
+        className="flex max-h-[85vh] flex-col rounded-lg popup text-sm"
       >
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <h2 className="text-lg font-semibold">{title}</h2>
@@ -141,7 +141,7 @@ export function SettingsFrame({
               Defaults ▾
             </button>
             {defaultsOpen && (
-              <div className="absolute bottom-10 left-0 z-10 w-44 rounded-md border border-[var(--border)] bg-[var(--bg)] py-1 shadow-2xl">
+              <div className="absolute bottom-10 left-0 z-10 w-44 rounded-md popup py-1">
                 <button
                   type="button"
                   onClick={() => {

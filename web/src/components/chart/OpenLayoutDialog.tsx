@@ -51,7 +51,7 @@ export default function OpenLayoutDialog() {
         onMouseDown={(e) => e.target === e.currentTarget && close()}
         onKeyDown={(e) => e.key === "Escape" && close()}
       >
-        <div className="flex h-[540px] max-h-[88vh] w-[480px] max-w-[96vw] flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] shadow-2xl" role="dialog" aria-label="Layouts">
+        <div className="flex h-[540px] max-h-[88vh] w-[480px] max-w-[96vw] flex-col overflow-hidden rounded-lg popup" role="dialog" aria-label="Layouts">
           <div className="flex items-center justify-between px-5 pb-3 pt-4">
             <span className="text-xl font-semibold">Layouts</span>
             <button className="rounded p-1 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={close} aria-label="Close">
@@ -72,7 +72,7 @@ export default function OpenLayoutDialog() {
             {sortOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} />
-                <div className="absolute right-5 top-7 z-20 min-w-[170px] rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 text-sm normal-case tracking-normal text-[var(--fg)] shadow-2xl">
+                <div className="absolute right-5 top-7 z-20 min-w-[170px] rounded-lg popup py-1 text-sm normal-case tracking-normal">
                   {SORTS.map((o) => (
                     <button
                       key={o.id}
