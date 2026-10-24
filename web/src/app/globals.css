@@ -49,7 +49,7 @@ select {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #131722;
+    --background: #0a0a0a;
     --foreground: #ededed;
   }
 }
@@ -74,13 +74,13 @@ textarea,
 }
 
 [data-theme="dark"] {
-  --bg: #131722; /* nền dark xanh than của TV (trước là #0f0f0f, quá đen) */
+  --bg: #0f0f0f; /* nền dark của TV (đo từ TradingView của user) */
   --fg: #d1d4dc;
   --muted: #787b86;
   --border: #2a2e39;
   --hover: #2a2e39;
   --accent: #2962ff;
-  --panel: #1e222d; /* thanh nổi (favorites, style drawing) */
+  --panel: #1f1f1f; /* thanh nổi (favorites, style drawing) - đo từ TradingView */
   --scroll-thumb: #434651;
   --scroll-thumb-hover: #5d606b;
 }

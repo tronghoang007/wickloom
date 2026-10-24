@@ -76,7 +76,7 @@ export const DOWN = "#f23645";
 
 // Màu mặc định theo theme cho các setting màu đang để `null`.
 export const CHART_THEMES = {
-  dark: { bg: "#131722", text: "#b2b5be", grid: "#1f2430", label: "#363a45", crosshair: "#758696" },
+  dark: { bg: "#0f0f0f", text: "#b2b5be", grid: "#242424", label: "#363a45", crosshair: "#758696" },
   light: { bg: "#ffffff", text: "#131722", grid: "#f0f3fa", label: "#131722", crosshair: "#758696" },
 };
 
