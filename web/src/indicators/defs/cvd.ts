@@ -85,9 +85,12 @@ export const cvd: IndicatorDef = {
   lower: (inputs, { bars, cut, step, calendar }) => {
     if (bars.length === 0) return null;
     if (inputs.agg === TICKS) {
-      const start = periodStarts(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", calendar).filter((s) => s <= cut).pop() ?? 0;
-      const from = bars[start].t;
-      return (bars[bars.length - 1].t + step - from) / 60 <= TICK_BUDGET ? { tfs: [TICK_TF], from } : null;
+      // chart nạp cả tháng nến nhưng chỉ độ sâu tick gần đây mới tính được: bắt đầu từ kỳ đầu tiên nằm trong ngân sách, nến chart cũ hơn để trống
+      const starts = periodStarts(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", calendar);
+      const first = starts.filter((s) => s <= cut).pop() ?? 0;
+      const oldest = bars[bars.length - 1].t + step - TICK_BUDGET * 60;
+      const start = starts.find((s) => s >= first && bars[s].t >= oldest);
+      return start === undefined ? null : { tfs: [TICK_TF], from: bars[start].t };
     }
     const first = inputs.custom ? TF_OF[str(inputs, "tf")] : autoLowerTf(step);
     // tự chọn thì được lùi sang khung thô hơn ở vùng M1 không còn; tự chọn khung riêng thì dùng đúng khung đó

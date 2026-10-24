@@ -186,12 +186,22 @@ describe("CVD 1 tick", () => {
     expect(tf.enabledIf!({ agg: "1 tick", custom: true })).toBe(false);
   });
 
-  it("def.lower: khung TD từ đầu kỳ; kỳ dài hơn 14 ngày thì null", () => {
+  it("def.lower: khung TD từ đầu kỳ; chart dài hơn 14 ngày thì chỉ lấy từ kỳ đầu tiên trong ngân sách; kỳ hiện tại dài hơn thì null", () => {
     const all = chart(100 * DAY, 3 * 96);
     const info = { bars: all, cut: 0, step: M15, calendar: { offset: 0 } };
     expect(cvd.lower!({ anchor: "1D", agg: "1 tick" }, info)).toEqual({ tfs: ["TD"], from: 100 * DAY });
-    const wide = chart(100 * DAY, 20 * 96);
-    expect(cvd.lower!({ anchor: "1W", agg: "1 tick" }, { ...info, bars: wide })).toBeNull(); // 20 ngày từ nến đầu chart
+    // chart 60 ngày (H1 nạp vài tháng là chuyện thường): kỳ ngày đầu tiên không cũ hơn 14 ngày so với nến cuối
+    const wide = chart(100 * DAY, 60 * 96);
+    const end = 160 * DAY;
+    const day = cvd.lower!({ anchor: "1D", agg: "1 tick" }, { ...info, bars: wide })!;
+    expect(day.tfs).toEqual(["TD"]);
+    expect(day.from).toBeGreaterThanOrEqual(end - 14 * DAY);
+    expect(day.from).toBeLessThan(end - 13 * DAY);
+    expect(day.from % DAY).toBe(0);
+    const week = cvd.lower!({ anchor: "1W", agg: "1 tick" }, { ...info, bars: wide })!; // tuần đầu tiên bắt đầu trong 14 ngày cuối
+    expect(week.from).toBeGreaterThanOrEqual(end - 14 * DAY);
+    expect(week.from).toBeLessThan(end - 7 * DAY);
+    expect(cvd.lower!({ anchor: "12M", agg: "1 tick" }, { ...info, bars: wide })).toBeNull(); // kỳ năm hiện tại bắt đầu quá xa
   });
 
   it("compute 1 tick: chỉ dùng nến delta tick; chưa có thì để trống chứ không đoán từ nến chart", () => {
