@@ -30,7 +30,7 @@ const METALS = ["XAU", "XAG", "XPT", "XPD", "XCU", "XAL", "XNI", "XPB", "XZN"];
 // Đồng coin hay gặp: màu thương hiệu + ký hiệu trong vòng tròn (không có thì vẽ chữ đầu của mã trên nền màu băm từ mã)
 export const COINS: Record<string, { color: string; glyph: string }> = {
   BTC: { color: "#f7931a", glyph: "₿" }, ETH: { color: "#627eea", glyph: "Ξ" }, XRP: { color: "#23292f", glyph: "X" }, LTC: { color: "#345d9d", glyph: "Ł" }, BCH: { color: "#8dc351", glyph: "₿" },
-  DOGE: { color: "#c2a633", glyph: "Ð" }, ADA: { color: "#0033ad", glyph: "₳" }, DOT: { color: "#e6007a", glyph: "●" }, SOL: { color: "#7c3aed", glyph: "S" }, LINK: { color: "#2a5ada", glyph: "L" },
+  DOGE: { color: "#c2a633", glyph: "Ð" }, ADA: { color: "#0033ad", glyph: "₳" }, DOT: { color: "#e6007a", glyph: "●" }, SOL: { color: "#0f0f14", glyph: "S" }, LINK: { color: "#2a5ada", glyph: "L" },
   BNB: { color: "#f3ba2f", glyph: "B" }, UNI: { color: "#ff007a", glyph: "U" }, MATIC: { color: "#8247e5", glyph: "M" }, AAVE: { color: "#b6509e", glyph: "A" }, XTZ: { color: "#2c7df7", glyph: "ꜩ" },
   USDT: { color: "#26a17b", glyph: "₮" }, SNX: { color: "#00d1ff", glyph: "S" }, COMP: { color: "#00d395", glyph: "C" }, MANA: { color: "#ff2d55", glyph: "M" }, ENJ: { color: "#624dbf", glyph: "E" },
   FIL: { color: "#0090ff", glyph: "F" }, THETA: { color: "#2ab8e6", glyph: "Θ" }, HBAR: { color: "#222222", glyph: "ℏ" }, CAKE: { color: "#d1884f", glyph: "C" }, BAT: { color: "#ff5000", glyph: "B" },

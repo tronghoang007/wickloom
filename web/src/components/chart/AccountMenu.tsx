@@ -4,9 +4,11 @@ import { accountSub, accountTitle, badgeColor, fmtMoney, MODE_COLOR, MODE_LABEL,
 import { useAuthStore } from "@/store/auth";
 import { startMt5Polling, useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
+import { useTradeStore } from "@/trading/store";
 import { useEffect, useState } from "react";
 import AccountSettings from "../auth/AccountSettings";
 import Avatar from "../auth/Avatar";
+import AccountDetails from "./AccountDetails";
 
 const item = "flex w-full items-center px-4 py-2 text-left text-sm hover:bg-[var(--hover)]";
 
@@ -116,6 +118,7 @@ function TradingAccounts() {
   const accounts = useMt5Store((s) => s.accounts);
   const loaded = useMt5Store((s) => s.loaded);
   const switchable = useMt5Store((s) => s.switchable);
+  const trade = useTradeStore((s) => s.data);
   return (
     <div className="border-b border-[var(--border)] px-4 py-3">
       <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Trading accounts (MT5)</div>
@@ -124,7 +127,8 @@ function TradingAccounts() {
         <div className="text-[13px] text-[var(--muted)]">Chưa có account MT5 nào kết nối. Mở MT5 và gắn EA TVBridge.</div>
       )}
       {accounts.map((a) => (
-        <div key={a.id} className="flex items-start gap-2 py-1" data-testid="mt5-account">
+        <div key={a.id} className="py-1" data-testid="mt5-account">
+        <div className="flex items-start gap-2">
           <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: a.online ? "#089981" : "#787b86" }} title={a.online ? "Online" : "Offline"} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
@@ -144,6 +148,8 @@ function TradingAccounts() {
               {a.equity !== undefined && a.equity !== a.balance && <div className="text-xs tabular-nums text-[var(--muted)]">Equity {fmtMoney(a.equity, "")}</div>}
             </div>
           )}
+        </div>
+        {a.active && trade && <AccountDetails data={trade} />}
         </div>
       ))}
       {!switchable && loaded && (

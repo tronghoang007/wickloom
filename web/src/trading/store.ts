@@ -3,7 +3,7 @@ import { useMt5Store } from "@/store/mt5";
 import { create } from "zustand";
 
 // Trạng thái giao dịch CHỈ ĐỌC của account MT5 đang cấp dữ liệu (docs/trade-plan.md T1). Hỏi GET /accounts/{id}/trade định kỳ.
-export type TradeTab = "positions" | "orders" | "history" | "account";
+export type TradeTab = "positions" | "orders" | "history";
 
 type State = {
   data: TradeData | null;

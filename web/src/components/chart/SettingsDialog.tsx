@@ -409,7 +409,7 @@ function TradingTab({ s, set }: P) {
       <Section>General</Section>
       <CheckRow label="One-click trading" checked={s.oneClick} onChange={(v) => set({ oneClick: v })} />
       <p className="-mt-1 mb-2 pl-7 text-[12px] text-[var(--muted)]">
-        Instantly edit orders and close positions without confirmation. Off: closing a position asks in a dialog, and dragging an order, SL or TP that is already placed waits at the new price until you click Confirm on its tag (or Discard / Esc to undo).
+        Sửa lệnh và đóng vị thế ngay, không cần xác nhận. Tắt: đóng vị thế sẽ hỏi bằng hộp thoại, còn kéo lệnh, SL hoặc TP đã đặt sẽ dừng ở giá mới và chờ bạn bấm Confirm trên thẻ của nó (hoặc Discard / Esc để hoàn tác).
       </p>
     </>
   );

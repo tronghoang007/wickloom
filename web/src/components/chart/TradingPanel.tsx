@@ -7,8 +7,8 @@ import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
 import { askClosePosition } from "@/trading/tagActions";
-import { accountProfit, dealNet, dealSummary, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel } from "@/trading/format";
-import { tradeBlock, webTrading } from "@/trading/gate";
+import { accountProfit, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel } from "@/trading/format";
+import { tradeBlock } from "@/trading/gate";
 import { useTradeFocus } from "@/trading/focus";
 import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
@@ -19,7 +19,6 @@ const TABS: { id: TradeTab; label: string }[] = [
   { id: "positions", label: "Positions" },
   { id: "orders", label: "Orders" },
   { id: "history", label: "History" },
-  { id: "account", label: "Account" },
 ];
 
 const th = "sticky top-0 bg-[var(--bg)] px-3 py-1.5 text-left font-medium text-[var(--muted)]";
@@ -54,6 +53,16 @@ export default function TradingPanel() {
   const stale = isStale(data, now);
   const a = data.account;
   const pnl = accountProfit(data);
+  const ccy = a.currency;
+  // Unrealized P/L và Margin level chỉ có nghĩa khi đang có lệnh (MT5 báo margin level 0 khi chưa dùng margin)
+  const stats: [string, string, string?][] = [
+    ["Equity", fmtMoney(a.equity, ccy)],
+    ["Free Margin", fmtMoney(a.margin_free, ccy)],
+    ["Margin", fmtMoney(a.margin, ccy)],
+    ["Balance", fmtMoney(a.balance, ccy)],
+    ...(data.positions.length > 0 ? ([["Unrealized P/L", fmtPnl(pnl), pnlClass(pnl)]] as [string, string, string?][]) : []),
+    ...(a.margin_level ? ([["Margin level", `${a.margin_level.toLocaleString("en-US", { maximumFractionDigits: 2 })}%`]] as [string, string, string?][]) : []),
+  ];
 
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg)]" data-testid="trading-panel">
@@ -94,13 +103,12 @@ export default function TradingPanel() {
             );
           })}
         </div>
-        <div className={`ml-auto flex items-center gap-4 pr-1 text-xs tabular-nums ${stale ? "opacity-50" : ""}`}>
-          <span className="text-[var(--muted)]">
-            Equity <span className="text-[var(--fg)]">{fmtMoney(a.equity, a.currency)}</span>
-          </span>
-          <span className="text-[var(--muted)]">
-            P/L <span className={pnlClass(pnl)}>{fmtPnl(pnl)}</span>
-          </span>
+        <div className={`ml-auto flex min-w-0 items-center gap-4 overflow-hidden pr-1 text-xs tabular-nums ${stale ? "opacity-50" : ""}`} data-testid="account-summary">
+          {stats.map(([k, v, cls]) => (
+            <span key={k} className="whitespace-nowrap text-[var(--muted)]">
+              {k} <span className={cls ?? "text-[var(--fg)]"}>{v}</span>
+            </span>
+          ))}
         </div>
       </div>
       {open && (
@@ -108,7 +116,6 @@ export default function TradingPanel() {
           {tab === "positions" && <Positions data={data} />}
           {tab === "orders" && <Orders data={data} />}
           {tab === "history" && <History data={data} />}
-          {tab === "account" && <AccountInfo data={data} />}
         </div>
       )}
     </div>
@@ -294,55 +301,5 @@ function History({ data }: { data: TradeData }) {
         })}
       </tbody>
     </table>
-  );
-}
-
-function AccountInfo({ data }: { data: TradeData }) {
-  const a = data.account;
-  const ccy = a.currency;
-  // Tổng hợp từ deal gần đây như màn History của MT5 (Profit đã đóng, Deposit, Swap, Commission); chưa có deal nào thì bỏ cả cụm
-  const sum = dealSummary(data.deals);
-  const money = (v: number) => <span className={pnlClass(v)}>{fmtPnl(v)}{ccy ? ` ${ccy}` : ""}</span>;
-  const history: [string, ReactNode][] =
-    data.deals.length === 0
-      ? []
-      : [
-          ["Profit đã đóng", money(sum.profit)],
-          ["Deposit", fmtMoney(sum.deposit, ccy)],
-          ...(sum.withdrawal ? ([["Withdrawal", fmtMoney(-sum.withdrawal, ccy)]] as [string, ReactNode][]) : []),
-          ["Swap", money(sum.swap)],
-          ["Commission", money(sum.commission)],
-        ];
-  const rows: [string, ReactNode][] = [
-    ["Balance", fmtMoney(a.balance, ccy)],
-    ["Equity", fmtMoney(a.equity, ccy)],
-    ["Profit đang mở", <span key="p" className={pnlClass(accountProfit(data))}>{fmtPnl(accountProfit(data))}{ccy ? ` ${ccy}` : ""}</span>],
-    ...history,
-    ["Margin", fmtMoney(a.margin, ccy)],
-    ["Free margin", fmtMoney(a.margin_free, ccy)],
-    ["Margin level", a.margin_level ? `${a.margin_level.toLocaleString("en-US", { maximumFractionDigits: 2 })}%` : "—"],
-    ["Leverage", a.leverage ? `1:${a.leverage}` : "—"],
-    ["Margin mode", a.margin_mode ? a.margin_mode[0].toUpperCase() + a.margin_mode.slice(1) : "—"],
-    ["Login", a.login ? `#${a.login} · ${a.server}` : a.server],
-    ["Web trading", webTrading(a)],
-  ];
-  const warn =
-    a.terminal_trade_allowed === false
-      ? "Algo Trading đang tắt trên terminal MT5."
-      : a.trade_allowed === false
-        ? "Account không cho giao dịch (đăng nhập bằng investor password?)."
-        : null;
-  return (
-    <div className="px-4 py-3">
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-8 gap-y-1.5 text-sm">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex justify-between gap-4 border-b border-[var(--border)] py-1">
-            <span className="text-[var(--muted)]">{k}</span>
-            <span className="tabular-nums">{v}</span>
-          </div>
-        ))}
-      </div>
-      {warn && <div className="mt-3 text-xs text-[#d69a00]">{warn}</div>}
-    </div>
   );
 }
