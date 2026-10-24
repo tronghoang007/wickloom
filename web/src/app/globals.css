@@ -84,6 +84,8 @@ textarea,
   --accent: #2962ff;
   --accent-text: #5b8cff; /* chữ/icon xanh trên nền tối: #2962ff chỉ đạt 2.8-3.9:1, màu này >=4.3:1; nền/viền vẫn dùng --accent */
   --panel: #1f1f1f; /* thanh nổi (favorites, style drawing) - đo từ TradingView */
+  --solid: #f2f2f2; /* nút đang chọn kiểu "ô sáng" (vd. ⭐ thanh yêu thích): nền sáng + icon tối */
+  --on-solid: #0f0f0f;
   --scroll-thumb: #555966;
   --scroll-thumb-hover: #787b86;
 }
@@ -99,6 +101,8 @@ textarea,
   --accent: #2962ff;
   --accent-text: #2962ff; /* trên nền sáng #2962ff đã đạt 5.2:1 */
   --panel: #ffffff;
+  --solid: #131722;
+  --on-solid: #ffffff;
   --scroll-thumb: #c1c4cd;
   --scroll-thumb-hover: #9598a1;
 }

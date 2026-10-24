@@ -3,7 +3,8 @@
 import { fetchSymbols } from "@/lib/api";
 import { useChartStore } from "@/store/chart";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ClearX, Close, Search } from "../icons";
+import EmptyState from "../EmptyState";
+import { ClearX, Close, EmptyPlugI, EmptySearchI, Search } from "../icons";
 import { SymbolBadge } from "../SymbolIcon";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -179,11 +180,11 @@ export default function SymbolSearchDialog({
           className="min-h-[200px] flex-1 overflow-y-auto border-t border-[var(--border)]"
         >
           {rows.length === 0 && (
-            <div className="px-5 py-8 text-sm text-[var(--muted)]">
+            <EmptyState icon={symbols.length === 0 ? <EmptyPlugI /> : <EmptySearchI />} className="h-full">
               {symbols.length === 0
                 ? "Chưa có symbol: EA chưa gửi danh sách."
                 : "Không tìm thấy symbol."}
-            </div>
+            </EmptyState>
           )}
           {rows.map((s, i) => (
             <div

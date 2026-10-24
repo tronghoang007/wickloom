@@ -135,7 +135,7 @@ export default function Toolbar() {
         open={typeOpen}
         setOpen={setTypeOpen}
         trigger={
-          <button className={iconBtn} title={cur.label}>
+          <button className={`${iconBtn} ${typeOpen ? "bg-[var(--hover)]" : ""}`} title={cur.label}>
             {cur.icon}
           </button>
         }

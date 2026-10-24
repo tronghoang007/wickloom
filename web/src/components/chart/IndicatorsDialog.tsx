@@ -4,7 +4,8 @@ import { INDICATORS } from "@/indicators/catalog";
 import { useIndicatorStore } from "@/indicators/store";
 import { useVolumeStore } from "@/store/volume";
 import { useState, type ReactNode } from "react";
-import { Close, Search, StarI, Svg24 as Svg } from "../icons";
+import EmptyState from "../EmptyState";
+import { Close, EmptySearchI, Search, StarI, Svg24 as Svg } from "../icons";
 
 type Tab = "fav" | "tech";
 
@@ -144,11 +145,11 @@ export default function IndicatorsDialog({
                   <span>BOOSTS</span>
                 </div>
                 {rows.length === 0 && (
-                  <div className="px-3 py-6 text-sm text-[var(--muted)]">
+                  <EmptyState icon={query ? <EmptySearchI /> : <StarI on={false} size={32} />} className="min-h-[280px]">
                     {query
                       ? "Không tìm thấy kết quả."
                       : "Chưa có indicator yêu thích. Bấm ngôi sao ở Technicals."}
-                  </div>
+                  </EmptyState>
                 )}
                 {rows.map((d) => (
                   <div

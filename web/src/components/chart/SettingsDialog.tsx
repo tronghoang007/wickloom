@@ -351,7 +351,7 @@ function CanvasTab({ s, set }: P) {
         {s.bgType === "gradient" && <Swatch value={s.bg2} fallback={t.bg} onChange={(v) => set({ bg2: v })} />}
       </Row>
       <CheckRow label="Vertical grid lines" checked={s.vertGrid} onChange={(v) => set({ vertGrid: v })}>
-        <Swatch value={s.gridColor} fallback={t.grid} disabled={!s.vertGrid && !s.horzGrid} onChange={(v) => set({ gridColor: v })} />
+        <Swatch value={s.gridColor} fallback={t.gridDot} disabled={!s.vertGrid && !s.horzGrid} onChange={(v) => set({ gridColor: v })} />
       </CheckRow>
       <CheckRow label="Horizontal grid lines" checked={s.horzGrid} onChange={(v) => set({ horzGrid: v })} />
       <Row label="Crosshair">

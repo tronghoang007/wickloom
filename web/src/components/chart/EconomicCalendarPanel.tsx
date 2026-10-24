@@ -7,6 +7,8 @@ import { useChartStore } from "@/store/chart";
 import { useSettingsStore } from "@/store/settings";
 import { useCalendarPrefs, useCalendarStore, type CalendarPreset } from "@/store/calendar";
 import { useEffect, useMemo, useRef, useState } from "react";
+import EmptyState from "../EmptyState";
+import { EmptyCalendarI } from "../icons";
 import { FlagBadge } from "../SymbolIcon";
 
 const PRESETS: { id: CalendarPreset; label: string }[] = [
@@ -171,9 +173,9 @@ export default function EconomicCalendarPanel() {
       </div>
       <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto">
         {groups.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-[var(--muted)]" role="status">
+          <EmptyState icon={<EmptyCalendarI />} className="h-full">
             {empty}
-          </div>
+          </EmptyState>
         ) : (
           groups.map((g) => (
             <section key={g.key} data-today={g.label.startsWith("Today") ? "true" : undefined}>

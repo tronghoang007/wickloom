@@ -61,7 +61,7 @@ export function layoutProfile(vp: Profile, st: ProfileStyle, left: number, right
   };
 }
 
-const dash = (style: LineStyleName, w: number): number[] => (style === "dashed" ? [5 * w, 4 * w] : style === "dotted" ? [w, 3 * w] : []);
+const dash = (style: LineStyleName, w: number): number[] => (style === "dashed" ? [6 * w, 6 * w] : style === "dotted" ? [w, 3 * w] : []);
 
 /** Vẽ volume profile của indicator: mỗi phiên một histogram ở đầu / cuối phiên, hoặc một profile ghim vào mép pane (Visible Range). */
 export class ProfilePrimitive implements ISeriesPrimitive<Time> {

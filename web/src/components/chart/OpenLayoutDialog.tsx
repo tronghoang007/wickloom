@@ -4,7 +4,8 @@ import { appSession } from "@/store/appSession";
 import { useLayoutStore } from "@/store/layout";
 import { useSessionStore } from "@/store/layoutSession";
 import { useMemo, useState } from "react";
-import { Close, Search, Trash } from "../icons";
+import EmptyState from "../EmptyState";
+import { Close, EmptyLayoutI, Search, Trash } from "../icons";
 import PromptDialog from "./PromptDialog";
 
 // Như dòng 2 của TV: "Oct 21, 2026, 23:55"
@@ -88,9 +89,17 @@ export default function OpenLayoutDialog() {
               </>
             )}
           </div>
-          <div className="min-h-[80px] flex-1 overflow-y-auto px-2">
-            {entries === null && <div className="px-3 py-6 text-sm text-[var(--muted)]">{loading ? "Đang tải…" : "Không tải được danh sách."}</div>}
-            {entries !== null && shown.length === 0 && <div className="px-3 py-6 text-sm text-[var(--muted)]">Không có layout nào.</div>}
+          <div className="min-h-[140px] flex-1 overflow-y-auto px-2">
+            {entries === null && (
+              <EmptyState icon={loading ? undefined : <EmptyLayoutI />} className="h-full">
+                {loading ? "Đang tải…" : "Không tải được danh sách."}
+              </EmptyState>
+            )}
+            {entries !== null && shown.length === 0 && (
+              <EmptyState icon={<EmptyLayoutI />} className="h-full">
+                Không có layout nào.
+              </EmptyState>
+            )}
             {shown.map((e) => (
               <div
                 key={e.id}

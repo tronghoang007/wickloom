@@ -23,7 +23,7 @@ export default function TimezoneMenu({ clock }: { clock: string }) {
   return (
     <div className="relative">
       <button
-        className="rounded px-1.5 py-1 text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+        className={`rounded px-1.5 py-1 hover:bg-[var(--hover)] hover:text-[var(--fg)] ${open ? "bg-[var(--hover)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
         title="Timezone"
         aria-label="Timezone"
         aria-haspopup="listbox"

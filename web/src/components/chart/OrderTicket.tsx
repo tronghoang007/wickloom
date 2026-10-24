@@ -19,6 +19,7 @@ import { useTradeStore } from "@/trading/store";
 import { askCancelOrder, askClosePosition, askRemoveStop } from "@/trading/tagActions";
 import { useTicketStore, type TicketRest } from "@/trading/ticket";
 import { useEffect, useState } from "react";
+import EmptyState from "../EmptyState";
 import { Close } from "../icons";
 import PriceText from "./PriceText";
 import ModeBadge from "./ModeBadge";
@@ -61,7 +62,7 @@ function ModifyPanel({ owner }: { owner: string }) {
     useTicketStore.setState({ modifyOwner: null });
     useRailStore.getState().closeOrder();
   }, [data, item]);
-  if (!item) return <div className="px-4 py-6 text-sm text-[var(--muted)]">Đang tải lệnh…</div>;
+  if (!item) return <EmptyState className="h-full">Đang tải lệnh…</EmptyState>;
 
   const digits = symbols.find((x) => x.name === item.symbol)?.digits;
   const edits = pendingFor(byPane, owner);

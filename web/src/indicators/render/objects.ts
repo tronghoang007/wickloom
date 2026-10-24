@@ -74,7 +74,7 @@ export function layoutLabel(px: number, py: number, textW: number, font: number,
 const isClear = (c: string | undefined): c is undefined | "" => !c;
 
 /** Nét đứt/chấm theo độ dày `w` (px bitmap). */
-const dash = (style: LineStyleName | undefined, w: number): number[] => (style === "dashed" ? [5 * w, 4 * w] : style === "dotted" ? [w, 3 * w] : []);
+const dash = (style: LineStyleName | undefined, w: number): number[] => (style === "dashed" ? [6 * w, 6 * w] : style === "dotted" ? [w, 3 * w] : []);
 
 /** Vẽ line / label / box của một indicator (xem `ObjectSet`). Gắn vào series neo nên theo thang giá của indicator; chỉ vẽ phần nằm trong khung nhìn. */
 export class ObjectsPrimitive implements ISeriesPrimitive<Time> {

@@ -361,3 +361,50 @@ export const AnchorI = () => (
     <path d="M14 9.5v12M10.5 12.5h7M6.5 15.5c0 3.6 3.4 6 7.5 6s7.5-2.4 7.5-6" />
   </Svg>
 );
+
+// --- icon của trạng thái rỗng (EmptyState): vẽ trên lưới 28 như các icon khác, hiện to hơn (size) ----------
+export const EmptyPositionsI = ({ size = 32 }: { size?: number }) => (
+  <Svg size={size}>
+    <rect x="5.5" y="10.5" width="17" height="12" rx="2" />
+    <path d="M10.5 10.5v-2a1.5 1.5 0 0 1 1.5-1.5h4a1.5 1.5 0 0 1 1.5 1.5v2M5.5 15.5h17M12.5 15.5v2h3v-2" />
+  </Svg>
+);
+export const EmptyOrdersI = ({ size = 32 }: { size?: number }) => (
+  <Svg size={size}>
+    <rect x="7.5" y="6.5" width="13" height="16" rx="2" />
+    <path d="M11.5 5.5h5v2h-5zM10.5 12.5h7M10.5 16h7M10.5 19.5h4" />
+  </Svg>
+);
+export const EmptyHistoryI = ({ size = 32 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M5.5 14a8.5 8.5 0 1 0 2.5-6M5.5 6.5v4h4M14 9.5v5l3 2" />
+  </Svg>
+);
+export const EmptyWatchlistI = ({ size = 32 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M7.5 5.5h13v18l-6.5-4-6.5 4zM11 10.5h6M11 14h6" />
+  </Svg>
+);
+export const EmptySearchI = ({ size = 32 }: { size?: number }) => (
+  <Svg size={size}>
+    <circle cx="12.5" cy="12.5" r="6.5" />
+    <path d="M17.5 17.5l5 5M10 12.5h5" />
+  </Svg>
+);
+export const EmptyCalendarI = ({ size = 32 }: { size?: number }) => (
+  <Svg size={size}>
+    <rect x="4.5" y="6.5" width="19" height="17" rx="2.5" />
+    <path d="M4.5 11.5h19M9.5 4.5v4M18.5 4.5v4M10 16h8" />
+  </Svg>
+);
+export const EmptyLayoutI = ({ size = 32 }: { size?: number }) => (
+  <Svg size={size}>
+    <rect x="4.5" y="5.5" width="19" height="17" rx="3.5" />
+    <path d="M4.5 12h19M12 12v10.5" />
+  </Svg>
+);
+export const EmptyPlugI = ({ size = 32 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M10.5 5.5v4M17.5 5.5v4M7.5 9.5h13v4a6.5 6.5 0 0 1-13 0zM14 20v3.5" />
+  </Svg>
+);

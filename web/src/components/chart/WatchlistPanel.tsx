@@ -5,7 +5,8 @@ import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useSettingsStore } from "@/store/settings";
 import { useEffect, useRef, useState } from "react";
-import { Chevron, Close, Plus } from "../icons";
+import EmptyState from "../EmptyState";
+import { Chevron, Close, EmptyWatchlistI, Plus } from "../icons";
 import { SymbolBadge } from "../SymbolIcon";
 import SymbolSearchDialog from "./SymbolSearchDialog";
 
@@ -202,9 +203,9 @@ export default function WatchlistPanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
         {symbols.length === 0 && (
-          <div className="px-2 py-6 text-sm text-[var(--muted)]">
+          <EmptyState icon={<EmptyWatchlistI />} className="h-full min-h-[200px]">
             Chưa có symbol trong watchlist. Bấm &quot;+&quot; để thêm.
-          </div>
+          </EmptyState>
         )}
         {symbols.map((s) => {
           const q = quotes[s];

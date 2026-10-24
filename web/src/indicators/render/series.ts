@@ -15,7 +15,7 @@ import { withAlpha, type PlotStyleR } from "../style";
 
 export const LWC_LINE_STYLE: Record<LineStyleName, LineStyle> = {
   solid: LineStyle.Solid,
-  dashed: LineStyle.Dashed,
+  dashed: LineStyle.LargeDashed, // nét đứt dài (6 / 6) như đường crosshair của TV; Dashed của LWC chỉ 2 / 2 nên trông như chấm
   dotted: LineStyle.Dotted,
 };
 

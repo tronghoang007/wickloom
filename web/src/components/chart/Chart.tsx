@@ -592,10 +592,11 @@ export default function Chart({ paneId }: { paneId: string }) {
       layout: { fontSize: 12, attributionLogo: false },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { style: LineStyle.Dashed, width: 1 },
-        horzLine: { style: LineStyle.Dashed, width: 1 },
+        // nét đứt dài như TV (đo từ canvas TV: 5px nét / 6px trống; LargeDashed của lightweight-charts: 6 / 6 là mẫu gần nhất, Dashed chỉ 2 / 2)
+        vertLine: { style: LineStyle.LargeDashed, width: 1 },
+        horzLine: { style: LineStyle.LargeDashed, width: 1 },
       },
-      rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.25 } },
+      rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.08 } },
       localization: { timeFormatter: (t: number) => crosshairLabel(t) },
       timeScale: {
         timeVisible: true,
@@ -971,7 +972,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   // theme + Canvas/Scales settings
   useEffect(() => {
     const t = CHART_THEMES[theme];
-    const grid = cs.gridColor ?? t.grid;
+    const grid = cs.gridColor ?? t.gridDot;
     const cross = cs.crosshairColor ?? t.crosshair;
     const border = cs.scaleLineColor ?? t.grid;
     chartRef.current?.applyOptions({
@@ -986,8 +987,9 @@ export default function Chart({ paneId }: { paneId: string }) {
         panes: { separatorColor: t.sep, separatorHoverColor: "rgba(68, 138, 255, 0.2)" },
       },
       grid: {
-        vertLines: { visible: cs.vertGrid, color: grid, style: LineStyle.Dotted },
-        horzLines: { visible: cs.horzGrid, color: grid, style: LineStyle.Dotted },
+        // chấm 1px thưa như TV (TV: 1 chấm / 3px trống; SparseDotted của lightweight-charts: 1 / 4 là mẫu gần nhất)
+        vertLines: { visible: cs.vertGrid, color: grid, style: LineStyle.SparseDotted },
+        horzLines: { visible: cs.horzGrid, color: grid, style: LineStyle.SparseDotted },
       },
       rightPriceScale: {
         borderColor: border,

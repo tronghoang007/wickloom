@@ -72,15 +72,16 @@ function ToolItem({
       <ToolIcon id={id} />
       <span className="flex-1 truncate">{spec.label}</span>
       {!spec.disabled && (
+        // ô 24x24 bo 4px, sao 13x12 như TV (đo trên flyout TV: nút 24, svg 18, sao 13.1x12.4); hover: nền #464646 (≈ fg 22%), sao đã yêu thích sáng trắng
         <button
-          className={`${fav ? "text-[var(--fg)]" : "text-transparent group-hover/item:text-[var(--muted)]"} hover:!text-[var(--fg)]`}
+          className={`-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] hover:bg-[color-mix(in_srgb,var(--fg)_22%,transparent)] ${fav ? "text-[var(--fg)] hover:!text-[var(--solid,#f2f2f2)]" : "text-transparent group-hover/item:text-[var(--muted)] hover:!text-[var(--fg)]"}`}
           onClick={(e) => {
             e.stopPropagation();
             toggleFavorite(id);
           }}
-          title="Favorites"
+          title={fav ? "Remove from favorites" : "Add to favorites"}
         >
-          <StarI on={fav} />
+          <StarI on={fav} size={17.5} />
         </button>
       )}
     </div>
@@ -440,11 +441,13 @@ export default function DrawingToolbar() {
       <TrashButton />
       <div className="flex-1" />
       <button
-        className={cls(showFavs)}
+        // chọn: ô sáng 34x34 bo 6px như TV (đo từ ảnh TV: ô 34x34, sao 18x18 nét tối); my-0.5 để chiều cao nút vẫn 38 như các nút khác
+        className={showFavs ? "relative my-0.5 flex h-[34px] w-[34px] items-center justify-center rounded-md bg-[var(--solid,#f2f2f2)] text-[var(--on-solid,#0f0f0f)]" : cls(false)}
         title="Favorites toolbar"
+        aria-pressed={showFavs}
         onClick={() => useDrawingStore.setState({ showFavs: !showFavs })}
       >
-        <StarI on={showFavs} />
+        <StarI on={false} />
       </button>
     </div>
   );

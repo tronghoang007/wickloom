@@ -9,6 +9,8 @@ import { useTradeStore } from "@/trading/store";
 import { useEffect, useState } from "react";
 import AccountSettings from "../auth/AccountSettings";
 import Avatar from "../auth/Avatar";
+import EmptyState from "../EmptyState";
+import { EmptyPlugI } from "../icons";
 import AccountDetails from "./AccountDetails";
 
 const item = "flex w-full items-center px-4 py-2 text-left text-sm hover:bg-[var(--hover)]";
@@ -55,7 +57,7 @@ export default function AccountMenu() {
   return (
     <div className="relative">
       <button
-        className="relative flex h-[38px] w-[38px] items-center justify-center rounded-full hover:bg-[var(--hover)]"
+        className={`relative flex h-[38px] w-[38px] items-center justify-center rounded-full hover:bg-[var(--hover)] ${open ? "bg-[var(--hover)]" : ""}`}
         title={trading ? `${title} · ${trading}` : title}
         aria-label="Account"
         onClick={() => (expired ? openAuth("login", "Phiên đăng nhập hết hạn — đăng nhập lại để tiếp tục lưu") : setOpen(!open))}
@@ -123,9 +125,11 @@ function TradingAccounts() {
   return (
     <div className="border-b border-[var(--border)] px-4 py-3">
       <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Trading accounts (MT5)</div>
-      {!loaded && <div className="text-[13px] text-[var(--muted)]">Đang tải…</div>}
+      {!loaded && <EmptyState compact>Đang tải…</EmptyState>}
       {loaded && accounts.length === 0 && (
-        <div className="text-[13px] text-[var(--muted)]">Chưa có account MT5 nào kết nối. Mở MT5 và gắn EA TVBridge.</div>
+        <EmptyState compact icon={<EmptyPlugI size={28} />}>
+          Chưa có account MT5 nào kết nối. Mở MT5 và gắn EA TVBridge.
+        </EmptyState>
       )}
       {accounts.map((a) => (
         <div key={a.id} className="py-1" data-testid="mt5-account">

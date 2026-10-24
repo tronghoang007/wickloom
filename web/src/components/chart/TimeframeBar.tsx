@@ -43,7 +43,7 @@ export default function TimeframeBar({ className }: { className: string }) {
         </button>
       ))}
       <div className="relative">
-        <button className={`${className} px-1`} onClick={() => setOpen(!open)}>
+        <button className={`${className} px-1 ${open ? "bg-[var(--hover)]" : ""}`} onClick={() => setOpen(!open)}>
           <Chevron />
         </button>
         {open && (

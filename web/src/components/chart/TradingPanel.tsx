@@ -13,6 +13,8 @@ import { tradeBlock } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
 import { useEffect, useState, type ReactNode } from "react";
+import EmptyState from "../EmptyState";
+import { EmptyHistoryI, EmptyOrdersI, EmptyPositionsI } from "../icons";
 import { SymbolBadge } from "../SymbolIcon";
 
 const TABS: { id: TradeTab; label: string }[] = [
@@ -171,11 +173,15 @@ export default function TradingPanel() {
 
 const digitsOf = (symbol: string) => useChartStore.getState().symbols.find((s) => s.name === symbol)?.digits;
 const rowClass = "border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--hover)]";
-const Empty = ({ children }: { children: ReactNode }) => <div className="px-4 py-6 text-sm text-[var(--muted)]">{children}</div>;
+const Empty = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
+  <EmptyState icon={icon} className="h-full">
+    {children}
+  </EmptyState>
+);
 
 function Positions({ data }: { data: TradeData }) {
   const busy = useOrderState((s) => s.busy);
-  if (data.positions.length === 0) return <Empty>Không có vị thế đang mở.</Empty>;
+  if (data.positions.length === 0) return <Empty icon={<EmptyPositionsI />}>Không có vị thế đang mở.</Empty>;
   const block = tradeBlock({ replay: false, status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   return (
     <table className="w-full text-xs tabular-nums">
@@ -293,7 +299,7 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
 
 function Orders({ data }: { data: TradeData }) {
   const busy = useOrderState((s) => s.busy);
-  if (data.orders.length === 0) return <Empty>Không có lệnh chờ.</Empty>;
+  if (data.orders.length === 0) return <Empty icon={<EmptyOrdersI />}>Không có lệnh chờ.</Empty>;
   const block = tradeBlock({ replay: false, status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   return (
     <table className="w-full text-xs tabular-nums">
@@ -340,9 +346,9 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
 }
 
 function History({ data }: { data: TradeData }) {
-  if (data.deals.length === 0) return <Empty>Chưa có giao dịch nào trong những ngày gần đây.</Empty>;
+  if (data.deals.length === 0) return <Empty icon={<EmptyHistoryI />}>Chưa có giao dịch nào trong những ngày gần đây.</Empty>;
   const rows = closedPositions(data.deals);
-  if (rows.length === 0) return <Empty>Chưa có vị thế nào đã đóng trong những ngày gần đây.</Empty>;
+  if (rows.length === 0) return <Empty icon={<EmptyHistoryI />}>Chưa có vị thế nào đã đóng trong những ngày gần đây.</Empty>;
   const ccy = data.account.currency;
   const heads: [string, boolean?][] = [["Symbol"], ["Type"], ["Volume, lot", true], ["Open price", true], ["Close price", true], ["T/P", true], ["S/L", true], ["Position"], ["Open time"], ["Close time"], [`Swap, ${ccy}`, true], ["Reason"], [`P/L, ${ccy}`, true]];
   return (

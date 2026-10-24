@@ -71,7 +71,7 @@ export default function LayoutMenu({ className }: { className: string }) {
 
   return (
     <div className="relative">
-      <button className={className} title="Select layout" aria-label="Select layout" onClick={() => setOpen(!open)}>
+      <button className={`${className} ${open ? "bg-[var(--hover)]" : ""}`} title="Select layout" aria-label="Select layout" aria-expanded={open} onClick={() => setOpen(!open)}>
         <LayoutI />
       </button>
       {open && (
