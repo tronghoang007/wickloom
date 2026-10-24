@@ -9,19 +9,6 @@ import { useVolumeStore } from "@/store/volume";
 import { useState, type ReactNode } from "react";
 import { Close, Search, StarI, Svg24 as Svg, Trash } from "../icons";
 
-const TITLES: Record<string, string> = {
-  sma: "Simple moving average",
-  ema: "Exponential moving average",
-  wma: "Weighted moving average",
-  bb: "Bollinger Bands",
-  vwap: "Volume-weighted average price",
-  volume: "Volume",
-  rsi: "Relative strength index",
-  macd: "Moving average convergence divergence",
-  stoch: "Stochastic",
-  atr: "Average true range",
-};
-
 type Tab = "fav" | "tech" | "onchart";
 
 function Ico({ children }: { children: ReactNode }) {
@@ -82,7 +69,7 @@ function OnChart() {
       {volOn && (
         <div className="rounded border border-[var(--border)] p-3">
           <div className="flex items-center justify-between text-sm font-semibold">
-            {TITLES.volume}
+            Volume
             <button
               className={removeBtn}
               title="Remove"
@@ -102,11 +89,11 @@ function OnChart() {
             className="rounded border border-[var(--border)] p-3"
           >
             <div className="mb-2 flex items-center justify-between text-sm font-semibold">
-              {TITLES[inst.id] ?? def.name}
+              {def.title}
               <button
                 className={removeBtn}
                 title="Remove"
-                aria-label={`Remove ${TITLES[inst.id] ?? def.name}`}
+                aria-label={`Remove ${def.title}`}
                 onClick={() => remove(inst.uid)}
               >
                 <Trash />
@@ -180,7 +167,7 @@ export default function IndicatorsDialog({
     if (query)
       return (
         d.name.toLowerCase().includes(query) ||
-        (TITLES[d.id] ?? "").toLowerCase().includes(query)
+        d.title.toLowerCase().includes(query)
       );
     if (tab === "fav") return favorites.includes(d.id);
     return tab === "tech";
@@ -306,7 +293,7 @@ export default function IndicatorsDialog({
                             <StarI on={favorites.includes(d.id)} />
                           </button>
                           <span className="truncate">
-                            {TITLES[d.id] ?? d.name}
+                            {d.title}
                           </span>
                           {count(d.id) > 0 && (
                             <span className="rounded bg-[var(--accent)]/20 px-1.5 text-xs text-[var(--accent)]">

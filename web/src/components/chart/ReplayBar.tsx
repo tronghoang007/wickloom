@@ -129,7 +129,7 @@ function ReplayTrade({ paneId, symbol, active }: { paneId: string; symbol: strin
   const shownPnl = sim.position ? pnl : sim.trades > 0 ? sim.realized : null;
   const pill = "h-[30px] rounded px-4 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100";
   return (
-    <div className="ml-auto mr-12 flex items-center gap-1.5" data-testid="replay-trade" title={hint}>
+    <div className="mr-12 flex items-center justify-self-end gap-1.5" data-testid="replay-trade" title={hint}>
       {shownPnl !== null && (
         <span className={`mr-1.5 hidden whitespace-nowrap text-xs tabular-nums lg:inline ${pnlClass(shownPnl)}`} data-testid="replay-pnl">
           {sim.position ? "P/L" : "Realized"} {fmtPnl(shownPnl)} {ccy}
@@ -171,7 +171,8 @@ export default function ReplayBar({ paneId, symbol, onStep }: { paneId: string; 
   );
 
   return (
-    <div className="relative flex h-[46px] items-center border-t border-[var(--border)] pl-3">
+    <div className="relative grid h-[46px] grid-cols-[1fr_auto_1fr] items-center border-t border-[var(--border)] px-3">
+      <div className="col-start-2 flex items-center">
       <button
         className={`${btn} ${selecting ? "bg-[var(--hover)]" : ""}`}
         onClick={() =>
@@ -217,6 +218,7 @@ export default function ReplayBar({ paneId, symbol, onStep }: { paneId: string; 
       >
         <JumpIcon />
       </button>
+      </div>
       <ReplayTrade paneId={paneId} symbol={symbol} active={active} />
       <button
         className="absolute right-3 flex h-[38px] w-[38px] items-center justify-center rounded hover:bg-[var(--hover)]"
