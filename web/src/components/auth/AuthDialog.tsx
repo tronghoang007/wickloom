@@ -3,6 +3,7 @@
 import { AuthError, authOptions } from "@/lib/authApi";
 import { useAuthStore, type DialogState } from "@/store/auth";
 import { useEffect, useRef, useState } from "react";
+import BrandLogo from "../BrandLogo";
 import { Close } from "../icons";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -86,7 +87,7 @@ function Form({ initial }: { initial: NonNullable<DialogState> }) {
         aria-label="Wickloom account"
       >
         <div className="mb-4 flex items-center justify-between">
-          <span className="text-xl font-semibold">Wickloom</span>
+          <BrandLogo size={28} />
           <button type="button" className="rounded p-1 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={close} aria-label="Close">
             <Close size={24} />
           </button>

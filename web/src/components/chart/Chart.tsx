@@ -58,6 +58,7 @@ import FavoritesBar from "./FavoritesBar";
 import InlineTextEditor from "./InlineTextEditor";
 import ReplayBar from "./ReplayBar";
 import { SymbolBadge } from "../SymbolIcon";
+import BrandLogo from "../BrandLogo";
 import StylePanel from "./StylePanel";
 import TradeOverlay from "./TradeOverlay";
 import TimezoneMenu from "./TimezoneMenu";
@@ -1672,6 +1673,10 @@ export default function Chart({ paneId }: { paneId: string }) {
           onConfirmEdit={(owner) => lineDragRef.current?.confirmEdit(owner)}
           onCancelEdit={(owner) => lineDragRef.current?.cancelEdit(owner)}
         />
+        {/* Logo Wickloom mờ ở góc trái-dưới pane cuối, ngay trên trục thời gian: chỗ logo TV trước đây (đã tắt, xem attributionLogo) */}
+        <div className="pointer-events-none absolute left-3 z-[3]" style={{ bottom: (chartRef.current?.timeScale().height() ?? 28) + 10 }}>
+          <BrandLogo size={30} watermark />
+        </div>
         <CalendarMarkers symbol={symbol} tf={tf} replay={replayActive} getChart={getChart} getBars={getBars} />
         {ctxMenu && (
           <ChartContextMenu
