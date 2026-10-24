@@ -77,13 +77,15 @@ textarea,
   --bg: #0f0f0f; /* nền dark của TV (đo từ TradingView của user) */
   --page: #1a1a1a; /* nền trang của TV (chart-page: dải toolbar trên cùng, khe giữa các khối) - đo từ TradingView */
   --fg: #d1d4dc;
-  --muted: #787b86;
+  --muted: #8a8d98; /* chữ phụ: TV dùng #787b86 nhưng chỉ đạt 3.2-4.1:1 trên hover/panel/page, #8a8d98 đạt >=4.1 trên mọi nền tối và vẫn tối hơn --fg rõ rệt */
   --border: #2a2e39;
   --hover: #2a2e39;
+  --selected: #363a45; /* hàng/ô đang chọn trong danh sách: sáng hơn hover nhưng không loá như khối --fg */
   --accent: #2962ff;
+  --accent-text: #5b8cff; /* chữ/icon xanh trên nền tối: #2962ff chỉ đạt 2.8-3.9:1, màu này >=4.3:1; nền/viền vẫn dùng --accent */
   --panel: #1f1f1f; /* thanh nổi (favorites, style drawing) - đo từ TradingView */
-  --scroll-thumb: #434651;
-  --scroll-thumb-hover: #5d606b;
+  --scroll-thumb: #555966;
+  --scroll-thumb-hover: #787b86;
 }
 
 [data-theme="light"] {
@@ -93,7 +95,9 @@ textarea,
   --muted: #6a6d78;
   --border: #e0e3eb;
   --hover: #f0f3fa;
+  --selected: #dde3f0;
   --accent: #2962ff;
+  --accent-text: #2962ff; /* trên nền sáng #2962ff đã đạt 5.2:1 */
   --panel: #ffffff;
   --scroll-thumb: #c1c4cd;
   --scroll-thumb-hover: #9598a1;

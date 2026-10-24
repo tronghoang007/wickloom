@@ -36,7 +36,7 @@ const MaximizeIc = () => (
 
 // Nút như TV (đo): 24px, viền #464646, bo 4px; rê vào thì đảo màu (nền sáng, icon tối)
 const btn =
-  "flex h-6 w-6 items-center justify-center rounded border border-[#464646] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--fg)] hover:text-[var(--bg)] disabled:cursor-default disabled:opacity-30 disabled:hover:bg-[var(--bg)] disabled:hover:text-[var(--fg)]";
+  "flex h-6 w-6 items-center justify-center rounded border border-[#464646] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--fg)] hover:text-[var(--bg)] disabled:cursor-default disabled:opacity-55 disabled:hover:bg-[var(--bg)] disabled:hover:text-[var(--fg)]";
 
 /**
  * Phần "vỏ" của các pane như TV: legend của indicator (tên, tham số, giá trị, nút ẩn / Settings / gỡ) nằm ngay đầu pane của nó,

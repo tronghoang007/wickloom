@@ -84,7 +84,7 @@ export default function VolumeLegend({
   const showValues = vs.statusValues && !vs.hidden && bar;
 
   return (
-    <div className={`group/vol pointer-events-auto -ml-1 flex w-fit items-center gap-x-1.5 rounded border border-transparent bg-[var(--legend-bg)] pl-1 pr-1 hover:border-[var(--border)] ${vs.hidden ? "opacity-50" : ""}`}>
+    <div className={`group/vol pointer-events-auto -ml-1 flex w-fit items-center gap-x-1.5 rounded border border-transparent bg-[var(--legend-bg)] pl-1 pr-1 hover:border-[var(--border)] ${vs.hidden ? "opacity-70" : ""}`}>
       {showTitle && <span className="text-[var(--fg)]">{TITLE}</span>}
       {showInputs && <span className="text-[var(--muted)]">{vs.maLength}</span>}
       {showValues && (

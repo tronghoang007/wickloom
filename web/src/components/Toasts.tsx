@@ -31,7 +31,7 @@ export default function Toasts() {
             <div className={t.title ? "text-[var(--fg)]/85" : ""}>{t.text}</div>
             {t.action && (
               <button
-                className="mt-1 font-semibold text-[var(--accent)] hover:underline"
+                className="mt-1 font-semibold text-[var(--accent-text)] hover:underline"
                 onClick={() => {
                   t.action!.run();
                   dismiss(t.id);

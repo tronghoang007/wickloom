@@ -332,7 +332,7 @@ export default function ColorPicker({
         className={
           children
             ? className
-            : `relative shrink-0 cursor-pointer rounded-md border border-[var(--border)] p-1 hover:border-[var(--muted)] disabled:pointer-events-none disabled:opacity-40 ${className}`
+            : `relative shrink-0 cursor-pointer rounded-md border border-[var(--border)] p-1 hover:border-[var(--muted)] disabled:pointer-events-none disabled:opacity-55 ${className}`
         }
       >
         {children ?? (

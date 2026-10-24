@@ -1,6 +1,7 @@
 "use client";
 
-import { accountSub, accountTitle, badgeColor, fmtMoney, MODE_COLOR, MODE_LABEL, tradingTooltip } from "@/lib/mt5Format";
+import { accountSub, accountTitle, badgeColor, fmtMoney, tradingTooltip } from "@/lib/mt5Format";
+import ModeBadge from "./ModeBadge";
 import { useAuthStore } from "@/store/auth";
 import { startMt5Polling, useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
@@ -133,11 +134,7 @@ function TradingAccounts() {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="truncate text-sm font-medium">{accountTitle(a)}</span>
-              {MODE_LABEL[a.mode] && (
-                <span className="shrink-0 rounded px-1 py-px text-[10px] font-bold text-white" style={{ background: MODE_COLOR[a.mode] }}>
-                  {MODE_LABEL[a.mode]}
-                </span>
-              )}
+              <ModeBadge mode={a.mode} />
             </div>
             <div className="break-words text-xs text-[var(--muted)]">{accountSub(a)}</div>
             {a.login === null && <div className="text-xs text-[var(--muted)]">EA cũ — cập nhật TVBridge 2.10 để thấy login và Demo/Real.</div>}

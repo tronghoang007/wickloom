@@ -13,7 +13,7 @@ import { Check, Section, SettingsFrame, VisibilityTab, field, num } from "./sett
 function InputRow({ def, value, onChange, enabled = true }: { def: InputDef; value: number | string | boolean; onChange: (v: number | string | boolean) => void; enabled?: boolean }) {
   if (def.type === "bool") return <Check label={def.label} checked={value as boolean} onChange={onChange} />;
   return (
-    <label className={`flex items-center justify-between py-1.5 ${enabled ? "" : "opacity-40"}`} title={def.tooltip}>
+    <label className={`flex items-center justify-between py-1.5 ${enabled ? "" : "opacity-55"}`} title={def.tooltip}>
       {def.label}
       {def.type === "int" || def.type === "float" ? (
         <input

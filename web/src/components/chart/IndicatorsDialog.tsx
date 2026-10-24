@@ -176,7 +176,7 @@ export default function IndicatorsDialog({
                         {d.title}
                       </span>
                       {count(d.id) > 0 && (
-                        <span className="rounded bg-[var(--accent)]/20 px-1.5 text-xs text-[var(--accent)]">
+                        <span className="rounded bg-[var(--accent)]/20 px-1.5 text-xs text-[var(--accent-text)]">
                           {count(d.id)} on chart
                         </span>
                       )}

@@ -39,7 +39,9 @@ const KIND_FULL = { sl: "Stop loss", tp: "Take profit" } as const; // chữ củ
 const SIM_TICKET = -1; // vị thế giả lập của Replay (không phải lệnh thật)
 const PNL_UP = "#089981"; // số lãi / lỗ trên thẻ (nhãn bắt đầu bằng + / -) tô xanh / đỏ theo dấu, không theo màu đường
 const PNL_DOWN = "#f23645";
-const DIM = 0.3; // độ đục của lệnh không được focus
+const DIM = 0.5; // độ đục của lệnh không được focus (0.3 làm chữ thẻ chỉ còn ~1.7:1, không đọc được)
+// chữ thẻ pha 25% về phía --fg: #2962ff (lệnh Buy) trên nền tối chỉ đạt 3.4-3.9:1; viền và nút vẫn giữ nguyên màu đường
+const tagText = (c: string) => `color-mix(in srgb, ${c}, var(--fg) 25%)`;
 const ownerName = (o: TagOwner) => (o.t === "draft" ? "Bản nháp" : `${o.t === "order" ? "Lệnh chờ" : "Vị thế"} #${o.ticket}`);
 
 function useNowSec() {
@@ -361,7 +363,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
               data-line-key={live ? l.key : undefined}
               title={`${ownerName(tag.owner)} · ${tag.kind === "entry" ? "giá vào" : KIND_NAME[tag.kind]}`}
               className={`${events} flex items-stretch overflow-hidden rounded border tabular-nums ${draggable ? "cursor-pointer" : ""}`}
-              style={{ height: TAG_H, color: fc(c), borderColor: fc(c), background: "var(--bg)", boxShadow: focus === mine ? `0 0 0 1px ${c}` : undefined }}
+              style={{ height: TAG_H, color: tagText(fc(c)), borderColor: fc(c), background: "var(--bg)", boxShadow: focus === mine ? `0 0 0 1px ${c}` : undefined }}
             >
               <span className="flex items-center border-r px-2" style={{ borderColor: fc(c) }}>
                 {tag.qty}

@@ -78,7 +78,7 @@ export default function PromptDialog({
             ref={okRef}
             type="submit"
             disabled={busy || (input && !value.trim())}
-            className={`h-9 rounded px-5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40 ${danger ? "bg-[#f23645]" : "bg-[var(--accent)]"}`}
+            className={`h-9 rounded px-5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-55 ${danger ? "bg-[#f23645]" : "bg-[var(--accent)]"}`}
           >
             {busy ? "…" : confirmLabel}
           </button>

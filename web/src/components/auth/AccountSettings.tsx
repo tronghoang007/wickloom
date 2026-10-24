@@ -68,7 +68,7 @@ export default function AccountSettings({ onClose }: { onClose: () => void }) {
 
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" className="h-10 rounded border border-[var(--border)] px-4 text-sm hover:bg-[var(--hover)]" onClick={onClose}>Cancel</button>
-          <button type="submit" disabled={!canSave} className="h-10 rounded bg-[var(--accent)] px-5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100">
+          <button type="submit" disabled={!canSave} className="h-10 rounded bg-[var(--accent)] px-5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-55 disabled:hover:brightness-100">
             {busy ? "…" : "Save"}
           </button>
         </div>

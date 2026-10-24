@@ -4,7 +4,7 @@ import { useConfirmStore, type ConfirmRow } from "@/store/confirm";
 import { useEffect, useRef, useState } from "react";
 import { Close } from "./icons";
 
-const TONE: Record<NonNullable<ConfirmRow["tone"]>, string> = { buy: "text-[#2962ff]", sell: "text-[#f23645]", pos: "text-[#089981]", neg: "text-[#f23645]" };
+const TONE: Record<NonNullable<ConfirmRow["tone"]>, string> = { buy: "text-[var(--accent-text)]", sell: "text-[#f23645]", pos: "text-[#089981]", neg: "text-[#f23645]" };
 
 /** Hộp thoại xác nhận (mở bằng `askConfirm`): tiêu đề, bảng tóm tắt, Huỷ / nút xác nhận. Esc hoặc bấm nền = huỷ. */
 export default function ConfirmHost() {
@@ -62,7 +62,7 @@ export default function ConfirmHost() {
             type="button"
             onClick={() => void run()}
             disabled={busy}
-            className={`h-9 rounded px-5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40 ${request.danger ? "bg-[#f23645]" : "bg-[var(--accent)]"}`}
+            className={`h-9 rounded px-5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-55 ${request.danger ? "bg-[#f23645]" : "bg-[var(--accent)]"}`}
           >
             {busy ? "…" : request.confirmLabel}
           </button>

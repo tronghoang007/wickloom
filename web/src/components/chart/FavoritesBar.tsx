@@ -109,7 +109,7 @@ export default function FavoritesBar() {
             key={id}
             title={SPEC[id].label}
             onClick={() => api?.setTool(tool === id ? null : id)}
-            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded ${tool === id ? "bg-[var(--hover)] text-[var(--accent)]" : "hover:bg-[var(--hover)]"}`}
+            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded ${tool === id ? "bg-[var(--hover)] text-[var(--accent-text)]" : "hover:bg-[var(--hover)]"}`}
           >
             <ToolIcon id={id} />
           </button>

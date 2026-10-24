@@ -49,7 +49,7 @@ function MenuList({ items, onClose }: { items: MenuItem[]; onClose: () => void }
                 it.onSelect?.();
                 onClose();
               }}
-              className={`flex h-8 w-full items-center gap-2 px-3 text-left enabled:hover:bg-[var(--hover)] disabled:opacity-40 ${open === i ? "bg-[var(--hover)]" : ""}`}
+              className={`flex h-8 w-full items-center gap-2 px-3 text-left enabled:hover:bg-[var(--hover)] disabled:opacity-55 ${open === i ? "bg-[var(--hover)]" : ""}`}
             >
               <span className="-ml-1.5 flex w-7 shrink-0 justify-center text-[var(--muted)]">{it.icon}</span>
               <span className="min-w-0 flex-1 truncate">{it.label}</span>

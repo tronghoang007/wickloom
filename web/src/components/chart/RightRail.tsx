@@ -10,7 +10,7 @@ import WatchlistPanel from "./WatchlistPanel";
 
 const base = "relative flex h-[38px] w-[38px] items-center justify-center rounded";
 const cls = (active: boolean) =>
-  `${base} ${active ? "bg-[var(--hover)] text-[var(--accent)]" : "text-[var(--fg)] hover:bg-[var(--hover)]"}`;
+  `${base} ${active ? "bg-[var(--hover)] text-[var(--accent-text)]" : "text-[var(--fg)] hover:bg-[var(--hover)]"}`;
 
 const TABS: { id: RailPanel; label: string; icon: ReactNode }[] = [
   { id: "watchlist", label: "Watchlist", icon: <WatchlistI /> },

@@ -159,14 +159,14 @@ function Form({ initial }: { initial: NonNullable<DialogState> }) {
         <button
           type="submit"
           disabled={!valid || busy}
-          className="mt-4 flex h-11 w-full items-center justify-center rounded bg-[var(--accent)] text-sm font-semibold text-white hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100"
+          className="mt-4 flex h-11 w-full items-center justify-center rounded bg-[var(--accent)] text-sm font-semibold text-white hover:brightness-110 disabled:opacity-55 disabled:hover:brightness-100"
         >
           {busy ? "…" : creating ? "Create account" : "Sign in"}
         </button>
 
         <div className="mt-3 text-center text-[13px] text-[var(--muted)]">
           {creating ? "Đã có tài khoản? " : "Chưa có tài khoản? "}
-          <button type="button" className="text-[var(--accent)] hover:underline" onClick={() => { setMode(creating ? "login" : "register"); setError(""); }}>
+          <button type="button" className="text-[var(--accent-text)] hover:underline" onClick={() => { setMode(creating ? "login" : "register"); setError(""); }}>
             {creating ? "Sign in" : "Create account"}
           </button>
         </div>

@@ -103,7 +103,7 @@ export const Close = ({ size = 28 }: { size?: number }) => (
 );
 export const ClearX = ({ size = 18 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 28 28" fill="currentColor">
-    <circle cx="14" cy="14" r="10" opacity=".5" />
+    <circle cx="14" cy="14" r="10" opacity=".85" />
     <path d="M10.5 10.5l7 7M17.5 10.5l-7 7" stroke="var(--bg)" strokeWidth="2" strokeLinecap="round" />
   </svg>
 );

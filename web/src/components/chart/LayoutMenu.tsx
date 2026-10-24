@@ -108,7 +108,7 @@ export default function LayoutMenu({ className }: { className: string }) {
             </div>
             <div className="px-3">
               <div className="border-t border-[var(--border)] px-0.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Sync in layout</div>
-              <div className={multi ? "" : "opacity-50"} title={multi ? undefined : "Cần ít nhất 2 chart"}>
+              <div className={multi ? "" : "opacity-55"} title={multi ? undefined : "Cần ít nhất 2 chart"}>
                 {SYNC_KEYS.map((k) => (
                   <div key={k} className="flex h-8 items-center justify-between px-0.5 text-sm">
                     <span className="flex items-center gap-2">

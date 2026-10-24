@@ -53,7 +53,7 @@ export default function TimeframeBar({ className }: { className: string }) {
               <button
                 disabled
                 title="Add custom interval (sắp có)"
-                className="mx-1.5 flex h-8 w-[184px] items-center gap-2 rounded px-2 text-left disabled:opacity-40"
+                className="mx-1.5 flex h-8 w-[184px] items-center gap-2 rounded px-2 text-left disabled:opacity-55"
               >
                 <Plus size={20} /> Add custom interval…
               </button>

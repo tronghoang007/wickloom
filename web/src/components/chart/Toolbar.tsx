@@ -42,9 +42,9 @@ const CHART_TYPES: { v: ChartType; label: string; icon: ReactNode }[] = [
 ];
 
 const btn =
-  "flex h-[38px] items-center gap-1.5 rounded px-2 text-sm hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
+  "flex h-[38px] items-center gap-1.5 rounded px-2 text-sm hover:bg-[var(--hover)] disabled:opacity-55 disabled:hover:bg-transparent";
 const iconBtn =
-  "flex h-[38px] w-[38px] items-center justify-center rounded hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
+  "flex h-[38px] w-[38px] items-center justify-center rounded hover:bg-[var(--hover)] disabled:opacity-55 disabled:hover:bg-transparent";
 const sep = <div className="mx-1.5 h-6 w-px bg-[var(--border)]" />;
 
 function Menu({
@@ -163,7 +163,7 @@ export default function Toolbar() {
         <AlertI /> Alert
       </button>
       <button
-        className={`${btn} ${replayOn ? "bg-white text-black hover:bg-white" : ""}`}
+        className={`${btn} ${replayOn ? "bg-[var(--fg)] text-[var(--bg)] hover:bg-[var(--fg)]" : ""}`}
         title="Replay"
         onClick={toggleReplay}
       >

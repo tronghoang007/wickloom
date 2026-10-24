@@ -41,7 +41,7 @@ function Section({ children }: { children: ReactNode }) {
 
 function Row({ label, children, soon }: { label?: ReactNode; children?: ReactNode; soon?: boolean }) {
   return (
-    <div className={`flex min-h-10 items-center gap-3 ${soon ? "opacity-40" : ""}`} title={soon ? SOON : undefined}>
+    <div className={`flex min-h-10 items-center gap-3 ${soon ? "opacity-55" : ""}`} title={soon ? SOON : undefined}>
       {label !== undefined && <div className="w-40 shrink-0">{label}</div>}
       <div className={`flex items-center gap-2 ${soon ? "pointer-events-none" : ""}`}>{children}</div>
     </div>
@@ -81,7 +81,7 @@ function Check({
 
 function CheckRow(props: Parameters<typeof Check>[0] & { children?: ReactNode }) {
   return (
-    <div className={`flex min-h-10 items-center gap-3 ${props.soon ? "opacity-40" : ""}`} title={props.soon ? SOON : undefined}>
+    <div className={`flex min-h-10 items-center gap-3 ${props.soon ? "opacity-55" : ""}`} title={props.soon ? SOON : undefined}>
       <Check {...props} wide={!props.children} />
       {props.children && <div className="flex items-center gap-2">{props.children}</div>}
     </div>
@@ -117,7 +117,7 @@ function Select<T extends string>({ value, options, onChange, width = 150, disab
       disabled={disabled}
       onChange={(e) => onChange?.(e.target.value as T)}
       style={{ width }}
-      className="h-8 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-[13px] text-[var(--fg)] outline-none hover:border-[var(--muted)] focus:border-[var(--accent)] disabled:opacity-40"
+      className="h-8 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-[13px] text-[var(--fg)] outline-none hover:border-[var(--muted)] focus:border-[var(--accent)] disabled:opacity-55"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -461,7 +461,7 @@ export default function SettingsDialog() {
                 disabled={t.soon}
                 title={t.soon ? SOON : undefined}
                 onClick={() => setTab(t.id)}
-                className={`mb-0.5 flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left disabled:opacity-40 ${
+                className={`mb-0.5 flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left disabled:opacity-55 ${
                   tab === t.id ? "bg-[var(--hover)] font-medium" : "enabled:hover:bg-[var(--hover)]"
                 }`}
               >

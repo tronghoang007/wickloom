@@ -22,7 +22,7 @@ const arrowBtn = (open: boolean) =>
     open ? "bg-[var(--hover)] text-[var(--fg)]" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
   }`;
 const cls = (active: boolean) =>
-  `${base} ${active ? "bg-[var(--hover)] text-[var(--accent)]" : "text-[var(--fg)] hover:bg-[var(--hover)]"}`;
+  `${base} ${active ? "bg-[var(--hover)] text-[var(--accent-text)]" : "text-[var(--fg)] hover:bg-[var(--hover)]"}`;
 
 function Flyout({
   rect,
@@ -65,7 +65,7 @@ function ToolItem({
     <div
       // group/item: flyout nằm trong nút nhóm (cũng là "group") - tên riêng để hover 1 hàng
       // chỉ hiện ngôi sao của hàng đó
-      className={`group/item flex h-10 items-center gap-2 px-2.5 text-sm ${spec.disabled ? "opacity-40" : "cursor-pointer hover:bg-[var(--hover)]"}`}
+      className={`group/item flex h-10 items-center gap-2 px-2.5 text-sm ${spec.disabled ? "opacity-55" : "cursor-pointer hover:bg-[var(--hover)]"}`}
       onClick={() => !spec.disabled && onPick(id)}
       title={spec.disabled ? "Sắp có" : undefined}
     >
@@ -190,13 +190,13 @@ function CursorButton() {
             c === null ? (
               <div key={`sep${i}`} className="my-1 h-px bg-[var(--border)]" />
             ) : "soon" in c ? (
-              <div key={c.icon} className="flex h-10 items-center gap-2 px-2.5 text-sm opacity-40" title="Sắp có">
+              <div key={c.icon} className="flex h-10 items-center gap-2 px-2.5 text-sm opacity-55" title="Sắp có">
                 <ToolIcon id={c.icon} /> {c.label}
               </div>
             ) : (
               <div
                 key={c.v}
-                className={`flex h-10 cursor-pointer items-center gap-2 px-2.5 text-sm hover:bg-[var(--hover)] ${cursor === c.v ? "text-[var(--accent)]" : ""}`}
+                className={`flex h-10 cursor-pointer items-center gap-2 px-2.5 text-sm hover:bg-[var(--hover)] ${cursor === c.v ? "text-[var(--accent-text)]" : ""}`}
                 onClick={() => choose(c.v)}
               >
                 <ToolIcon id={c.icon} /> {c.label}
@@ -300,7 +300,7 @@ function MagnetButton() {
           {(["weak", "strong"] as const).map((m) => (
             <div
               key={m}
-              className={`flex h-10 cursor-pointer items-center gap-2 px-2.5 text-sm hover:bg-[var(--hover)] ${magnet && magnetMode === m ? "text-[var(--accent)]" : ""}`}
+              className={`flex h-10 cursor-pointer items-center gap-2 px-2.5 text-sm hover:bg-[var(--hover)] ${magnet && magnetMode === m ? "text-[var(--accent-text)]" : ""}`}
               onClick={() => choose(m)}
             >
               <Magnet strong={m === "strong"} /> {m === "strong" ? "Strong magnet" : "Weak magnet"}

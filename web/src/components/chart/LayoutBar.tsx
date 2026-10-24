@@ -78,7 +78,7 @@ export default function LayoutBar() {
         onClick={() => void appSession().save()}
       >
         <span className="max-w-[140px] truncate text-sm font-medium">{name}</span>
-        <span className={`text-[10px] ${status.accent ? "text-[var(--accent)]" : "text-[var(--muted)]"}`}>{status.text}</span>
+        <span className={`text-[10px] ${status.accent ? "text-[var(--accent-text)]" : "text-[var(--muted)]"}`}>{status.text}</span>
       </button>
       <button
         className="flex h-[38px] w-6 items-center justify-center rounded hover:bg-[var(--hover)]"
@@ -109,11 +109,11 @@ export default function LayoutBar() {
                 {recent.map((e) => (
                   <button
                     key={e.id}
-                    className={`mx-1 flex w-[calc(100%-8px)] flex-col rounded px-3 py-1.5 text-left ${e.id === layoutId ? "bg-[var(--fg)] text-[var(--bg)]" : "hover:bg-[var(--hover)]"}`}
+                    className={`mx-1 flex w-[calc(100%-8px)] flex-col rounded px-3 py-1.5 text-left ${e.id === layoutId ? "bg-[var(--selected)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]" : "hover:bg-[var(--hover)]"}`}
                     onClick={() => { setOpen(false); void appSession().open(e.id); }}
                   >
                     <span className="max-w-[210px] truncate text-sm">{e.name}</span>
-                    <span className={`text-xs ${e.id === layoutId ? "opacity-70" : "text-[var(--muted)]"}`}>{recentSub(e)}</span>
+                    <span className={`text-xs ${e.id === layoutId ? "opacity-75" : "text-[var(--muted)]"}`}>{recentSub(e)}</span>
                   </button>
                 ))}
               </>

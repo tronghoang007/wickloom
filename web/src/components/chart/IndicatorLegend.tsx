@@ -37,7 +37,7 @@ export default function IndicatorLegend({
   return (
     <div
       onDoubleClick={onSettings}
-      className={`group/ind pointer-events-auto -ml-1 flex w-fit items-center gap-x-1.5 rounded border border-transparent bg-[var(--legend-bg)] pl-1 pr-1 hover:border-[var(--border)] ${dim ? "opacity-50" : ""}`}
+      className={`group/ind pointer-events-auto -ml-1 flex w-fit items-center gap-x-1.5 rounded border border-transparent bg-[var(--legend-bg)] pl-1 pr-1 hover:border-[var(--border)] ${dim ? "opacity-70" : ""}`}
     >
       {cs.showIndicatorTitles && <span className="text-[var(--fg)]">{def.name}</span>}
       {cs.showIndicatorInputs && params && <span className="text-[var(--muted)]">{params}</span>}

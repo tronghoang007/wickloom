@@ -28,7 +28,7 @@ function Highlight({ text, q }: { text: string; q: string }) {
   return (
     <>
       {text.slice(0, i)}
-      <span className="text-[var(--accent)]">
+      <span className="text-[var(--accent-text)]">
         {text.slice(i, i + q.length)}
       </span>
       {text.slice(i + q.length)}
@@ -167,7 +167,7 @@ export default function SymbolSearchDialog({
                 setType(c.id);
                 setSel(0);
               }}
-              className={`rounded-full px-3.5 py-1.5 text-sm ${type === c.id ? "bg-white text-black" : "bg-[var(--hover)] hover:brightness-125"}`}
+              className={`rounded-full px-3.5 py-1.5 text-sm ${type === c.id ? "bg-[var(--fg)] text-[var(--bg)]" : "bg-[var(--hover)] hover:brightness-125"}`}
             >
               {c.label}
             </button>
@@ -193,7 +193,7 @@ export default function SymbolSearchDialog({
               className={`mx-1 my-0.5 flex cursor-pointer items-center gap-3 rounded px-4 py-2 ${i === sel ? "outline outline-2 -outline-offset-2 outline-white/90" : ""} ${s.name === symbol ? "bg-[var(--hover)]" : ""}`}
             >
               <SymbolBadge name={s.name} type={s.type} />
-              <span className="w-24 shrink-0 font-medium text-[var(--accent)]">
+              <span className="w-24 shrink-0 font-medium text-[var(--accent-text)]">
                 <Highlight text={s.name} q={q.trim()} />
               </span>
               <span className="min-w-0 flex-1 truncate text-sm">

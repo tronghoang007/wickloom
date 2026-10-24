@@ -12,7 +12,7 @@ import { drawingMenuItems } from "./drawingMenu";
 
 // Thanh nổi kiểu TradingView: cao 38px, nút 34px với icon 28px, vạch màu 3px dưới icon.
 const btn =
-  "relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
+  "relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-55 disabled:hover:bg-transparent";
 
 const Grip = () => (
   <svg
@@ -93,7 +93,7 @@ export default function StylePanel() {
     </div>
   );
   const item = (on: boolean) =>
-    `flex h-8 w-full items-center gap-2 px-3 text-left text-sm ${on ? "bg-[var(--fg)] text-[var(--bg)]" : "hover:bg-[var(--hover)]"}`;
+    `flex h-8 w-full items-center gap-2 px-3 text-left text-sm ${on ? "bg-[var(--selected)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]" : "hover:bg-[var(--hover)]"}`;
 
   return (
     <>
@@ -276,7 +276,7 @@ export default function StylePanel() {
         {/* Anchor như TV: ghim cố định trên màn hình, không chạy theo chart */}
         {SPEC[d.type]?.anchorable && (
           <button
-            className={`${btn} ${d.opts?.anchored ? "text-[var(--accent)]" : ""}`}
+            className={`${btn} ${d.opts?.anchored ? "text-[var(--accent-text)]" : ""}`}
             title={d.opts?.anchored ? "Unanchor" : "Anchor"}
             onClick={() => api.toggleAnchor()}
           >

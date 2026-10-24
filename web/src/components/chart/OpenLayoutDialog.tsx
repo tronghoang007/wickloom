@@ -75,7 +75,7 @@ export default function OpenLayoutDialog() {
                   {SORTS.map((o) => (
                     <button
                       key={o.id}
-                      className={`flex w-full px-3 py-1.5 text-left hover:bg-[var(--hover)] ${o.id === sort ? "font-semibold text-[var(--accent)]" : ""}`}
+                      className={`flex w-full px-3 py-1.5 text-left hover:bg-[var(--hover)] ${o.id === sort ? "font-semibold text-[var(--accent-text)]" : ""}`}
                       onClick={() => {
                         setSort(o.id);
                         setSortOpen(false);

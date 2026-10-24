@@ -53,7 +53,7 @@ export default function TimezoneMenu({ clock }: { clock: string }) {
                     setList(null);
                   }}
                 >
-                  <span className="w-3 shrink-0 text-[var(--accent)]">{on ? "✓" : ""}</span>
+                  <span className="w-3 shrink-0 text-[var(--accent-text)]">{on ? "✓" : ""}</span>
                   {tzMenuLabel(z)}
                 </button>
               );

@@ -25,7 +25,7 @@ const TF_LABEL: Record<string, string> = {
 
 // Cụm control Replay của TV: cao 38px, nút icon vuông 38px (icon 28px, nét 1px), chữ 14px.
 const btn =
-  "flex h-[38px] min-w-[38px] items-center justify-center gap-1 rounded px-[5px] text-sm hover:bg-[var(--hover)] disabled:opacity-40 disabled:hover:bg-transparent";
+  "flex h-[38px] min-w-[38px] items-center justify-center gap-1 rounded px-[5px] text-sm hover:bg-[var(--hover)] disabled:opacity-55 disabled:hover:bg-transparent";
 
 // Icon đo theo TV (getBBox trên lưới 28): Select bar 16x18, Play 11x17, Step 13x16, Jump 15x16.
 // Tam giác viền bo góc, không tô; vẽ lại, không chép path của TV.
@@ -127,7 +127,7 @@ function ReplayTrade({ paneId, symbol, active }: { paneId: string; symbol: strin
   }, [sim.event, sym?.digits, ccy]);
   const pnl = openPnl(sim, spec);
   const shownPnl = sim.position ? pnl : sim.trades > 0 ? sim.realized : null;
-  const pill = "h-[30px] rounded px-4 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100";
+  const pill = "h-[30px] rounded px-4 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:brightness-100";
   return (
     <div className="mr-12 flex items-center justify-self-end gap-1.5" data-testid="replay-trade" title={hint}>
       {shownPnl !== null && (
@@ -153,7 +153,7 @@ function ReplayTrade({ paneId, symbol, active }: { paneId: string; symbol: strin
       <button
         type="button"
         disabled={!sim.position || !spec}
-        className="h-[30px] rounded border border-[var(--border)] px-3 text-sm hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+        className="h-[30px] rounded border border-[var(--border)] px-3 text-sm hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent"
         onClick={() => spec && useReplaySim.getState().flatten(paneId, spec)}
       >
         Flatten

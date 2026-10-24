@@ -1539,7 +1539,7 @@ export default function Chart({ paneId }: { paneId: string }) {
     <button
       key={m}
       onClick={() => pane.chart.setState({ scaleMode: scaleMode === m ? "normal" : m })}
-      className={`rounded px-1.5 py-0.5 hover:bg-[var(--hover)] ${scaleMode === m ? "text-[var(--accent)]" : ""}`}
+      className={`rounded px-1.5 py-0.5 hover:bg-[var(--hover)] ${scaleMode === m ? "text-[var(--accent-text)]" : ""}`}
     >
       {label}
     </button>

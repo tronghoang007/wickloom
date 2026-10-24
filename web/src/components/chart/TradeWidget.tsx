@@ -42,7 +42,7 @@ export default function TradeWidget({ symbol, digits, replay }: { symbol: string
     else t.open({ symbol, side, mode: "market", digits });
   };
 
-  const dim = block !== null || busy ? "opacity-50" : "";
+  const dim = block !== null || busy ? "opacity-60" : "";
   return (
     <div className="pointer-events-auto mt-1 flex h-[38px] select-none items-stretch gap-1 text-[11px]" data-testid="trade-widget" title={block ?? undefined}>
       <button type="button" aria-label="Sell at market" onClick={() => click("sell")} className={`${sideBtn} ${dim} bg-[#f23645] hover:brightness-110`}>

@@ -1,6 +1,7 @@
 "use client";
 
-import { fmtMoney, MODE_COLOR, MODE_LABEL } from "@/lib/mt5Format";
+import { fmtMoney } from "@/lib/mt5Format";
+import ModeBadge from "./ModeBadge";
 import type { PendingOrder, Position, TradeData } from "@/lib/mt5Api";
 import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
@@ -50,7 +51,7 @@ function Head({ cols, all }: { cols: [string, boolean?][]; all?: { label: string
           <th key={i} className={(all && i === cols.length - 1 ? th.replace("text-left", "text-right") : th) + (right ? R : "")}>
             {all && i === cols.length - 1 ? (
               <button
-                className="cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-40"
+                className="cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-55"
                 disabled={all.disabled}
                 title={all.title}
                 onClick={all.run}
@@ -112,23 +113,21 @@ export default function TradingPanel() {
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg)]" data-testid="trading-panel">
       <div className="flex h-[34px] items-center gap-1 pl-2 text-sm">
         <span className="px-1.5 font-semibold">Trading</span>
-        <span className="flex items-center gap-1.5 px-1 text-xs text-[var(--muted)]">
-          <span className="max-w-[160px] truncate">{a.name || a.broker || a.server}</span>
-          {MODE_LABEL[a.mode] && (
-            <span className="rounded px-1 py-px text-[10px] font-bold text-white" style={{ background: MODE_COLOR[a.mode] }}>
-              {MODE_LABEL[a.mode]}
-            </span>
-          )}
-          {stale && <span className="rounded bg-[var(--hover)] px-1 py-px text-[10px]">{a.online ? "dữ liệu cũ" : "offline"}</span>}
+        <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+        <span className="flex items-center gap-2 px-1.5">
+          <span className="max-w-[160px] truncate text-[13px]" title={a.server || undefined}>{a.name || a.broker || a.server}</span>
+          <ModeBadge mode={a.mode} />
+          {stale && <span className="inline-flex h-[18px] items-center rounded border border-[var(--border)] bg-[var(--hover)] px-1.5 text-[10px] leading-none text-[var(--muted)]">{a.online ? "dữ liệu cũ" : "offline"}</span>}
         </span>
-        <div className="ml-2 flex items-center">
+        <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+        <div className="flex items-center gap-1.5">
           {TABS.map((t) => {
             const n = t.id === "positions" ? data.positions.length : t.id === "orders" ? data.orders.length : null;
             const on = open && tab === t.id;
             return (
               <button
                 key={t.id}
-                className={`cursor-pointer rounded px-2.5 py-1 text-[13px] hover:bg-[var(--hover)] ${on ? "bg-[var(--hover)] font-semibold" : "text-[var(--muted)]"}`}
+                className={`cursor-pointer rounded px-3 py-1 text-[13px] hover:bg-[var(--hover)] ${on ? "bg-[var(--hover)] font-semibold" : "text-[var(--muted)]"}`}
                 onClick={() => useTradeStore.getState().showTab(t.id)}
               >
                 {t.label}
@@ -137,7 +136,7 @@ export default function TradingPanel() {
             );
           })}
         </div>
-        <div className={`ml-auto flex min-w-0 items-center gap-4 overflow-hidden pr-3 text-xs tabular-nums ${stale ? "opacity-50" : ""}`} data-testid="account-summary">
+        <div className={`ml-auto flex min-w-0 items-center gap-4 overflow-hidden pr-3 text-xs tabular-nums ${stale ? "opacity-60" : ""}`} data-testid="account-summary">
           {stats.map(([k, v, cls]) => (
             <span key={k} className="whitespace-nowrap text-[var(--muted)]">
               {k} <span className={cls ?? "text-[var(--fg)]"}>{v}</span>
@@ -160,7 +159,7 @@ export default function TradingPanel() {
         </div>
       </div>
       {open && (
-        <div className={`h-[180px] overflow-auto border-t border-[var(--border)] ${stale ? "opacity-50" : ""}`}>
+        <div className={`h-[180px] overflow-auto border-t border-[var(--border)] ${stale ? "opacity-60" : ""}`}>
           {tab === "positions" && <Positions data={data} />}
           {tab === "orders" && <Orders data={data} />}
           {tab === "history" && <History data={data} />}
@@ -255,7 +254,7 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
       <td className={`${td} text-[var(--muted)]`}>{fmtTime(p.time)}</td>
       <td className={td + " relative text-right"} onClick={(e) => e.stopPropagation()}>
         <button
-          className={`cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-40 ${editing ? "invisible" : ""}`}
+          className={`cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-55 ${editing ? "invisible" : ""}`}
           disabled={block !== null || busy}
           title={block ?? (canPartial ? "Đóng vị thế (kéo thanh hoặc sửa lot để đóng một phần)" : "Đóng vị thế")}
           onClick={() => {
@@ -328,7 +327,7 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
       <td className={`${td} text-[var(--muted)]`}>{o.expiration ? fmtTime(o.expiration) : "GTC"}</td>
       <td className={td + " text-right"} onClick={(e) => e.stopPropagation()}>
         <button
-          className="cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-40"
+          className="cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-55"
           disabled={block !== null || busy}
           title={block ?? "Huỷ lệnh chờ"}
           onClick={() => void cancelOrder(o.ticket, o.symbol)}

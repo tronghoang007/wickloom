@@ -1,6 +1,6 @@
 "use client";
 
-import { fmtMoney, MODE_COLOR, MODE_LABEL } from "@/lib/mt5Format";
+import { fmtMoney } from "@/lib/mt5Format";
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal, useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
@@ -21,6 +21,7 @@ import { useTicketStore, type TicketRest } from "@/trading/ticket";
 import { useEffect, useState } from "react";
 import { Close } from "../icons";
 import PriceText from "./PriceText";
+import ModeBadge from "./ModeBadge";
 
 // Ô nhập nổi lên khỏi nền tối: nền sáng hơn một chút + viền rõ hơn (tính từ màu chữ nên đúng cả theme sáng). Ô bị khoá (TP / SL chưa bật) vẫn thấy khung, chỉ mờ chữ, không mờ cả ô
 const fieldBase = "w-full rounded-lg border border-[color-mix(in_srgb,var(--fg)_24%,transparent)] bg-[color-mix(in_srgb,var(--fg)_6%,transparent)] tabular-nums outline-none placeholder:text-[var(--muted)] hover:border-[color-mix(in_srgb,var(--fg)_38%,transparent)] focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:border-[color-mix(in_srgb,var(--fg)_14%,transparent)] disabled:bg-transparent disabled:text-[var(--muted)] disabled:hover:border-[color-mix(in_srgb,var(--fg)_14%,transparent)]";
@@ -76,27 +77,23 @@ function ModifyPanel({ owner }: { owner: string }) {
   const pnl = pnlSpec(sym, ccy);
   const what = pos ? `${sideLabel(pos.type)} ${fmtLot(pos.volume)}` : `${orderLabel(ord!.type)} ${fmtLot(ord!.volume)}`;
   const profit = pos ? positionPnl(pos) : null;
-  const btn = "flex h-11 w-full cursor-pointer items-center justify-center rounded-lg text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40";
+  const btn = "flex h-11 w-full cursor-pointer items-center justify-center rounded-lg text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55";
   return (
     <div role="dialog" aria-label="Modify order" className="flex min-h-0 flex-1 flex-col text-[var(--fg)]">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-3">
         <div className="mb-3 flex items-center gap-2">
           <span className="text-[15px] font-semibold">{item.symbol}</span>
-          {account && MODE_LABEL[account.mode] && (
-            <span className="rounded px-1.5 py-px text-[10px] font-bold text-white" style={{ background: MODE_COLOR[account.mode] }}>
-              {MODE_LABEL[account.mode]}
-            </span>
-          )}
+          {account && <ModeBadge mode={account.mode} />}
           <span className="min-w-0 flex-1 truncate text-xs text-[var(--muted)]">{account ? account.name || account.broker || account.server : ""}</span>
           <button type="button" className="cursor-pointer rounded p-0.5 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={() => useTicketStore.getState().close()} aria-label="Close order panel">
             <Close size={20} />
           </button>
         </div>
         <div className="mb-4 rounded-lg px-3.5 py-3 text-white" style={{ background: buy ? "#2962ff" : "#f23645" }}>
-          <div className="text-xs text-white/80">{pos ? "Vị thế" : "Lệnh chờ"} #{ticket}</div>
+          <div className="text-xs text-white">{pos ? "Vị thế" : "Lệnh chờ"} #{ticket}</div>
           <div className="mt-1 text-[17px] font-semibold leading-none">{what}</div>
           {profit !== null && (
-            <div className="mt-1.5 text-sm tabular-nums text-white/90">
+            <div className="mt-1.5 text-sm tabular-nums text-white">
               {fmtPnl(profit)} {ccy}
             </div>
           )}
@@ -404,11 +401,7 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3 pt-3">
         <div className="mb-3 flex items-center gap-2">
           <span className="text-[15px] font-semibold">{d.symbol}</span>
-          {account && MODE_LABEL[account.mode] && (
-            <span className="rounded px-1.5 py-px text-[10px] font-bold text-white" style={{ background: MODE_COLOR[account.mode] }}>
-              {MODE_LABEL[account.mode]}
-            </span>
-          )}
+          {account && <ModeBadge mode={account.mode} />}
           <span className="min-w-0 flex-1 truncate text-xs text-[var(--muted)]" title={account?.equity !== undefined ? `Equity ${fmtMoney(account.equity, account.currency)}` : undefined}>
             {account ? account.name || account.broker || account.server : "Chưa có account MT5"}
           </span>
@@ -431,7 +424,7 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
                 className={`flex h-[60px] cursor-pointer flex-col justify-center rounded-lg px-3.5 transition ${sell ? "items-start" : "items-end"} ${on ? "text-white" : "bg-[var(--hover)] text-[var(--fg)] hover:brightness-110"}`}
                 style={on ? { background: sell ? "#f23645" : "#2962ff" } : undefined}
               >
-                <span className={`text-xs font-medium leading-none ${on ? "text-white/80" : "text-[var(--muted)]"}`}>{sell ? "Sell" : "Buy"}</span>
+                <span className={`text-xs font-medium leading-none ${on ? "text-white" : "text-[var(--fg)]/80"}`}>{sell ? "Sell" : "Buy"}</span>
                 <span className="mt-1 text-[19px] font-semibold leading-none tabular-nums">{quote ? <PriceText value={sell ? bid : ask} digits={digits} /> : "—"}</span>
               </button>
             );
@@ -446,7 +439,7 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
         </div>
 
         {/* đang chờ: phần dưới mờ đi và không tương tác (inert) tới khi bắt đầu lệnh mới */}
-        <div inert={idle} className={idle ? "opacity-40" : ""}>
+        <div inert={idle} className={idle ? "opacity-55" : ""}>
         <div className="mb-4 grid grid-cols-2 border-b border-[var(--border)] text-sm">
           {(["market", "pending"] as const).map((m) => (
             <button
@@ -487,11 +480,11 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
         <div className="mb-4">
           <span className={lab}>Lot</span>
           <div className="relative">
-            <button type="button" aria-label="Decrease lot" disabled={!spec} className="absolute left-1 top-1 h-8 w-8 cursor-pointer rounded-md text-lg leading-none text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-40" onClick={() => spec && setLot(stepLot(normalizeLot(lot, spec), -1, spec))}>
+            <button type="button" aria-label="Decrease lot" disabled={!spec} className="absolute left-1 top-1 h-8 w-8 cursor-pointer rounded-md text-lg leading-none text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-55" onClick={() => spec && setLot(stepLot(normalizeLot(lot, spec), -1, spec))}>
               −
             </button>
             <input aria-label="Lot" className={`${field} px-10 text-center`} inputMode="decimal" value={d.lot} onChange={(e) => patch({ lot: e.target.value })} onBlur={() => spec && setLot(normalizeLot(lot, spec))} onKeyDown={(e) => e.stopPropagation()} />
-            <button type="button" aria-label="Increase lot" disabled={!spec} className="absolute right-1 top-1 h-8 w-8 cursor-pointer rounded-md text-lg leading-none text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-40" onClick={() => spec && setLot(stepLot(normalizeLot(lot, spec), 1, spec))}>
+            <button type="button" aria-label="Increase lot" disabled={!spec} className="absolute right-1 top-1 h-8 w-8 cursor-pointer rounded-md text-lg leading-none text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-55" onClick={() => spec && setLot(stepLot(normalizeLot(lot, spec), 1, spec))}>
               +
             </button>
           </div>
@@ -553,7 +546,7 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
         ) : (
           <button type="submit" disabled={!!err || busy} className="flex h-12 w-full cursor-pointer flex-col items-center justify-center rounded-lg text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50" style={{ background: accent }}>
             <span className="text-sm font-semibold leading-tight">{submitTitle}</span>
-            <span className="text-[11px] leading-tight text-white/80">{submitSub}</span>
+            <span className="text-[11px] leading-tight text-white">{submitSub}</span>
           </button>
         )}
         {!idle && (

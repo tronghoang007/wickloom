@@ -660,7 +660,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
             </button>
             <button
               type="button"
-              className="rounded-lg bg-white px-5 py-2 text-sm font-medium text-black hover:bg-neutral-200"
+              className="rounded-lg bg-[var(--fg)] px-5 py-2 text-sm font-medium text-[var(--bg)] hover:opacity-90"
               onClick={() => {
                 accepted.current = true;
                 api?.replaceSelected(d, orig.current);
