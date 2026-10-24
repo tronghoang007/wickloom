@@ -237,6 +237,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
         const draggable = live && !(tag.kind === "entry" && tag.owner.t === "position"); // giá vào của vị thế đã khớp không kéo được; SL/TP, lệnh chờ và bản nháp thì có
         const c = l.color;
         const mine = OWNER_ID(tag.owner);
+        const tagBg = pendingOwners.has(mine) ? "var(--bg)" : bg; // lệnh đang có thay đổi chờ xác nhận: nền thẻ đặc, không lộ nến phía sau
         const base = tag.draft && tag.kind !== "entry" ? 0.75 : tag.draft ? 0.9 : 1; // bản nháp hơi mờ; lệnh đã đặt đang sửa chờ xác nhận (pending) vẫn sáng đủ
         const fade = focus !== null && mine !== focus ? Math.min(base, DIM) : base; // lệnh khác đang được focus: mờ hẳn
         const closeTitle = tag.kind !== "entry" ? `Bỏ ${KIND_NAME[tag.kind]}` : tag.owner.t === "draft" ? "Bỏ bản nháp" : tag.owner.t === "order" ? "Huỷ lệnh chờ" : "Đóng vị thế";
@@ -261,7 +262,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
                   title="Bỏ thay đổi (Esc)"
                   onClick={() => onCancelEdit(OWNER_ID(tag.owner))}
                   className={`${events} cursor-pointer rounded border border-[var(--fg)]/50 px-2.5 text-[12px] font-medium hover:bg-white/10`}
-                  style={{ height: TAG_H, background: bg, color: "var(--fg)" }}
+                  style={{ height: TAG_H, background: "var(--bg)", color: "var(--fg)" }}
                 >
                   Discard
                 </button>
@@ -300,7 +301,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
               data-line-key={live ? l.key : undefined}
               title={`${ownerName(tag.owner)} · ${tag.kind === "entry" ? "giá vào" : KIND_NAME[tag.kind]}`}
               className={`${events} flex items-stretch overflow-hidden rounded border tabular-nums ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
-              style={{ height: TAG_H, color: c, borderColor: c, background: bg, boxShadow: focus === mine ? `0 0 0 1px ${c}` : undefined }}
+              style={{ height: TAG_H, color: c, borderColor: c, background: tagBg, boxShadow: focus === mine ? `0 0 0 1px ${c}` : undefined }}
             >
               <span className="flex items-center border-r px-2" style={{ borderColor: c }}>
                 {tag.qty}
