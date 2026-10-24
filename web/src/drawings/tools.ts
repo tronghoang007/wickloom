@@ -1,5 +1,5 @@
 import type { Bar } from "@/lib/api";
-import { computeProfile } from "@/volumeProfile/compute";
+import { computeProfile, computeTickProfile, type TickSource } from "@/volumeProfile/compute";
 import { textBox, type Ext, type Pt, type Shape } from "./shapes";
 import type { Anchor, Drawing } from "./types";
 
@@ -11,6 +11,7 @@ export type Ctx = {
   bars: Bar[];
   profileBars?: Bar[]; // nến khung nhỏ hơn dùng tính volume profile (FRVP / AVP), có thể chưa tải xong
   profileStep?: number; // giây mỗi nến của profileBars
+  ticks?: TickSource; // tick cho volume profile khi Data aggregation = 1 tick (manager cấp; chưa nạp xong thì profile dùng nến khung nhỏ)
   tickSize: number;
   hovered: boolean;
   selected: boolean;
@@ -434,7 +435,7 @@ const elliott = (names: string[]) => (c: Ctx): Shape[] => [poly(c.p), ...letters
 export { computeProfile }; // nay nằm ở volumeProfile/compute.ts (dùng chung với indicator)
 
 export const VP_DEFAULTS = {
-  layout: "rows", rows: 24, volume: "updown", va: 70, extend: false, width: 30, place: "left", values: false,
+  layout: "rows", rows: 24, volume: "updown", va: 70, agg: "ticks", extend: false, width: 30, place: "left", values: false,
   up: "#26a69a", down: "#f23645", vaUp: "#00bcd4", vaDown: "#e91e63",
   showVah: true, vahColor: "#2962ff", showVal: true, valColor: "#2962ff", showPoc: true, pocColor: "#ff9800",
 };
@@ -487,7 +488,11 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
   // Extend Right (và AVP): profile gom volume tới nến mới nhất, hộp kéo hết bề ngang chart
   const lastT = c.bars[c.bars.length - 1]?.t ?? t1;
   const toLast = anchored || o.extend;
-  const vp = computeProfile(profileSource(c, t0, (toLast ? Math.max(t1, lastT) : t1) + c.step), tick, o.rows, o.va, o.layout);
+  const end = (toLast ? Math.max(t1, lastT) : t1) + c.step;
+  // "1 tick": mỗi tick rơi đúng row chứa giá của nó; chưa có tick (ngoài độ sâu, chưa nạp xong) thì nến khung nhỏ như Time
+  const vp =
+    (o.agg === "ticks" && c.ticks ? computeTickProfile(c.ticks, c.bars.filter((b) => b.t >= t0 && b.t < end), t0, end, tick, o.rows, o.va, o.layout) : null) ??
+    computeProfile(profileSource(c, t0, end), tick, o.rows, o.va, o.layout);
   if (!vp) return [];
   const { lo, hi, size, N, up, dn, total, mv, poc, vl, vh } = vp;
 

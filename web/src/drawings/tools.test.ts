@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import { textBox, type Shape } from "./shapes";
 import { computeProfile, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, profileSource, regression, SPEC, tableCellAt, tableCells, volumeIn, type Ctx } from "./tools";
+import type { TickSource } from "@/volumeProfile/compute";
 import type { Anchor } from "./types";
 
 const T = 1_000_000;
@@ -315,6 +316,68 @@ describe("volume profile vẽ dạng thanh", () => {
       const labels = run("delta", { values: true }).filter((s): s is Extract<Shape, { k: "text" }> => s.k === "text").map((s) => s.text);
       expect(labels).toContain("100");
       expect(labels.some((t) => t.startsWith("-"))).toBe(true);
+    });
+  });
+
+  describe("Data aggregation = 1 tick", () => {
+    // 20 nến t = 0..19, giá 0..100: [0, 20) là cả khoảng profile (nến cuối + step)
+    const fake = (covered = true, ready = true) => {
+      const asked: [number, number, number][] = [];
+      const ticks: TickSource = {
+        covered: () => covered,
+        hist: (t0, t1, lay) => {
+          asked.push([t0, t1, lay.N]);
+          // mọi tick nằm ở row đầu: up 7, dn 3
+          return ready ? { up: lay.N ? [7, ...new Array(lay.N - 1).fill(0)] : [], dn: lay.N ? [3, ...new Array(lay.N - 1).fill(0)] : [] } : null;
+        },
+      };
+      return { ticks, asked };
+    };
+    const run = (type: string, opts: Record<string, unknown>, ticks?: TickSource) => {
+      const c = ctx(type, 10);
+      return SPEC[type].build({ ...c, d: { ...c.d, opts: { rows: 10, ...opts } }, ...(ticks ? { ticks } : {}) });
+    };
+    const widths = (shapes: Shape[]) =>
+      shapes.filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && !!s.fill).map((s) => Math.max(...s.pts.map((q) => q.x)) - Math.min(...s.pts.map((q) => q.x)));
+
+    it("dùng histogram tick: chỉ row đầu có thanh (up + dn), cả khoảng [t0, nến cuối + step)", () => {
+      const { ticks, asked } = fake();
+      expect(widths(run("frvp", { agg: "ticks" }, ticks))).toHaveLength(2); // thanh up + thanh down của row 0
+      expect(asked).toEqual([[0, 20, asked[0][2]]]);
+      expect(asked[0][2]).toBeGreaterThanOrEqual(10);
+    });
+
+    it("mặc định là 1 tick; Time không đụng tới tick; không cấp tick hoặc tick chưa sẵn sàng thì giống Time", () => {
+      const def = fake();
+      run("frvp", {}, def.ticks);
+      expect(def.asked).toHaveLength(1); // không đặt agg: dùng mặc định 1 tick
+      const { ticks, asked } = fake();
+      const time = widths(run("frvp", { agg: "time" }, ticks));
+      expect(asked).toHaveLength(0);
+      expect(time.length).toBeGreaterThan(2);
+      expect(widths(run("frvp", { agg: "ticks" }))).toEqual(time);
+      expect(widths(run("frvp", { agg: "ticks" }, fake(false).ticks))).toEqual(time); // chưa nạp tới đầu
+      expect(widths(run("frvp", { agg: "ticks" }, fake(true, false).ticks))).toEqual(time); // histogram chưa về
+    });
+
+    it("AVP: tới nến mới nhất; Extend right của FRVP cũng vậy", () => {
+      const a = fake();
+      run("avp", { agg: "ticks" }, a.ticks);
+      expect(a.asked[0].slice(0, 2)).toEqual([0, 20]);
+      const f = fake();
+      const c = ctx("frvp", 10);
+      SPEC.frvp.build({ ...c, d: { ...c.d, points: [{ time: 0, price: 0 }, { time: 9, price: 50 }], opts: { rows: 10, agg: "ticks", extend: true } }, ticks: f.ticks });
+      expect(f.asked[0].slice(0, 2)).toEqual([0, 20]);
+      const g = fake();
+      SPEC.frvp.build({ ...c, d: { ...c.d, points: [{ time: 0, price: 0 }, { time: 9, price: 50 }], opts: { rows: 10, agg: "ticks" } }, ticks: g.ticks });
+      expect(g.asked[0].slice(0, 2)).toEqual([0, 10]); // không extend: dừng ở nến thứ hai của khoảng + step
+    });
+
+    it("đang kéo: chỉ vạch dọc, không hỏi tick", () => {
+      const { ticks, asked } = fake();
+      const c = ctx("frvp", 10);
+      SPEC.frvp.build({ ...c, d: { ...c.d, opts: { agg: "ticks" } }, dragging: true, ticks });
+      expect(asked).toHaveLength(0);
     });
   });
 

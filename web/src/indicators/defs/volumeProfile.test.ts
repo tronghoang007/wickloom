@@ -177,15 +177,15 @@ describe("Data aggregation = 1 tick", () => {
     return { src, asked };
   };
 
-  it("input agg: Time hoặc 1 tick, mặc định Time, ở cả hai indicator", () => {
+  it("input agg: Time hoặc 1 tick, mặc định 1 tick, ở cả hai indicator", () => {
     for (const id of ["svp", "vrvp"] as const) {
-      expect(byId(id).inputs.find((i) => i.key === "agg")).toMatchObject({ type: "select", default: "Time", options: ["Time", "1 tick"] });
+      expect(byId(id).inputs.find((i) => i.key === "agg")).toMatchObject({ type: "select", default: "1 tick", options: ["Time", "1 tick"] });
     }
   });
 
-  it("1 tick: volume mỗi row lấy từ histogram tick, row theo vùng giá của nến chart, tổng = số row x 4", () => {
+  it("1 tick (mặc định): volume mỗi row lấy từ histogram tick, row theo vùng giá của nến chart, tổng = số row x 4", () => {
     const { src, asked } = fake(() => true);
-    const p = run("svp", { agg: "1 tick", rows: 24 }, src);
+    const p = run("svp", { rows: 24 }, src);
     expect(p.profiles).toHaveLength(2);
     expect(asked.map((a) => [a.t0, a.t1])).toEqual([[20 * DAY, 21 * DAY], [21 * DAY, 22 * DAY]]); // cả phiên, gồm nến cuối
     for (const vp of p.profiles) {
@@ -195,7 +195,7 @@ describe("Data aggregation = 1 tick", () => {
     }
   });
 
-  it("Time (mặc định) không đụng tới tick dù manager cấp", () => {
+  it("Time không đụng tới tick dù manager cấp", () => {
     const { src, asked } = fake(() => true);
     run("svp", { agg: "Time" }, src);
     expect(asked).toHaveLength(0);

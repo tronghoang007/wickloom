@@ -1,5 +1,5 @@
 import type { Bar } from "@/lib/api";
-import { computeProfile, finishProfile, profileLayout } from "@/volumeProfile/compute";
+import { computeProfile, computeTickProfile } from "@/volumeProfile/compute";
 import { periodKeys, periodStarts, type Period } from "../calendar";
 import { TICK_DEPTH, lowerCandidates, overlaps, tickStart, withinBudget } from "../lower";
 import { num, str, type Ctx, type IndicatorDef, type InputDef, type ItemDef, type PlacedProfile, type ProfileSet, type ProfileStyle } from "../schema";
@@ -19,7 +19,7 @@ const rowsInput: InputDef = { key: "rows", label: "Row Size", type: "int", defau
 const volumeInput: InputDef = { key: "volume", label: "Volume", type: "select", default: "Up/Down", options: ["Up/Down", "Total", "Delta"] };
 const TICKS = "1 tick";
 const aggInput: InputDef = {
-  key: "agg", label: "Data aggregation", type: "select", default: "Time", options: ["Time", TICKS],
+  key: "agg", label: "Data aggregation", type: "select", default: TICKS, options: ["Time", TICKS],
   tooltip: "Defines how volume is assigned to price rows. \"Time\" splits the volume of lower timeframe candles over their price range. \"1 tick\" puts every tick on the row of its price (the broker's tick history, requested from MetaTrader; each tick counts as tick volume 1) and covers only the last few weeks; older data uses candles.",
 };
 const vaInput: InputDef = { key: "va", label: "Value Area Volume", type: "int", default: 70, min: 1, max: 100 };
@@ -73,18 +73,10 @@ const layoutKind = (c: Ctx) => (str(c.inputs, "layout") === "Ticks Per Row" ? "t
 
 const compute = (c: Ctx, src: Bar[]) => computeProfile(src, c.tick, num(c.inputs, "rows"), num(c.inputs, "va"), layoutKind(c));
 
-/** Profile của [t0, t1) từ tick: row chia theo vùng giá của nến chart, volume lên / xuống do backend gom. null = chưa dùng được (tắt 1 tick, tick chưa nạp tới đầu, chưa nạp xong). */
-function tickProfile(c: Ctx, chart: Bar[], t0: number, t1: number) {
-  const t = c.ticks;
-  if (!t || !t.covered(t0)) return null;
-  const lay = profileLayout(chart, c.tick, num(c.inputs, "rows"), layoutKind(c));
-  const h = lay && t.hist(t0, t1, lay);
-  return lay && h ? finishProfile(lay, h.up, h.dn, num(c.inputs, "va")) : null;
-}
-
 /** Profile của nến chart `chart` (khoảng [t0, t1)): tick nếu có, không thì nến khung nhỏ / nến chart. */
 const profileOf = (c: Ctx, chart: Bar[], t0: number, t1: number, step: number) =>
-  (c.inputs.agg === TICKS ? tickProfile(c, chart, t0, t1) : null) ?? compute(c, profileSource(chart, c.lower, t0, t1, step));
+  (c.inputs.agg === TICKS && c.ticks ? computeTickProfile(c.ticks, chart, t0, t1, c.tick, num(c.inputs, "rows"), num(c.inputs, "va"), layoutKind(c)) : null) ??
+  compute(c, profileSource(chart, c.lower, t0, t1, step));
 
 export const svp: IndicatorDef = {
   id: "svp", name: "SVP", title: "Session volume profile", overlay: true,

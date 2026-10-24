@@ -1,6 +1,8 @@
 import type { Bar } from "@/lib/api";
 import type { CalendarOpts } from "./calendar";
-import type { Layout, Profile } from "@/volumeProfile/compute";
+import type { Profile, TickSource } from "@/volumeProfile/compute";
+
+export type { TickSource };
 import type { LowerNeed } from "./lower";
 import type { Num, SourceName } from "./ta";
 
@@ -82,12 +84,6 @@ export type ProfileStyle = {
   poc: ProfileLine; vah: ProfileLine; val: ProfileLine;
 };
 export type ProfileSet = { profiles: PlacedProfile[]; style: ProfileStyle };
-
-/** Dữ liệu tick cho volume profile "1 tick": `covered(t0)` = tick đã nạp tới đầu `t0`; `hist` = volume lên / xuống của tick trong [t0, t1) gom vào các row của `lay` (null = chưa nạp xong). */
-export type TickSource = {
-  covered: (t0: number) => boolean;
-  hist: (t0: number, t1: number, lay: Layout) => { up: number[]; dn: number[] } | null;
-};
 
 export type Ctx = {
   bars: Bar[]; // đã gồm cả lịch sử nạp ngầm phía trước (xem engine)

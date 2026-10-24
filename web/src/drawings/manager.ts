@@ -1,4 +1,7 @@
-import { TF_SECONDS, fetchBars, type Bar } from "@/lib/api";
+import { TF_SECONDS, fetchBars, fetchTickProfile, triggerBackfillAt, type Bar } from "@/lib/api";
+import { LowerFeed, TICK_DEPTH, TICK_TF } from "@/indicators/lower";
+import { TickProfileFeed, coverSig, coversFrom } from "@/indicators/tickProfile";
+import type { TickSource } from "@/volumeProfile/compute";
 import { DrawingDoc, acquireDoc, releaseDoc, type DocView } from "./doc";
 import { noteGuestDrawing } from "./storage";
 import { crosshairLabel } from "@/lib/timefmt";
@@ -20,7 +23,7 @@ import { isActivePane, useLayoutStore } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
 import { visibleOn } from "./visibility";
-import { defaultOpts, GROUPS, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, type Ctx, type OneClickView } from "./tools";
+import { defaultOpts, GROUPS, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, VP_BY, type Ctx, type OneClickView } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
 
 type Opts = {
@@ -74,6 +77,11 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private profileBars = new Map<string, { bars: Bar[]; step: number }>(); // nến khung nhỏ của VP + giây mỗi nến
   private profileKeys = new Map<string, string>();
   private profileVer = 0;
+  // "1 tick" của FRVP / AVP: nến delta tick (EA gửi lịch sử tick, chỉ để biết phút nào đã có tick) và histogram giá gom theo row, dùng chung cách với indicator
+  private tickCover = new LowerFeed((symbol, tf, from, to, limit) => fetchBars(symbol, tf, to, limit, from), () => this.tickChanged(), {
+    backfill: async (symbol, tf, count, before) => (await triggerBackfillAt(symbol, tf, count, before)).ok,
+  });
+  private tickProfiles = new TickProfileFeed((symbol, from, to, lay) => fetchTickProfile(symbol, from, to, lay.lo, lay.size, lay.N), () => this.tickChanged());
   private hoveredId: string | null = null;
   private mode: Mode = { k: "idle" };
   private chartLock: { handleScroll: unknown; handleScale: unknown } | null = null;
@@ -406,6 +414,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       bars,
       profileBars: this.profileBars.get(d.id)?.bars,
       profileStep: this.profileBars.get(d.id)?.step,
+      ticks: this.tickSource(d, bars, step),
       tickSize: this.o.getTickSize(),
       hovered: d.id === this.hoveredId,
       selected: d.id === this.st.selectedId,
@@ -1079,6 +1088,26 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.profileVer++;
     this.setSt({ drawings: [], selectedId: null });
     this.refresh();
+  }
+
+  private tickChanged() {
+    this.profileVer++; // khoá vẽ lại đổi: hình dựng lại với dữ liệu tick mới
+    this.refresh();
+  }
+
+  /** Tick cho FRVP / AVP khi Data aggregation = 1 tick và khoảng profile nằm trong độ sâu tick (tính từ nến cuối); không thì undefined (dùng nến khung nhỏ). */
+  private tickSource(d: Drawing, bars: Bar[], step: number): TickSource | undefined {
+    if ((d.type !== "frvp" && d.type !== "avp") || !this.symbol || this.dragging(d)) return undefined;
+    if (({ ...VP_BY[d.type], ...d.opts }).agg !== "ticks") return undefined;
+    const last = bars[bars.length - 1];
+    const span = last && profileSpan(d, last.t);
+    if (!last || !span || last.t + step - span.t0 > TICK_DEPTH) return undefined;
+    const symbol = this.symbol;
+    const cover = this.tickCover.get(symbol, { tfs: [TICK_TF], from: span.t0 }, last.t + step);
+    return {
+      covered: (t0) => coversFrom(cover, t0),
+      hist: (t0, t1, lay) => this.tickProfiles.get(symbol, t0, t1, lay, coverSig(cover, t0, t1)),
+    };
   }
 
   private setProfileBars(id: string, bars: Bar[] | undefined, step = 0) {

@@ -32,6 +32,21 @@ export function profileLayout(bars: Bar[], tick: number, rows: number, layout = 
   return { lo: lowTick * tick, hi: highTick * tick, size: ticksPerRow * tick, N: Math.max(1, Math.ceil(totalTicks / ticksPerRow)) };
 }
 
+/** Dữ liệu tick cho volume profile "1 tick": `covered(t0)` = tick đã nạp tới đầu `t0`; `hist` = volume lên / xuống của tick trong [t0, t1) gom vào các row của `lay` (null = chưa nạp xong). */
+export type TickSource = {
+  covered: (t0: number) => boolean;
+  hist: (t0: number, t1: number, lay: Layout) => { up: number[]; dn: number[] } | null;
+};
+
+/** Profile của [t0, t1) từ tick: row chia theo vùng giá của nến chart `chart` (như `computeProfile`), volume lên / xuống do `src` gom theo giá từng tick.
+ *  null = chưa dùng được (tick chưa nạp tới đầu, chưa nạp xong, không có volume): người gọi dùng nến khung nhỏ thay. */
+export function computeTickProfile(src: TickSource, chart: Bar[], t0: number, t1: number, tick: number, rows: number, va: number, layout = "rows") {
+  if (!src.covered(t0)) return null;
+  const lay = profileLayout(chart, tick, rows, layout);
+  const h = lay && src.hist(t0, t1, lay);
+  return lay && h ? finishProfile(lay, h.up, h.dn, va) : null;
+}
+
 export function computeProfile(bars: Bar[], tick: number, rows: number, va: number, layout = "rows") {
   const lay = profileLayout(bars, tick, rows, layout);
   if (!lay) return null;

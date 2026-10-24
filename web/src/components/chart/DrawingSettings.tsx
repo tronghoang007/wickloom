@@ -235,6 +235,20 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   }
                 />
               </Row>
+              <Row label="Data aggregation">
+                <select
+                  className={input}
+                  value={v.agg}
+                  onChange={(e) => setOpt("agg", e.target.value)}
+                >
+                  <option value="time" className="text-black">
+                    Time
+                  </option>
+                  <option value="ticks" className="text-black">
+                    1 tick
+                  </option>
+                </select>
+              </Row>
               {check("Extend right", "extend")}
             </>
           )}
