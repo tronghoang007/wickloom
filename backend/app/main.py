@@ -74,6 +74,13 @@ def get_bars(symbol: str, tf: str, frm: Optional[int] = Query(None, alias="from"
     return state.bars.query(symbol, tf, frm, to, limit)
 
 
+@app.get("/tickvp")
+def get_tickvp(symbol: str, frm: int = Query(alias="from"), to: int = 0, lo: float = 0, size: float = Query(gt=0), n: int = Query(ge=1, le=5000)):
+    """Volume Profile "1 tick": volume lên / xuống của tick trong các phút [from, to) gom vào n row bắt đầu từ giá `lo`, mỗi row cao `size` (xem tickdelta.py)."""
+    up, dn = state.bars.tickvp(symbol, frm, to, lo, size, n)
+    return {"up": up, "dn": dn}
+
+
 @app.post("/backfill")
 def backfill(symbol: str, tf: str, count: int = 500, pos: int = 0, before: int = 0):
     request_backfill(symbol, tf, count, pos, before)

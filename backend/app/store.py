@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from .config import BARS_DB, SQLITE_PATH
 
 _COLS = ("t", "o", "h", "l", "c", "v")
+TICK_KEEP = 21 * 86400  # giữ tick profile + nến delta tick (tf "TD") tối đa chừng này giây tính từ phút mới nhất; web chỉ dùng 14 ngày
 
 
 class BarStore:
@@ -27,7 +28,41 @@ class BarStore:
             "o REAL NOT NULL, h REAL NOT NULL, l REAL NOT NULL, c REAL NOT NULL, v REAL NOT NULL, "
             "PRIMARY KEY (symbol, tf, t)) WITHOUT ROWID"
         )
+        # Histogram giá theo phút của tick (Volume Profile "1 tick"), cùng lượt ghi với nến "TD". Bảng mới: nến "TD" cũ không có histogram nên bỏ để nạp lại
+        has_vp = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tickvp'").fetchone()
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS tickvp (symbol TEXT NOT NULL, t INTEGER NOT NULL, p REAL NOT NULL, up REAL NOT NULL, dn REAL NOT NULL, "
+            "PRIMARY KEY (symbol, t, p)) WITHOUT ROWID"
+        )
+        if not has_vp:
+            self.db.execute("DELETE FROM bars WHERE tf='TD'")
         self.db.commit()
+
+    def put_tickvp(self, symbol: str, t0: int, t1: int, rows: List[Tuple[int, float, float, float]]) -> None:
+        """Ghi histogram các phút [t0, t1] (UTC giây): xoá phút cũ trong khoảng rồi ghi `rows` (t, giá, volume lên, volume xuống), vì bản mới của một phút
+        (EA tính lại phút đang chạy) có thể thiếu giá mà bản cũ có. Dọn dữ liệu cũ hơn `TICK_KEEP` so với phút mới nhất."""
+        with self._lock:
+            self.db.execute("DELETE FROM tickvp WHERE symbol=? AND t>=? AND t<=?", (symbol, t0, t1))
+            self.db.executemany("INSERT INTO tickvp VALUES (?,?,?,?,?)", [(symbol, t, p, u, d) for t, p, u, d in rows])
+            row = self.db.execute("SELECT t FROM tickvp WHERE symbol=? ORDER BY t DESC LIMIT 1", (symbol,)).fetchone()
+            if row:
+                old = row[0] - TICK_KEEP
+                self.db.execute("DELETE FROM tickvp WHERE symbol=? AND t<?", (symbol, old))
+                self.db.execute("DELETE FROM bars WHERE symbol=? AND tf='TD' AND t<?", (symbol, old))
+            self.db.commit()
+
+    def tickvp(self, symbol: str, frm: int, to: int, lo: float, size: float, n: int) -> Tuple[List[float], List[float]]:
+        """Volume lên / xuống của các phút [frm, to) gom vào `n` row, row i phủ giá [lo + i*size, lo + (i+1)*size); giá ngoài khoảng dồn vào row đầu / cuối."""
+        up, dn = [0.0] * n, [0.0] * n
+        sql = ("SELECT CAST((p - ?) / ? + 1e-6 AS INTEGER) AS i, SUM(up), SUM(dn) FROM tickvp "
+               "WHERE symbol=? AND t>=? AND t<? GROUP BY i")
+        with self._lock:
+            rows = self.db.execute(sql, (lo, size, symbol, frm, to)).fetchall()
+        for i, u, d in rows:
+            k = min(n - 1, max(0, i))
+            up[k] += u
+            dn[k] += d
+        return up, dn
 
     def upsert(self, symbol: str, tf: str, bars: List[Dict[str, Any]]) -> None:
         rows = [(symbol, tf, int(b["t"]), b["o"], b["h"], b["l"], b["c"], b["v"]) for b in bars]
@@ -60,6 +95,7 @@ class BarStore:
                 return None
             self.db.execute("VACUUM INTO ?", (str(dest),))
             self.db.execute("DELETE FROM bars")
+            self.db.execute("DELETE FROM tickvp")
             self.db.commit()
         return dest
 

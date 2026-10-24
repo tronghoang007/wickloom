@@ -8,9 +8,12 @@ const VP_MAX_ROWS = 1000; // Ticks per row quá nhỏ trên mã nhiều tick: g�
 // Row như help của TV: "Number of rows" lấy ticks/row = (đỉnh − đáy) / số row / tick rồi làm tròn lên hoặc
 // xuống sao cho tổng số row gần số yêu cầu nhất (row cuối có thể ngắn hơn, nên tổng row có thể lệch);
 // "Ticks per row" thì Row Size chính là số tick mỗi row.
-export type Profile = NonNullable<ReturnType<typeof computeProfile>>;
+export type Profile = NonNullable<ReturnType<typeof finishProfile>>;
+/** Các row của một profile: [lo, lo + N * size), mỗi row cao `size` (giá). */
+export type Layout = { lo: number; hi: number; size: number; N: number };
 
-export function computeProfile(bars: Bar[], tick: number, rows: number, va: number, layout = "rows") {
+/** Chia row cho vùng giá [min low, max high] của `bars` (xem quy tắc ở trên); null nếu không có nến. */
+export function profileLayout(bars: Bar[], tick: number, rows: number, layout = "rows"): Layout | null {
   if (bars.length === 0) return null;
   const priceLow = Math.min(...bars.map((b) => b.l)), priceHigh = Math.max(...bars.map((b) => b.h));
   const lowTick = Math.floor(priceLow / tick), highTick = Math.ceil(priceHigh / tick);
@@ -26,8 +29,13 @@ export function computeProfile(bars: Bar[], tick: number, rows: number, va: numb
         Math.abs(Math.ceil(totalTicks / candidate) - requestedRows) <
           Math.abs(Math.ceil(totalTicks / best) - requestedRows) ? candidate : best,
       );
-  const lo = lowTick * tick, hi = highTick * tick, size = ticksPerRow * tick;
-  const N = Math.max(1, Math.ceil(totalTicks / ticksPerRow));
+  return { lo: lowTick * tick, hi: highTick * tick, size: ticksPerRow * tick, N: Math.max(1, Math.ceil(totalTicks / ticksPerRow)) };
+}
+
+export function computeProfile(bars: Bar[], tick: number, rows: number, va: number, layout = "rows") {
+  const lay = profileLayout(bars, tick, rows, layout);
+  if (!lay) return null;
+  const { lo, size, N } = lay;
   const up = new Array(N).fill(0), dn = new Array(N).fill(0);
   for (const b of bars) {
     const i0 = Math.min(N - 1, Math.floor((b.l - lo) / size)), i1 = Math.min(N - 1, Math.floor((b.h - lo) / size));
@@ -42,6 +50,12 @@ export function computeProfile(bars: Bar[], tick: number, rows: number, va: numb
       if (overlap > 0) bucket[i] += (v * overlap) / range;
     }
   }
+  return finishProfile(lay, up, dn, va);
+}
+
+/** Volume tổng, POC và Value Area (va = % tổng volume) từ volume lên / xuống đã chia vào các row của `lay`; null nếu không có volume. */
+export function finishProfile(lay: Layout, up: number[], dn: number[], va: number) {
+  const { lo, hi, size, N } = lay;
   const total: number[] = up.map((v, i) => v + dn[i]);
   const mv = Math.max(...total), sum = total.reduce((s, v) => s + v, 0);
   if (!(sum > 0)) return null;

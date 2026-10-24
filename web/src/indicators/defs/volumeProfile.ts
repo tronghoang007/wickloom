@@ -1,13 +1,15 @@
 import type { Bar } from "@/lib/api";
-import { computeProfile } from "@/volumeProfile/compute";
+import { computeProfile, finishProfile, profileLayout } from "@/volumeProfile/compute";
 import { periodKeys, periodStarts, type Period } from "../calendar";
-import { lowerCandidates, overlaps, withinBudget } from "../lower";
+import { TICK_DEPTH, lowerCandidates, overlaps, tickStart, withinBudget } from "../lower";
 import { num, str, type Ctx, type IndicatorDef, type InputDef, type ItemDef, type PlacedProfile, type ProfileSet, type ProfileStyle } from "../schema";
 import { TF_SECONDS } from "@/lib/api";
 import { barStep, groupPeriods } from "./pivots";
 
 // Session Volume Profile và Visible Range Volume Profile: cùng họ với FRVP / AVP của drawings (volumeProfile/compute.ts),
 // volume chia theo nến khung nhỏ (LowerFeed) như TV, nơi thiếu thì dùng nến chart.
+// "Data aggregation = 1 tick" (mở rộng so với TV): mỗi tick rơi đúng vào row chứa giá của nó, lên / xuống theo quy tắc tick như CVD; nơi chưa có tick
+// (ngoài độ sâu tick của broker, hoặc chưa nạp xong) dùng nến như trên.
 
 const BUDGET = 100_000;
 const SESSIONS: Record<string, Period> = { Day: "day", Week: "week", Month: "month" };
@@ -15,6 +17,11 @@ const SESSIONS: Record<string, Period> = { Day: "day", Week: "week", Month: "mon
 const layoutInput: InputDef = { key: "layout", label: "Rows Layout", type: "select", default: "Number Of Rows", options: ["Number Of Rows", "Ticks Per Row"] };
 const rowsInput: InputDef = { key: "rows", label: "Row Size", type: "int", default: 24, min: 1, max: 1000 };
 const volumeInput: InputDef = { key: "volume", label: "Volume", type: "select", default: "Up/Down", options: ["Up/Down", "Total", "Delta"] };
+const TICKS = "1 tick";
+const aggInput: InputDef = {
+  key: "agg", label: "Data aggregation", type: "select", default: "Time", options: ["Time", TICKS],
+  tooltip: "Defines how volume is assigned to price rows. \"Time\" splits the volume of lower timeframe candles over their price range. \"1 tick\" puts every tick on the row of its price (the broker's tick history, requested from MetaTrader; each tick counts as tick volume 1) and covers only the last few weeks; older data uses candles.",
+};
 const vaInput: InputDef = { key: "va", label: "Value Area Volume", type: "int", default: 70, min: 1, max: 100 };
 const widthInput = (d: number, of = "box"): InputDef => ({ key: "width", label: `Width (% of the ${of})`, type: "int", default: d, min: 1, max: 100 });
 const placeInput = (d: string): InputDef => ({ key: "place", label: "Placement", type: "select", default: d, options: ["Left", "Right"] });
@@ -62,13 +69,27 @@ export function profileSource(chart: Bar[], lower: Bar[], t0: number, t1: number
   return fill.length === 0 ? fine : [...fine, ...fill].sort((a, b) => a.t - b.t);
 }
 
-const compute = (c: Ctx, src: Bar[]) =>
-  computeProfile(src, c.tick, num(c.inputs, "rows"), num(c.inputs, "va"), str(c.inputs, "layout") === "Ticks Per Row" ? "ticks" : "rows");
+const layoutKind = (c: Ctx) => (str(c.inputs, "layout") === "Ticks Per Row" ? "ticks" : "rows");
+
+const compute = (c: Ctx, src: Bar[]) => computeProfile(src, c.tick, num(c.inputs, "rows"), num(c.inputs, "va"), layoutKind(c));
+
+/** Profile của [t0, t1) từ tick: row chia theo vùng giá của nến chart, volume lên / xuống do backend gom. null = chưa dùng được (tắt 1 tick, tick chưa nạp tới đầu, chưa nạp xong). */
+function tickProfile(c: Ctx, chart: Bar[], t0: number, t1: number) {
+  const t = c.ticks;
+  if (!t || !t.covered(t0)) return null;
+  const lay = profileLayout(chart, c.tick, num(c.inputs, "rows"), layoutKind(c));
+  const h = lay && t.hist(t0, t1, lay);
+  return lay && h ? finishProfile(lay, h.up, h.dn, num(c.inputs, "va")) : null;
+}
+
+/** Profile của nến chart `chart` (khoảng [t0, t1)): tick nếu có, không thì nến khung nhỏ / nến chart. */
+const profileOf = (c: Ctx, chart: Bar[], t0: number, t1: number, step: number) =>
+  (c.inputs.agg === TICKS ? tickProfile(c, chart, t0, t1) : null) ?? compute(c, profileSource(chart, c.lower, t0, t1, step));
 
 export const svp: IndicatorDef = {
   id: "svp", name: "SVP", title: "Session volume profile", overlay: true,
   inputs: [
-    layoutInput, rowsInput, volumeInput, vaInput,
+    layoutInput, rowsInput, volumeInput, vaInput, aggInput,
     { key: "session", label: "Session", type: "select", default: "Day", options: Object.keys(SESSIONS) },
     widthInput(30), placeInput("Left"), valuesInput,
     { key: "extend", label: "Extend POC/VAH/VAL", type: "bool", default: false },
@@ -85,8 +106,15 @@ export const svp: IndicatorDef = {
     const tfs = withinBudget(lowerCandidates(step, "M1"), from, bars[bars.length - 1].t + step, BUDGET);
     return tfs.length ? { tfs, from } : null;
   },
+  ticks: (inputs, { bars, cut, step, calendar }) => {
+    if (inputs.agg !== TICKS || bars.length === 0 || step >= 86400) return null;
+    const starts = periodStarts(bars.map((b) => b.t), SESSIONS[str(inputs, "session")] ?? "day", calendar);
+    // phiên cũ hơn độ sâu tick không tính bằng tick (dùng nến), phiên đầu tiên trong độ sâu bắt đầu nạp tick
+    const start = tickStart(bars, starts, starts.filter((s) => s <= cut).pop() ?? 0, step);
+    return start === undefined ? null : { from: bars[start].t };
+  },
   profiles: (c): ProfileSet => {
-    const { bars, lower } = c;
+    const { bars } = c;
     const style = styleOf(c, false);
     if (bars.length === 0) return { profiles: [], style };
     const step = barStep(bars);
@@ -95,7 +123,7 @@ export const svp: IndicatorDef = {
     const profiles: PlacedProfile[] = [];
     for (const s of sessions) {
       if (s.last < c.cut) continue; // phiên nằm hẳn trong lịch sử ẩn
-      const vp = compute(c, profileSource(bars.slice(s.first, s.last + 1), lower, bars[s.first].t, bars[s.last].t + step, step));
+      const vp = profileOf(c, bars.slice(s.first, s.last + 1), bars[s.first].t, bars[s.last].t + step, step);
       if (vp) profiles.push({ ...vp, x1: s.first, x2: s.last });
     }
     return { profiles, style };
@@ -108,7 +136,7 @@ export const rangeLowerTf = (step: number, seconds: number): string | null =>
 
 export const vrvp: IndicatorDef = {
   id: "vrvp", name: "VRVP", title: "Visible range volume profile", overlay: true,
-  inputs: [layoutInput, rowsInput, volumeInput, vaInput, widthInput(30, "pane"), placeInput("Right"), valuesInput],
+  inputs: [layoutInput, rowsInput, volumeInput, vaInput, aggInput, widthInput(30, "pane"), placeInput("Right"), valuesInput],
   plots: [],
   items: ITEMS.map((it) => (it.id === "vah" || it.id === "val" ? { ...it, line: { width: 1, style: "dashed" as const } } : it)),
   needsRange: true,
@@ -123,15 +151,20 @@ export const vrvp: IndicatorDef = {
     const tfs = withinBudget(lowerCandidates(step, first), from, to, BUDGET);
     return tfs.length ? { tfs, from } : null;
   },
+  ticks: (inputs, { bars, step, range }) => {
+    if (inputs.agg !== TICKS || !range || bars.length === 0 || range.to <= range.from) return null;
+    const from = bars[range.from].t;
+    return bars[bars.length - 1].t + step - from <= TICK_DEPTH ? { from } : null; // cả vùng nhìn phải nằm trong độ sâu tick, không thì dùng nến
+  },
   profiles: (c): ProfileSet => {
-    const { bars, lower } = c;
+    const { bars } = c;
     const style = styleOf(c, true);
     if (bars.length === 0) return { profiles: [], style };
     const step = barStep(bars);
     const from = c.range?.from ?? c.cut;
     const to = c.range?.to ?? bars.length - 1;
     if (to < from) return { profiles: [], style };
-    const vp = compute(c, profileSource(bars.slice(from, to + 1), lower, bars[from].t, bars[to].t + step, step));
+    const vp = profileOf(c, bars.slice(from, to + 1), bars[from].t, bars[to].t + step, step);
     return { profiles: vp ? [{ ...vp, x1: from, x2: to }] : [], style };
   },
 };

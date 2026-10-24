@@ -1,6 +1,6 @@
 import type { Bar } from "@/lib/api";
 import type { CalendarOpts } from "./calendar";
-import type { Profile } from "@/volumeProfile/compute";
+import type { Layout, Profile } from "@/volumeProfile/compute";
 import type { LowerNeed } from "./lower";
 import type { Num, SourceName } from "./ta";
 
@@ -83,6 +83,12 @@ export type ProfileStyle = {
 };
 export type ProfileSet = { profiles: PlacedProfile[]; style: ProfileStyle };
 
+/** Dữ liệu tick cho volume profile "1 tick": `covered(t0)` = tick đã nạp tới đầu `t0`; `hist` = volume lên / xuống của tick trong [t0, t1) gom vào các row của `lay` (null = chưa nạp xong). */
+export type TickSource = {
+  covered: (t0: number) => boolean;
+  hist: (t0: number, t1: number, lay: Layout) => { up: number[]; dn: number[] } | null;
+};
+
 export type Ctx = {
   bars: Bar[]; // đã gồm cả lịch sử nạp ngầm phía trước (xem engine)
   inputs: Inputs; // đã điền mặc định + ép kiểu
@@ -98,6 +104,8 @@ export type Ctx = {
   cut: number;
   /** Vùng đang nhìn thấy, theo chỉ số trong `bars` (chỉ có khi `def.needsRange`); không biết thì undefined. */
   range?: { from: number; to: number };
+  /** Dữ liệu tick theo `def.ticks`; không có = indicator không cần / đang tắt "1 tick". */
+  ticks?: TickSource;
 };
 
 export type IndicatorDef = {
@@ -115,6 +123,8 @@ export type IndicatorDef = {
   warmup: (inputs: Inputs) => number;
   /** Cần nến khung nhỏ (chia volume trong nến chart): khung nào, phủ từ đâu. Trả null = không cần / dùng nến chart. Manager nạp ngầm rồi tính lại. */
   lower?: (inputs: Inputs, info: { bars: Bar[]; cut: number; step: number; calendar: CalendarOpts; range?: { from: number; to: number } }) => LowerNeed | null;
+  /** Cần lịch sử tick (volume profile "1 tick"): phủ từ đâu. Trả null = không cần. Manager nạp nến delta tick (tf "TD") rồi cấp `ctx.ticks`. */
+  ticks?: (inputs: Inputs, info: { bars: Bar[]; cut: number; step: number; calendar: CalendarOpts; range?: { from: number; to: number } }) => { from: number } | null;
   /** Kết quả phụ thuộc vùng đang nhìn (Visible Range Volume Profile): manager tính lại khi kéo / zoom. */
   needsRange?: boolean;
   /** Volume profile của indicator (Session / Visible Range Volume Profile), vẽ bằng `ProfilePrimitive`. */

@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from . import economic, mt5, state, tickdelta, trade
 from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN
@@ -61,9 +61,11 @@ def _handle_bars(body: BarsIn) -> None:
 
 def _handle_ticks_hist(body: TicksHistIn) -> None:
     state.broker_offset["value"] = body.broker_utc_offset
-    rows = tickdelta.ingest(body)
+    hist: Dict[Tuple[int, float], List[float]] = {}
+    rows = tickdelta.ingest(body, hist)
     if rows:
         state.bars.upsert(body.symbol, tickdelta.TICK_DELTA_TF, rows)
+        state.bars.put_tickvp(body.symbol, rows[0]["t"], rows[-1]["t"], [(m, p, u, d) for (m, p), (u, d) in hist.items()])
 
 
 async def _write(writer: asyncio.StreamWriter, msg: Dict[str, Any]) -> None:

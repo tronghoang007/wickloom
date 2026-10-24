@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { byId } from "../catalog";
 import { computeExtras } from "../engine";
 import { newInstance } from "../instance";
+import type { TickSource } from "../schema";
 import { profileSource, rangeLowerTf, svp, vrvp } from "./volumeProfile";
 
 const DAY = 86400;
@@ -154,5 +155,88 @@ describe("Visible Range Volume Profile", () => {
   it("needsRange để manager tính lại khi kéo / zoom", () => {
     expect(vrvp.needsRange).toBe(true);
     expect(svp.needsRange).toBeUndefined();
+  });
+});
+
+describe("Data aggregation = 1 tick", () => {
+  // một ngày M15 (96 nến, giá 94..106): hai ngày liền nhau để thử phiên có / chưa có tick
+  const bars = [...chart(20, 96), ...chart(21, 96)];
+  const lower = m1(20 * DAY, 22 * DAY);
+  const run = (id: "svp" | "vrvp", inputs: Record<string, number | string | boolean>, ticks?: TickSource, range?: { from: number; to: number }) =>
+    computeExtras(byId(id), { ...newInstance(id), inputs }, bars, { offset: 0 }, lower, { tick: 0.01, cut: 0, ...(ticks ? { ticks } : {}), ...(range ? { range } : {}) }).profiles!;
+  // tick giả: mỗi row nhận up = 3, dn = 1; ghi lại các yêu cầu
+  const fake = (covered: (t0: number) => boolean, ready = true) => {
+    const asked: { t0: number; t1: number; N: number }[] = [];
+    const src: TickSource = {
+      covered,
+      hist: (t0, t1, lay) => {
+        asked.push({ t0, t1, N: lay.N });
+        return ready ? { up: new Array(lay.N).fill(3), dn: new Array(lay.N).fill(1) } : null;
+      },
+    };
+    return { src, asked };
+  };
+
+  it("input agg: Time hoặc 1 tick, mặc định Time, ở cả hai indicator", () => {
+    for (const id of ["svp", "vrvp"] as const) {
+      expect(byId(id).inputs.find((i) => i.key === "agg")).toMatchObject({ type: "select", default: "Time", options: ["Time", "1 tick"] });
+    }
+  });
+
+  it("1 tick: volume mỗi row lấy từ histogram tick, row theo vùng giá của nến chart, tổng = số row x 4", () => {
+    const { src, asked } = fake(() => true);
+    const p = run("svp", { agg: "1 tick", rows: 24 }, src);
+    expect(p.profiles).toHaveLength(2);
+    expect(asked.map((a) => [a.t0, a.t1])).toEqual([[20 * DAY, 21 * DAY], [21 * DAY, 22 * DAY]]); // cả phiên, gồm nến cuối
+    for (const vp of p.profiles) {
+      expect(vp.N).toBe(asked[0].N);
+      expect(vp.total.every((v) => v === 4)).toBe(true);
+      expect(vp.up.every((v) => v === 3) && vp.dn.every((v) => v === 1)).toBe(true);
+    }
+  });
+
+  it("Time (mặc định) không đụng tới tick dù manager cấp", () => {
+    const { src, asked } = fake(() => true);
+    run("svp", { agg: "Time" }, src);
+    expect(asked).toHaveLength(0);
+  });
+
+  it("phiên chưa có tick (chưa nạp tới đầu) hoặc histogram chưa về: dùng nến như Time", () => {
+    const time = run("svp", { agg: "Time" });
+    const part = fake((t0) => t0 >= 21 * DAY); // chỉ phiên 2 có tick
+    const p = run("svp", { agg: "1 tick" }, part.src);
+    expect(part.asked.map((a) => a.t0)).toEqual([21 * DAY]); // phiên 1 không xin histogram
+    expect(p.profiles[0].total).toEqual(time.profiles[0].total); // phiên 1 giống hệt Time
+    expect(p.profiles[1].total.every((v) => v === 4)).toBe(true);
+    const pending = run("svp", { agg: "1 tick" }, fake(() => true, false).src);
+    expect(pending.profiles.map((x) => x.total)).toEqual(time.profiles.map((x) => x.total));
+    expect(run("svp", { agg: "1 tick" }).profiles.map((x) => x.total)).toEqual(time.profiles.map((x) => x.total)); // manager không cấp tick
+  });
+
+  it("vrvp: một profile cho vùng nhìn, histogram của đúng [nến đầu, nến cuối + 1)", () => {
+    const { src, asked } = fake(() => true);
+    const p = run("vrvp", { agg: "1 tick" }, src, { from: 10, to: 50 });
+    expect(asked).toEqual([{ t0: bars[10].t, t1: bars[50].t + M15, N: p.profiles[0].N }]);
+    expect(p.profiles[0].total.every((v) => v === 4)).toBe(true);
+  });
+
+  it("ticks (svp): không 1 tick thì null; 1 tick thì phủ từ đầu phiên đầu tiên trong độ sâu 14 ngày", () => {
+    const need = (inputs: Record<string, number | string | boolean>, b = bars) => svp.ticks!(inputs, { bars: b, cut: 0, step: M15, calendar: { offset: 0 } });
+    expect(need({ agg: "Time" })).toBeNull();
+    expect(need({ agg: "1 tick", session: "Day" })).toEqual({ from: 20 * DAY });
+    const wide = Array.from({ length: 30 }, (_, d) => chart(100 + d, 96)).flat(); // 30 ngày: chỉ 14 ngày cuối
+    expect(need({ agg: "1 tick", session: "Day" }, wide)).toEqual({ from: 116 * DAY });
+    expect(svp.ticks!({ agg: "1 tick", session: "Day" }, { bars: chart(0, 96), cut: 0, step: 86400, calendar: { offset: 0 } })).toBeNull(); // D1 trở lên: không phiên
+  });
+
+  it("ticks (vrvp): cần vùng nhìn và nằm trong 14 ngày từ nến cuối", () => {
+    const need = (inputs: Record<string, number | string | boolean>, range?: { from: number; to: number }, b = bars) => vrvp.ticks!(inputs, { bars: b, cut: 0, step: M15, calendar: { offset: 0 }, ...(range ? { range } : {}) });
+    expect(need({ agg: "Time" }, { from: 0, to: 10 })).toBeNull();
+    expect(need({ agg: "1 tick" })).toBeNull();
+    expect(need({ agg: "1 tick" }, { from: 10, to: 10 })).toBeNull();
+    expect(need({ agg: "1 tick" }, { from: 10, to: 50 })).toEqual({ from: bars[10].t });
+    const wide = Array.from({ length: 30 }, (_, d) => chart(100 + d, 96)).flat();
+    expect(need({ agg: "1 tick" }, { from: 0, to: 100 }, wide)).toBeNull(); // vùng bắt đầu từ 30 ngày trước
+    expect(need({ agg: "1 tick" }, { from: 20 * 96, to: 29 * 96 }, wide)).toEqual({ from: wide[20 * 96].t });
   });
 });

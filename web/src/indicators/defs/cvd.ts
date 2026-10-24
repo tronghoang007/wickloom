@@ -1,6 +1,6 @@
 import type { Bar } from "@/lib/api";
 import { periodKeys, periodStarts, type Period } from "../calendar";
-import { TICK_TF, autoLowerTf, lowerCandidates, withinBudget } from "../lower";
+import { TICK_TF, autoLowerTf, lowerCandidates, tickStart, withinBudget } from "../lower";
 import { str, type IndicatorDef } from "../schema";
 import { nan } from "../ta";
 
@@ -11,7 +11,6 @@ const ANCHORS: Record<string, Period> = { "1D": "day", "1W": "week", "1M": "mont
 /** Ô Timeframe của TV ("1", "5", "60"...) -> tên khung của backend. */
 const TF_OF: Record<string, string> = { "1": "M1", "5": "M5", "15": "M15", "30": "M30", "60": "H1", "240": "H4", D: "D1" };
 const BUDGET = 100_000; // số nến khung nhỏ tối đa chấp nhận cho một lần nạp
-const TICK_BUDGET = 14 * 1440; // "1 tick": tối đa chừng này phút (~3,4 triệu tick vàng) mỗi lần; xa hơn thì không tính (TV cũng báo thiếu độ sâu tick)
 const TICKS = "1 tick";
 
 /** Chiều của volume từng nến khung nhỏ: đóng > mở lên, đóng < mở xuống; đóng = mở thì so với đóng nến trước, vẫn bằng thì giữ chiều trước. */
@@ -88,8 +87,7 @@ export const cvd: IndicatorDef = {
       // chart nạp cả tháng nến nhưng chỉ độ sâu tick gần đây mới tính được: bắt đầu từ kỳ đầu tiên nằm trong ngân sách, nến chart cũ hơn để trống
       const starts = periodStarts(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", calendar);
       const first = starts.filter((s) => s <= cut).pop() ?? 0;
-      const oldest = bars[bars.length - 1].t + step - TICK_BUDGET * 60;
-      const start = starts.find((s) => s >= first && bars[s].t >= oldest);
+      const start = tickStart(bars, starts, first, step);
       return start === undefined ? null : { tfs: [TICK_TF], from: bars[start].t };
     }
     const first = inputs.custom ? TF_OF[str(inputs, "tf")] : autoLowerTf(step);

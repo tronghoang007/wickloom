@@ -3,7 +3,7 @@ import type { CalendarOpts } from "./calendar";
 import { resolveInputs, type IndicatorInstance } from "./instance";
 import { sanitizeObjects } from "./objects";
 import { itemStyles } from "./style";
-import type { Computed, Ctx, IndicatorDef, ObjectSet, PlotData, ProfileSet } from "./schema";
+import type { Computed, Ctx, IndicatorDef, ObjectSet, PlotData, ProfileSet, TickSource } from "./schema";
 import { nan, source, type Num } from "./ta";
 
 /** Dịch `a` sang phải `offset` phần tử (âm = sang trái); dương thì mảng dài thêm `offset` (vùng tương lai). Chỗ trống là `fill`. */
@@ -21,7 +21,7 @@ export function shiftBy<T>(a: T[], offset: number, fill: T): T[] {
 export const futureTimes = (last: number, count: number, step: number): number[] => Array.from({ length: count }, (_, k) => last + (k + 1) * step);
 
 /** Phần môi trường của chart mà compute có thể cần ngoài nến: kích thước tick, vùng đang nhìn. */
-export type Env = { tick?: number; range?: { from: number; to: number }; cut?: number };
+export type Env = { tick?: number; range?: { from: number; to: number }; cut?: number; ticks?: TickSource };
 
 function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = [], env: Env = {}): Ctx {
   const memo = new Map<string, Num>();
@@ -30,7 +30,7 @@ function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calend
     if (!s) memo.set(name, (s = source(bars, name)));
     return s;
   };
-  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar, lower, items: itemStyles(inst, def), tick: env.tick && env.tick > 0 ? env.tick : 0.01, cut: env.cut ?? 0, ...(env.range ? { range: env.range } : {}) };
+  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar, lower, items: itemStyles(inst, def), tick: env.tick && env.tick > 0 ? env.tick : 0.01, cut: env.cut ?? 0, ...(env.range ? { range: env.range } : {}), ...(env.ticks ? { ticks: env.ticks } : {}) };
 }
 
 /** Tính mọi plot của 1 instance trên `bars` (đã gồm lịch sử nạp ngầm). Luôn trả đủ plot của def; mỗi plot dài bars.length, cộng thêm offset nếu offset dương. */

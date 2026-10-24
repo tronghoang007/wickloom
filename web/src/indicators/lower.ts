@@ -11,6 +11,15 @@ export const LOWER_TFS = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"] as const;
 /** Khung giả cho delta theo tick từng phút (CVD "1 tick"): backend gom tick lịch sử do EA gửi (backfill tf "TD") thành MỖI PHÚT một nến o = 0,
  *  c = delta cuối phút, h / l = đỉnh / đáy của delta tích luỹ qua từng tick trong phút, v = tổng trọng số tick. Không phải khung của MT5. */
 export const TICK_TF = "TD";
+/** Độ sâu tick tối đa (giây) tính từ nến cuối: ~3,4 triệu tick vàng; xa hơn thì không tính (TV cũng báo thiếu độ sâu tick). */
+export const TICK_DEPTH = 14 * 86400;
+
+/** Chỉ số (trong `bars`) của đầu kỳ đầu tiên, từ kỳ `first` trở đi, nằm trong độ sâu tick tính từ nến cuối; undefined nếu kỳ hiện tại đã dài hơn độ sâu. `starts` = đầu các kỳ. */
+export function tickStart(bars: Bar[], starts: number[], first: number, step: number): number | undefined {
+  const oldest = bars[bars.length - 1].t + step - TICK_DEPTH;
+  return starts.find((s) => s >= first && bars[s].t >= oldest);
+}
+
 /** Độ dài (giây) của nến một khung nhỏ, kể cả khung giả. */
 export const stepOf = (tf: string): number => (tf === TICK_TF ? 60 : TF_SECONDS[tf]);
 

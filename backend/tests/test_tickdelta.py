@@ -63,3 +63,62 @@ def test_ticks_hist_over_tcp_is_stored_and_served():
     assert [(r["t"], r["c"], r["h"], r["l"], r["v"]) for r in rows] == [(0, 2.0, 2.0, 0.0, 2.0), (60, -1.0, 0.0, -1.0, 1.0)]
     assert c.get("/bars", params={"symbol": sym, "tf": "M1"}).json() == []  # không lẫn vào nến thường
     assert c.get("/bars", params={"symbol": sym, "tf": "XX"}).status_code == 400
+
+
+def test_classify_histogram_splits_weight_by_direction_per_minute_and_price():
+    hist = {}
+    # phút 0: 100 (lên, trọng số 2), 101 (lên), 100 (xuống), 100 (bằng: giữ xuống, trọng số 3); phút 1: 100 (lên so với tick trước? bằng: giữ xuống)
+    tickdelta.classify([1, 2, 3, 4, M + 1], [100, 101, 100, 100, 100], [2, 1, 1, 3, 1], 99.0, 1, hist)
+    assert hist == {(0, 100): [2.0, 4.0], (0, 101): [1.0, 0.0], (60, 100): [0.0, 1.0]}
+    # tổng volume mỗi phút khớp v của nến TD
+    rows, _, _ = tickdelta.classify([1, 2, 3, 4, M + 1], [100, 101, 100, 100, 100], [2, 1, 1, 3, 1], 99.0, 1)
+    assert [r["v"] for r in rows] == [7.0, 1.0]
+
+
+def test_tickvp_store_buckets_rows_and_clamps():
+    from app.store import BarStore
+
+    st = BarStore(__import__("pathlib").Path(tempfile.mkdtemp()) / "b.sqlite")
+    st.put_tickvp("S", 0, 60, [(0, 100.0, 2.0, 1.0), (0, 100.4, 1.0, 0.0), (0, 101.0, 0.0, 3.0), (60, 103.0, 5.0, 0.0), (120, 100.0, 9.0, 9.0)])
+    # row 0 = [100, 101), row 1 = [101, 102), row 2 = [102, 103): 103 nằm đúng mép trên -> row 3 bị cắt về row cuối; phút 120 ngoài [0, 120)
+    up, dn = st.tickvp("S", 0, 120, 100.0, 1.0, 3)
+    assert up == [3.0, 0.0, 5.0] and dn == [1.0, 3.0, 0.0]
+    # lo = 100.5: row 0 = [100.5, 101.5) nhận 101.0 cùng 100.0 và 100.4 (thấp hơn lo nên dồn vào row đầu); 103 nằm trong row 2 = [102.5, 103.5)
+    up, dn = st.tickvp("S", 0, 120, 100.5, 1.0, 3)
+    assert up == [3.0, 0.0, 5.0] and dn == [4.0, 0.0, 0.0]
+    # ghi lại phút 0 với ít giá hơn: phút cũ bị thay, không còn dòng thừa
+    st.put_tickvp("S", 0, 0, [(0, 100.0, 7.0, 0.0)])
+    up, dn = st.tickvp("S", 0, 120, 100.0, 1.0, 3)
+    assert up == [7.0, 0.0, 5.0] and dn == [0.0, 0.0, 0.0]
+
+
+def test_tickvp_old_td_bars_dropped_when_table_is_new_and_old_data_pruned():
+    import pathlib
+    import sqlite3
+
+    from app.store import BarStore, TICK_KEEP
+
+    path = pathlib.Path(tempfile.mkdtemp()) / "old.sqlite"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE bars (symbol TEXT NOT NULL, tf TEXT NOT NULL, t INTEGER NOT NULL, o REAL NOT NULL, h REAL NOT NULL, l REAL NOT NULL, c REAL NOT NULL, v REAL NOT NULL, PRIMARY KEY (symbol, tf, t)) WITHOUT ROWID")
+    db.executemany("INSERT INTO bars VALUES (?,?,?,1,1,1,1,1)", [("S", "TD", 0), ("S", "M1", 0)])
+    db.commit()
+    db.close()
+    st = BarStore(path)  # chưa có bảng tickvp: nến TD cũ (không có histogram) bị bỏ, nến thường giữ
+    assert st.query("S", "TD") == [] and len(st.query("S", "M1")) == 1
+    st.upsert("S", "TD", [{"t": 0, "o": 0, "h": 0, "l": 0, "c": 0, "v": 1}, {"t": TICK_KEEP + 120, "o": 0, "h": 0, "l": 0, "c": 0, "v": 1}])
+    st.put_tickvp("S", 0, 0, [(0, 5.0, 1.0, 0.0)])
+    st.put_tickvp("S", TICK_KEEP + 120, TICK_KEEP + 120, [(TICK_KEEP + 120, 5.0, 1.0, 0.0)])  # phút mới đẩy phút 0 ra khỏi thời hạn giữ
+    assert st.tickvp("S", 0, 60, 5.0, 1.0, 1) == ([0.0], [0.0])
+    assert [b["t"] for b in st.query("S", "TD")] == [TICK_KEEP + 120]
+
+
+def test_ticks_hist_over_tcp_feeds_tickvp_endpoint():
+    sym = "TDVP"
+    # 4 tick: 10 (lên so với pb 9), 12 (lên), 11 (xuống) trong phút 0; 11 (bằng: giữ xuống) phút 1
+    send_ea([{"type": "ticks_hist", "symbol": sym, "broker_utc_offset": 0, "t": [1000, 2000, 3000, 61000], "p": [10, 12, 11, 11], "pb": 9, "done": True}])
+    c = TestClient(app)
+    r = c.get("/tickvp", params={"symbol": sym, "from": 0, "to": 120, "lo": 10, "size": 1, "n": 3}).json()
+    assert r == {"up": [1.0, 0.0, 1.0], "dn": [0.0, 2.0, 0.0]}
+    assert c.get("/tickvp", params={"symbol": sym, "from": 60, "to": 120, "lo": 10, "size": 1, "n": 3}).json() == {"up": [0.0, 0.0, 0.0], "dn": [0.0, 1.0, 0.0]}
+    assert c.get("/tickvp", params={"symbol": sym, "from": 0, "to": 120, "lo": 10, "size": 0, "n": 3}).status_code == 422

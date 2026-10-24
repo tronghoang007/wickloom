@@ -1,4 +1,4 @@
-import { TF_SECONDS, fetchBars, fetchBrokerOffset, triggerBackfillAt, type Bar } from "@/lib/api";
+import { TF_SECONDS, fetchBars, fetchBrokerOffset, fetchTickProfile, triggerBackfillAt, type Bar } from "@/lib/api";
 import type { IChartApi, IPriceLine, ISeriesApi, SeriesType, UTCTimestamp } from "lightweight-charts";
 import { byId } from "./catalog";
 import { mergeCandleColors, planCandleColors } from "./candleColors";
@@ -7,14 +7,15 @@ import { planUpdate, type Snap } from "./diff";
 import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
 import { instanceShown, plotColor, resolveInputs, showsPriceLabel, type IndicatorInstance } from "./instance";
 import { effectiveScale, paneIndices, paneKeyOf } from "./layout";
-import { LowerFeed } from "./lower";
+import { LowerFeed, TICK_TF } from "./lower";
 import { trimObjects, trimProfiles } from "./objects";
 import { FillPrimitive, type FillEdge } from "./render/fill";
 import { ObjectsPrimitive } from "./render/objects";
 import { ProfilePrimitive } from "./render/profile";
 import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions, scaleId } from "./render/series";
-import type { IndicatorDef, PlotData } from "./schema";
+import type { IndicatorDef, PlotData, TickSource } from "./schema";
 import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
+import { TickProfileFeed, coverSig, coversFrom } from "./tickProfile";
 
 type Live = {
   inst: IndicatorInstance;
@@ -84,6 +85,7 @@ export class IndicatorManager {
   private lower = new LowerFeed((symbol, tf, from, to, limit) => fetchBars(symbol, tf, to, limit, from), () => this.schedule(), {
     backfill: async (symbol, tf, count, before) => (await triggerBackfillAt(symbol, tf, count, before)).ok,
   });
+  private tickProfiles = new TickProfileFeed((symbol, from, to, lay) => fetchTickProfile(symbol, from, to, lay.lo, lay.size, lay.N), () => this.schedule());
   private prevColors: string[] | null = null;
 
   /** `onSync`: báo sau mỗi lần tính lại để legend đọc giá trị mới. `onCandleColors`: báo khi indicator (Color Candles) đổi màu nến chart. */
@@ -268,8 +270,9 @@ export class IndicatorManager {
       this.applyStyle(l);
       if (l.def.needsCalendar && !cal) continue; // chưa biết ranh giới phiên: chờ thay vì vẽ sai
       const range = l.def.needsRange ? this.visibleRange(cut) : undefined;
+      const ticks = this.tickSource(l, all, cut, step, cal ?? { offset: 0 }, range); // trước nến khung nhỏ: tick là nguồn chính, nến chỉ để dự phòng
       const lowerBars = this.lowerBars(l, all, cut, step, cal ?? { offset: 0 }, range);
-      const env = { tick: this.getTick(), cut, ...(range ? { range } : {}) };
+      const env = { tick: this.getTick(), cut, ...(range ? { range } : {}), ...(ticks ? { ticks } : {}) };
       const out = computeInstance(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars);
       l.data = l.def.plots.map((p, k) => {
         const d = trimPlot(out[p.id], cut);
@@ -322,6 +325,19 @@ export class IndicatorManager {
     if (!l.def.lower) return [];
     const need = l.def.lower(resolveInputs(l.def, l.inst.inputs), { bars: all, cut, step, calendar, ...(range ? { range } : {}) });
     return need ? this.lower.get(this.feed.symbol, need, this.bars[this.bars.length - 1].t + step) : [];
+  }
+
+  /** Tick cho volume profile "1 tick": nạp nến delta tick (EA gửi lịch sử tick) rồi cấp histogram giá theo row cho từng profile. */
+  private tickSource(l: Live, all: Bar[], cut: number, step: number, calendar: { offset: number; dayOpens?: number[] }, range?: { from: number; to: number }): TickSource | undefined {
+    if (!l.def.ticks) return undefined;
+    const need = l.def.ticks(resolveInputs(l.def, l.inst.inputs), { bars: all, cut, step, calendar, ...(range ? { range } : {}) });
+    if (!need) return undefined;
+    const { symbol } = this.feed;
+    const cover = this.lower.get(symbol, { tfs: [TICK_TF], from: need.from }, this.bars[this.bars.length - 1].t + step);
+    return {
+      covered: (t0) => coversFrom(cover, t0),
+      hist: (t0, t1, lay) => this.tickProfiles.get(symbol, t0, t1, lay, coverSig(cover, t0, t1)),
+    };
   }
 
   // Color Candles: gộp màu của các indicator đang hiện rồi báo chart chính tô lại phần đã đổi

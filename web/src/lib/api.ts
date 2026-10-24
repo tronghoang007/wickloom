@@ -58,6 +58,18 @@ export async function fetchBars(symbol: string, tf: string, to?: number, limit =
   return r.ok ? r.json() : [];
 }
 
+/** Volume lên / xuống của tick trong các phút [from, to) gom vào `n` row cao `size` bắt đầu từ giá `lo` (backend /tickvp); null nếu lỗi. */
+export async function fetchTickProfile(symbol: string, from: number, to: number, lo: number, size: number, n: number): Promise<{ up: number[]; dn: number[] } | null> {
+  const q = new URLSearchParams({ symbol, from: String(from), to: String(to), lo: String(lo), size: String(size), n: String(n) });
+  try {
+    const r = await fetch(`${API}/tickvp?${q}`);
+    const j = r.ok ? await r.json() : null;
+    return j && Array.isArray(j.up) && Array.isArray(j.dn) ? { up: j.up, dn: j.dn } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Giây: giờ broker − UTC (EA báo cho backend); 0 nếu backend chưa biết / không trả lời. */
 export async function fetchBrokerOffset(): Promise<number> {
   try {
