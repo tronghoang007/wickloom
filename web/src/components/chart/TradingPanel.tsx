@@ -7,12 +7,13 @@ import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
 import { askClosePosition } from "@/trading/tagActions";
-import { accountProfit, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, sideLabel } from "@/trading/format";
+import { accountProfit, closedPositions, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, REASON_LABEL, sideLabel } from "@/trading/format";
 import { tradeBlock } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
 import { useEffect, useState, type ReactNode } from "react";
 import { Chevron } from "../icons";
+import { SymbolBadge } from "../SymbolIcon";
 
 const TABS: { id: TradeTab; label: string }[] = [
   { id: "positions", label: "Positions" },
@@ -20,8 +21,38 @@ const TABS: { id: TradeTab; label: string }[] = [
   { id: "history", label: "History" },
 ];
 
-const th = "sticky top-0 bg-[var(--bg)] px-3 py-1.5 text-left font-medium text-[var(--muted)]";
-const td = "whitespace-nowrap px-3 py-1";
+
+// Bảng kiểu TradingView (Positions / Orders / History): tiêu đề mờ có đường kẻ dưới, số căn phải, mỗi dòng cách nhau một đường kẻ mảnh
+const th = "sticky top-0 z-[1] whitespace-nowrap border-b border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-left font-normal text-[var(--muted)]";
+const td = "whitespace-nowrap px-3 py-2.5";
+const R = " text-right";
+const symbolType = (symbol: string) => useChartStore.getState().symbols.find((s) => s.name === symbol)?.type;
+function SymbolCell({ symbol }: { symbol: string }) {
+  return (
+    <span className="flex items-center gap-2 font-medium">
+      <SymbolBadge name={symbol} type={symbolType(symbol)} size={20} />
+      {symbol}
+    </span>
+  );
+}
+const SideCell = ({ side, label = sideLabel(side) }: { side: "buy" | "sell"; label?: string }) => (
+  <span className="flex items-center gap-1.5">
+    <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: side === "buy" ? "#2962ff" : "#ff9800" }} />
+    {label}
+  </span>
+);
+function Head({ cols }: { cols: [string, boolean?][] }) {
+  return (
+    <thead>
+      <tr>
+        {cols.map(([h, right], i) => (
+          <th key={i} className={th + (right ? R : "")}>{h}</th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
 
 function useNowSec() {
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -122,20 +153,14 @@ export default function TradingPanel() {
 }
 
 const digitsOf = (symbol: string) => useChartStore.getState().symbols.find((s) => s.name === symbol)?.digits;
-const rowClass = "border-t border-[var(--border)] hover:bg-[var(--hover)]";
+const rowClass = "border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--hover)]";
 const Empty = ({ children }: { children: ReactNode }) => <div className="px-4 py-6 text-sm text-[var(--muted)]">{children}</div>;
 
 function Positions({ data }: { data: TradeData }) {
   if (data.positions.length === 0) return <Empty>Không có vị thế đang mở.</Empty>;
   return (
     <table className="w-full text-xs tabular-nums">
-      <thead>
-        <tr>
-          {["Symbol", "Side", "Lot", "Entry", "SL", "TP", "Price", "P/L", "Opened", ""].map((h, i) => (
-            <th key={i} className={th}>{h}</th>
-          ))}
-        </tr>
-      </thead>
+      <Head cols={[["Symbol"], ["Side"], ["Lot", true], ["Entry", true], ["SL", true], ["TP", true], ["Price", true], ["P/L", true], ["Opened"], [""]]} />
       <tbody>
         {data.positions.map((p) => (
           <PositionRow key={p.ticket} p={p} account={data.account} />
@@ -163,14 +188,14 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
   };
   return (
     <tr className={rowClass}>
-      <td className={`${td} font-medium`}>{p.symbol}</td>
-      <td className={`${td} ${p.type === "buy" ? "text-[#2962ff]" : "text-[#ff9800]"}`}>{sideLabel(p.type)}</td>
-      <td className={td}>{fmtLot(p.volume)}</td>
-      <td className={td}>{fmtPx(p.price_open, d)}</td>
-      <td className={td}>{fmtPx(p.sl, d, true)}</td>
-      <td className={td}>{fmtPx(p.tp, d, true)}</td>
-      <td className={td}>{fmtPx(p.price_current, d)}</td>
-      <td className={`${td} font-medium ${pnlClass(pl)}`}>{fmtPnl(pl)}</td>
+      <td className={td}><SymbolCell symbol={p.symbol} /></td>
+      <td className={td}><SideCell side={p.type === "sell" ? "sell" : "buy"} /></td>
+      <td className={td + R}>{fmtLot(p.volume)}</td>
+      <td className={td + R}>{fmtPx(p.price_open, d)}</td>
+      <td className={td + R}>{fmtPx(p.sl, d, true)}</td>
+      <td className={td + R}>{fmtPx(p.tp, d, true)}</td>
+      <td className={td + R}>{fmtPx(p.price_current, d)}</td>
+      <td className={`${td}${R} font-medium ${pnlClass(pl)}`}>{fmtPnl(pl)}</td>
       <td className={`${td} text-[var(--muted)]`}>{fmtTime(p.time)}</td>
       <td className={td} onClick={(e) => e.stopPropagation()}>
         {editing ? (
@@ -213,13 +238,7 @@ function Orders({ data }: { data: TradeData }) {
   if (data.orders.length === 0) return <Empty>Không có lệnh chờ.</Empty>;
   return (
     <table className="w-full text-xs tabular-nums">
-      <thead>
-        <tr>
-          {["Symbol", "Type", "Lot", "Price", "SL", "TP", "Placed", "Expires", ""].map((h, i) => (
-            <th key={i} className={th}>{h}</th>
-          ))}
-        </tr>
-      </thead>
+      <Head cols={[["Symbol"], ["Type"], ["Lot", true], ["Price", true], ["SL", true], ["TP", true], ["Placed"], ["Expires"], [""]]} />
       <tbody>
         {data.orders.map((o) => (
           <OrderRow key={o.ticket} o={o} account={data.account} />
@@ -236,17 +255,17 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
   const block = tradeBlock({ replay: false, status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   return (
     <tr className={rowClass}>
-      <td className={`${td} font-medium`}>{o.symbol}</td>
-      <td className={td}>{orderLabel(o.type)}</td>
-      <td className={td}>{fmtLot(o.volume)}</td>
-      <td className={td}>{fmtPx(o.price_open, d)}</td>
-      <td className={td}>{fmtPx(o.sl, d, true)}</td>
-      <td className={td}>{fmtPx(o.tp, d, true)}</td>
+      <td className={td}><SymbolCell symbol={o.symbol} /></td>
+      <td className={td}><SideCell side={o.type.startsWith("buy") ? "buy" : "sell"} label={orderLabel(o.type)} /></td>
+      <td className={td + R}>{fmtLot(o.volume)}</td>
+      <td className={td + R}>{fmtPx(o.price_open, d)}</td>
+      <td className={td + R}>{fmtPx(o.sl, d, true)}</td>
+      <td className={td + R}>{fmtPx(o.tp, d, true)}</td>
       <td className={`${td} text-[var(--muted)]`}>{fmtTime(o.time_setup)}</td>
       <td className={`${td} text-[var(--muted)]`}>{o.expiration ? fmtTime(o.expiration) : "GTC"}</td>
       <td className={td} onClick={(e) => e.stopPropagation()}>
         <button
-          className="cursor-pointer rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40"
+          className="cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-40"
           disabled={block !== null || busy}
           title={block ?? "Huỷ lệnh chờ"}
           onClick={() => void cancelOrder(o.ticket, o.symbol)}
@@ -260,28 +279,31 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
 
 function History({ data }: { data: TradeData }) {
   if (data.deals.length === 0) return <Empty>Chưa có giao dịch nào trong những ngày gần đây.</Empty>;
+  const rows = closedPositions(data.deals);
+  if (rows.length === 0) return <Empty>Chưa có vị thế nào đã đóng trong những ngày gần đây.</Empty>;
+  const ccy = data.account.currency;
+  const heads: [string, boolean?][] = [["Symbol"], ["Type"], ["Volume, lot", true], ["Open price", true], ["Close price", true], ["T/P", true], ["S/L", true], ["Position"], ["Open time"], ["Close time"], [`Swap, ${ccy}`, true], ["Reason"], [`P/L, ${ccy}`, true]];
   return (
     <table className="w-full text-xs tabular-nums">
-      <thead>
-        <tr>
-          {["Time", "Symbol", "Type", "Entry", "Lot", "Price", "Net P/L"].map((h) => (
-            <th key={h} className={th}>{h}</th>
-          ))}
-        </tr>
-      </thead>
+      <Head cols={heads} />
       <tbody>
-        {data.deals.map((d) => {
-          const net = dealNet(d);
-          const balance = d.type === "balance";
+        {rows.map((r) => {
+          const d = digitsOf(r.symbol);
           return (
-            <tr key={d.ticket} className="border-t border-[var(--border)]">
-              <td className={`${td} text-[var(--muted)]`}>{fmtTime(d.time)}</td>
-              <td className={`${td} font-medium`}>{d.symbol || "—"}</td>
-              <td className={td}>{sideLabel(d.type)}</td>
-              <td className={td}>{d.entry === "in" ? "In" : d.entry === "out" ? "Out" : d.entry === "inout" ? "In/Out" : "—"}</td>
-              <td className={td}>{balance ? "—" : fmtLot(d.volume)}</td>
-              <td className={td}>{balance ? "—" : fmtPx(d.price, digitsOf(d.symbol))}</td>
-              <td className={`${td} font-medium ${pnlClass(net)}`}>{d.entry === "in" && !net ? "—" : fmtPnl(net)}</td>
+            <tr key={r.position} className={rowClass}>
+              <td className={td}><SymbolCell symbol={r.symbol} /></td>
+              <td className={td}><SideCell side={r.side} /></td>
+              <td className={td + R}>{fmtLot(r.volume)}</td>
+              <td className={td + R}>{r.openTime ? fmtPx(r.open, d) : "—"}</td>
+              <td className={td + R}>{fmtPx(r.close, d)}</td>
+              <td className={td + R}>{fmtPx(r.tp, d, true)}</td>
+              <td className={td + R}>{fmtPx(r.sl, d, true)}</td>
+              <td className={td}>{r.position > 0 ? r.position : "—"}</td>
+              <td className={td}>{fmtTime(r.openTime)}</td>
+              <td className={td}>{fmtTime(r.closeTime)}</td>
+              <td className={td + R}>{r.swap.toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
+              <td className={td}>{REASON_LABEL[r.reason] ?? "—"}</td>
+              <td className={`${td}${R} font-medium ${pnlClass(r.pnl)}`}>{fmtPnl(r.pnl)}</td>
             </tr>
           );
         })}

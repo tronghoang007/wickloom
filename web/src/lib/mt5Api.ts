@@ -61,6 +61,8 @@ export type PendingOrder = {
 export type Deal = {
   ticket: number; order: number; symbol: string; type: "buy" | "sell" | "balance" | "other"; entry: "in" | "out" | "inout" | "";
   volume: number; price: number; profit: number; commission: number; swap: number; time: number; magic: number; comment: string;
+  /** EA 2.18+: mã vị thế mà deal thuộc về (0 = deal nạp/rút), SL/TP lúc khớp, lý do (client/mobile/web/expert/sl/tp/so); EA cũ không gửi. */
+  position?: number; sl?: number; tp?: number; reason?: string;
 };
 export type TradeData = { account: Mt5Account; positions: Position[]; orders: PendingOrder[]; deals: Deal[]; updated_at: number | null };
 

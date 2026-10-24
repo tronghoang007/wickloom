@@ -4,10 +4,11 @@ import { fmtMoney, MODE_COLOR, MODE_LABEL } from "@/lib/mt5Format";
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal, useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
+import { useRailStore } from "@/store/rail";
 import { useOrderState } from "@/trading/actions";
 import { parseNum, type Draft } from "@/trading/draft";
 import { draftError } from "@/trading/draftCheck";
-import { cancelOwnerEdits, confirmOwnerEdits, pendingFor, useEditBridge } from "@/trading/editBridge";
+import { cancelOwnerEdits, clearEdit, confirmOwnerEdits, pendingFor, seedEditStop, setEditPrice, useEditBridge } from "@/trading/editBridge";
 import { fmtLot, fmtPnl, fmtPx, orderLabel, positionPnl, sideLabel } from "@/trading/format";
 import { currentLot, fmtLotValue, lotSpec, normalizeLot, stepLot, writeLot } from "@/trading/lot";
 import { pendingLabel, resolveOrderType, snapPrice } from "@/trading/orderType";
@@ -15,7 +16,7 @@ import { estimatePnl, pnlSpec, pointsBetween, priceForPnl, type PnlSpec } from "
 import { spreadPips, useQuoteStore } from "@/trading/quote";
 import { seedDraftStop, setDraftMode, startDraft, submitDraft } from "@/trading/submit";
 import { useTradeStore } from "@/trading/store";
-import { askCancelOrder, askClosePosition } from "@/trading/tagActions";
+import { askCancelOrder, askClosePosition, askRemoveStop } from "@/trading/tagActions";
 import { useTicketStore, type TicketRest } from "@/trading/ticket";
 import { useEffect, useState } from "react";
 import { Close } from "../icons";
@@ -53,25 +54,24 @@ function ModifyPanel({ owner }: { owner: string }) {
   const item = pos ?? ord;
   useEffect(() => {
     // lệnh không còn (đã đóng / huỷ / khớp): bảng về trạng thái chờ
-    if (data && !item) useTicketStore.setState({ modifyOwner: null });
+    if (!data || item) return;
+    useTicketStore.setState({ modifyOwner: null });
+    useRailStore.getState().closeOrder();
   }, [data, item]);
   if (!item) return <div className="px-4 py-6 text-sm text-[var(--muted)]">Đang tải lệnh…</div>;
 
   const digits = symbols.find((x) => x.name === item.symbol)?.digits;
   const edits = pendingFor(byPane, owner);
   const pending = edits.length > 0;
-  const pick = (key: string, was: number) => {
-    const e = edits.find((x) => x.key === key);
-    return e ? { now: e.price, was, changed: e.price !== was } : { now: was, was, changed: false };
-  };
   const p = kind === "position" ? "p" : "o";
-  const rows: { label: string; v: { now: number; was: number; changed: boolean } | null }[] = [
-    ...(ord ? [{ label: "Giá vào", v: pick(`o:${ticket}`, ord.price_open) }] : [{ label: "Giá vào", v: { now: pos!.price_open, was: pos!.price_open, changed: false } }]),
-    { label: "Take profit", v: item.tp > 0 || edits.some((x) => x.key === `${p}tp:${ticket}`) ? pick(`${p}tp:${ticket}`, item.tp) : null },
-    { label: "Stop loss", v: item.sl > 0 || edits.some((x) => x.key === `${p}sl:${ticket}`) ? pick(`${p}sl:${ticket}`, item.sl) : null },
-  ];
+  const entryEdit = edits.find((x) => x.key === `o:${ticket}`);
+  const entryWas = ord ? ord.price_open : pos!.price_open;
+  const entryNow = entryEdit?.price ?? entryWas;
   const buy = (pos ? pos.type : ord!.type).startsWith("buy");
   const ccy = account?.currency ?? "";
+  const sym = symbols.find((x) => x.name === item.symbol);
+  const tick = sym?.tick_size || 10 ** -(digits ?? 5);
+  const pnl = pnlSpec(sym, ccy);
   const what = pos ? `${sideLabel(pos.type)} ${fmtLot(pos.volume)}` : `${orderLabel(ord!.type)} ${fmtLot(ord!.volume)}`;
   const profit = pos ? positionPnl(pos) : null;
   const btn = "flex h-11 w-full cursor-pointer items-center justify-center rounded-lg text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40";
@@ -99,22 +99,35 @@ function ModifyPanel({ owner }: { owner: string }) {
             </div>
           )}
         </div>
-        <div className="space-y-2.5 text-sm">
-          {rows.map((r) => (
-            <div key={r.label} className="flex items-baseline justify-between">
-              <span className="text-[var(--muted)]">{r.label}</span>
-              {r.v === null ? (
-                <span className="text-[var(--muted)]">—</span>
-              ) : (
-                <span className="tabular-nums" data-testid={`modify-${r.label}`}>
-                  {r.v.changed && <span className="mr-2 text-xs text-[var(--muted)] line-through">{r.v.was > 0 ? fmtPx(r.v.was, digits) : "—"}</span>}
-                  <span className={r.v.changed ? "font-semibold text-[var(--accent)]" : ""}>{fmtPx(r.v.now, digits)}</span>
-                </span>
-              )}
-            </div>
-          ))}
+        <div className="mb-3">
+          <span className="mb-1.5 block text-xs text-[var(--muted)]">Giá vào</span>
+          {ord ? (
+            <Cell aria="Entry price" title="Giá vào" value={fmtPx(entryNow, digits)} deferred onCommit={(v) => {
+              const n = parseNum(v);
+              if (n > 0) setEditPrice(`o:${ticket}`, snapPrice(n, tick, digits ?? 5));
+            }} />
+          ) : (
+            <div className="flex h-9 items-center px-0.5 text-[13px] tabular-nums" data-testid="modify-Giá vào">{fmtPx(entryNow, digits)}</div>
+          )}
+          {entryEdit && entryEdit.price !== entryWas && <div className="mt-1 text-xs text-[var(--muted)]">Giá cũ <span className="line-through">{fmtPx(entryWas, digits)}</span></div>}
         </div>
-        <div className="mt-4 text-xs text-[var(--muted)]">Kéo đường SL / TP / giá vào trên chart để đổi, rồi bấm Modify.</div>
+        {(["tp", "sl"] as const).map((k) => (
+          <ModifyStop
+            key={k}
+            kind={k}
+            keyId={`${p}${k}:${ticket}`}
+            was={item[k]}
+            now={edits.find((x) => x.key === `${p}${k}:${ticket}`)?.price ?? item[k]}
+            buy={(pos ? pos.type : ord!.type).startsWith("buy")}
+            entry={entryNow}
+            lot={item.volume}
+            digits={digits ?? 5}
+            tick={tick}
+            spec={pnl}
+            ccy={ccy}
+            onRemove={() => askRemoveStop({ t: pos ? "position" : "order", ticket }, k, item[k], item.symbol, digits ?? 5)}
+          />
+        ))}
       </div>
       <div className="shrink-0 space-y-2 border-t border-[var(--border)] px-4 pb-3 pt-3">
         <button type="button" disabled={!pending || busy} onClick={() => confirmOwnerEdits(owner)} className={`${btn} bg-[var(--accent)] text-white hover:brightness-110`}>
@@ -133,6 +146,67 @@ function ModifyPanel({ owner }: { owner: string }) {
   );
 }
 
+// Take profit / Stop loss của lệnh đã đặt trong bảng Modify: cùng bố cục Giá | Điểm | Lãi (Lỗ) như bản nháp (`StopRow`), nhưng mỗi ô commit khi Enter / rời ô và thành thay đổi chờ trên chart.
+// Công tắc bật = mức gợi ý; tắt = bỏ mức đã đặt (hộp thoại xác nhận) hoặc bỏ thay đổi chờ nếu mức đó mới tạo.
+function ModifyStop({ kind, keyId, was, now, buy, entry, lot, digits, tick, spec, ccy, onRemove }: { kind: "sl" | "tp"; keyId: string; was: number; now: number; buy: boolean; entry: number; lot: number; digits: number; tick: number; spec: PnlSpec | null; ccy: string; onRemove: () => void }) {
+  const profit = kind === "tp";
+  const on = now > 0;
+  const name = profit ? "Take profit" : "Stop loss";
+  const side = buy ? "buy" : "sell";
+  const dir = buy ? 1 : -1;
+  const set = (v: number | null) => {
+    if (v !== null && v > 0) setEditPrice(keyId, snapPrice(v, tick, digits));
+  };
+  const toggle = (checked: boolean) => {
+    if (checked) return seedEditStop(keyId);
+    clearEdit(keyId);
+    if (was > 0) onRemove();
+  };
+  const gain = (now - entry) * dir >= 0;
+  const points = on && entry > 0 ? `${gain ? "+" : "-"}${pointsBetween(entry, now, digits)}` : "";
+  const amount = on && entry > 0 && spec ? fmtPnl(estimatePnl(side, lot, entry, now, spec)) : "";
+  const signed = (t: string) => {
+    const n = parseNum(t);
+    return !n ? null : /^\s*[+-]/.test(t) ? n : profit ? Math.abs(n) : -Math.abs(n);
+  };
+  return (
+    <div className="mb-3 border-t border-[var(--border)] pt-3">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[13px] font-medium" style={{ color: profit ? "#089981" : "#ff9800" }}>
+          {name}
+        </span>
+        <Switch on={on} onChange={toggle} label={`Enable ${name}`} />
+      </div>
+      <div className={`${COLS} mb-1 text-[11px] text-[var(--fg)]/80`} aria-hidden>
+        <span>Price</span>
+        <span>Points</span>
+        <span>P/L</span>
+      </div>
+      <div className={COLS}>
+        <Cell aria={`${name} price`} title="Price" value={on ? fmtPx(now, digits) : ""} disabled={!on} deferred onCommit={(v) => set(parseNum(v))} />
+        <Cell aria={`${name} points`} title="Points" value={points} disabled={!on || !(entry > 0)} deferred onCommit={(v) => {
+          const n = signed(v);
+          if (n !== null) set(entry + dir * n * 10 ** -digits);
+        }} />
+        <Cell
+          aria={`${name} amount`}
+          title="P/L"
+          value={amount}
+          suffix={ccy}
+          disabled={!on || !spec || !(entry > 0)}
+          deferred
+          onCommit={(v) => {
+            const n = signed(v);
+            if (!spec || n === null) return;
+            set(priceForPnl(side, lot, entry, n, spec));
+          }}
+        />
+      </div>
+      {on && was > 0 && now !== was && <div className="mt-1 text-xs text-[var(--muted)]">Mức cũ <span className="line-through">{fmtPx(was, digits)}</span></div>}
+    </div>
+  );
+}
+
 /** Sau khi đặt xong bảng KHÔNG đóng mà ở trạng thái chờ như TradingView ("Start creating order"): vẫn hiện symbol đang xem và giá Sell / Buy, các ô còn lại mờ + không bấm được;
  *  bấm Sell / Buy hoặc nút dưới đáy mới bắt đầu bản nháp mới (và lúc đó mới có đường entry / SL / TP trên chart). */
 function RestPanel({ rest }: { rest: TicketRest }) {
@@ -146,8 +220,13 @@ function RestPanel({ rest }: { rest: TicketRest }) {
 }
 
 // Ô nhập hiển thị giá trị TÍNH TỪ bản nháp; đang gõ thì giữ đúng chữ người dùng gõ (không bị làm tròn giữa chừng), rời ô thì quay về giá trị tính được.
-function Cell({ title, value, onCommit, disabled, suffix, aria }: { title: string; value: string; onCommit: (v: string) => void; disabled?: boolean; suffix?: string; aria: string }) {
+function Cell({ title, value, onCommit, disabled, suffix, aria, deferred }: { title: string; value: string; onCommit: (v: string) => void; disabled?: boolean; suffix?: string; aria: string; deferred?: boolean }) {
   const [text, setText] = useState<string | null>(null);
+  // deferred (bảng Modify): mỗi lần commit là một thay đổi chờ trên chart nên chỉ commit khi bấm Enter / rời ô, không phải từng phím gõ
+  const commit = () => {
+    if (deferred && text !== null && text.trim() !== value.trim()) onCommit(text);
+    setText(null);
+  };
   return (
     <div className="relative min-w-0">
       <input
@@ -160,10 +239,16 @@ function Cell({ title, value, onCommit, disabled, suffix, aria }: { title: strin
         value={text ?? value}
         onChange={(e) => {
           setText(e.target.value);
-          onCommit(e.target.value);
+          if (!deferred) onCommit(e.target.value);
         }}
-        onBlur={() => setText(null)}
-        onKeyDown={(e) => e.stopPropagation()} // phím trong ô nhập không phải phím tắt của chart
+        onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation(); // phím trong ô nhập không phải phím tắt của chart
+          if (deferred && e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          }
+        }}
       />
       {suffix && <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--muted)]">{suffix}</span>}
     </div>

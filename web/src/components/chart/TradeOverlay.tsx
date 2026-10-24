@@ -8,6 +8,7 @@ import { canModifyTrades, makeStopTitle } from "@/trading/chartOrders";
 import { chartGlobal } from "@/store/chart";
 import { draftLines } from "@/trading/draft";
 import { useTradeFocus, withAlpha } from "@/trading/focus";
+import { HANDLE_INSET } from "@/trading/lineDrag";
 import { COLORS, fmtLot, fmtPnl, ghostsFor, tradeLines, type DragPreview, type LineSpec, type TagOwner } from "@/trading/format";
 import { estimatePnl, pnlSpec } from "@/trading/pnl";
 import { useQuoteStore } from "@/trading/quote";
@@ -19,7 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const TAG_H = 22;
 const RIGHT_GAP = 70; // thẻ nằm lệch trái khỏi mép vùng vẽ (giống TV: "Order and position alignment: Right")
-const LINK_X = 34; // đường nối dọc giữa giá vào / SL / TP cách mép vùng vẽ
+const LINK_X = HANDLE_INSET; // đường nối dọc + chấm tròn trên mỗi đường, cách mép vùng vẽ (LineDrag đổi con trỏ thành lên-xuống đúng chỗ này)
 
 const STYLE = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted } as const;
 const OWNER_ID = (o: TagOwner) => (o.t === "draft" ? "draft" : `${o.t}:${o.ticket}`);
@@ -34,6 +35,7 @@ function closeSim(paneId: string, kind: "entry" | "sl" | "tp", sym: Parameters<t
 }
 
 const KIND_NAME = { sl: "SL", tp: "TP" } as const;
+const KIND_FULL = { sl: "Stop loss", tp: "Take profit" } as const; // chữ của tooltip nút TP / SL mờ (như TradingView)
 const SIM_TICKET = -1; // vị thế giả lập của Replay (không phải lệnh thật)
 const PNL_UP = "#089981"; // số lãi / lỗ trên thẻ (nhãn bắt đầu bằng + / -) tô xanh / đỏ theo dấu, không theo màu đường
 const PNL_DOWN = "#f23645";
@@ -130,6 +132,9 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
     dirty.current = true;
   }, [focus]);
 
+  // Trỏ vào nút TP / SL mờ: tô nhạt cả vùng chart phía lãi (TP) hoặc phía lỗi (SL) so với đường giá vào, như TradingView. Đọc mỗi khung hình nên không cần render lại
+  const zoneRef = useRef<{ key: string; up: boolean; color: string } | null>(null);
+  const zoneEl = useRef<HTMLDivElement>(null);
   const hoverRef = useRef<string | null>(null); // chủ của thẻ đang được trỏ vào: đọc mỗi khung hình nên không cần render lại
   useEffect(() => {
     let raf = 0;
@@ -181,6 +186,21 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
         const y = series.priceToCoordinate(l.price);
         if (y !== null) ys.set(l.key, y as number);
       }
+      const zone = zoneRef.current;
+      const zy = zone ? ys.get(zone.key) : undefined;
+      const ze = zoneEl.current;
+      if (ze) {
+        if (!zone || zy === undefined) ze.style.display = "none";
+        else {
+          const ph = chart.paneSize(0).height;
+          const y = Math.min(Math.max(zy, 0), ph);
+          ze.style.display = "block";
+          ze.style.width = `${chart.timeScale().width()}px`;
+          ze.style.top = `${zone.up ? 0 : y}px`;
+          ze.style.height = `${zone.up ? y : ph - y}px`;
+          ze.style.background = withAlpha(zone.color, 0.15);
+        }
+      }
       for (const [key, el] of els.current) {
         const y = ys.get(key);
         const visible = y !== undefined && y >= -TAG_H && y <= h + TAG_H;
@@ -200,17 +220,23 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
       const f = focusRef.current;
       const groups = new Map<string, LineSpec[]>();
       for (const l of wantLines) if (l.tag && ys.has(l.key)) groups.set(OWNER_ID(l.tag.owner), [...(groups.get(OWNER_ID(l.tag.owner)) ?? []), l]);
+      const hov = hoverRef.current ?? useTradeFocus.getState().hover; // trỏ vào thẻ, hoặc trỏ gần đường (LineDrag báo)
       for (const [owner, g] of groups) {
-        if (g.length < 2) continue;
         const entry = g.find((l) => l.tag?.kind === "entry") ?? g[0];
-        if (!entry.tag?.draft && owner !== f && owner !== hoverRef.current) continue; // lệnh đã đặt: đường nối chỉ hiện khi chọn (focus) hoặc trỏ vào thẻ
+        const active = owner === f || owner === hov;
+        const linked = g.length >= 2 && (entry.tag?.draft || active); // lệnh đã đặt: đường nối chỉ hiện khi chọn (focus) hoặc trỏ vào
+        if (!linked && !active) continue;
         const op = f !== null && owner !== f ? DIM : entry.tag?.draft ? 0.6 : 0.9;
         const w = f === owner ? 2 : 1;
-        const gy = g.map((l) => ys.get(l.key) as number);
-        svg += `<line x1="${linkX}" x2="${linkX}" y1="${Math.min(...gy)}" y2="${Math.max(...gy)}" stroke="${entry.color}" stroke-width="${w}" stroke-dasharray="4 3" opacity="${op}"/>`;
+        if (linked) {
+          const gy = g.map((l) => ys.get(l.key) as number);
+          svg += `<line x1="${linkX}" x2="${linkX}" y1="${Math.min(...gy)}" y2="${Math.max(...gy)}" stroke="${entry.color}" stroke-width="${w}" stroke-dasharray="4 3" opacity="${op}"/>`;
+        }
         for (const l of g) {
-          const filled = l === entry;
-          svg += `<circle cx="${linkX}" cy="${ys.get(l.key)}" r="3.5" fill="${filled ? l.color : "var(--bg)"}" stroke="${l.color}" stroke-width="${w + 0.5}" opacity="${op}"/>`;
+          const cy = ys.get(l.key);
+          // chấm tròn kéo được (như TradingView): vòng rỗng + quầng sáng khi đang trỏ / chọn lệnh này; chỉ có đường nối thì giữ chấm đặc ở giá vào
+          if (active) svg += `<circle cx="${linkX}" cy="${cy}" r="8" fill="${l.color}" opacity="0.22"/><circle cx="${linkX}" cy="${cy}" r="3.5" fill="var(--bg)" stroke="${l.color}" stroke-width="${w + 0.5}"/>`;
+          else svg += `<circle cx="${linkX}" cy="${cy}" r="3.5" fill="${l === entry ? l.color : "var(--bg)"}" stroke="${l.color}" stroke-width="${w + 0.5}" opacity="${op}"/>`;
         }
       }
       if (svg !== lastLink && link.current) {
@@ -232,6 +258,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
   return (
     <div ref={root} className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" data-testid="trade-overlay">
       <svg ref={link} className="absolute inset-0 h-full w-full" aria-hidden />
+      <div ref={zoneEl} className="absolute left-0 hidden" aria-hidden />
       {lines.flatMap((l) => {
         const tag = l.tag;
         if (!tag) return [];
@@ -291,28 +318,39 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
               </>
             )}
             {live &&
-              tag.ghosts.map((k) => (
+              tag.ghosts.map((k) => {
+                const hue = k === "tp" ? "#089981" : "#ff9800";
+                const tint = withAlpha(hue, 0.15 * fade);
+                return (
                 <button
                   key={k}
                   type="button"
                   data-tag-btn
-                  title={`Kéo để đặt ${KIND_NAME[k]}`}
+                  onPointerEnter={() => {
+                    if (tag.side) zoneRef.current = { key: l.key, up: (k === "tp") === (tag.side === "buy"), color: hue };
+                  }}
+                  onPointerLeave={() => (zoneRef.current = null)}
                   onPointerDown={(e) => {
                     if (e.button !== 0) return;
                     e.preventDefault();
                     e.stopPropagation();
+                    zoneRef.current = null;
                     onGhost(tag.owner, k, e.nativeEvent);
                   }}
-                  className={`${events} min-w-[38px] cursor-grab rounded border border-dotted px-3 font-semibold hover:brightness-125 active:cursor-grabbing`}
-                  style={{ height: TAG_H, color: fc(k === "tp" ? "#089981" : "#ff9800"), borderColor: fc(k === "tp" ? "#089981" : "#ff9800"), background: "var(--bg)" }}
+                  className={`${events} group/ghost relative min-w-[38px] cursor-pointer rounded border border-dotted px-3 font-semibold hover:brightness-125`}
+                  style={{ height: TAG_H, color: fc(hue), borderColor: fc(hue), background: `linear-gradient(${tint}, ${tint}), var(--bg)` }} // phủ màu nhạt như TradingView, trên nền đặc để đường giá không lộ xuyên qua
                 >
                   {KIND_NAME[k]}
+                  <span role="tooltip" className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-[#363a45] px-2.5 py-2 text-[12px] font-normal leading-none text-[#d1d4dc] shadow-lg group-hover/ghost:block group-active/ghost:hidden">
+                    Drag to add {KIND_FULL[k]}
+                  </span>
                 </button>
-              ))}
+                );
+              })}
             <div
               data-line-key={live ? l.key : undefined}
               title={`${ownerName(tag.owner)} · ${tag.kind === "entry" ? "giá vào" : KIND_NAME[tag.kind]}`}
-              className={`${events} flex items-stretch overflow-hidden rounded border tabular-nums ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+              className={`${events} flex items-stretch overflow-hidden rounded border tabular-nums ${draggable ? "cursor-pointer" : ""}`}
               style={{ height: TAG_H, color: fc(c), borderColor: fc(c), background: "var(--bg)", boxShadow: focus === mine ? `0 0 0 1px ${c}` : undefined }}
             >
               <span className="flex items-center border-r px-2" style={{ borderColor: fc(c) }}>

@@ -20,13 +20,16 @@ vi.mock("@/store/toast", () => ({ toast: vi.fn() }));
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
+import { useRailStore } from "@/store/rail";
 import { DEFAULT_SETTINGS, useSettingsStore } from "@/store/settings";
 import { createLineDrag, type ChartDrag } from "./chartOrders";
 import { useTradeFocus } from "./focus";
 import { useQuoteStore } from "./quote";
+import { clearEdit, seedEditStop, setEditPrice } from "./editBridge";
 import { useReplaySim } from "./replaySim";
 import type { PnlSpec } from "./pnl";
 import { useTradeStore } from "./store";
+import { useTicketStore } from "./ticket";
 
 const account = { id: "S:1", server: "S", broker: "B", login: 1, name: "n", mode: "demo", currency: "USD", leverage: 500, online: true, active: true, seen: 1, ea_trading: true } as Mt5Account;
 const position: Position = { ticket: 1, symbol: "XAUUSDm", type: "buy", volume: 0.1, price_open: 4125, sl: 4090, tp: 4150, price_current: 4130, profit: 0, swap: 0, time: 1, magic: 0, comment: "" };
@@ -82,6 +85,50 @@ afterEach(() => {
 });
 
 const last = () => previews[previews.length - 1];
+
+describe("Discard", () => {
+  it("bỏ thay đổi chờ và bỏ chọn lệnh đó (focus + bảng Modify)", () => {
+    useTicketStore.getState().select("position:1");
+    drop("psl:1", 4100);
+    ctl.cancelEdit("position:1");
+    expect(last()).toEqual([]);
+    expect(useTradeFocus.getState().owner).toBeNull();
+    expect(useTicketStore.getState().modifyOwner).toBeNull();
+    expect(useRailStore.getState().open).not.toBe("order"); // thanh trả về panel trước đó
+    call("onMove", "psl:1", 4095); // chọn -> kéo -> Discard -> kéo: cú kéo sau KHÔNG dựng lại bảng như vừa bấm chọn
+    expect(useTicketStore.getState().modifyOwner).toBeNull();
+    expect(useRailStore.getState().open).not.toBe("order");
+  });
+
+  it("Discard của lệnh này không bỏ chọn lệnh khác đang focus", () => {
+    drop("psl:1", 4100);
+    useTradeFocus.setState({ owner: "order:2" });
+    ctl.cancelEdit("position:1");
+    expect(useTradeFocus.getState().owner).toBe("order:2");
+  });
+});
+
+describe("ô nhập ở bảng Modify (editBridge)", () => {
+  it("nhập giá = thay đổi chờ xác nhận; One-click bật cũng không tự gửi (có nút Modify)", () => {
+    useSettingsStore.setState({ s: { ...DEFAULT_SETTINGS, oneClick: true } });
+    setEditPrice("psl:1", 4100);
+    expect(last().map((p) => [p.key, p.price, p.pending])).toEqual([["psl:1", 4100, true]]);
+    expect(h.moveStops).not.toHaveBeenCalled();
+  });
+
+  it("giá sai phía thì không tạo thay đổi chờ", () => {
+    setEditPrice("psl:1", 4200); // SL của vị thế Buy phải dưới giá thị trường
+    expect(last()).toEqual([]);
+  });
+
+  it("bật SL / TP chưa có: mức gợi ý đúng phía; clear bỏ thay đổi chờ", () => {
+    seedEditStop("ptp:1");
+    const [tp] = last();
+    expect(tp.key).toBe("ptp:1");
+    clearEdit("ptp:1");
+    expect(last()).toEqual([]);
+  });
+});
 
 describe("kéo SL / TP của vị thế (One-click tắt)", () => {
   it("kéo TP sau khi đã thả SL: cả hai cùng chờ xác nhận, SL KHÔNG bị trả về giá cũ", () => {
@@ -193,8 +240,18 @@ describe("focus lệnh trên chart", () => {
   });
 
   it("bấm vào đường mà không kéo (onAbort) cũng focus", () => {
-    call("onAbort", "ptp:1", 4150);
+    call("onAbort", "ptp:1", 4150, true);
     expect(useTradeFocus.getState().owner).toBe("position:1");
+  });
+
+  it("chỉ bấm không dời mới chọn lệnh (mở bảng Modify); kéo rồi thả lại giá cũ hay Esc thì chỉ focus", () => {
+    useRailStore.setState({ open: null }); // thanh đang đóng: kéo không được tự mở / đổi bảng
+    useTicketStore.setState({ modifyOwner: null });
+    call("onAbort", "ptp:1", 4150, false);
+    expect(useTicketStore.getState().modifyOwner).toBeNull();
+    expect(useTradeFocus.getState().owner).toBe("position:1");
+    call("onAbort", "ptp:1", 4150, true);
+    expect(useTicketStore.getState().modifyOwner).toBe("position:1");
   });
 
   it("bấm nền chart hoặc Esc thì bỏ focus; Esc lúc đang kéo thì không", () => {
@@ -248,11 +305,16 @@ describe("Replay: SL / TP của vị thế giả lập", () => {
     expect(sim()?.tp).toBe(0);
   });
 
-  it("kéo nút TP / SL mờ trên thẻ: đặt mức gợi ý theo giá nến hiện tại rồi bắt đầu kéo", () => {
+  it("kéo nút TP / SL mờ trên thẻ: nhấn chưa đặt gì, chỉ khi bắt đầu kéo mới đặt mức gợi ý theo giá nến hiện tại", () => {
     ctl.beginStop({ t: "position", ticket: -1 }, "tp", {} as never);
+    expect(sim()?.tp).toBe(0);
+    const arm = h.begin.mock.calls[0][4] as () => boolean;
+    expect(h.begin).toHaveBeenCalledWith({}, "stp:-1", 0, expect.any(Number), expect.any(Function));
+    expect(arm()).toBe(true);
     expect(sim()?.tp).toBeGreaterThan(4100);
-    expect(h.begin).toHaveBeenCalledWith({}, "stp:-1", 0, sim()?.tp);
     ctl.beginStop({ t: "position", ticket: -1 }, "sl", {} as never);
+    expect(sim()?.sl).toBe(0);
+    (h.begin.mock.calls[1][4] as () => boolean)();
     expect(sim()?.sl).toBeLessThan(4100);
     expect(sim()?.sl).toBeGreaterThan(0);
   });

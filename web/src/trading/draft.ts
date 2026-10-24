@@ -22,7 +22,7 @@ export const parseNum = (t: string): number => (t.trim() === "" ? 0 : parseFloat
 export type DraftField = "price" | "sl" | "tp";
 export const DRAFT_IDS: Record<string, DraftField> = { "d:entry": "price", "d:sl": "sl", "d:tp": "tp" };
 
-/** Đường của bản nháp trên chart của `symbol` (nét đứt như TradingView): giá vào + thẻ có nút đặt lệnh (lệnh chờ: ở giá đã nhập, nhãn loại lệnh theo giá thị trường hiện tại; Market: ở giá khớp
+/** Đường của bản nháp trên chart của `symbol` (giá vào nét liền như lệnh đã đặt; bản nháp phân biệt bằng thẻ hơi mờ): giá vào + thẻ có nút đặt lệnh (lệnh chờ: ở giá đã nhập, nhãn loại lệnh theo giá thị trường hiện tại; Market: ở giá khớp
  *  Ask / Bid, kéo đi chỗ khác thì thành lệnh chờ), SL / TP chấm chấm kèm lãi/lỗi. Chưa có giá vào hợp lệ (chưa nhập, chưa có tick) thì không có đường giá vào. */
 export function draftLines(d: Draft | null, symbol: string, quote: { bid: number; ask: number } | undefined, stopTitle?: StopTitleFn): LineSpec[] {
   if (!d || d.symbol !== symbol) return [];
@@ -42,9 +42,9 @@ export function draftLines(d: Draft | null, symbol: string, quote: { bid: number
       key: "d:entry",
       price: entry,
       color: sideColor(d.side),
-      style: "dashed",
+      style: "solid",
       title: `${label} ${d.lot}`.toUpperCase(),
-      tag: { kind: "entry", owner: { t: "draft" }, qty: d.lot, label, ghosts: ghostsFor(sl, tp), place: sideName, draft: true },
+      tag: { kind: "entry", owner: { t: "draft" }, qty: d.lot, label, ghosts: ghostsFor(sl, tp), place: sideName, draft: true, side: d.side },
     });
   }
   const title = (kind: "sl" | "tp", p: number) => (stopTitle ? stopTitle(kind, d.side, lot, entry, p, symbol) : kind.toUpperCase());

@@ -19,11 +19,11 @@ describe("draftLines", () => {
   it("lệnh chờ: đường giá vào nét đứt theo hướng, nhãn loại lệnh suy ra từ giá thị trường; SL cam + TP xanh chấm chấm", () => {
     const l = draftLines(d({ sl: "4110", tp: "4140" }), "XAUUSDm", Q);
     expect(l).toMatchObject([
-      { key: "d:entry", price: 4120, color: COLORS.buy, style: "dashed", title: "BUY LIMIT 0.10" },
+      { key: "d:entry", price: 4120, color: COLORS.buy, style: "solid", title: "BUY LIMIT 0.10" },
       { key: "d:sl", price: 4110, color: COLORS.sl, style: "dotted", title: "SL" },
       { key: "d:tp", price: 4140, color: COLORS.tp, style: "dotted", title: "TP" },
     ]);
-    expect(l[0].tag).toEqual({ kind: "entry", owner: { t: "draft" }, qty: "0.10", label: "Buy limit", ghosts: [], place: "Buy", draft: true });
+    expect(l[0].tag).toEqual({ kind: "entry", owner: { t: "draft" }, qty: "0.10", label: "Buy limit", ghosts: [], place: "Buy", draft: true, side: "buy" });
     expect(draftLines(d({ side: "sell", price: "4140" }), "XAUUSDm", Q)[0].color).toBe(COLORS.sell);
   });
   it("thẻ giá vào có nút mờ cho SL/TP chưa đặt", () => {

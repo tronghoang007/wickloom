@@ -70,14 +70,17 @@
 //|   CVD / Big Trades theo CUNG quy tac voi lich su tick (chi tick doi  |
 //|   Bid, hoac tick giao dich neu theo Last), khong con phai cho EA     |
 //|   tinh lai moi 15 giay                                              |
+//| - 2.18: "deals" them position (DEAL_POSITION_ID), sl, tp, reason    |
+//|   (DEAL_REASON: client/mobile/web/expert/sl/tp/so...) - web ghep     |
+//|   deal vao/ra thanh vi the da dong cho tab History                  |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.17"
+#property version "2.18"
 
-#define EA_VERSION "2.17"
+#define EA_VERSION "2.18"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -418,6 +421,25 @@ string DealEntryStr(long e)
   return "";
 }
 
+string DealReasonStr(long r)
+{
+  if (r == DEAL_REASON_CLIENT)
+    return "client";
+  if (r == DEAL_REASON_MOBILE)
+    return "mobile";
+  if (r == DEAL_REASON_WEB)
+    return "web";
+  if (r == DEAL_REASON_EXPERT)
+    return "expert";
+  if (r == DEAL_REASON_SL)
+    return "sl";
+  if (r == DEAL_REASON_TP)
+    return "tp";
+  if (r == DEAL_REASON_SO)
+    return "so";
+  return "";
+}
+
 // Lich su khop lenh DealsDays ngay gan nhat (toi da MaxDeals, moi nhat truoc)
 void PostDeals()
 {
@@ -450,6 +472,10 @@ void PostDeals()
         + ",\"swap\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_SWAP), 2)
         + ",\"time\":" + IntegerToString(ToUtc(HistoryDealGetInteger(tk, DEAL_TIME)))
         + ",\"magic\":" + IntegerToString((long)HistoryDealGetInteger(tk, DEAL_MAGIC))
+        + ",\"position\":" + IntegerToString((long)HistoryDealGetInteger(tk, DEAL_POSITION_ID))
+        + ",\"sl\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_SL), dg)
+        + ",\"tp\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_TP), dg)
+        + ",\"reason\":\"" + DealReasonStr(HistoryDealGetInteger(tk, DEAL_REASON)) + "\""
         + ",\"comment\":\"" + Esc(HistoryDealGetString(tk, DEAL_COMMENT)) + "\"}";
   }
   SendLine("{\"type\":\"deals\",\"deals\":" + js + "]}");

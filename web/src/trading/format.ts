@@ -38,6 +38,87 @@ export const accountProfit = (data: TradeData) => data.account.profit ?? totalPn
 /** Lãi/lỗ cuối cùng của một deal trong lịch sử (kể cả phí). */
 export const dealNet = (d: Deal) => d.profit + d.commission + d.swap;
 
+export type ClosedPosition = {
+  position: number; symbol: string; side: "buy" | "sell"; volume: number; open: number; close: number; sl: number; tp: number;
+  openTime: number; closeTime: number; swap: number; pnl: number; reason: string;
+};
+
+const trade = (d: Deal) => d.type === "buy" || d.type === "sell";
+
+/** Deal đã có mã vị thế thì giữ nguyên; EA cũ thì gán mã suy ra: deal ra lấy mã của deal vào cũ nhất còn khối lượng, ngược hướng với nó. */
+function withPositions(deals: Deal[]): Deal[] {
+  if (deals.some((d) => d.position)) return deals;
+  const asc = deals.filter(trade).sort((a, b) => a.time - b.time || a.ticket - b.ticket);
+  const open: { d: Deal; left: number }[] = [];
+  return asc.map((d) => {
+    if (d.entry === "in") {
+      open.push({ d, left: d.volume });
+      return { ...d, position: -d.ticket };
+    }
+    let left = d.volume;
+    let pos = -d.ticket; // không thấy deal vào (đã ngoài cửa sổ): tự thành một vị thế
+    for (const o of open) {
+      if (o.left <= 1e-9 || o.d.symbol !== d.symbol || o.d.type === d.type) continue;
+      if (pos === -d.ticket) pos = -o.d.ticket;
+      const take = Math.min(left, o.left);
+      o.left -= take;
+      left -= take;
+      if (left <= 1e-9) break;
+    }
+    return { ...d, position: pos };
+  });
+}
+
+/** Comment MT5 gắn vào deal đóng bởi SL / TP / stop out: "[sl 4090.00]", "[tp 4200.098]", "[so ...]" (kèm giá chạm). EA mới gửi sẵn reason / sl / tp; EA cũ thì chỉ còn đọc được từ đây. */
+const hit = (d: Deal) => {
+  const m = /^\[(sl|tp|so)\s+([\d.]+)\]/i.exec(d.comment);
+  return m ? { reason: m[1].toLowerCase(), price: Number(m[2]) } : null;
+};
+const reasonOf = (d: Deal) => d.reason || hit(d)?.reason || "";
+/** SL / TP của vị thế lúc đóng: EA mới gửi trên deal; EA cũ chỉ biết mức đã chạm (đóng bởi TP thì TP = giá đó), mức còn lại để 0. */
+const levelOf = (d: Deal, k: "sl" | "tp") => d[k] || (hit(d)?.reason === k ? hit(d)!.price : 0);
+
+const wavg = (ds: Deal[]) => {
+  const v = ds.reduce((s, d) => s + d.volume, 0);
+  return v > 0 ? ds.reduce((s, d) => s + d.price * d.volume, 0) / v : 0;
+};
+
+/** Ghép deal vào/ra cùng mã vị thế thành các vị thế ĐÃ ĐÓNG (như tab History của TradingView), mới đóng nhất trước. Đóng nhiều lần (một phần) thì cộng khối lượng và lấy giá đóng trung bình
+ *  theo khối lượng. P/L = lãi/lỗ + swap + phí của mọi deal trong vị thế. Vị thế còn mở (chưa có deal ra) và deal nạp/rút bị bỏ; deal vào đã trôi khỏi cửa sổ EA gửi thì giá/giờ mở = 0.
+ *  EA cũ (< 2.18) không gửi mã vị thế: ghép theo thứ tự vào trước ra trước trong từng symbol, mã vị thế âm = tự suy ra (không phải mã MT5). */
+export function closedPositions(deals: Deal[]): ClosedPosition[] {
+  const by = new Map<number, Deal[]>();
+  for (const d of withPositions(deals)) {
+    if (!trade(d) || !d.position) continue;
+    by.set(d.position, [...(by.get(d.position) ?? []), d]);
+  }
+  const out: ClosedPosition[] = [];
+  for (const [position, ds] of by) {
+    const outs = ds.filter((d) => d.entry === "out" || d.entry === "inout").sort((a, b) => a.time - b.time);
+    if (outs.length === 0) continue;
+    const ins = ds.filter((d) => d.entry === "in").sort((a, b) => a.time - b.time);
+    const last = outs[outs.length - 1];
+    out.push({
+      position,
+      symbol: last.symbol,
+      side: last.type === "buy" ? "sell" : "buy", // deal đóng đi ngược hướng vị thế
+      volume: outs.reduce((s, d) => s + d.volume, 0),
+      open: wavg(ins),
+      close: wavg(outs),
+      sl: levelOf(last, "sl"),
+      tp: levelOf(last, "tp"),
+      openTime: ins[0]?.time ?? 0,
+      closeTime: last.time,
+      swap: ds.reduce((s, d) => s + d.swap, 0),
+      pnl: ds.reduce((s, d) => s + dealNet(d), 0),
+      reason: reasonOf(last),
+    });
+  }
+  return out.sort((a, b) => b.closeTime - a.closeTime);
+}
+
+export const REASON_LABEL: Record<string, string> = { client: "Client", mobile: "Mobile", web: "Web", expert: "Expert", sl: "Stop loss", tp: "Take profit", so: "Stop out" };
+
 export type DealSummary = { profit: number; swap: number; commission: number; deposit: number; withdrawal: number; closed: number };
 
 /** Tổng hợp từ lịch sử deal như màn History của MT5: Profit = tổng lãi/lỗ các lệnh ĐÃ ĐÓNG (deal vào lệnh chưa có lãi/lỗ nên không tính), Swap + Commission của mọi deal mua/bán,
@@ -70,8 +151,8 @@ export function isStale(data: TradeData | null, nowSec: number): boolean {
 
 export type LineStyleName = "solid" | "dashed" | "dotted";
 export type TagOwner = { t: "draft" } | { t: "position"; ticket: number } | { t: "order"; ticket: number };
-/** Thẻ trên chart của một đường (kiểu TradingView): [nút đặt lệnh của bản nháp] [TP+] [SL+] [lot | nhãn | ×]. `ghosts` = SL/TP chưa có: kéo nút mờ ra giá cần đặt để tạo. */
-export type LineTag = { kind: "entry" | "tp" | "sl"; owner: TagOwner; qty: string; label: string; ghosts: ("tp" | "sl")[]; place?: string; draft: boolean; pending?: boolean };
+/** Thẻ trên chart của một đường (kiểu TradingView): [nút đặt lệnh của bản nháp] [TP+] [SL+] [lot | nhãn | ×]. `ghosts` = SL/TP chưa có: kéo nút mờ ra giá cần đặt để tạo. `side` (thẻ giá vào) = hướng lệnh, để tô vùng lãi / lỗi khi trỏ vào nút mờ. */
+export type LineTag = { kind: "entry" | "tp" | "sl"; owner: TagOwner; qty: string; label: string; ghosts: ("tp" | "sl")[]; place?: string; draft: boolean; pending?: boolean; side?: "buy" | "sell" };
 export type LineSpec = { key: string; price: number; color: string; style: LineStyleName; title: string; tag?: LineTag };
 
 // Màu theo TradingView Paper Trading: Buy xanh dương, Sell đỏ, TP xanh lá, SL cam
@@ -121,7 +202,7 @@ export function tradeLines(data: TradeData | null, symbol: string, nowSec: numbe
       color: sideColor(side),
       style: "solid",
       title: `${buy ? "BUY" : "SELL"} ${fmtLot(p.volume)}  ${pnl}`,
-      tag: { kind: "entry", owner, qty: fmtLot(p.volume), label: ccy ? `${pnl} ${ccy}` : pnl, ghosts: ghostsFor(sl, tp), draft: false },
+      tag: { kind: "entry", owner, qty: fmtLot(p.volume), label: ccy ? `${pnl} ${ccy}` : pnl, ghosts: ghostsFor(sl, tp), draft: false, side },
     });
     stops("p", owner, p.ticket, side, p.volume, p.price_open, sl, tp);
   }
@@ -137,7 +218,7 @@ export function tradeLines(data: TradeData | null, symbol: string, nowSec: numbe
       color: sideColor(side),
       style: "solid",
       title: `${orderLabel(o.type).toUpperCase()} ${fmtLot(o.volume)}`,
-      tag: { kind: "entry", owner, qty: fmtLot(o.volume), label: orderLabel(o.type), ghosts: ghostsFor(sl, tp), draft: false },
+      tag: { kind: "entry", owner, qty: fmtLot(o.volume), label: orderLabel(o.type), ghosts: ghostsFor(sl, tp), draft: false, side },
     });
     stops("o", owner, o.ticket, side, o.volume, o.price_open, sl, tp);
   }

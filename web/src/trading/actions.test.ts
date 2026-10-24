@@ -78,7 +78,7 @@ describe("placeMarket", () => {
   it("lỗi chưa rõ kết quả (504/mất mạng) → toast dài + làm mới để thấy vị thế có thể đã khớp", async () => {
     sendOrder.mockResolvedValue({ kind: "error", status: 504, message: "EA không trả lời", unknown: true } satisfies TradeOutcome);
     await placeMarket("buy", "XAUUSDm", 0.1);
-    expect(toastMock).toHaveBeenCalledWith("EA không trả lời", { ms: 10_000 });
+    expect(toastMock).toHaveBeenCalledWith("EA không trả lời", expect.objectContaining({ ms: 10_000, kind: "error" }));
     await vi.advanceTimersByTimeAsync(2000);
     expect(refresh).toHaveBeenCalled();
   });
@@ -86,7 +86,7 @@ describe("placeMarket", () => {
   it("lỗi rõ ràng (403 real...) → toast, không làm mới", async () => {
     sendOrder.mockResolvedValue({ kind: "error", status: 403, message: "Hiện chỉ giao dịch được trên account demo", unknown: false } satisfies TradeOutcome);
     await placeMarket("buy", "XAUUSDm", 0.1);
-    expect(toastMock).toHaveBeenCalledWith("Hiện chỉ giao dịch được trên account demo", { ms: 7000 });
+    expect(toastMock).toHaveBeenCalledWith("Hiện chỉ giao dịch được trên account demo", expect.objectContaining({ ms: 7000, kind: "error" }));
     await vi.advanceTimersByTimeAsync(2000);
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -237,7 +237,7 @@ describe("moveOrder", () => {
     sendPending.mockResolvedValue(done({ orderType: "buy_stop" }));
     sendCancel.mockResolvedValue({ kind: "error", status: 504, message: "EA không trả lời", unknown: true } satisfies TradeOutcome);
     expect(await moveOrder(ord(), 4150, 3)).toBe(true);
-    expect(toastMock).toHaveBeenLastCalledWith(expect.stringMatching(/chưa xoá được lệnh cũ #222/), { ms: 12_000 });
+    expect(toastMock).toHaveBeenLastCalledWith(expect.stringMatching(/chưa xoá được lệnh cũ #222/), expect.objectContaining({ ms: 12_000, kind: "error" }));
   });
 
   it("sell stop kéo lên trên Bid → sell limit mới", async () => {
@@ -316,7 +316,7 @@ describe("moveStops", () => {
     toastMock.mock.calls[0][1].action.run();
     await vi.advanceTimersByTimeAsync(0);
     expect(sendModifyPos).toHaveBeenLastCalledWith("S:1", 111, { sl: 4115, tp: 4140 });
-    expect(toastMock).toHaveBeenLastCalledWith("Đã hoàn tác SL & TP XAUUSDm #111", { ms: 4000 });
+    expect(toastMock).toHaveBeenLastCalledWith("Đã hoàn tác SL & TP XAUUSDm #111", expect.objectContaining({ ms: 4000, kind: "success" }));
   });
 
   it("lệnh chờ: đi qua API sửa lệnh; một mức bỏ (to = 0) được ghi là bỏ", async () => {
@@ -334,7 +334,7 @@ describe("moveStops", () => {
   it("sàn từ chối → một toast lỗi, không có Hoàn tác, false", async () => {
     sendModifyPos.mockResolvedValue(done({ ok: false, message: "SL/TP không hợp lệ (quá gần giá)" }));
     expect(await moveStops(t, both, 3)).toBe(false);
-    expect(toastMock.mock.calls).toEqual([["SL/TP không hợp lệ (quá gần giá)", { ms: 7000 }]]);
+    expect(toastMock.mock.calls).toEqual([["SL/TP không hợp lệ (quá gần giá)", expect.objectContaining({ ms: 7000, kind: "error" })]]);
   });
 });
 
@@ -365,14 +365,14 @@ describe("moveStop", () => {
     toastMock.mock.calls[0][1].action.run();
     await vi.advanceTimersByTimeAsync(0);
     expect(sendModifyPos).toHaveBeenLastCalledWith("S:1", 111, { sl: 4115 });
-    expect(toastMock).toHaveBeenLastCalledWith("Đã hoàn tác SL XAUUSDm #111 → 4115.000", { ms: 4000 });
+    expect(toastMock).toHaveBeenLastCalledWith("Đã hoàn tác SL XAUUSDm #111 → 4115.000", expect.objectContaining({ ms: 4000, kind: "success" }));
   });
 
   it("sàn từ chối → toast message, không có nút Hoàn tác, trả false", async () => {
     sendModifyPos.mockResolvedValue(done({ ok: false, message: "SL/TP không hợp lệ (quá gần giá)" }));
     expect(await moveStop(pos, 4129.9, 3)).toBe(false);
     expect(toastMock).toHaveBeenCalledTimes(1);
-    expect(toastMock.mock.calls[0]).toEqual(["SL/TP không hợp lệ (quá gần giá)", { ms: 7000 }]);
+    expect(toastMock.mock.calls[0]).toEqual(["SL/TP không hợp lệ (quá gần giá)", expect.objectContaining({ ms: 7000, kind: "error" })]);
   });
 
   it("EA cũ (409 cần >= 2.14) → báo rõ, false", async () => {
@@ -394,7 +394,7 @@ describe("moveStop", () => {
     toastMock.mock.calls[0][1].action.run();
     await vi.advanceTimersByTimeAsync(0);
     expect(sendModifyPos).toHaveBeenLastCalledWith("S:1", 111, { sl: 0 });
-    expect(toastMock).toHaveBeenLastCalledWith("Đã bỏ SL XAUUSDm #111", { ms: 4000 });
+    expect(toastMock).toHaveBeenLastCalledWith("Đã bỏ SL XAUUSDm #111", expect.objectContaining({ ms: 4000, kind: "success" }));
   });
 
   it("giá 0 = bỏ SL/TP (dấu × trên thẻ): gửi 0, Hoàn tác đặt lại mức cũ", async () => {

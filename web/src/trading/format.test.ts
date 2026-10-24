@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Deal, Mt5Account, PendingOrder, Position, TradeData } from "@/lib/mt5Api";
-import { COLORS, STALE_SECONDS, accountProfit, dealNet, dealSummary, ghostsFor, stopLabel, type StopTitleFn, fmtLot, fmtPnl, fmtPx, isStale, orderLabel, positionPnl, sideLabel, totalPnl, tradeLines } from "./format";
+import { COLORS, STALE_SECONDS, accountProfit, closedPositions, dealNet, dealSummary, ghostsFor, stopLabel, type StopTitleFn, fmtLot, fmtPnl, fmtPx, isStale, orderLabel, positionPnl, sideLabel, totalPnl, tradeLines } from "./format";
 
 const account = { id: "S:1", server: "S", broker: "B", login: 1, name: "n", mode: "demo", currency: "USD", leverage: 500, online: true, active: true, seen: 1 } as Mt5Account;
 const pos = (o: Partial<Position> = {}): Position => ({
@@ -135,7 +135,7 @@ describe("thẻ trên chart (kiểu TradingView)", () => {
   it("vị thế: thẻ entry có lot + lãi/lỗi kèm đơn vị tiền, SL/TP mỗi mức một thẻ, không còn nút mờ khi đủ cả hai", () => {
     const l = tradeLines(data({ orders: [] }), "XAUUSDm", 1000, null, undefined, "USD");
     const entry = l.find((x) => x.key === "p:1")?.tag;
-    expect(entry).toEqual({ kind: "entry", owner: { t: "position", ticket: 1 }, qty: "0.10", label: "+47.00 USD", ghosts: [], draft: false });
+    expect(entry).toEqual({ kind: "entry", owner: { t: "position", ticket: 1 }, qty: "0.10", label: "+47.00 USD", ghosts: [], draft: false, side: "buy" });
     expect(l.find((x) => x.key === "psl:1")?.tag).toMatchObject({ kind: "sl", owner: { t: "position", ticket: 1 }, label: "SL" });
   });
   it("vị thế chưa có SL/TP: thẻ entry có hai nút mờ", () => {
@@ -216,5 +216,51 @@ describe("dealSummary", () => {
   });
   it("không có deal: toàn số 0", () => {
     expect(dealSummary([])).toEqual({ profit: 0, swap: 0, commission: 0, deposit: 0, withdrawal: 0, closed: 0 });
+  });
+});
+
+describe("closedPositions", () => {
+  const deal = (o: Partial<Deal>): Deal => ({ ticket: 1, order: 1, symbol: "BTCUSDm", type: "buy", entry: "in", volume: 0.01, price: 100, profit: 0, commission: 0, swap: 0, time: 1000, magic: 0, comment: "", position: 7, ...o });
+
+  it("ghép deal vào/ra cùng mã vị thế: hướng theo deal vào, giá mở / đóng, P/L gồm phí", () => {
+    const rows = closedPositions([
+      deal({ ticket: 2, entry: "out", type: "sell", price: 110, profit: 0.1, commission: -0.02, swap: -0.01, time: 2000, sl: 90, tp: 120, reason: "tp" }),
+      deal({ ticket: 1 }),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ position: 7, side: "buy", open: 100, close: 110, openTime: 1000, closeTime: 2000, sl: 90, tp: 120, reason: "tp", swap: -0.01 });
+    expect(rows[0].pnl).toBeCloseTo(0.07);
+  });
+
+  it("đóng một phần nhiều lần: cộng khối lượng, giá đóng trung bình; vị thế còn mở và deal nạp tiền bị bỏ; mới đóng trước", () => {
+    const rows = closedPositions([
+      deal({ ticket: 3, position: 8, entry: "out", type: "buy", volume: 0.01, price: 50, time: 3000 }),
+      deal({ ticket: 4, position: 7, entry: "out", type: "sell", volume: 0.01, price: 100, time: 2500 }),
+      deal({ ticket: 5, position: 7, entry: "out", type: "sell", volume: 0.03, price: 120, time: 2600 }),
+      deal({ ticket: 6, position: 7, entry: "in", volume: 0.04, price: 100, time: 1000 }),
+      deal({ ticket: 7, position: 9, entry: "in", time: 4000 }),
+      deal({ ticket: 8, position: 0, type: "balance", entry: "", time: 5000 }),
+    ]);
+    expect(rows.map((r) => r.position)).toEqual([8, 7]);
+    expect(rows[0]).toMatchObject({ side: "sell", open: 0, openTime: 0 });
+    expect(rows[1].volume).toBeCloseTo(0.04);
+    expect(rows[1].close).toBeCloseTo(115);
+    expect(rows[1].closeTime).toBe(2600);
+  });
+
+  it("EA cũ không có mã vị thế: ghép vào trước ra trước theo symbol, lý do đọc từ comment", () => {
+    const old = (o: Partial<Deal>) => deal({ position: undefined, ...o });
+    const rows = closedPositions([
+      old({ ticket: 4, symbol: "EURUSD", type: "buy", entry: "out", price: 1.2, time: 3000 }),
+      old({ ticket: 3, type: "sell", entry: "out", price: 90, profit: -1, time: 2000, comment: "[sl 90.00]" }),
+      old({ ticket: 2, symbol: "EURUSD", type: "sell", entry: "in", price: 1.3, time: 1500 }),
+      old({ ticket: 1, type: "buy", entry: "in", price: 100, time: 1000 }),
+    ]);
+    expect(rows.map((r) => [r.symbol, r.side, r.open, r.close, r.reason])).toEqual([
+      ["EURUSD", "sell", 1.3, 1.2, ""],
+      ["BTCUSDm", "buy", 100, 90, "sl"],
+    ]);
+    expect(rows[1]).toMatchObject({ sl: 90, tp: 0 }); // mức đã chạm đọc từ comment
+    expect(rows.every((r) => r.position < 0)).toBe(true);
   });
 });

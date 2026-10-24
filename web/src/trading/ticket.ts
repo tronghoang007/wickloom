@@ -76,7 +76,10 @@ export const useTicketStore = create<State>()((set) => ({
   },
 }));
 
-// Bấm nền chart / Esc bỏ focus thì bảng Modify cũng thôi (kéo lệnh khác chỉ đổi focus, không đổi bảng)
+// Bấm nền chart / Esc / Discard bỏ focus thì bảng Modify cũng thôi, và trả thanh bên phải về panel trước đó: để thanh còn ở "order" (chỉ ẩn) thì cú kéo kế tiếp, `follow` thấy thanh đang
+// mở bảng đặt lệnh nên dựng lại bảng như vừa bấm chọn (kéo lệnh khác chỉ đổi focus, không đổi bảng)
 useTradeFocus.subscribe((f) => {
-  if (f.owner === null && useTicketStore.getState().modifyOwner !== null) useTicketStore.setState({ modifyOwner: null });
+  if (f.owner !== null || useTicketStore.getState().modifyOwner === null) return;
+  useTicketStore.setState({ modifyOwner: null });
+  useRailStore.getState().closeOrder();
 });

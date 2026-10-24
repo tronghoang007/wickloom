@@ -27,17 +27,17 @@ function refreshSoon() {
 }
 
 /** Báo kết quả bằng toast. `success` là câu cố định hoặc hàm của kết quả (vd chèn loại lệnh EA đã quyết). Trả true nếu sàn đã khớp / nhận lệnh. */
-function report(o: TradeOutcome, success: string | ((r: TradeResult) => string), quiet = false): boolean {
+function report(o: TradeOutcome, success: string | ((r: TradeResult) => string), quiet = false, title = "Done"): boolean {
   if (o.kind === "done" && o.result.ok) {
-    if (!quiet) toast(typeof success === "string" ? success : success(o.result), { ms: 4000 });
+    if (!quiet) toast(typeof success === "string" ? success : success(o.result), { ms: 4000, title, kind: "success" });
     refreshSoon();
     return true;
   }
   if (o.kind === "done") {
-    toast(o.result.message || "Sàn từ chối lệnh", { ms: 7000 });
+    toast(o.result.message || "Sàn từ chối lệnh", { ms: 7000, title: "Order rejected", kind: "error" });
     return false;
   }
-  toast(o.message, { ms: o.unknown ? 10_000 : 7000 });
+  toast(o.message, { ms: o.unknown ? 10_000 : 7000, title: o.unknown ? "Order status unknown" : "Order failed", kind: "error" });
   if (o.unknown) refreshSoon(); // có thể đã khớp: cho người dùng thấy vị thế
   return false;
 }
@@ -63,7 +63,7 @@ export async function placeMarket(side: "buy" | "sell", symbol: string, volume: 
   const done = await run("Đăng nhập để giao dịch", async (accountId) => {
     const o = await sendMarketOrder(accountId, { symbol, side, volume, sl: stops.sl, tp: stops.tp, clientId: newClientId() });
     const price = o.kind === "done" && o.result.price > 0 ? ` @ ${fmtPx(o.result.price, digits)}` : "";
-    return report(o, `${side === "buy" ? "Buy" : "Sell"} ${fmtLot(volume)} ${symbol}${price}`);
+    return report(o, `${side === "buy" ? "Buy" : "Sell"} ${fmtLot(volume)} ${symbol}${price}`, false, "Order filled");
   });
   return done === true;
 }
@@ -72,7 +72,7 @@ export async function placeMarket(side: "buy" | "sell", symbol: string, volume: 
 export function closeTrade(ticket: number, symbol: string, volume = 0): Promise<void> {
   return run("Đăng nhập để giao dịch", async (accountId) => {
     const o = await sendClosePosition(accountId, ticket, volume);
-    report(o, `Đã đóng ${volume > 0 ? `${fmtLot(volume)} lot của ` : ""}${symbol} #${ticket}`);
+    report(o, `Đã đóng ${volume > 0 ? `${fmtLot(volume)} lot của ` : ""}${symbol} #${ticket}`, false, "Position closed");
   }).then(() => undefined);
 }
 
@@ -89,6 +89,7 @@ async function pendingCall(accountId: string, r: PendingParams, digits: number |
       return res.typeChanged ? `Đã đặt ${text} (giá nhảy: loại lệnh đã đổi so với dự kiến)` : text;
     },
     quiet,
+    "Pending order placed",
   );
 }
 
@@ -100,7 +101,7 @@ export async function placePending(r: PendingParams, digits?: number): Promise<b
 /** Huỷ lệnh chờ `ticket`. */
 export async function cancelOrder(ticket: number, symbol: string): Promise<boolean> {
   return (
-    (await run("Đăng nhập để giao dịch", async (accountId) => report(await sendCancelOrder(accountId, ticket), `Đã huỷ lệnh chờ ${symbol} #${ticket}`))) === true
+    (await run("Đăng nhập để giao dịch", async (accountId) => report(await sendCancelOrder(accountId, ticket), `Đã huỷ lệnh chờ ${symbol} #${ticket}`, false, "Order cancelled"))) === true
   );
 }
 
@@ -113,7 +114,7 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
     const resolved = type && q ? resolveOrderType(sideOfType(type), price, q.bid, q.ask) : type;
     if (!type || resolved === type) {
       // cùng loại (hoặc chưa có giá để so: để EA quyết, nó từ chối nếu loại sẽ đổi)
-      return report(await sendModifyOrder(accountId, order.ticket, { price, ...stops }), `Đã đổi giá ${order.symbol} #${order.ticket} → ${fmtPx(price, digits)}`);
+      return report(await sendModifyOrder(accountId, order.ticket, { price, ...stops }), `Đã đổi giá ${order.symbol} #${order.ticket} → ${fmtPx(price, digits)}`, false, "Order modified");
     }
     if (!resolved) {
       toast("Giá vào trùng giá thị trường: lệnh chờ không đặt được ở đó", { ms: 6000 });
@@ -128,9 +129,9 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
     if (!placed) return false; // lệnh cũ còn nguyên
     const del = await sendCancelOrder(accountId, order.ticket);
     if (del.kind === "done" && del.result.ok) {
-      toast(`Đã chuyển lệnh #${order.ticket} thành ${pendingLabel(resolved)} ${fmtLot(order.volume)} ${order.symbol} @ ${fmtPx(price, digits)}`, { ms: 5000 });
+      toast(`Đã chuyển lệnh #${order.ticket} thành ${pendingLabel(resolved)} ${fmtLot(order.volume)} ${order.symbol} @ ${fmtPx(price, digits)}`, { ms: 5000, title: "Pending order placed", kind: "success" });
     } else {
-      toast(`Đã đặt ${pendingLabel(resolved)} mới nhưng chưa xoá được lệnh cũ #${order.ticket}: xoá tay ở tab Orders`, { ms: 12_000 });
+      toast(`Đã đặt ${pendingLabel(resolved)} mới nhưng chưa xoá được lệnh cũ #${order.ticket}: xoá tay ở tab Orders`, { ms: 12_000, title: "Old order not removed", kind: "error" });
     }
     refreshSoon();
     return true;
@@ -154,7 +155,7 @@ export async function moveStops(t: StopsTarget, changes: StopChange[], digits?: 
   const undo = () =>
     void run("Đăng nhập để giao dịch", async (accountId) => {
       const back = changes.length === 1 && changes[0].from > 0 ? `Đã hoàn tác ${names} ${where} → ${fmtPx(changes[0].from, digits)}` : changes.length === 1 ? `Đã bỏ ${names} ${where}` : `Đã hoàn tác ${names} ${where}`;
-      report(await call(accountId, patch((c) => c.from)), back);
+      report(await call(accountId, patch((c) => c.from)), back, false, "Order modified");
     });
   const done = await run("Đăng nhập để giao dịch", async (accountId) => {
     const o = await call(accountId, patch((c) => c.to));
@@ -166,7 +167,7 @@ export async function moveStops(t: StopsTarget, changes: StopChange[], digits?: 
           : one.to > 0
             ? `Đã ${one.from > 0 ? "đổi" : "đặt"} ${names} ${where} → ${fmtPx(one.to, digits)}${pnlText}`
             : `Đã bỏ ${names} ${where}`;
-      toast(text, { ms: 8000, action: changes.some((c) => c.from !== c.to) ? { label: "Hoàn tác", run: undo } : undefined });
+      toast(text, { ms: 8000, title: "Order modified", kind: "success", action: changes.some((c) => c.from !== c.to) ? { label: "Hoàn tác", run: undo } : undefined });
       refreshSoon();
       return true;
     }

@@ -2,7 +2,13 @@ import { create } from "zustand";
 
 // Lệnh (vị thế / lệnh chờ / bản nháp) đang được "focus" trên chart: khi có nhiều lệnh, bấm vào thẻ hoặc đường của một lệnh để thấy SL/TP nào là của lệnh đó, các lệnh khác mờ đi.
 // `owner` = "position:<ticket>" | "order:<ticket>" | "draft" (cùng khoá với nhóm thẻ trong TradeOverlay). Không còn trên chart (đã đóng / huỷ) thì coi như không focus gì.
-export const useTradeFocus = create<{ owner: string | null; set: (owner: string | null) => void }>()((set) => ({ owner: null, set: (owner) => set({ owner }) }));
+// `hover` = lệnh có đường đang được trỏ gần (chart báo, thẻ tự báo riêng): hiện chấm tròn kéo được trên các đường của lệnh đó.
+export const useTradeFocus = create<{ owner: string | null; set: (owner: string | null) => void; hover: string | null; setHover: (owner: string | null) => void }>()((set) => ({
+  owner: null,
+  set: (owner) => set({ owner }),
+  hover: null,
+  setHover: (hover) => set((s) => (s.hover === hover ? s : { hover })),
+}));
 
 /** Màu `#rrggbb` + độ đục (0-1) → `#rrggbbaa`; màu khác dạng thì giữ nguyên. */
 export function withAlpha(color: string, alpha: number): string {

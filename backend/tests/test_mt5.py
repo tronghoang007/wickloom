@@ -235,6 +235,11 @@ def test_deals_sorted_newest_first_and_independent_of_trade_message():
     r.update_trade(w, {"type": "deals", "deals": [old, DEAL, bal, {**DEAL, "ticket": 9, "type": "weird", "entry": "weird"}]})
     d = r.trade("Exness-MT5Trial17:12345678")["deals"]
     assert [x["ticket"] for x in d] == [333, 9, 2, 1]  # mới nhất trước; cùng giờ giữ thứ tự EA gửi
+    assert d[0]["position"] == 0 and d[0]["reason"] == "" and d[0]["sl"] == 0.0  # EA cũ không gửi: mặc định rỗng
+    r.update_trade(w, {"type": "deals", "deals": [{**DEAL, "position": 111, "sl": 4090, "tp": 4120, "reason": "tp"}]})
+    got = r.trade("Exness-MT5Trial17:12345678")["deals"][0]
+    assert (got["position"], got["sl"], got["tp"], got["reason"]) == (111, 4090.0, 4120.0, "tp")
+    r.update_trade(w, {"type": "deals", "deals": [old, DEAL, bal, {**DEAL, "ticket": 9, "type": "weird", "entry": "weird"}]})
     assert next(x for x in d if x["ticket"] == 9)["type"] == "other" and next(x for x in d if x["ticket"] == 9)["entry"] == ""
     r.update_trade(w, {"type": "trade", "positions": [POS], "orders": []})
     assert len(r.trade("Exness-MT5Trial17:12345678")["deals"]) == 4  # trade không xoá deals

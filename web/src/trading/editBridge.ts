@@ -10,7 +10,13 @@ export const useEditBridge = create<State>()((set) => ({
   setPane: (paneId, m) => set((s) => ({ byPane: { ...s.byPane, [paneId]: m } })),
 }));
 
-type Handlers = { confirm: (owner: string) => void; cancel: (owner: string) => void };
+type Handlers = {
+  confirm: (owner: string) => void;
+  cancel: (owner: string) => void;
+  set: (key: string, price: number) => void; // ô nhập ở bảng Modify: đặt giá mới cho một đường (khoá như DragPreview.key), thành thay đổi chờ, không tự gửi
+  seed: (key: string) => void; // bật SL / TP chưa có: đặt mức gợi ý
+  clear: (key: string) => void; // bỏ thay đổi chờ của một đường
+};
 const handlers = new Map<string, Handlers>();
 
 export function registerEditHandlers(paneId: string, h: Handlers): () => void {
@@ -23,6 +29,9 @@ export function registerEditHandlers(paneId: string, h: Handlers): () => void {
 
 export const confirmOwnerEdits = (owner: string) => handlers.forEach((h) => h.confirm(owner));
 export const cancelOwnerEdits = (owner: string) => handlers.forEach((h) => h.cancel(owner));
+export const setEditPrice = (key: string, price: number) => handlers.forEach((h) => h.set(key, price));
+export const seedEditStop = (key: string) => handlers.forEach((h) => h.seed(key));
+export const clearEdit = (key: string) => handlers.forEach((h) => h.clear(key));
 
 /** Các thay đổi đang chờ của một lệnh, từ mọi chart. */
 export function pendingFor(byPane: State["byPane"], owner: string): DragPreview[] {

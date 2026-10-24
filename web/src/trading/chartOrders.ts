@@ -164,12 +164,13 @@ export function createLineDrag(o: Opts): ChartDrag {
   const cancelEdit = (owner?: string) => {
     for (const [k, e] of edits) if (!owner || e.owner === owner) edits.delete(k);
     publish();
+    if (owner && useTradeFocus.getState().owner === owner) useTradeFocus.getState().set(null); // Discard = bỏ chọn lệnh luôn (bảng Modify đóng theo focus)
   };
-  const settle = (preview: DragPreview, pnlText = "") => {
+  const settle = (preview: DragPreview, pnlText = "", auto = true) => {
     const owner = ownerOf(preview.key);
     if (!owner) return publish();
     edits.set(preview.key, { preview, owner, pnlText });
-    if (useSettingsStore.getState().s.oneClick) confirmEdit(owner);
+    if (auto && useSettingsStore.getState().s.oneClick) confirmEdit(owner);
     else publish();
   };
   const onEsc = (e: KeyboardEvent) => {
@@ -186,6 +187,35 @@ export function createLineDrag(o: Opts): ChartDrag {
   };
   const onChartClick = () => useTradeFocus.getState().set(null);
   o.chart.subscribeClick(onChartClick);
+
+  // Đặt giá mới cho một đường của lệnh đã đặt (kiểm tra phía + vùng cấm của broker, rồi thành thay đổi chờ xác nhận): dùng cho thả tay (auto: One-click bật thì gửi ngay) và cho ô nhập ở bảng Modify (không tự gửi, có nút Modify)
+  const applyEdit = (id: string, price: number, auto: boolean) => {
+    const digits = o.getDigits();
+    const q = useQuoteStore.getState().quotes[o.getSymbol()];
+    const stop = stopOf(id);
+    if (stop) {
+      const why = checkStopMove({ target: stop.target, side: stop.side, kind: stop.field, price, entry: stop.entry, bid: q?.bid ?? 0, ask: q?.ask ?? 0, digits, stopsLevel: symbolInfo()?.stops_level });
+      if (why) {
+        toast(why, { ms: 6000 });
+        return publish();
+      }
+      const ccy = useMt5Store.getState().accounts.find((a) => a.active)?.currency ?? "";
+      const spec = pnlSpec(symbolInfo(), ccy);
+      const pnlText = spec ? ` (${fmtPnlCcy(estimatePnl(stop.side, stop.lot, stop.entry, price, spec), ccy)})` : "";
+      const preview = { key: id, price, title: stopTitleFn(stop.field, stop.side, stop.lot, stop.entry, price, stop.symbol) };
+      return settle(preview, pnlText, auto);
+    }
+
+    const order = orderOf(Number(id.slice(2)));
+    if (!order) return publish();
+    const t = isPendingType(order.type) && q ? resolveOrderType(sideOfType(order.type), price, q.bid, q.ask) : null;
+    const level = symbolInfo()?.stops_level;
+    if (t && q && tooClose(t, price, q.bid, q.ask, level, digits)) {
+      toast(`Quá gần giá thị trường (tối thiểu ${level} điểm)`, { ms: 6000 }); // không âm thầm đổi sang market
+      return publish();
+    }
+    settle({ key: id, price, title: `${labelAt(order, price)} ${fmtLot(order.volume)}`.toUpperCase(), label: labelAt(order, price) }, "", auto);
+  };
 
   const drag = new LineDrag({
     chart: o.chart,
@@ -236,14 +266,15 @@ export function createLineDrag(o: Opts): ChartDrag {
       }
       publish();
     },
-    onAbort: (id, from) => {
+    onHover: (id) => useTradeFocus.getState().setHover(id === null ? null : id in DRAFT_IDS ? "draft" : ownerOf(id)),
+    onAbort: (id, from, click) => {
       const sim = SIM_STOP.exec(id);
       if (sim) {
         useReplaySim.getState().setStop(o.paneId, sim[1] as "sl" | "tp", from); // Esc / bấm không kéo: về mức cũ (0 = bỏ mức vừa kéo ra)
         return;
       }
-      // bấm vào đường mà không kéo = chọn lệnh đó (mở bảng Modify ở thanh bên phải); kéo thì chỉ focus, không mở bảng
-      const clicked = id in DRAFT_IDS ? null : ownerOf(id);
+      // bấm vào đường mà không kéo = chọn lệnh đó (mở bảng Modify ở thanh bên phải); kéo (kể cả thả lại đúng giá cũ) hay Esc thì chỉ focus, không mở bảng
+      const clicked = click && !(id in DRAFT_IDS) ? ownerOf(id) : null;
       if (clicked) useTicketStore.getState().select(clicked);
       else focusLine(id);
       if (id in DRAFT_IDS) return patchDraft(id, null, from); // trả ô nhập về giá cũ
@@ -257,36 +288,12 @@ export function createLineDrag(o: Opts): ChartDrag {
         return;
       }
       live = null;
-      const digits = o.getDigits();
-      const q = useQuoteStore.getState().quotes[o.getSymbol()];
-      const stop = stopOf(id);
-      if (stop) {
-        const why = checkStopMove({ target: stop.target, side: stop.side, kind: stop.field, price, entry: stop.entry, bid: q?.bid ?? 0, ask: q?.ask ?? 0, digits, stopsLevel: symbolInfo()?.stops_level });
-        if (why) {
-          toast(why, { ms: 6000 });
-          return publish();
-        }
-        const ccy = useMt5Store.getState().accounts.find((a) => a.active)?.currency ?? "";
-        const spec = pnlSpec(symbolInfo(), ccy);
-        const pnlText = spec ? ` (${fmtPnlCcy(estimatePnl(stop.side, stop.lot, stop.entry, price, spec), ccy)})` : "";
-        const preview = { key: id, price, title: stopTitleFn(stop.field, stop.side, stop.lot, stop.entry, price, stop.symbol) };
-        return settle(preview, pnlText);
-      }
-
-      const order = orderOf(Number(id.slice(2)));
-      if (!order) return publish();
-      const t = isPendingType(order.type) && q ? resolveOrderType(sideOfType(order.type), price, q.bid, q.ask) : null;
-      const level = symbolInfo()?.stops_level;
-      if (t && q && tooClose(t, price, q.bid, q.ask, level, digits)) {
-        toast(`Quá gần giá thị trường (tối thiểu ${level} điểm)`, { ms: 6000 }); // không âm thầm đổi sang market
-        return publish();
-      }
-      settle({ key: id, price, title: `${labelAt(order, price)} ${fmtLot(order.volume)}`.toUpperCase(), label: labelAt(order, price) });
+      applyEdit(id, price, true);
     },
   });
 
   /** Kéo nút TP / SL mờ trên thẻ lệnh ra giá cần đặt (như TradingView). Bản nháp: ghi thẳng vào bản nháp; vị thế / lệnh chờ đã đặt: đường hiện ra ở mức gợi ý rồi theo con trỏ, thả tay mới gửi.
-   *  Bấm không kéo thì nhận luôn mức gợi ý (cách giá tham chiếu 0.25%). */
+   *  Đường chỉ hiện ra khi con trỏ bắt đầu kéo (nhấn chuột chưa làm gì); bấm không kéo thì không đặt gì. */
   const beginStop = (owner: TagOwner, kind: "sl" | "tp", e: PointerEvent) => {
     if (owner.t === "position" && owner.ticket === SIM_OWNER) {
       // vị thế giả lập của Replay: mức gợi ý đo từ giá nến hiện tại, rồi theo con trỏ
@@ -295,14 +302,15 @@ export function createLineDrag(o: Opts): ChartDrag {
       const sym = symbolInfo();
       const digits = o.getDigits();
       const seed = defaultStop(kind, sim.position.side, sim.price, sym?.tick_size || 10 ** -digits, digits);
-      if (useReplaySim.getState().setStop(o.paneId, kind, seed)) drag.begin(e, `s${kind}:-1`, 0, seed);
+      drag.begin(e, `s${kind}:-1`, 0, seed, () => useReplaySim.getState().setStop(o.paneId, kind, seed));
       return;
     }
     if (owner.t === "draft") {
-      seedDraftStop(kind);
-      const d = useTicketStore.getState().draft;
-      const v = d ? parseNum(d[kind]) : 0;
-      if (v > 0) drag.begin(e, `d:${kind}`, 0, v);
+      drag.begin(e, `d:${kind}`, 0, 0, () => {
+        seedDraftStop(kind);
+        const d = useTicketStore.getState().draft;
+        return (d ? parseNum(d[kind]) : 0) > 0;
+      });
       return;
     }
     if (!canMove()) return;
@@ -318,12 +326,29 @@ export function createLineDrag(o: Opts): ChartDrag {
     const ref = stop.target === "position" ? (q ? (stop.side === "buy" ? q.bid : q.ask) : 0) : stop.entry;
     if (!(ref > 0)) return;
     const seed = defaultStop(kind, stop.side, ref, tick, digits, sym?.stops_level);
-    live = { key, price: seed, title: stopTitleFn(kind, stop.side, stop.lot, stop.entry, seed, stop.symbol) };
-    publish();
-    drag.begin(e, key, 0, seed);
+    drag.begin(e, key, 0, seed, () => {
+      live = { key, price: seed, title: stopTitleFn(kind, stop.side, stop.lot, stop.entry, seed, stop.symbol) };
+      publish();
+      return true;
+    });
   };
 
-  const unregister = registerEditHandlers(o.paneId, { confirm: confirmEdit, cancel: cancelEdit });
+  // Bảng Modify (ô nhập / công tắc SL, TP): mức gợi ý như nút TP / SL mờ trên thẻ (vị thế đo từ giá đóng, lệnh chờ từ giá vào)
+  const seedEdit = (key: string) => {
+    const stop = stopOf(key);
+    if (!stop) return;
+    const sym = symbolInfo();
+    const q = useQuoteStore.getState().quotes[o.getSymbol()];
+    const digits = o.getDigits();
+    const ref = stop.target === "position" ? (q ? (stop.side === "buy" ? q.bid : q.ask) : 0) : stop.entry;
+    if (ref > 0) applyEdit(key, defaultStop(stop.field, stop.side, ref, sym?.tick_size || 10 ** -digits, digits, sym?.stops_level), false);
+  };
+  const clearEdit = (key: string) => {
+    edits.delete(key);
+    publish();
+  };
+
+  const unregister = registerEditHandlers(o.paneId, { confirm: confirmEdit, cancel: cancelEdit, set: (key, price) => applyEdit(key, price, false), seed: seedEdit, clear: clearEdit });
   return {
     destroy: () => {
       unregister();

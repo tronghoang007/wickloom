@@ -72,8 +72,8 @@ def _orders(v: Any) -> List[Dict[str, Any]]:
 
 
 def _deals(v: Any) -> List[Dict[str, Any]]:
-    rows = _rows(v, ints=("ticket", "order", "time", "magic"), nums=("volume", "price", "profit", "commission", "swap"),
-                 strs=("symbol", "comment"), enums={"type": DEAL_TYPES, "entry": DEAL_ENTRIES}, need_symbol=False)
+    rows = _rows(v, ints=("ticket", "order", "time", "magic", "position"), nums=("volume", "price", "profit", "commission", "swap", "sl", "tp"),
+                 strs=("symbol", "comment", "reason"), enums={"type": DEAL_TYPES, "entry": DEAL_ENTRIES}, need_symbol=False)
     return sorted(rows, key=lambda r: -r["time"])
 
 

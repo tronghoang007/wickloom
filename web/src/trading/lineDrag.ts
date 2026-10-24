@@ -27,19 +27,25 @@ export type LineDragHost = {
   tickSize: () => number;
   onMove: (id: string, price: number) => void; // giá xem trước trong lúc kéo
   onDrop: (id: string, price: number, from: number) => void; // thả tay ở giá khác giá ban đầu
-  onAbort: (id: string, from: number) => void; // huỷ (Esc / mất con trỏ) hoặc thả mà chưa dời đi đâu
+  onHover?: (id: string | null) => void; // đường kéo được đang được trỏ gần (null = không còn)
+  onAbort: (id: string, from: number, click: boolean) => void; // huỷ (Esc / mất con trỏ), kéo rồi thả lại đúng giá cũ, hoặc bấm không kéo (`click` = true: chỉ trường hợp này mới là "chọn")
 };
 
 const TOL = 6;
+/** Chấm tròn kéo được nằm trên đường giá, cách mép phải vùng vẽ bấy nhiêu px (TradeOverlay vẽ chấm ở đó). */
+export const HANDLE_INSET = 34;
+const CLICK_SLOP = 4; // px: bấm tay thường rung 1-3px, mà 1px trên chart có thể là cả chục tick, nên chưa dời quá ngần này thì vẫn là "bấm", không phải kéo
 
 export class LineDrag {
-  private drag: { id: string; from: number; price: number } | null = null;
+  private drag: { id: string; from: number; price: number; x: number; y: number; moved: boolean; arm?: () => boolean } | null = null;
   private lock: { handleScroll: unknown; handleScale: unknown } | null = null;
   private hovering = false;
+  private hoverId: string | null = null;
 
   constructor(private h: LineDragHost) {
     h.listenOn.addEventListener("pointerdown", this.onDown, true);
     h.listenOn.addEventListener("pointermove", this.onMoveEv, true);
+    h.listenOn.addEventListener("pointerleave", this.onLeave);
     window.addEventListener("pointerup", this.onUp);
     window.addEventListener("pointercancel", this.onCancel);
     window.addEventListener("keydown", this.onKey);
@@ -48,6 +54,7 @@ export class LineDrag {
   destroy() {
     this.h.listenOn.removeEventListener("pointerdown", this.onDown, true);
     this.h.listenOn.removeEventListener("pointermove", this.onMoveEv, true);
+    this.h.listenOn.removeEventListener("pointerleave", this.onLeave);
     window.removeEventListener("pointerup", this.onUp);
     window.removeEventListener("pointercancel", this.onCancel);
     window.removeEventListener("keydown", this.onKey);
@@ -104,7 +111,7 @@ export class LineDrag {
     this.drag = null;
   }
 
-  private start(e: PointerEvent, id: string, from: number, price: number) {
+  private start(e: PointerEvent, id: string, from: number, price: number, moved = false, arm?: () => boolean) {
     this.consume(e);
     try {
       this.h.container.setPointerCapture(e.pointerId); // nhả chuột ngoài chart vẫn nhận được pointerup
@@ -112,8 +119,8 @@ export class LineDrag {
       /* pointer đã biến mất */
     }
     this.lockChart();
-    this.drag = { id, from, price };
-    this.h.container.style.cursor = "grabbing";
+    this.drag = { id, from, price, x: e.clientX, y: e.clientY, moved, arm };
+    this.h.container.style.cursor = "ns-resize";
   }
 
   private onDown = (e: PointerEvent) => {
@@ -122,15 +129,22 @@ export class LineDrag {
     if (t) this.start(e, t.id, t.price, t.price);
   };
 
-  /** Bắt đầu kéo một đường CHƯA có trên chart (nút TP/SL mờ trên thẻ lệnh): `from` = mức hiện có (0 = chưa đặt), `price` = giá khởi đầu (thả ngay không kéo thì nhận giá này). */
-  begin(e: PointerEvent, id: string, from: number, price: number) {
+  /** Bắt đầu kéo một đường CHƯA có trên chart (nút TP/SL mờ trên thẻ lệnh): `from` = mức hiện có (0 = chưa đặt), `price` = giá khởi đầu (thả ngay không kéo thì nhận giá này).
+   *  Có `arm`: đường chỉ được tạo (arm chạy, trả false = bỏ) khi con trỏ đã dời quá ngưỡng "bấm"; nhấn rồi thả không kéo thì không làm gì cả (như TradingView: "Drag to add"). */
+  begin(e: PointerEvent, id: string, from: number, price: number, arm?: () => boolean) {
     if (e.button !== 0 || this.drag) return;
-    this.start(e, id, from, price);
+    this.start(e, id, from, price, !arm, arm); // không `arm`: bấm không kéo vẫn nhận mức gợi ý, không qua ngưỡng "bấm"
   }
 
   private onMoveEv = (e: PointerEvent) => {
     if (this.drag) {
       this.consume(e);
+      if (!this.drag.moved && Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) < CLICK_SLOP) return;
+      if (!this.drag.moved && this.drag.arm && !this.drag.arm()) {
+        this.finish();
+        return;
+      }
+      this.drag.moved = true;
       const raw = this.h.getSeries()?.coordinateToPrice(this.local(e).y);
       if (raw == null) return;
       const price = snapPrice(raw as number, this.h.tickSize(), this.h.digits());
@@ -139,15 +153,25 @@ export class LineDrag {
       this.h.onMove(this.drag.id, price);
       return;
     }
-    if (this.pick(e)) {
+    const t = this.pick(e);
+    this.setHoverId(t ? t.id : null);
+    if (t) {
       e.stopPropagation(); // DrawingManager không được ghi đè con trỏ / tô sáng hình bên dưới
-      this.h.container.style.cursor = "grab"; // bàn tay mở: đường này kéo thả được
+      this.h.container.style.cursor = "ns-resize"; // trỏ vào đường (bất kỳ chỗ nào trên đường, không riêng chấm tròn): kéo lên xuống được
       this.hovering = true;
     } else if (this.hovering) {
       this.hovering = false;
       this.h.container.style.cursor = "";
     }
   };
+
+  private setHoverId(id: string | null) {
+    if (this.hoverId === id) return;
+    this.hoverId = id;
+    this.h.onHover?.(id);
+  }
+
+  private onLeave = () => this.setHoverId(null);
 
   private onUp = (e: PointerEvent) => {
     const d = this.drag;
@@ -159,7 +183,9 @@ export class LineDrag {
       /* đã nhả */
     }
     this.finish();
-    if (Math.abs(d.price - d.from) < this.h.tickSize() / 2) this.h.onAbort(d.id, d.from); // chưa dời đi đâu
+    if (!d.moved && d.arm) return; // đường chưa được tạo: không có gì để thả hay huỷ
+    if (!d.moved) this.h.onAbort(d.id, d.from, true); // nhấn xuống rồi thả ra, không dời: bấm
+    else if (Math.abs(d.price - d.from) < this.h.tickSize() / 2) this.h.onAbort(d.id, d.from, false); // đã kéo nhưng thả lại đúng giá cũ: vẫn là kéo, không phải chọn
     else this.h.onDrop(d.id, d.price, d.from);
   };
 
@@ -167,7 +193,8 @@ export class LineDrag {
     const d = this.drag;
     if (!d) return;
     this.finish();
-    this.h.onAbort(d.id, d.from);
+    if (!d.moved && d.arm) return;
+    this.h.onAbort(d.id, d.from, false);
   };
 
   private onKey = (e: KeyboardEvent) => {

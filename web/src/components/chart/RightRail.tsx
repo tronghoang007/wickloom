@@ -21,7 +21,7 @@ const TABS: { id: RailPanel; label: string; icon: ReactNode }[] = [
 export default function RightRail() {
   const open = useRailStore((s) => s.open);
   const setOpen = useRailStore((s) => s.setOpen);
-  const drafting = useTicketStore((s) => s.draft !== null || s.rest !== null); // đang soạn lệnh, hoặc bảng đang chờ sau khi đặt xong
+  const drafting = useTicketStore((s) => s.draft !== null || s.rest !== null || s.modifyOwner !== null); // đang soạn lệnh, bảng đang chờ sau khi đặt xong, hoặc đang xem / sửa một lệnh đã đặt
   const tabs = TABS.filter((t) => t.id !== "order" || drafting);
   const active = tabs.find((t) => t.id === open);
 
