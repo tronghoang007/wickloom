@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
-import { askClosePosition } from "@/trading/tagActions";
+import { askCancelAll, askCloseAll, askClosePosition } from "@/trading/tagActions";
 import { accountProfit, closedPositions, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, REASON_LABEL, sideLabel } from "@/trading/format";
 import { tradeBlock } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
@@ -41,12 +41,25 @@ const SideCell = ({ side, label = sideLabel(side) }: { side: "buy" | "sell"; lab
     {label}
   </span>
 );
-function Head({ cols }: { cols: [string, boolean?][] }) {
+function Head({ cols, all }: { cols: [string, boolean?][]; all?: { label: string; disabled?: boolean; title?: string; run: () => void } }) {
   return (
     <thead>
       <tr>
         {cols.map(([h, right], i) => (
-          <th key={i} className={th + (right ? R : "")}>{h}</th>
+          <th key={i} className={(all && i === cols.length - 1 ? th.replace("text-left", "text-right") : th) + (right ? R : "")}>
+            {all && i === cols.length - 1 ? (
+              <button
+                className="cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={all.disabled}
+                title={all.title}
+                onClick={all.run}
+              >
+                {all.label}
+              </button>
+            ) : (
+              h
+            )}
+          </th>
         ))}
       </tr>
     </thead>
@@ -157,16 +170,52 @@ const rowClass = "border-b border-[var(--border)] last:border-b-0 hover:bg-[var(
 const Empty = ({ children }: { children: ReactNode }) => <div className="px-4 py-6 text-sm text-[var(--muted)]">{children}</div>;
 
 function Positions({ data }: { data: TradeData }) {
+  const busy = useOrderState((s) => s.busy);
   if (data.positions.length === 0) return <Empty>Không có vị thế đang mở.</Empty>;
+  const block = tradeBlock({ replay: false, status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   return (
     <table className="w-full text-xs tabular-nums">
-      <Head cols={[["Symbol"], ["Side"], ["Lot", true], ["Entry", true], ["SL", true], ["TP", true], ["Price", true], ["P/L", true], ["Opened"], [""]]} />
+      <Head
+        cols={[["Symbol"], ["Side"], ["Lot", true], ["Entry", true], ["SL", true], ["TP", true], ["Price", true], ["P/L", true], ["Opened"], [""]]}
+        all={{ label: "Close all", disabled: block !== null || busy, title: block ?? "Đóng tất cả vị thế", run: () => askCloseAll(data.positions) }}
+      />
       <tbody>
         {data.positions.map((p) => (
           <PositionRow key={p.ticket} p={p} account={data.account} />
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** Thanh kéo đóng một phần theo % của vị thế (như MT5): mốc 20 / 40 / 60 / 80 / 100% là chấm tròn có nhãn %, đường kẻ 1px, đoạn đã chọn tô đỏ, núm tròn. Giá trị ra là lot đã chuẩn hoá theo step.
+ *  Input range thật nằm đè lên để kéo / dùng phím. */
+const SLIDER_MARKS = [20, 40, 60, 80, 100];
+function LotSlider({ spec, value, onChange }: { spec: { min: number; max: number; step: number }; value: number; onChange: (lot: number) => void }) {
+  const pct = Math.min(100, Math.max(0, (value / spec.max) * 100));
+  return (
+    <span className="relative mx-1 flex h-5 w-56 items-center">
+      <span className="pointer-events-none absolute inset-x-2 inset-y-0 flex items-center">
+        <span className="absolute inset-x-0 h-px bg-[var(--border)]" />
+        <span className="absolute left-0 h-px bg-[#f23645]" style={{ width: `${pct}%` }} />
+        {SLIDER_MARKS.map((m) => (
+          <span key={m} className="absolute flex -translate-x-1/2 flex-col items-center" style={{ left: `${m}%` }}>
+            <span className={`h-2 w-2 rounded-full ${m <= pct + 1e-6 ? "bg-[#f23645]" : "bg-[var(--muted)]"}`} />
+            <span className="absolute top-3.5 text-[10px] leading-none text-[var(--muted)]">{m}%</span>
+          </span>
+        ))}
+      </span>
+      <input
+        type="range"
+        aria-label="Close percent slider"
+        min={0}
+        max={100}
+        step={0.1}
+        value={pct}
+        onChange={(e) => onChange(normalizeLot((parseFloat(e.target.value) / 100) * spec.max, spec))}
+        className="absolute inset-0 m-0 h-full w-full cursor-pointer appearance-none bg-transparent focus:outline-none [&::-webkit-slider-runnable-track]:h-full [&::-webkit-slider-runnable-track]:bg-transparent [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:mt-0.5 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-[#f23645] [&::-webkit-slider-thumb]:bg-[var(--bg)] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-solid [&::-moz-range-thumb]:border-[#f23645] [&::-moz-range-thumb]:bg-[var(--bg)]"
+      />
+    </span>
   );
 }
 
@@ -179,9 +228,11 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
   const [text, setText] = useState("");
   // vào được lệnh đóng khi account sẵn sàng; spec/giá chỉ cần cho widget SELL/BUY
   const block = tradeBlock({ replay: false, status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const sym = useChartStore.getState().symbols.find((s) => s.name === p.symbol);
+  const spec = sym?.volume_min && sym.volume_step ? { min: sym.volume_min, max: p.volume, step: sym.volume_step } : null;
+  const canPartial = spec !== null && p.volume > spec.min + 1e-9; // lot lớn hơn lot tối thiểu thì mới đóng một phần được
+  const want0 = spec ? normalizeLot(parseFloat(text.replace(",", ".")), spec) : p.volume;
   const close = () => {
-    const sym = useChartStore.getState().symbols.find((s) => s.name === p.symbol);
-    const spec = sym?.volume_min && sym.volume_step ? { min: sym.volume_min, max: p.volume, step: sym.volume_step } : null;
     const want = spec ? normalizeLot(parseFloat(text.replace(",", ".")), spec) : p.volume;
     setEditing(false);
     askClosePosition(p, want >= p.volume - 1e-9 ? 0 : want); // hộp thoại xác nhận rồi mới gửi; 0 = đóng hết
@@ -197,9 +248,23 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
       <td className={td + R}>{fmtPx(p.price_current, d)}</td>
       <td className={`${td}${R} font-medium ${pnlClass(pl)}`}>{fmtPnl(pl)}</td>
       <td className={`${td} text-[var(--muted)]`}>{fmtTime(p.time)}</td>
-      <td className={td} onClick={(e) => e.stopPropagation()}>
-        {editing ? (
-          <span className="flex items-center gap-1">
+      <td className={td + " relative text-right"} onClick={(e) => e.stopPropagation()}>
+        <button
+          className={`cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-40 ${editing ? "invisible" : ""}`}
+          disabled={block !== null || busy}
+          title={block ?? (canPartial ? "Đóng vị thế (kéo thanh hoặc sửa lot để đóng một phần)" : "Đóng vị thế")}
+          onClick={() => {
+            if (!canPartial) return askClosePosition(p); // không chia nhỏ được: đóng hết (có hộp xác nhận)
+            setText(fmtLot(p.volume));
+            setEditing(true);
+          }}
+        >
+          Close
+        </button>
+        {editing && (
+          // nổi lên trên hàng (không đẩy các cột khác), cao đúng bằng hàng, neo bên phải
+          <span className="absolute inset-y-0 right-0 z-10 flex items-center justify-center gap-3 border-l border-[var(--border)] bg-[var(--bg)] px-3 shadow-lg">
+            {spec && <LotSlider spec={spec} value={Number.isFinite(want0) ? want0 : spec.max} onChange={(lot) => setText(fmtLot(lot))} />}
             <input
               autoFocus
               aria-label="Close lot"
@@ -211,23 +276,11 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
                 if (e.key === "Enter") close();
                 else if (e.key === "Escape") setEditing(false);
               }}
-              className="w-14 rounded border border-[var(--border)] bg-transparent px-1 py-0.5 text-center"
+              className="w-16 rounded border border-[var(--border)] bg-transparent px-1.5 py-1 text-center"
             />
-            <button className="cursor-pointer rounded bg-[#f23645] px-1.5 py-0.5 text-white hover:brightness-110" onClick={close}>OK</button>
-            <button className="cursor-pointer px-1 text-[var(--muted)] hover:text-[var(--fg)]" aria-label="Cancel" onClick={() => setEditing(false)}>✕</button>
+            <button className="cursor-pointer rounded bg-[#f23645] px-3 py-1 text-white hover:brightness-110" onClick={close}>OK</button>
+            <button className="cursor-pointer px-1.5 text-sm text-[var(--muted)] hover:text-[var(--fg)]" aria-label="Cancel" onClick={() => setEditing(false)}>✕</button>
           </span>
-        ) : (
-          <button
-            className="cursor-pointer rounded border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={block !== null || busy}
-            title={block ?? "Đóng vị thế (sửa lot để đóng một phần)"}
-            onClick={() => {
-              setText(fmtLot(p.volume));
-              setEditing(true);
-            }}
-          >
-            Close
-          </button>
         )}
       </td>
     </tr>
@@ -235,10 +288,15 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
 }
 
 function Orders({ data }: { data: TradeData }) {
+  const busy = useOrderState((s) => s.busy);
   if (data.orders.length === 0) return <Empty>Không có lệnh chờ.</Empty>;
+  const block = tradeBlock({ replay: false, status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   return (
     <table className="w-full text-xs tabular-nums">
-      <Head cols={[["Symbol"], ["Type"], ["Lot", true], ["Price", true], ["SL", true], ["TP", true], ["Placed"], ["Expires"], [""]]} />
+      <Head
+        cols={[["Symbol"], ["Type"], ["Lot", true], ["Price", true], ["SL", true], ["TP", true], ["Placed"], ["Expires"], [""]]}
+        all={{ label: "Cancel all", disabled: block !== null || busy, title: block ?? "Huỷ tất cả lệnh chờ", run: () => askCancelAll(data.orders) }}
+      />
       <tbody>
         {data.orders.map((o) => (
           <OrderRow key={o.ticket} o={o} account={data.account} />
@@ -263,7 +321,7 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
       <td className={td + R}>{fmtPx(o.tp, d, true)}</td>
       <td className={`${td} text-[var(--muted)]`}>{fmtTime(o.time_setup)}</td>
       <td className={`${td} text-[var(--muted)]`}>{o.expiration ? fmtTime(o.expiration) : "GTC"}</td>
-      <td className={td} onClick={(e) => e.stopPropagation()}>
+      <td className={td + " text-right"} onClick={(e) => e.stopPropagation()}>
         <button
           className="cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-40"
           disabled={block !== null || busy}

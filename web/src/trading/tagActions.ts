@@ -4,7 +4,7 @@ import { chartGlobal } from "@/store/chart";
 import { askConfirm } from "@/store/confirm";
 import { useMt5Store } from "@/store/mt5";
 import { useSettingsStore } from "@/store/settings";
-import { cancelOrder, closeTrade, moveStop } from "./actions";
+import { cancelAllOrders, cancelOrder, closeAllTrades, closeTrade, moveStop } from "./actions";
 import { fmtLot, fmtPnl, fmtPx, orderLabel, positionPnl, sideLabel, type LineSpec } from "./format";
 import { submitDraft } from "./submit";
 import { useTicketStore } from "./ticket";
@@ -73,6 +73,47 @@ export function askCancelOrder(o: PendingOrder): void {
     cancelLabel: "Giữ lệnh",
     danger: true,
     onConfirm: () => cancelOrder(o.ticket, o.symbol),
+  });
+}
+
+/** "Close all" ở bảng Positions: hộp thoại xác nhận (số vị thế + tổng lãi/lỗ), One-click trading bật thì đóng ngay. */
+export function askCloseAll(positions: Position[]): void {
+  if (positions.length === 0) return;
+  const run = () => closeAllTrades(positions.map((p) => p.ticket));
+  if (useSettingsStore.getState().s.oneClick) {
+    void run();
+    return;
+  }
+  const ccy = useMt5Store.getState().accounts.find((a) => a.active)?.currency ?? "";
+  const pnl = positions.reduce((s, p) => s + positionPnl(p), 0);
+  askConfirm({
+    title: "Đóng tất cả vị thế",
+    rows: [
+      ...accountRows(),
+      { label: "Vị thế", value: String(positions.length) },
+      { label: "Lãi / Lỗ", value: `${fmtPnl(pnl)}${ccy ? ` ${ccy}` : ""}`, tone: pnl > 0 ? ("pos" as const) : pnl < 0 ? ("neg" as const) : undefined },
+    ],
+    confirmLabel: "Đóng tất cả",
+    danger: true,
+    onConfirm: run,
+  });
+}
+
+/** "Cancel all" ở bảng Orders: hộp thoại xác nhận, One-click trading bật thì huỷ ngay. */
+export function askCancelAll(orders: PendingOrder[]): void {
+  if (orders.length === 0) return;
+  const run = () => cancelAllOrders(orders.map((o) => o.ticket));
+  if (useSettingsStore.getState().s.oneClick) {
+    void run();
+    return;
+  }
+  askConfirm({
+    title: "Huỷ tất cả lệnh chờ",
+    rows: [...accountRows(), { label: "Lệnh chờ", value: String(orders.length) }],
+    confirmLabel: "Huỷ tất cả",
+    cancelLabel: "Giữ lệnh",
+    danger: true,
+    onConfirm: run,
   });
 }
 

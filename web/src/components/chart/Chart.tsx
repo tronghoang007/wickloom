@@ -1146,7 +1146,18 @@ export default function Chart({ paneId }: { paneId: string }) {
   );
 
   // data + realtime
+  const prevKeyRef = useRef<{ symbol: string; tf: string } | null>(null);
   useEffect(() => {
+    // Chỉ đổi timeframe (cùng symbol) khi đang xem đoạn lịch sử (không chạm nến mới nhất): giữ đúng mốc thời gian
+    // đang xem ở giữa màn hình và số nến hiển thị, như TradingView, thay vì văng về nến mới nhất.
+    const prev = prevKeyRef.current;
+    prevKeyRef.current = { symbol, tf };
+    let keepView: { t: number; span: number } | null = null;
+    const oldRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+    if (prev && prev.symbol === symbol && prev.tf !== tf && oldRange && barsRef.current.length > 0 && oldRange.to < barsRef.current.length - 1) {
+      const t = timeAt(barsRef.current, TF_SECONDS[prev.tf], (oldRange.from + oldRange.to) / 2);
+      if (t !== null) keepView = { t, span: oldRange.to - oldRange.from };
+    }
     let alive = true;
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout>;
@@ -1195,7 +1206,12 @@ export default function Chart({ paneId }: { paneId: string }) {
       refreshExtras();
       chartRef.current?.priceScale("right").setAutoScale(true);
       if (bars.length) {
-        if (chartRef.current) chartRef.current.timeScale().setVisibleLogicalRange(defaultRange(chartRef.current, bars.length));
+        if (chartRef.current) {
+          const mid = keepView ? indexAt(bars, TF_SECONDS[tf], keepView.t) : null;
+          // mốc đang xem nằm hẳn ngoài dữ liệu đã tải của TF mới (vd lịch sử 1m chưa nạp) thì về góc nhìn mặc định
+          const kept = keepView && mid !== null && mid + keepView.span / 2 > 0 && mid - keepView.span / 2 < bars.length - 1;
+          chartRef.current.timeScale().setVisibleLogicalRange(kept && keepView && mid !== null ? { from: mid - keepView.span / 2, to: mid + keepView.span / 2 } : defaultRange(chartRef.current, bars.length));
+        }
       } else {
         clearTimeout(pollTimer);
         pollTimer = setTimeout(load, missing ? 5000 : 800);

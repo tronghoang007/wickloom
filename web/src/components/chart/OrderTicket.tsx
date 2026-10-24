@@ -554,6 +554,11 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
             <span className="text-[11px] leading-tight text-white/80">{submitSub}</span>
           </button>
         )}
+        {!idle && (
+          <button type="button" onClick={close} className="mt-2 flex h-10 w-full cursor-pointer items-center justify-center rounded-lg bg-[var(--hover)] text-sm font-medium text-[var(--fg)] transition hover:brightness-125">
+            Cancel
+          </button>
+        )}
       </div>
     </form>
   );

@@ -185,7 +185,7 @@ export function tradeLines(data: TradeData | null, symbol: string, nowSec: numbe
     for (const [kind, v, color] of [["sl", slv, COLORS.sl], ["tp", tpv, COLORS.tp]] as const) {
       if (!(v > 0)) continue;
       const title = stopTitle(kind, side, lot, entry, v, symbol);
-      out.push({ key: `${prefix}${kind}:${ticket}`, price: v, color, style: "dotted", title, tag: { kind, owner, qty: fmtLot(lot), label: stopLabel(title), ghosts: [], draft: false } });
+      out.push({ key: `${prefix}${kind}:${ticket}`, price: v, color, style: prefix === "p" ? "solid" : "dashed", title, tag: { kind, owner, qty: fmtLot(lot), label: stopLabel(title), ghosts: [], draft: false } });
     }
   };
   for (const p of data.positions) {
@@ -216,7 +216,7 @@ export function tradeLines(data: TradeData | null, symbol: string, nowSec: numbe
       key: `o:${o.ticket}`,
       price: o.price_open,
       color: sideColor(side),
-      style: "solid",
+      style: "dashed",
       title: `${orderLabel(o.type).toUpperCase()} ${fmtLot(o.volume)}`,
       tag: { kind: "entry", owner, qty: fmtLot(o.volume), label: orderLabel(o.type), ghosts: ghostsFor(sl, tp), draft: false, side },
     });

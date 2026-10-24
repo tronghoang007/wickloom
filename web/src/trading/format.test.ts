@@ -64,8 +64,8 @@ describe("tradeLines", () => {
     const l = tradeLines(data({ orders: [] }), "XAUUSDm", 1000);
     expect(l).toMatchObject([
       { key: "p:1", price: 4100.5, color: COLORS.buy, style: "solid", title: "BUY 0.10  +47.00" },
-      { key: "psl:1", price: 4090, color: COLORS.sl, style: "dotted", title: "SL" },
-      { key: "ptp:1", price: 4120, color: COLORS.tp, style: "dotted", title: "TP" },
+      { key: "psl:1", price: 4090, color: COLORS.sl, style: "solid", title: "SL" },
+      { key: "ptp:1", price: 4120, color: COLORS.tp, style: "solid", title: "TP" },
     ]);
     const s = tradeLines(data({ positions: [pos({ type: "sell", sl: 0, tp: 0, profit: -3, swap: 0 })], orders: [] }), "XAUUSDm", 1000);
     expect(s).toMatchObject([{ key: "p:1", price: 4100.5, color: COLORS.sell, style: "solid", title: "SELL 0.10  -3.00" }]);
@@ -144,13 +144,13 @@ describe("thẻ trên chart (kiểu TradingView)", () => {
   });
   it("lệnh chờ: nhãn là loại lệnh, đường liền theo hướng, nút mờ cho mức thiếu", () => {
     const l = tradeLines(data({ positions: [] }), "XAUUSDm", 1000);
-    expect(l[0]).toMatchObject({ key: "o:2", color: COLORS.buy, style: "solid", tag: { kind: "entry", owner: { t: "order", ticket: 2 }, qty: "0.20", label: "Buy limit", ghosts: ["sl"] } });
+    expect(l[0]).toMatchObject({ key: "o:2", color: COLORS.buy, style: "dashed", tag: { kind: "entry", owner: { t: "order", ticket: 2 }, qty: "0.20", label: "Buy limit", ghosts: ["sl"] } });
     const sell = tradeLines(data({ positions: [], orders: [ord({ type: "sell_stop" })] }), "XAUUSDm", 1000);
     expect(sell[0].color).toBe(COLORS.sell);
   });
   it("kéo nút mờ ra: đường SL tạm hiện ở giá kéo và nút SL mất khỏi thẻ entry", () => {
     const l = tradeLines(data({ positions: [pos({ sl: 0 })], orders: [] }), "XAUUSDm", 1000, { key: "psl:1", price: 4085, title: "SL -15.00 USD" });
-    expect(l.find((x) => x.key === "psl:1")).toMatchObject({ price: 4085, style: "dotted", tag: { kind: "sl", label: "-15.00 USD", ghosts: [] } });
+    expect(l.find((x) => x.key === "psl:1")).toMatchObject({ price: 4085, style: "solid", tag: { kind: "sl", label: "-15.00 USD", ghosts: [] } });
     expect(l.find((x) => x.key === "p:1")?.tag?.ghosts).toEqual([]);
   });
   it("thả tay xong đang chờ xác nhận: thẻ của đúng đường đó mang cờ pending, các thẻ khác không", () => {

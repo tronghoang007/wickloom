@@ -76,6 +76,24 @@ export function closeTrade(ticket: number, symbol: string, volume = 0): Promise<
   }).then(() => undefined);
 }
 
+/** Đóng hết các vị thế `tickets` lần lượt trong một lượt (một lệnh bay mỗi lúc); lỗi từng lệnh vẫn toast, cuối cùng toast tổng kết. */
+export function closeAllTrades(tickets: number[]): Promise<void> {
+  return run("Đăng nhập để giao dịch", async (accountId) => {
+    let ok = 0;
+    for (const t of tickets) if (report(await sendClosePosition(accountId, t, 0), "", true)) ok++;
+    if (ok > 0) toast(`Đã đóng ${ok}/${tickets.length} vị thế`, { ms: 4000, title: "Positions closed", kind: ok === tickets.length ? "success" : "info" });
+  }).then(() => undefined);
+}
+
+/** Huỷ hết các lệnh chờ `tickets` lần lượt, cùng cách với closeAllTrades. */
+export function cancelAllOrders(tickets: number[]): Promise<void> {
+  return run("Đăng nhập để giao dịch", async (accountId) => {
+    let ok = 0;
+    for (const t of tickets) if (report(await sendCancelOrder(accountId, t), "", true)) ok++;
+    if (ok > 0) toast(`Đã huỷ ${ok}/${tickets.length} lệnh chờ`, { ms: 4000, title: "Orders cancelled", kind: ok === tickets.length ? "success" : "info" });
+  }).then(() => undefined);
+}
+
 export type PendingParams = Omit<PendingRequest, "clientId">;
 
 // Một lần đặt lệnh chờ (đã ở trong run). Giá nhảy làm EA chọn loại khác loại web hiển thị thì vẫn đặt (demo) và nói rõ trong toast.
