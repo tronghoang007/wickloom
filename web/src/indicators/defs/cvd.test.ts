@@ -150,3 +150,58 @@ describe("def.lower của CVD", () => {
     expect(cvd.lower!({ anchor: "12M", custom: false, tf: "1" }, { ...info, bars: chart(0, 3 * 365 * 96), cut: 3 * 365 * 96 - 100 })).toBeNull();
   });
 });
+
+describe("CVD 1 tick", () => {
+  // nến delta từng phút của backend: o = 0, c = delta phút, h / l = đỉnh / đáy delta tích luỹ trong phút
+  const td = (t: number, c: number, h: number, l: number, v = 1): Bar => ({ t, o: 0, h, l, c, v });
+  const bars = chart(0, 3);
+
+  it("nối các phút: open = tích luỹ trước, high / low = đầu + h / l của từng phút, close = cuối", () => {
+    // nến 0 (0..900): phút 0: +3 (đỉnh 5, đáy −1); phút 5: −2 (đỉnh 1, đáy −4); nến 1: phút 15: +10; nến 2: phút 30: −4
+    const fine = [td(0, 3, 5, -1), td(300, -2, 1, -4), td(900, 10, 12, 0), td(1800, -4, 0, -6)];
+    const d = cumulativeDelta(bars, [1, 1, 1], fine, true);
+    expect(d.o).toEqual([0, 1, 11]);
+    expect(d.c).toEqual([1, 11, 7]);
+    expect(d.h).toEqual([5, 13, 11]); // nến 0: max(0, 0+5, 3+1) = 5; nến 1: 1+12 = 13; nến 2: max(11, 11+0) = 11
+    expect(d.l).toEqual([-1, 1, 5]); // nến 0: min(0, −1, 3−4) = −1; nến 1: min(1, 1+0) = 1; nến 2: 11−6 = 5
+  });
+
+  it("nến chart không có phút nào: na, tích luỹ giữ nguyên", () => {
+    const d = cumulativeDelta(bars, [1, 1, 1], [td(0, 4, 4, 0), td(1800, 1, 1, 0)], true);
+    expect(Number.isNaN(d.c[1])).toBe(true);
+    expect(d.o[2]).toBe(4);
+    expect(d.c[2]).toBe(5);
+  });
+
+  it("def: input Data aggregation, chọn 1 tick thì tắt Use custom timeframe và Timeframe", () => {
+    const keys = cvd.inputs.map((i) => i.key);
+    expect(keys.slice(0, 2)).toEqual(["anchor", "agg"]);
+    const agg = cvd.inputs.find((i) => i.key === "agg")!;
+    expect(agg).toMatchObject({ type: "select", default: "Time", options: ["Time", "1 tick"] });
+    const custom = cvd.inputs.find((i) => i.key === "custom")!;
+    const tf = cvd.inputs.find((i) => i.key === "tf")!;
+    expect(custom.enabledIf!({ agg: "Time" })).toBe(true);
+    expect(custom.enabledIf!({ agg: "1 tick" })).toBe(false);
+    expect(tf.enabledIf!({ agg: "Time", custom: true })).toBe(true);
+    expect(tf.enabledIf!({ agg: "1 tick", custom: true })).toBe(false);
+  });
+
+  it("def.lower: khung TD từ đầu kỳ; kỳ dài hơn 14 ngày thì null", () => {
+    const all = chart(100 * DAY, 3 * 96);
+    const info = { bars: all, cut: 0, step: M15, calendar: { offset: 0 } };
+    expect(cvd.lower!({ anchor: "1D", agg: "1 tick" }, info)).toEqual({ tfs: ["TD"], from: 100 * DAY });
+    const wide = chart(100 * DAY, 20 * 96);
+    expect(cvd.lower!({ anchor: "1W", agg: "1 tick" }, { ...info, bars: wide })).toBeNull(); // 20 ngày từ nến đầu chart
+  });
+
+  it("compute 1 tick: chỉ dùng nến delta tick; chưa có thì để trống chứ không đoán từ nến chart", () => {
+    const b = chart(100 * DAY, 96);
+    const inst = { ...newInstance("cvd"), inputs: { agg: "1 tick" } };
+    const empty = computeInstance(byId("cvd"), inst, b, { offset: 0 }, []).cvd;
+    expect(empty.values.every(Number.isNaN)).toBe(true);
+    const pieces = Array.from({ length: 96 * 15 }, (_, i) => td(100 * DAY + i * 60, i % 2 ? -1 : 1, i % 2 ? 0 : 1, i % 2 ? -1 : 0));
+    const full = computeInstance(byId("cvd"), inst, b, { offset: 0 }, pieces).cvd;
+    expect(full.candle!.o[0]).toBe(0);
+    expect(full.values[0]).toBe(1); // 15 phút: +1 −1 ... 8 lần +1, 7 lần −1
+  });
+});

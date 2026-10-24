@@ -56,3 +56,16 @@ class BarsIn(BaseModel):
     tf: str
     bars: List[Bar]
     done: Optional[bool] = None  # chunk cuối của backfill
+
+
+class TicksHistIn(BaseModel):
+    """Lịch sử tick EA gửi khi web xin backfill tf "TD" (xem tickdelta.py): mảng song song, tăng dần theo thời gian."""
+    broker_utc_offset: int = 0
+    symbol: str
+    t: List[int]  # time_msc theo giờ server (như `ticks`)
+    p: List[float]  # giá dùng để phân loại: bid (khung nến theo Bid) hoặc last (khung nến theo Last)
+    w: Optional[List[float]] = None  # trọng số từng tick (volume khi theo Last); thiếu = 1
+    pb: float = 0  # giá tick liền trước cửa sổ (0 = không biết)
+    pd: int = 1  # chiều (1 lên / -1 xuống) của tick đó
+    cont: bool = False  # tiếp nối thông điệp trước của cùng yêu cầu
+    done: Optional[bool] = None

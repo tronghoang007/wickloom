@@ -1,6 +1,6 @@
 import type { Bar } from "@/lib/api";
 import { describe, expect, it, vi } from "vitest";
-import { LOWER_TFS, LowerFeed, autoLowerTf, lowerCandidates, mergeSources, withinBudget } from "./lower";
+import { LOWER_TFS, LowerFeed, TICK_TF, autoLowerTf, lowerCandidates, mergeSources, stepOf, withinBudget } from "./lower";
 
 const bar = (t: number, c = 1, v = 1): Bar => ({ t, o: c, h: c, l: c, c, v });
 const run = (tf: string, from: number, count: number): Bar[] => Array.from({ length: count }, (_, i) => bar(from + i * ({ M1: 60, M5: 300 }[tf] ?? 60), i));
@@ -69,7 +69,7 @@ describe("LowerFeed", () => {
   it("lần đầu rỗng rồi nạp ngầm, xong thì báo onChange và trả nến", async () => {
     const db = fakeDb({ M1: run("M1", 0, 10) });
     const onChange = vi.fn();
-    const feed = new LowerFeed(db.fetch, onChange, () => 0);
+    const feed = new LowerFeed(db.fetch, onChange, { now: () => 0 });
     expect(feed.get("X", { tfs: ["M1"], from: 0 }, 600)).toEqual([]);
     await flush();
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -79,7 +79,7 @@ describe("LowerFeed", () => {
 
   it("phân trang lùi khi nhiều hơn một trang", async () => {
     const db = fakeDb({ M1: run("M1", 0, 10) });
-    const feed = new LowerFeed(db.fetch, () => {}, () => 0, 4);
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => 0, pageSize: 4 });
     feed.get("X", { tfs: ["M1"], from: 0 }, 600);
     await flush();
     expect(feed.get("X", { tfs: ["M1"], from: 0 }, 600).map((b) => b.t)).toEqual(run("M1", 0, 10).map((b) => b.t));
@@ -88,7 +88,7 @@ describe("LowerFeed", () => {
 
   it("cuộn trái (from nhỏ hơn) chỉ nạp phần cũ thêm", async () => {
     const db = fakeDb({ M1: run("M1", 0, 20) });
-    const feed = new LowerFeed(db.fetch, () => {}, () => 0);
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => 0 });
     feed.get("X", { tfs: ["M1"], from: 600 }, 1200);
     await flush();
     expect(feed.get("X", { tfs: ["M1"], from: 600 }, 1200)).toHaveLength(10);
@@ -100,7 +100,7 @@ describe("LowerFeed", () => {
 
   it("DB không có dữ liệu ở vùng cũ: không nạp lại mãi", async () => {
     const db = fakeDb({ M1: run("M1", 600, 5) });
-    const feed = new LowerFeed(db.fetch, () => {}, () => 0);
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => 0 });
     for (let i = 0; i < 3; i++) {
       feed.get("X", { tfs: ["M1"], from: 0 }, 900);
       await flush();
@@ -110,7 +110,7 @@ describe("LowerFeed", () => {
 
   it("ghép nhiều khung: M1 chỗ có, M5 cho vùng cũ", async () => {
     const db = fakeDb({ M1: run("M1", 3000, 5), M5: run("M5", 0, 20) }); // M1 từ 3000; M5 0..5700
-    const feed = new LowerFeed(db.fetch, () => {}, () => 0);
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => 0 });
     const need = { tfs: ["M1", "M5"], from: 0 };
     feed.get("X", need, 6000);
     await flush();
@@ -126,7 +126,7 @@ describe("LowerFeed", () => {
     const m1 = run("M1", 0, 5);
     const db = fakeDb({ M1: m1 });
     const onChange = vi.fn();
-    const feed = new LowerFeed(db.fetch, onChange, () => now);
+    const feed = new LowerFeed(db.fetch, onChange, { now: () => now });
     feed.get("X", { tfs: ["M1"], from: 0 }, 300);
     await flush();
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -161,7 +161,7 @@ describe("LowerFeed", () => {
       if (fail) throw new Error("net");
       return run("M1", 0, 3);
     });
-    const feed = new LowerFeed(fetch, () => {}, () => now);
+    const feed = new LowerFeed(fetch, () => {}, { now: () => now });
     feed.get("X", { tfs: ["M1"], from: 0 }, 300);
     await flush();
     now = 5_000;
@@ -177,10 +177,215 @@ describe("LowerFeed", () => {
 
   it("symbol khác có cache riêng", async () => {
     const db = fakeDb({ M1: run("M1", 0, 3) });
-    const feed = new LowerFeed(db.fetch, () => {}, () => 0);
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => 0 });
     feed.get("A", { tfs: ["M1"], from: 0 }, 300);
     feed.get("B", { tfs: ["M1"], from: 0 }, 300);
     await flush();
     expect(db.calls).toHaveLength(2);
+  });
+});
+
+// EA giả: nạp vào "DB" `count` nến mới nhất của broker có t <= before (nến neo cũng được gửi lại, như EA thật)
+function fakeEa(db: ReturnType<typeof fakeDb>, broker: Record<string, Bar[]>, opts: { refuse?: boolean } = {}) {
+  const calls: { tf: string; count: number; before: number }[] = [];
+  const backfill = async (_s: string, tf: string, count: number, before: number) => {
+    calls.push({ tf, count, before });
+    if (opts.refuse) return false;
+    const sent = (broker[tf] ?? []).filter((b) => b.t <= before).slice(-count);
+    const have = new Map((db.data[tf] ?? []).map((b) => [b.t, b]));
+    for (const b of sent) have.set(b.t, b);
+    db.data[tf] = [...have.values()].sort((a, b) => a.t - b.t);
+    return true;
+  };
+  return { calls, backfill };
+}
+
+// Như manager: gọi get() mỗi lần có thay đổi (onChange) hoặc sau một lúc, cho tới khi không còn lần xin EA nào mới
+async function drive(feed: LowerFeed, clock: { now: number }, need: { tfs: string[]; from: number }, to: number, calls: unknown[]) {
+  let quiet = 0;
+  for (let i = 0; i < 60 && quiet < 3; i++) {
+    const before = calls.length;
+    feed.get("X", need, to);
+    await flush(); // đọc DB / làm mới đuôi
+    feed.get("X", need, to);
+    await flush(); // xin EA
+    clock.now += 31_000; // qua thời gian chờ giữa hai lần xin
+    quiet = calls.length === before ? quiet + 1 : 0;
+  }
+  return feed.get("X", need, to);
+}
+
+describe("LowerFeed xin EA nạp thêm", () => {
+  const sleep = async () => {};
+  const mk = (data: Record<string, Bar[]>, broker: Record<string, Bar[]>, extra: { refuse?: boolean; chunk?: number; tickChunk?: number } = {}) => {
+    const db = fakeDb(data);
+    const ea = fakeEa(db, broker, extra);
+    const clock = { now: 0 };
+    const onChange = vi.fn();
+    const feed = new LowerFeed(db.fetch, onChange, { now: () => clock.now, backfill: ea.backfill, sleep, ...(extra.chunk ? { chunk: extra.chunk } : {}), ...(extra.tickChunk ? { tickChunk: extra.tickChunk } : {}) });
+    return { db, ea, clock, onChange, feed };
+  };
+
+  it("DB thiếu đầu: xin EA nạp lùi từ nến đầu, rồi dùng được", async () => {
+    const { ea, clock, feed } = mk({ M1: run("M1", 3000, 10) }, { M1: run("M1", 0, 100) });
+    const out = await drive(feed, clock, { tfs: ["M1"], from: 0 }, 4000, ea.calls);
+    expect(ea.calls[0]).toEqual({ tf: "M1", count: 100, before: 3000 }); // 50 nến thiếu + 50 dư
+    expect(out[0].t).toBe(0);
+    expect(out).toHaveLength(60); // 0..3540: 50 nến nạp thêm + 10 đã có
+    expect(ea.calls).toHaveLength(1);
+  });
+
+  it("thiếu nhiều hơn một chunk: nối nhiều lần xin cho tới khi đủ", async () => {
+    const { ea, clock, feed } = mk({ M1: run("M1", 3000, 10) }, { M1: run("M1", 0, 100) }, { chunk: 20 });
+    const out = await drive(feed, clock, { tfs: ["M1"], from: 0 }, 4000, ea.calls);
+    expect(out[0].t).toBe(0);
+    expect(out).toHaveLength(60); // 0..3540: 50 nến nạp thêm + 10 đã có
+    expect(ea.calls.length).toBeGreaterThan(2);
+    expect(ea.calls.every((c) => c.count <= 20)).toBe(true);
+  });
+
+  it("broker không có thêm: thử đúng hai lần rồi thôi (không lặp mãi)", async () => {
+    const { ea, clock, feed } = mk({ M1: run("M1", 3000, 10) }, { M1: run("M1", 3000, 10) });
+    await drive(feed, clock, { tfs: ["M1"], from: 0 }, 4000, ea.calls);
+    expect(ea.calls).toHaveLength(2);
+    await drive(feed, clock, { tfs: ["M1"], from: 0 }, 4000, ea.calls);
+    expect(ea.calls).toHaveLength(2);
+  });
+
+  it("giữa hai lần xin phải chờ 30 giây", async () => {
+    const { ea, clock, feed } = mk({ M1: run("M1", 3000, 10) }, { M1: run("M1", 3000, 10) });
+    const need = { tfs: ["M1"], from: 0 };
+    const step = async () => {
+      feed.get("X", need, 4000);
+      await flush();
+      feed.get("X", need, 4000);
+      await flush();
+    };
+    await step(); // đọc DB rồi xin lần 1, không có gì
+    expect(ea.calls).toHaveLength(1);
+    clock.now = 10_000;
+    await step();
+    expect(ea.calls).toHaveLength(1);
+    clock.now = 31_000;
+    await step();
+    expect(ea.calls).toHaveLength(2);
+  });
+
+  it("backend từ chối: tính một lần thử, không ném", async () => {
+    const { ea, clock, feed, onChange } = mk({ M1: run("M1", 3000, 10) }, {}, { refuse: true });
+    const out = await drive(feed, clock, { tfs: ["M1"], from: 0 }, 4000, ea.calls);
+    expect(out).toHaveLength(10);
+    expect(ea.calls).toHaveLength(2);
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it("DB rỗng: xin nến mới nhất tới `to`", async () => {
+    const { ea, clock, feed } = mk({}, { M1: run("M1", 0, 100) });
+    const out = await drive(feed, clock, { tfs: ["M1"], from: 3000 }, 6000, ea.calls);
+    expect(ea.calls[0]).toMatchObject({ tf: "M1", before: 6000 });
+    expect(out.length).toBeGreaterThan(0);
+    expect(out[0].t).toBeLessThanOrEqual(3000);
+  });
+
+  it("DB rỗng: đọc xong phải báo onChange để manager tính lại và xin EA (không chờ tick nào)", async () => {
+    const { ea, feed, onChange } = mk({}, { M1: run("M1", 0, 100) });
+    const need = { tfs: ["M1"], from: 3000 };
+    onChange.mockImplementation(() => feed.get("X", need, 6000)); // như manager: chỉ tính lại khi có onChange
+    feed.get("X", need, 6000);
+    await flush();
+    await flush();
+    expect(onChange).toHaveBeenCalled();
+    expect(ea.calls[0]).toMatchObject({ tf: "M1", before: 6000 });
+  });
+
+  it("lỗ hổng mà khung thô có nến trong đó: xin EA lấp; chỗ nghỉ thì không xin", async () => {
+    const m1 = run("M1", 0, 5).concat(run("M1", 3600, 5)); // 0..240, 3600..3840
+    const m5 = run("M5", 0, 14); // phủ liên tục: thị trường mở lúc đó
+    const open = mk({ M1: m1, M5: m5 }, { M1: run("M1", 0, 70) });
+    const out = await drive(open.feed, open.clock, { tfs: ["M1", "M5"], from: 0 }, 4000, open.ea.calls);
+    expect(open.ea.calls).toEqual([{ tf: "M1", count: 65, before: 3600 }]); // 55 nến thiếu + 10 dư
+    expect(out.filter((b) => b.t >= 300 && b.t < 3600)).toHaveLength(55);
+
+    const closed = mk({ M1: m1, M5: run("M5", 0, 1).concat(run("M5", 3600, 3)) }, { M1: run("M1", 0, 70) });
+    await drive(closed.feed, closed.clock, { tfs: ["M1", "M5"], from: 0 }, 4000, closed.ea.calls);
+    expect(closed.ea.calls).toEqual([]);
+  });
+
+  it("khung mịn hết đường (broker không có) thì mới xin đầu của khung thô hơn", async () => {
+    const { ea, clock, feed } = mk({ M1: run("M1", 3000, 10), M5: run("M5", 2400, 10) }, { M1: run("M1", 3000, 10), M5: run("M5", 0, 40) });
+    const out = await drive(feed, clock, { tfs: ["M1", "M5"], from: 0 }, 5400, ea.calls);
+    expect(ea.calls.map((c) => c.tf)).toEqual(["M1", "M1", "M5"]);
+    expect(out[0].t).toBe(0); // vùng cũ do M5 phủ
+  });
+
+  it("khung mịn nạp được đủ thì không xin khung thô hơn", async () => {
+    const { ea, clock, feed } = mk({ M1: run("M1", 3000, 10), M5: run("M5", 2400, 10) }, { M1: run("M1", 0, 100), M5: run("M5", 0, 40) });
+    await drive(feed, clock, { tfs: ["M1", "M5"], from: 0 }, 5400, ea.calls);
+    expect(ea.calls.map((c) => c.tf)).toEqual(["M1"]);
+  });
+
+  it("chỉ một lần xin tại một thời điểm", async () => {
+    const { ea, feed } = mk({ M1: run("M1", 3000, 10) }, { M1: run("M1", 0, 100) });
+    const need = { tfs: ["M1"], from: 0 };
+    feed.get("X", need, 4000);
+    await flush();
+    feed.get("X", need, 4000);
+    feed.get("X", need, 4000);
+    feed.get("X", need, 4000);
+    await flush();
+    expect(ea.calls).toHaveLength(1);
+  });
+
+  it("không cấu hình backfill: chỉ đọc DB", async () => {
+    const db = fakeDb({ M1: run("M1", 3000, 10) });
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => 0 });
+    for (let i = 0; i < 3; i++) {
+      feed.get("X", { tfs: ["M1"], from: 0 }, 4000);
+      await flush();
+    }
+    expect(feed.get("X", { tfs: ["M1"], from: 0 }, 4000)).toHaveLength(10);
+    expect(db.calls).toHaveLength(1);
+  });
+  it("khung tick TD: bước 60s, xin theo từng đoạn tickChunk nến M1, chờ lâu hơn", async () => {
+    expect(stepOf(TICK_TF)).toBe(60);
+    expect(stepOf("M5")).toBe(300);
+    const { ea, clock, feed } = mk({ TD: run("M1", 3000, 10) }, { TD: run("M1", 0, 100) }, { tickChunk: 20 });
+    const out = await drive(feed, clock, { tfs: [TICK_TF], from: 0 }, 4000, ea.calls);
+    expect(out[0].t).toBe(0);
+    expect(out.length).toBeGreaterThanOrEqual(60); // 0..3540 + vài phút đuôi do EA gửi khi làm mới đuôi
+    const heads = ea.calls.filter((c) => c.count !== 3); // count 3 = làm mới đuôi
+    expect(heads.length).toBeGreaterThan(2);
+    expect(heads.every((c) => c.tf === "TD" && c.count <= 20)).toBe(true);
+  });
+
+  it("làm mới đuôi của TD nhờ EA tính lại vài phút gần nhất rồi mới đọc; khung thường thì không", async () => {
+    const db = fakeDb({ TD: run("M1", 0, 10), M1: run("M1", 0, 10) });
+    const calls: { tf: string; count: number; before: number }[] = [];
+    const clock = { now: 0 };
+    const backfill = async (_s: string, tf: string, count: number, before: number) => {
+      calls.push({ tf, count, before });
+      if (tf === "TD") db.data.TD.push(bar(600, 7)); // EA gửi phút mới
+      return true;
+    };
+    const onChange = vi.fn();
+    const feed = new LowerFeed(db.fetch, onChange, { now: () => clock.now, backfill, sleep: async () => {} });
+    const need = { tfs: [TICK_TF], from: 0 };
+    feed.get("X", need, 660);
+    await flush();
+    expect(calls).toEqual([]); // lần đầu đọc DB, chưa làm mới đuôi
+    clock.now = 16_000;
+    feed.get("X", need, 660);
+    await flush();
+    expect(calls).toEqual([{ tf: "TD", count: 3, before: 660 }]);
+    expect(feed.get("X", need, 660).at(-1)).toMatchObject({ t: 600, c: 7 });
+    expect(onChange).toHaveBeenCalledTimes(2);
+    // khung thường: đọc đuôi từ DB, không nhờ EA
+    const feed2 = new LowerFeed(db.fetch, () => {}, { now: () => clock.now, backfill, sleep: async () => {} });
+    feed2.get("X", { tfs: ["M1"], from: 0 }, 660);
+    await flush();
+    clock.now = 40_000;
+    feed2.get("X", { tfs: ["M1"], from: 0 }, 660);
+    await flush();
+    expect(calls.filter((c) => c.tf === "M1")).toEqual([]);
   });
 });

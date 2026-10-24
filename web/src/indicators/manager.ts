@@ -1,4 +1,4 @@
-import { TF_SECONDS, fetchBars, fetchBrokerOffset, type Bar } from "@/lib/api";
+import { TF_SECONDS, fetchBars, fetchBrokerOffset, triggerBackfillAt, type Bar } from "@/lib/api";
 import type { IChartApi, IPriceLine, ISeriesApi, SeriesType, UTCTimestamp } from "lightweight-charts";
 import { byId } from "./catalog";
 import { mergeCandleColors, planCandleColors } from "./candleColors";
@@ -81,7 +81,9 @@ export class IndicatorManager {
     () => this.schedule(),
   );
 
-  private lower = new LowerFeed((symbol, tf, from, to, limit) => fetchBars(symbol, tf, to, limit, from), () => this.schedule());
+  private lower = new LowerFeed((symbol, tf, from, to, limit) => fetchBars(symbol, tf, to, limit, from), () => this.schedule(), {
+    backfill: async (symbol, tf, count, before) => (await triggerBackfillAt(symbol, tf, count, before)).ok,
+  });
   private prevColors: string[] | null = null;
 
   /** `onSync`: báo sau mỗi lần tính lại để legend đọc giá trị mới. `onCandleColors`: báo khi indicator (Color Candles) đổi màu nến chart. */

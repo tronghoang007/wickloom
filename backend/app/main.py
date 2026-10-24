@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from . import accounts, auth, economic, me, mt5, state, tcp_server, trade
 from .config import ALLOWED_ORIGINS, TF_SECONDS
 from .state import request_backfill
+from .tickdelta import TICK_DELTA_TF
 from .store import TABLES
 
 app = FastAPI(title="TV personal backend")
@@ -68,7 +69,7 @@ def list_symbols():
 @app.get("/bars")
 def get_bars(symbol: str, tf: str, frm: Optional[int] = Query(None, alias="from"),
              to: Optional[int] = None, limit: int = Query(500, le=50000)):
-    if tf not in TF_SECONDS:
+    if tf not in TF_SECONDS and tf != TICK_DELTA_TF:  # "TD" = nến delta theo tick từng phút (tickdelta.py)
         raise HTTPException(400, "unknown tf")
     return state.bars.query(symbol, tf, frm, to, limit)
 

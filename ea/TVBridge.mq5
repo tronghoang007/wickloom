@@ -58,14 +58,21 @@
 //|   cua so [CalendarDaysBack, CalendarDaysAhead] ngay - web ve bang   |
 //|   lich + bieu tuong su kien tren chart, khong phu thuoc mang ngoai  |
 //|   (docs/calendar-plan.md). Tat bang SendCalendar=false              |
+//| - 2.16: lenh "backfill" voi tf "TD" = lich su TICK cho CVD "1 tick" |
+//|   cua web (docs/indicators-plan.md): doc CopyTicksRange cua `count` |
+//|   nen M1 ket thuc o phut chua `before` (cat o gio hien tai), gui    |
+//|   "ticks_hist" (mang gia/trong so tung tick, cat o ranh gioi phut, |
+//|   toi da TickHistChunk tick moi thong diep) - backend tu phan loai  |
+//|   len/xuong va luu delta tung phut. Bang khung nen: gia = Bid neu   |
+//|   chart theo Bid, Last (trong so = volume) neu chart theo Last      |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.15"
+#property version "2.16"
 
-#define EA_VERSION "2.15"
+#define EA_VERSION "2.16"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -73,6 +80,7 @@ input string Token = "dev-token";
 input int TimerMs = 300;
 input int BackfillChunk = 5000;
 input int MaxTicksPerCall = 2000;
+input int TickHistChunk = 20000; // so tick toi da trong mot thong diep "ticks_hist" (lich su tick cho CVD 1 tick)
 input int DealsDays = 30;  // lich su deal gui len web (chi doc)
 input int MaxDeals = 200;
 
@@ -822,6 +830,152 @@ void Backfill(string symbol, string tfs, int count, int start_pos = 0, long befo
   PrintFormat("Backfill %s %s: %d bar (pos %d, before %s)", symbol, tfs, total, start_pos, IntegerToString(before));
 }
 
+//--- lich su tick cho CVD "1 tick" (tf "TD") ----------------------------
+// Gia + trong so dung de phan loai len/xuong: nen theo Bid -> tick doi Bid, trong so 1 (giong tick_volume cua nen);
+// nen theo Last (san) -> tick giao dich, trong so = volume. Tick khong thuoc loai do bi bo qua.
+bool TickPrice(const MqlTick &tk, bool useLast, double &price, double &weight)
+{
+  if (useLast)
+  {
+    if ((tk.flags & TICK_FLAG_LAST) == 0 || tk.last <= 0)
+      return false;
+    price = tk.last;
+    weight = (double)tk.volume;
+    if (weight <= 0)
+      weight = 1;
+    return true;
+  }
+  if ((tk.flags & TICK_FLAG_BID) == 0 || tk.bid <= 0)
+    return false;
+  price = tk.bid;
+  weight = 1;
+  return true;
+}
+
+// Noi cac so thanh "a,b,c" theo tung khoi nho (cong chuoi dai lien tuc rat cham)
+string JoinLongs(const long &a[], int n)
+{
+  string all = "", part = "";
+  for (int i = 0; i < n; i++)
+  {
+    part += (i > 0 ? "," : "") + IntegerToString(a[i]);
+    if ((i & 255) == 255)
+    {
+      all += part;
+      part = "";
+    }
+  }
+  return all + part;
+}
+
+string JoinDoubles(const double &a[], int n, int digits)
+{
+  string all = "", part = "";
+  for (int i = 0; i < n; i++)
+  {
+    part += (i > 0 ? "," : "") + DoubleToString(a[i], digits);
+    if ((i & 255) == 255)
+    {
+      all += part;
+      part = "";
+    }
+  }
+  return all + part;
+}
+
+bool SendTickChunk(string symbol, int offset, int digits, const long &t[], const double &p[], const double &w[], int n, bool useW, double pb, int pd, bool cont, bool done)
+{
+  string js = "{\"type\":\"ticks_hist\",\"broker_utc_offset\":" + IntegerToString(offset) + ",\"symbol\":\"" + Esc(symbol) + "\",\"pb\":" + DoubleToString(pb, 8) + ",\"pd\":" + IntegerToString(pd)
+              + ",\"cont\":" + (cont ? "true" : "false") + ",\"done\":" + (done ? "true" : "false")
+              + ",\"t\":[" + JoinLongs(t, n) + "],\"p\":[" + JoinDoubles(p, n, digits) + "]";
+  if (useW)
+    js += ",\"w\":[" + JoinDoubles(w, n, 2) + "]";
+  return SendLine(js + "}");
+}
+
+// Tick cua `minutes` nen M1 (dem lui theo chi so nen nhu Backfill nen nhay qua cuoi tuan / gio dong cua), nen cuoi la nen chua `before`
+// (epoch UTC); nen chua toi (hien tai) thi cat o bay gio -> phut do chua tron, lan sau web xin lai (backend ghi de ca phut).
+// Cua so luon tron phut nen moi phut nam tron trong mot thong diep.
+void TickHistory(string symbol, int minutes, long before)
+{
+  if (minutes <= 0)
+    return;
+  minutes = MathMin(minutes, 2880);
+  SymbolSelect(symbol, true);
+  int offset = BrokerOffset();
+  long offMs = (long)offset * 1000;
+  bool useLast = (SymbolInfoInteger(symbol, SYMBOL_CHART_MODE) == SYMBOL_CHART_MODE_LAST);
+  int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+  long nowMs = (long)TimeGMT() * 1000 + 999;
+  long endMs = MathMin((before / 60 + 1) * 60 * 1000, nowMs); // het phut chua `before`, khong qua bay gio
+  long startMs = ((endMs - 1) / 60000 - minutes + 1) * 60000; // du phong neu terminal chua co nen M1 o do: theo gio dong ho
+  MqlRates r1[];
+  int shift = iBarShift(symbol, PERIOD_M1, (datetime)((endMs - 1) / 1000 + offset), false);
+  if (shift >= 0 && CopyRates(symbol, PERIOD_M1, shift, minutes, r1) > 0)
+    startMs = ((long)r1[0].time - offset) * 1000;
+
+  // gia + chieu cua tick lien truoc cua so (5 phut truoc do): de tick dau co chieu dung (khong co thi backend lay mac dinh)
+  double pb = 0, price = 0, weight = 0;
+  int pd = 1;
+  MqlTick pre[];
+  int np = CopyTicksRange(symbol, pre, COPY_TICKS_ALL, (ulong)(startMs + offMs - 300000), (ulong)(startMs + offMs - 1));
+  for (int k = 0; k < np; k++)
+    if (TickPrice(pre[k], useLast, price, weight))
+    {
+      if (pb > 0 && price != pb)
+        pd = (price > pb) ? 1 : -1;
+      pb = price;
+    }
+
+  MqlTick ticks[];
+  int n = -1;
+  for (int attempt = 0; attempt < 5; attempt++)
+  {
+    ResetLastError();
+    n = CopyTicksRange(symbol, ticks, COPY_TICKS_ALL, (ulong)(startMs + offMs), (ulong)(endMs + offMs - 1));
+    if (n >= 0)
+      break;
+    Sleep(300); // lich su tick cu chua tai xong -> thu lai
+  }
+  if (n <= 0)
+  {
+    PrintFormat("TickHistory %s: khong co tick (n=%d, loi %d, %d nen M1 toi %s)", symbol, n, GetLastError(), minutes, IntegerToString(endMs / 1000));
+    return;
+  }
+
+  int cap = TickHistChunk * 2;
+  long tt[];
+  double pp[], ww[];
+  ArrayResize(tt, cap);
+  ArrayResize(pp, cap);
+  ArrayResize(ww, cap);
+  int cnt = 0, sent = 0;
+  long curMin = -1;
+  bool cont = false;
+  for (int i = 0; i < n; i++)
+  {
+    if (!TickPrice(ticks[i], useLast, price, weight))
+      continue;
+    long m = (long)ticks[i].time_msc / 60000;
+    if (cnt > 0 && ((m != curMin && cnt >= TickHistChunk) || cnt >= cap)) // cat o ranh gioi phut; qua cap thi cat luon (phut do bi chia hai, hiem)
+    {
+      if (!SendTickChunk(symbol, offset, digits, tt, pp, ww, cnt, useLast, pb, pd, cont, false))
+        return;
+      sent += cnt;
+      cnt = 0;
+      cont = true;
+    }
+    curMin = m;
+    tt[cnt] = (long)ticks[i].time_msc;
+    pp[cnt] = price;
+    ww[cnt] = weight;
+    cnt++;
+  }
+  if (cnt > 0 && SendTickChunk(symbol, offset, digits, tt, pp, ww, cnt, useLast, pb, pd, cont, true))
+    sent += cnt;
+  PrintFormat("TickHistory %s: %d tick (%d nen M1 toi %s, %s)", symbol, sent, minutes, IntegerToString(endMs / 1000), useLast ? "Last" : "Bid");
+}
+
 //--- giao dich tu web (T2): market Buy/Sell + dong vi the -------------------
 double JsonDbl(string obj, string key)
 {
@@ -1337,7 +1491,10 @@ void HandleCommand(string line)
     int count = (int)JsonInt(line, "count");
     int pos = (int)JsonInt(line, "pos");
     long before = JsonInt(line, "before");
-    Backfill(sym, tf, count, pos, before);
+    if (tf == "TD")
+      TickHistory(sym, count, before); // lich su tick cho CVD "1 tick": count = so nen M1
+    else
+      Backfill(sym, tf, count, pos, before);
   }
   else if (type == "error")
   {

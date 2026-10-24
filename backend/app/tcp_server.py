@@ -3,9 +3,9 @@ import json
 import time
 from typing import Any, Dict
 
-from . import economic, mt5, state, trade
+from . import economic, mt5, state, tickdelta, trade
 from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN
-from .models import BarsIn, SymbolsIn, TicksIn
+from .models import BarsIn, SymbolsIn, TicksHistIn, TicksIn
 
 # Tick chỉ dùng cho realtime: tick cũ hơn mức này (EA gửi lại lịch sử tick, vd
 # CopyTicks từ msc=0 khi mới subscribe) bị bỏ - quá khứ do backfill bar của EA lo. Gom
@@ -57,6 +57,13 @@ def _handle_bars(body: BarsIn) -> None:
         state._on_update(body.symbol, body.tf, merged)
     if body.done or len(body.bars) > 0:
         state.hub.publish(body.symbol, body.tf, {"type": "bars_loaded", "symbol": body.symbol, "tf": body.tf})
+
+
+def _handle_ticks_hist(body: TicksHistIn) -> None:
+    state.broker_offset["value"] = body.broker_utc_offset
+    rows = tickdelta.ingest(body)
+    if rows:
+        state.bars.upsert(body.symbol, tickdelta.TICK_DELTA_TF, rows)
 
 
 async def _write(writer: asyncio.StreamWriter, msg: Dict[str, Any]) -> None:
@@ -143,6 +150,8 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
                     _handle_ticks(TicksIn.model_validate(msg))
                 elif mtype == "bars":
                     _handle_bars(BarsIn.model_validate(msg))
+                elif mtype == "ticks_hist":
+                    _handle_ticks_hist(TicksHistIn.model_validate(msg))
                 elif mtype == "account":
                     mt5.registry.update(writer, msg)
                 elif mtype == "calendar":

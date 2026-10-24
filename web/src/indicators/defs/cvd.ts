@@ -1,6 +1,6 @@
 import type { Bar } from "@/lib/api";
 import { periodKeys, periodStarts, type Period } from "../calendar";
-import { autoLowerTf, lowerCandidates, withinBudget } from "../lower";
+import { TICK_TF, autoLowerTf, lowerCandidates, withinBudget } from "../lower";
 import { str, type IndicatorDef } from "../schema";
 import { nan } from "../ta";
 
@@ -11,6 +11,8 @@ const ANCHORS: Record<string, Period> = { "1D": "day", "1W": "week", "1M": "mont
 /** Ô Timeframe của TV ("1", "5", "60"...) -> tên khung của backend. */
 const TF_OF: Record<string, string> = { "1": "M1", "5": "M5", "15": "M15", "30": "M30", "60": "H1", "240": "H4", D: "D1" };
 const BUDGET = 100_000; // số nến khung nhỏ tối đa chấp nhận cho một lần nạp
+const TICK_BUDGET = 14 * 1440; // "1 tick": tối đa chừng này phút (~3,4 triệu tick vàng) mỗi lần; xa hơn thì không tính (TV cũng báo thiếu độ sâu tick)
+const TICKS = "1 tick";
 
 /** Chiều của volume từng nến khung nhỏ: đóng > mở lên, đóng < mở xuống; đóng = mở thì so với đóng nến trước, vẫn bằng thì giữ chiều trước. */
 export function barDirection(b: Bar, prevClose: number, prevDir: 1 | -1): 1 | -1 {
@@ -21,8 +23,9 @@ export function barDirection(b: Bar, prevClose: number, prevDir: 1 | -1): 1 | -1
 
 export type DeltaCandles = { o: number[]; h: number[]; l: number[]; c: number[] };
 
-/** Nến delta tích luỹ: `fine` = nến khung nhỏ tăng dần theo t, `keys` = khoá kỳ anchor của từng nến chart. Nến chart trước chỗ dữ liệu khung nhỏ bắt đầu, hoặc không có nến khung nhỏ nào bên trong, là na. */
-export function cumulativeDelta(bars: Bar[], keys: number[], fine: Bar[]): DeltaCandles {
+/** Nến delta tích luỹ: `fine` = nến khung nhỏ tăng dần theo t, `keys` = khoá kỳ anchor của từng nến chart. Nến chart trước chỗ dữ liệu khung nhỏ bắt đầu, hoặc không có nến khung nhỏ nào bên trong, là na.
+ *  `ticks`: `fine` là nến delta từng phút của tick (backend tf "TD": o = 0, c = delta phút, h / l = đỉnh / đáy delta tích luỹ trong phút) thay vì nến giá cần phân loại. */
+export function cumulativeDelta(bars: Bar[], keys: number[], fine: Bar[], ticks = false): DeltaCandles {
   const n = bars.length;
   const out: DeltaCandles = { o: nan(n), h: nan(n), l: nan(n), c: nan(n) };
   if (fine.length === 0) return out;
@@ -48,6 +51,12 @@ export function cumulativeDelta(bars: Bar[], keys: number[], fine: Bar[]): Delta
     out.o[i] = cum;
     while (j < fine.length && fine[j].t < end) {
       const b = fine[j++];
+      if (ticks) {
+        hi = Math.max(hi, cum + b.h);
+        lo = Math.min(lo, cum + b.l);
+        cum += b.c;
+        continue;
+      }
       dir = barDirection(b, prevClose, dir);
       prevClose = b.c;
       cum += dir * b.v;
@@ -65,8 +74,9 @@ export const cvd: IndicatorDef = {
   id: "cvd", name: "CVD", title: "Cumulative volume delta", overlay: false, format: "volume",
   inputs: [
     { key: "anchor", label: "Anchor period", type: "select", default: "1D", options: Object.keys(ANCHORS) },
-    { key: "custom", label: "Use custom timeframe", type: "bool", default: false, tooltip: "The indicator scans lower timeframe data to approximate up and down volume used in the delta calculation. By default, the timeframe is chosen automatically. Higher timeframes provide more historical data, but the data will be less precise." },
-    { key: "tf", label: "Timeframe", type: "select", default: "1", options: Object.keys(TF_OF), enabledIf: (i) => !!i.custom },
+    { key: "agg", label: "Data aggregation", type: "select", default: "Time", options: ["Time", TICKS], tooltip: "Defines how lower timeframe data is aggregated for the delta calculation. \"1 tick\" computes the delta on tick data (the broker's tick history, requested from MetaTrader; each tick counts as tick volume 1) and covers only a few weeks." },
+    { key: "custom", label: "Use custom timeframe", type: "bool", default: false, enabledIf: (i) => i.agg !== TICKS, tooltip: "The indicator scans lower timeframe data to approximate up and down volume used in the delta calculation. By default, the timeframe is chosen automatically. Higher timeframes provide more historical data, but the data will be less precise." },
+    { key: "tf", label: "Timeframe", type: "select", default: "1", options: Object.keys(TF_OF), enabledIf: (i) => !!i.custom && i.agg !== TICKS },
   ],
   plots: [{ id: "cvd", title: "CVD", type: "candles", color: "#089981", colorDown: "#f23645" }],
   levels: [{ id: "zero", title: "Zero", value: 0, color: "#787b86" }],
@@ -74,6 +84,11 @@ export const cvd: IndicatorDef = {
   needsCalendar: true,
   lower: (inputs, { bars, cut, step, calendar }) => {
     if (bars.length === 0) return null;
+    if (inputs.agg === TICKS) {
+      const start = periodStarts(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", calendar).filter((s) => s <= cut).pop() ?? 0;
+      const from = bars[start].t;
+      return (bars[bars.length - 1].t + step - from) / 60 <= TICK_BUDGET ? { tfs: [TICK_TF], from } : null;
+    }
     const first = inputs.custom ? TF_OF[str(inputs, "tf")] : autoLowerTf(step);
     // tự chọn thì được lùi sang khung thô hơn ở vùng M1 không còn; tự chọn khung riêng thì dùng đúng khung đó
     const cands = lowerCandidates(step, first);
@@ -86,6 +101,11 @@ export const cvd: IndicatorDef = {
   },
   compute: ({ bars, inputs, lower, calendar }) => {
     const keys = periodKeys(bars.map((b) => b.t), ANCHORS[str(inputs, "anchor")] ?? "day", calendar);
+    // "1 tick": chỉ dùng nến delta theo tick; chưa nạp tới / ngoài độ sâu tick thì để trống (TV báo thiếu độ sâu tick) thay vì đoán từ nến chart
+    if (inputs.agg === TICKS) {
+      const t = cumulativeDelta(bars, keys, lower, true);
+      return { cvd: { values: t.c, candle: { o: t.o, h: t.h, l: t.l } } };
+    }
     // chart khung nhỏ nhất (không có khung nhỏ hơn) hoặc không tải được: dùng chính nến chart
     const fine = lower.length > 0 ? lower : bars;
     const d = cumulativeDelta(bars, keys, fine);
