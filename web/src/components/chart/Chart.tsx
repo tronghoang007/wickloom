@@ -167,10 +167,9 @@ function basePoint(b: Bar, type: ChartType, prevC?: number) {
   };
 }
 
-const volPoint = (b: Bar, prevC: number | undefined, vs: VolumeSettings) => {
-  const cs = useSettingsStore.getState().s;
-  return { time: b.t as UTCTimestamp, value: b.v, color: volColor(vs, cs, volUp(b, prevC, vs)) };
-};
+const volPoint = (b: Bar, prevC: number | undefined, vs: VolumeSettings) => ({
+  time: b.t as UTCTimestamp, value: b.v, color: volColor(vs, volUp(b, prevC, vs)),
+});
 
 function fmtCountdown(sec: number) {
   const h = Math.floor(sec / 3600),
@@ -210,6 +209,8 @@ type Legend = { bar: Bar; prev: number | null };
 // Khoảng cách giữa 2 nến liền kề lớn hơn mức này = cache backend có lỗ (không phải
 // cuối tuần/nghỉ lễ) -> phải hỏi EA trước khi vẽ đoạn cũ hơn.
 const gapLimit = (tf: string) => Math.max(5 * 86400, 3 * TF_SECONDS[tf]);
+const MAX_BLANK_BARS = 20000; // đổi TF: góc nhìn cũ hơn dữ liệu tối đa bấy nhiêu nến thì vẫn đi nạp (mỗi lần 500 nến), xa hơn thì bỏ
+const hasHole = (bars: Bar[], tf: string) => bars.some((b, i) => i > 0 && b.t - bars[i - 1].t > gapLimit(tf));
 
 // Bar cũ hơn `firstT` lấy từ DB dùng được nếu nối liền với `firstT`, hoặc EA đã trả lời
 // backfill neo đúng mốc này (khoảng trống là thật trên MT5).
@@ -1028,7 +1029,7 @@ export default function Chart({ paneId }: { paneId: string }) {
     volMaRef.current?.applyOptions({ visible: volMaShown(vs, tf), color: vs.maColor });
     renderVol();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vs, tf, cs.bodyUp, cs.bodyDown]);
+  }, [vs, tf]);
 
   // cursor mode + screenshot
   const cursor = useDrawingStore((s) => s.cursor);
@@ -1230,16 +1231,23 @@ export default function Chart({ paneId }: { paneId: string }) {
 
   // data + realtime
   const prevKeyRef = useRef<{ symbol: string; tf: string } | null>(null);
+  // Góc nhìn cần giữ qua lần đổi timeframe tới (thời gian ở giữa, thời gian mép phải, số nến); còn đó tới khi áp xong lên TF mới
+  const keepViewRef = useRef<{ t: number; tRight: number; span: number } | null>(null);
   useEffect(() => {
     // Chỉ đổi timeframe (cùng symbol) khi đang xem đoạn lịch sử (không chạm nến mới nhất): giữ đúng mốc thời gian
     // đang xem ở giữa màn hình và số nến hiển thị, như TradingView, thay vì văng về nến mới nhất.
     const prev = prevKeyRef.current;
     prevKeyRef.current = { symbol, tf };
-    let keepView: { t: number; span: number } | null = null;
-    const oldRange = chartRef.current?.timeScale().getVisibleLogicalRange();
-    if (prev && prev.symbol === symbol && prev.tf !== tf && oldRange && barsRef.current.length > 0 && oldRange.to < barsRef.current.length - 1) {
-      const t = timeAt(barsRef.current, TF_SECONDS[prev.tf], (oldRange.from + oldRange.to) / 2);
-      if (t !== null) keepView = { t, span: oldRange.to - oldRange.from };
+    if (!prev || prev.symbol !== symbol) keepViewRef.current = null;
+    else if (prev.tf !== tf && barsRef.current.length > 0) {
+      // (chưa có nến = lần đổi trước còn đang tải: giữ góc nhìn đang chờ)
+      keepViewRef.current = null;
+      const oldRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+      if (oldRange && oldRange.to < barsRef.current.length - 1) {
+        const t = timeAt(barsRef.current, TF_SECONDS[prev.tf], (oldRange.from + oldRange.to) / 2);
+        const tRight = timeAt(barsRef.current, TF_SECONDS[prev.tf], oldRange.to);
+        if (t !== null && tRight !== null) keepViewRef.current = { t, tRight, span: oldRange.to - oldRange.from };
+      }
     }
     let alive = true;
     let ws: WebSocket | null = null;
@@ -1258,9 +1266,10 @@ export default function Chart({ paneId }: { paneId: string }) {
       // Đang replay (đã "cắt" tại 1 mốc thời gian) -> đổi symbol/tf vẫn phải neo đúng
       // mốc đó, không load "mới nhất" của tf mới.
       const anchor = replayActiveNow ? cursorRef.current : undefined;
-      const bars = await fetchBars(symbol, tf, anchor);
+      let bars = await fetchBars(symbol, tf, anchor);
       if (!alive) return;
       if (replayActiveNow) {
+        keepViewRef.current = null;
         fullRef.current = bars;
         if (bars.length === 0) {
           // tf này chưa có cache tới mốc cắt -> xin EA nạp thêm, chờ "bars_loaded" rồi
@@ -1271,6 +1280,16 @@ export default function Chart({ paneId }: { paneId: string }) {
         if (!alive) return;
         applyVisible(buildVisible(cursorRef.current));
         return;
+      }
+      const tfs = TF_SECONDS[tf];
+      const kv = keepViewRef.current;
+      // Giữ mốc giữa nhưng không lố qua mép phải cũ: TF lớn hơn phủ nhiều thời gian hơn 1 số nến, lố qua sẽ trồi tới nến mới nhất
+      const toT = kv && Math.min(kv.t + (kv.span * tfs) / 2, kv.tRight);
+      if (kv && toT !== null && bars.length && bars[0].t > toT - kv.span * tfs) {
+        // đoạn đang xem cũ hơn 500 nến mới nhất của TF này: tải liền một mạch từ đó tới nến mới nhất (chừa 50 nến bên trái)
+        const wide = await fetchBars(symbol, tf, undefined, 50000, Math.floor(toT - (kv.span + 50) * tfs));
+        if (!alive) return;
+        if (wide.length > bars.length && wide.length < 50000 && !hasHole(wide, tf)) bars = wide;
       }
       barsRef.current = bars;
       setLegend(legendAt(bars.length - 1));
@@ -1290,11 +1309,15 @@ export default function Chart({ paneId }: { paneId: string }) {
       chartRef.current?.priceScale("right", mainIndex()).setAutoScale(true);
       if (bars.length) {
         if (chartRef.current) {
-          const mid = keepView ? indexAt(bars, TF_SECONDS[tf], keepView.t) : null;
-          // mốc đang xem nằm hẳn ngoài dữ liệu đã tải của TF mới (vd lịch sử 1m chưa nạp) thì về góc nhìn mặc định
-          const kept = keepView && mid !== null && mid + keepView.span / 2 > 0 && mid - keepView.span / 2 < bars.length - 1;
-          chartRef.current.timeScale().setVisibleLogicalRange(kept && keepView && mid !== null ? { from: mid - keepView.span / 2, to: mid + keepView.span / 2 } : defaultRange(chartRef.current, bars.length));
+          const mid = kv ? indexAt(bars, tfs, kv.t) : null;
+          const right = kv ? indexAt(bars, tfs, kv.tRight) : null;
+          const to = kv && mid !== null && right !== null ? Math.min(mid + kv.span / 2, right) : null;
+          // mốc đang xem cũ hơn dữ liệu đã tải của TF mới (vd lịch sử 1m chưa nạp): vẫn đặt góc nhìn ở đó, cuộn-lùi tự xin
+          // EA nạp thêm (mỗi lần dịch góc nhìn theo số nến nạp được); quá xa (> MAX_BLANK_BARS nến) thì về góc nhìn mặc định
+          const kept = kv && to !== null && to > -MAX_BLANK_BARS && to - kv.span < bars.length - 1;
+          chartRef.current.timeScale().setVisibleLogicalRange(kept && kv && to !== null ? { from: to - kv.span, to } : defaultRange(chartRef.current, bars.length));
         }
+        keepViewRef.current = null;
       } else {
         clearTimeout(pollTimer);
         pollTimer = setTimeout(load, missing ? 5000 : 800);
@@ -1694,7 +1717,8 @@ export default function Chart({ paneId }: { paneId: string }) {
             aria-label="Scroll to the most recent bar"
             title="Scroll to the most recent bar"
             onClick={() => {
-              chartRef.current?.timeScale().scrollToRealTime();
+              // nhảy tức thì (không scrollToRealTime): animation 400ms của LWC bị cắt ngang mỗi lần nến cũ được nạp/ghép vào, dừng giữa chừng
+              chartRef.current?.timeScale().scrollToPosition(useSettingsStore.getState().s.rightOffset, false);
               setShowLatestButton(false);
             }}
             className="absolute bottom-9 right-[76px] z-20 flex h-8 w-8 items-center justify-center rounded border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] shadow hover:bg-[var(--hover)]"
@@ -1775,10 +1799,10 @@ export default function Chart({ paneId }: { paneId: string }) {
               aria-label={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
               title={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
               onClick={() => pane.indicators.getState().setCollapsed(!legendCollapsed)}
-              className="pointer-events-auto mt-1 flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] text-[var(--fg)] hover:bg-[var(--hover)]"
+              className="pointer-events-auto mt-1 flex h-6 w-6 items-center justify-center rounded border border-[#464646] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--hover)]"
             >
               <span className={legendCollapsed ? "" : "rotate-180"}>
-                <Chevron size={14} />
+                <Chevron size={22} />
               </span>
             </button>
           )}

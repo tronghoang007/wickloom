@@ -1,6 +1,5 @@
 "use client";
 
-import { useSettingsStore } from "@/store/settings";
 import { DEFAULT_VOLUME, useVolumeStore, volColor, type VolumeSettings } from "@/store/volume";
 import { useRef } from "react";
 import ColorPicker from "./ColorPicker";
@@ -9,7 +8,6 @@ import { Check, Section, SettingsFrame, VisibilityTab, field, num } from "./sett
 function Dialog() {
   const s = useVolumeStore((st) => st.s);
   const set = useVolumeStore((st) => st.set);
-  const cs = useSettingsStore((st) => st.s);
   // Chỉnh là áp ngay lên chart (xem trước); Cancel/X/Esc trả về setting lúc mở dialog, Ok giữ lại
   const snapshot = useRef<VolumeSettings>(useVolumeStore.getState().s);
 
@@ -54,15 +52,15 @@ function Dialog() {
               <Check label="Volume" checked={s.show} onChange={(v) => set({ show: v })} />
               <div className="flex items-center justify-between py-1.5 pl-6">
                 Growing
-                <ColorPicker value={volColor(s, cs, true)} onChange={(c) => set({ growing: c })} className="h-7 w-12 p-1" />
+                <ColorPicker value={volColor(s, true)} onChange={(c) => set({ growing: c })} className="h-7 w-7 p-1" />
               </div>
               <div className="flex items-center justify-between py-1.5 pl-6">
                 Falling
-                <ColorPicker value={volColor(s, cs, false)} onChange={(c) => set({ falling: c })} className="h-7 w-12 p-1" />
+                <ColorPicker value={volColor(s, false)} onChange={(c) => set({ falling: c })} className="h-7 w-7 p-1" />
               </div>
               <div className="flex items-center justify-between">
                 <Check label="Volume MA" checked={s.maOn} onChange={(v) => set({ maOn: v })} />
-                <ColorPicker value={s.maColor} onChange={(c) => set({ maColor: c })} className="h-7 w-12 p-1" />
+                <ColorPicker value={s.maColor} onChange={(c) => set({ maColor: c })} className="h-7 w-7 p-1" />
               </div>
 
               <Section>Output values</Section>

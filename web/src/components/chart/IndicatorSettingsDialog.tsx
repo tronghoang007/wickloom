@@ -110,13 +110,13 @@ function Dialog({ uid }: { uid: string }) {
                     <Check className="min-w-0 flex-1 whitespace-nowrap" label={p.title} checked={st.visible} onChange={(visible) => setStyle("plots", p.id, { visible })} />
                     {p.type === "candles" && (
                       <>
-                        <ColorPicker value={st.color} onChange={(color) => setStyle("plots", p.id, { color })} className="h-7 w-10 p-1" />
-                        <ColorPicker value={st.colorDown} onChange={(colorDown) => setStyle("plots", p.id, { colorDown })} className="h-7 w-10 p-1" />
+                        <ColorPicker value={st.color} onChange={(color) => setStyle("plots", p.id, { color })} className="h-7 w-7 p-1" />
+                        <ColorPicker value={st.colorDown} onChange={(colorDown) => setStyle("plots", p.id, { colorDown })} className="h-7 w-7 p-1" />
                       </>
                     )}
                     {!p.perBar && p.type !== "candles" && (
                       <>
-                        <ColorPicker value={st.color} onChange={(color) => setStyle("plots", p.id, { color })} className="h-7 w-10 p-1" />
+                        <ColorPicker value={st.color} onChange={(color) => setStyle("plots", p.id, { color })} className="h-7 w-7 p-1" />
                         <Pick value={st.lineStyle} disabled={!isLine} options={LINE_STYLES} onChange={(v) => setStyle("plots", p.id, { lineStyle: v as LineStyleName })} />
                         <Pick value={String(st.width)} width="w-[56px]" disabled={!isLine} options={WIDTHS.map((w) => ({ id: String(w), label: `${w}px` }))} onChange={(v) => setStyle("plots", p.id, { width: Number(v) })} />
                         <Pick value={st.type} width="w-[124px]" options={PLOT_TYPES} onChange={(v) => setStyle("plots", p.id, { type: v as PlotType })} />
@@ -144,7 +144,7 @@ function Dialog({ uid }: { uid: string }) {
                             if (Number.isFinite(n)) setStyle("levels", l.id, { value: n });
                           }}
                         />
-                        <ColorPicker value={st.color} onChange={(color) => setStyle("levels", l.id, { color })} className="h-7 w-10 p-1" />
+                        <ColorPicker value={st.color} onChange={(color) => setStyle("levels", l.id, { color })} className="h-7 w-7 p-1" />
                         <Pick value={st.lineStyle} options={LINE_STYLES} onChange={(v) => setStyle("levels", l.id, { lineStyle: v as LineStyleName })} />
                         <Pick value={String(st.width)} options={WIDTHS.map((w) => ({ id: String(w), label: `${w}px` }))} onChange={(v) => setStyle("levels", l.id, { width: Number(v) })} />
                       </div>
@@ -162,8 +162,8 @@ function Dialog({ uid }: { uid: string }) {
                       <div key={f.id} className="flex items-center justify-between">
                         <Check label={f.title} checked={st.visible} onChange={(visible) => setStyle("fills", f.id, { visible })} />
                         <div className="flex items-center gap-1.5">
-                          <ColorPicker value={st.color} onChange={(color) => setStyle("fills", f.id, { color })} className="h-7 w-10 p-1" />
-                          {f.colorDown && <ColorPicker value={st.colorDown} onChange={(colorDown) => setStyle("fills", f.id, { colorDown })} className="h-7 w-10 p-1" />}
+                          <ColorPicker value={st.color} onChange={(color) => setStyle("fills", f.id, { color })} className="h-7 w-7 p-1" />
+                          {f.colorDown && <ColorPicker value={st.colorDown} onChange={(colorDown) => setStyle("fills", f.id, { colorDown })} className="h-7 w-7 p-1" />}
                         </div>
                       </div>
                     );
@@ -182,7 +182,7 @@ function Dialog({ uid }: { uid: string }) {
                       ) : (
                         <Check className="min-w-0 flex-1 whitespace-nowrap" label={it.title} checked={st.visible} onChange={(visible) => setStyle("items", it.id, { visible })} />
                       )}
-                      <ColorPicker value={st.color} onChange={(color) => setStyle("items", it.id, { color })} className="h-7 w-10 p-1" />
+                      <ColorPicker value={st.color} onChange={(color) => setStyle("items", it.id, { color })} className="h-7 w-7 p-1" />
                       {it.line && (
                         <>
                           <Pick value={st.style} options={LINE_STYLES} onChange={(v) => setStyle("items", it.id, { lineStyle: v as LineStyleName })} />

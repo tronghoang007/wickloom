@@ -3,7 +3,6 @@ import { visibleOn } from "@/drawings/visibility";
 import type { Bar } from "@/lib/api";
 import { composeStore } from "./compose";
 import { DEFAULT_VOLUME, type VolumeSettings } from "./paneStores";
-import type { ChartSettings } from "./settings";
 
 export { DEFAULT_VOLUME, type VolumeSettings };
 
@@ -15,9 +14,13 @@ export function volUp(b: Bar, prevC: number | undefined, v: VolumeSettings) {
   return v.colorByPrevClose && prevC !== undefined ? b.c >= prevC : b.c >= b.o;
 }
 
-/** Màu cột (có thể kèm alpha). Chưa chọn thì lấy màu nến 40%; màu nến có thể kèm alpha (#rrggbbaa). */
-export function volColor(v: VolumeSettings, cs: ChartSettings, up: boolean) {
-  return (up ? v.growing : v.falling) ?? `${(up ? cs.bodyUp : cs.bodyDown).slice(0, 7)}66`;
+/** Màu mặc định của cột volume: đo từ TV (`#26a69a` / `#ef5350` ở 50%), độc lập với màu nến như TV. */
+export const VOL_UP = "#26a69a80";
+export const VOL_DOWN = "#ef535080";
+
+/** Màu cột (có thể kèm alpha #rrggbbaa); chưa chọn thì dùng màu mặc định của TV. */
+export function volColor(v: VolumeSettings, up: boolean) {
+  return (up ? v.growing : v.falling) ?? (up ? VOL_UP : VOL_DOWN);
 }
 
 /** Histogram volume có đang hiện không (chưa gỡ, không ẩn, bật Volume, đúng khung thời gian). */

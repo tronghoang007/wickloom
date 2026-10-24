@@ -5,7 +5,7 @@ import { computeExtras } from "../engine";
 import { newInstance } from "../instance";
 import { TICK_DEPTH } from "../lower";
 import type { TickSource } from "../schema";
-import { bigTrades, bubbleFrom, bubbleSize, niceStep, rowSize } from "./bigTrades";
+import { bigTrades, bubbleFrom, bubbleSize, lighten, niceStep, rowSize } from "./bigTrades";
 
 const M5 = 300;
 const bar = (t: number): Bar => ({ t, o: 100, h: 101, l: 99, c: 100, v: 1 });
@@ -105,9 +105,9 @@ describe("Big Trades", () => {
     const { ticks } = source([cell(t + 60, 101.5, 8, 2), cell(t + 240, 99.5, 1, 6), cell(bars[7].t, 100, 3, 3)]);
     const b = run(ticks, { text: false }).bubbles!;
     const at = (y: number) => b.find((x) => x.y === y)!;
-    expect(at(101.5)).toMatchObject({ x: 5, border: "#26a69a" }); // mua nhiều hơn
-    expect(at(99.5)).toMatchObject({ x: 5, border: "#f23645" }); // bán nhiều hơn
-    expect(at(100)).toMatchObject({ x: 7, border: "#26a69a" }); // bằng nhau: bên mua
+    expect(at(101.5)).toMatchObject({ x: 5, bg: "#26a69ab8" }); // mua nhiều hơn
+    expect(at(99.5)).toMatchObject({ x: 5, bg: "#f23645b8" }); // bán nhiều hơn
+    expect(at(100)).toMatchObject({ x: 7, bg: "#26a69ab8" }); // bằng nhau: bên mua
     expect(at(101.5).text).toBeUndefined();
   });
 
@@ -123,8 +123,15 @@ describe("Big Trades", () => {
   it("màu và độ trong suốt lấy từ Style / Opacity", () => {
     const style = { items: { buy: { color: "#112233" } } };
     const b = run(source([cell(bars[0].t, 100, 4, 0)]).ticks, { opacity: 50 }, 0, style).bubbles![0];
-    expect(b.border).toBe("#112233");
+    expect(b.border).toBe(lighten("#112233", 0.6)); // viền sáng hơn nền để tách khỏi nến cùng màu
     expect(b.bg).toBe("#11223380");
+  });
+
+  it("lighten pha màu với trắng; màu khác định dạng giữ nguyên", () => {
+    expect(lighten("#000000", 0.5)).toBe("#808080");
+    expect(lighten("#26a69a", 0)).toBe("#26a69a");
+    expect(lighten("#26a69a", 1)).toBe("#ffffff");
+    expect(lighten("red", 0.5)).toBe("red");
   });
 
   it("volume lớn hiện dạng gọn (K / M)", () => {

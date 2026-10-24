@@ -35,7 +35,7 @@ function FibLevels({ levels, onChange }: { levels: FibLevel[]; onChange: (lv: Fi
             value={l.coeff}
             onChange={(e) => e.target.value !== "" && Number.isFinite(Number(e.target.value)) && set(i, { coeff: Number(e.target.value) })}
           />
-          <ColorPicker value={l.color} onChange={(c) => set(i, { color: c })} className="h-7 w-9 p-1" />
+          <ColorPicker value={l.color} onChange={(c) => set(i, { color: c })} className="h-7 w-7 p-1" />
         </div>
       ))}
     </div>
@@ -106,7 +106,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
     <Row label={label}>
       <span className="flex items-center gap-3">
         {color && (
-          <ColorPicker value={String(v[color as keyof typeof v])} onChange={(c) => setOpt(color, c)} className="h-8 w-12 p-1" />
+          <ColorPicker value={String(v[color as keyof typeof v])} onChange={(c) => setOpt(color, c)} className="h-8 w-8 p-1" />
         )}
         {dash && (
           <select className={`${input} w-24`} value={Number(v[dash as keyof typeof v])} onChange={(e) => setOpt(dash, Number(e.target.value))}>
@@ -126,7 +126,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
   );
   const colorRow = (label: string, key: string) => (
     <Row label={label}>
-      <ColorPicker value={String(v[key as keyof typeof v])} onChange={(c) => setOpt(key, c)} className="h-8 w-12 p-1" />
+      <ColorPicker value={String(v[key as keyof typeof v])} onChange={(c) => setOpt(key, c)} className="h-8 w-8 p-1" />
     </Row>
   );
 
@@ -138,7 +138,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   )}
                 <Row label={o.label}>
                   {"color" in o ? (
-                    <ColorPicker value={String(optOf(d, o.key) || d.color)} onChange={(c) => setOpt(o.key, c)} className="h-8 w-12 p-1" />
+                    <ColorPicker value={String(optOf(d, o.key) || d.color)} onChange={(c) => setOpt(o.key, c)} className="h-8 w-8 p-1" />
                   ) : "choices" in o ? (
                     <select className={input} value={String(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.value)}>
                       {o.choices.map(([v, label]) => (
@@ -397,13 +397,13 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
           {tab === "style" && isPos && (
             <>
               <Row label="Profit color">
-                <ColorPicker value={o.profit} onChange={(c) => setOpt("profit", c)} className="h-8 w-12 p-1" />
+                <ColorPicker value={o.profit} onChange={(c) => setOpt("profit", c)} className="h-8 w-8 p-1" />
               </Row>
               <Row label="Stop color">
-                <ColorPicker value={o.stop} onChange={(c) => setOpt("stop", c)} className="h-8 w-12 p-1" />
+                <ColorPicker value={o.stop} onChange={(c) => setOpt("stop", c)} className="h-8 w-8 p-1" />
               </Row>
               <Row label="Text color">
-                <ColorPicker value={d.textColor ?? "#ffffff"} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-12 p-1" />
+                <ColorPicker value={d.textColor ?? "#ffffff"} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-8 p-1" />
               </Row>
               <Row label="Fill opacity (%)">
                 <input
@@ -427,7 +427,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
           {tab === "style" && !isPos && !isVol && (
             <>
               <Row label={spec.colorLabel ?? "Line color"}>
-                <ColorPicker value={d.color} onChange={(c) => setD({ ...d, color: c })} className="h-8 w-12 p-1" />
+                <ColorPicker value={d.color} onChange={(c) => setD({ ...d, color: c })} className="h-8 w-8 p-1" />
               </Row>
               <Row label="Line width">
                 <select
@@ -465,7 +465,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
               </Row>
               {!spec.text && (
                 <Row label="Text color">
-                  <ColorPicker value={d.textColor ?? d.color} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-12 p-1" />
+                  <ColorPicker value={d.textColor ?? d.color} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-8 p-1" />
                 </Row>
               )}
               {!spec.text && (spec.prompt || d.text !== undefined) && (
@@ -486,7 +486,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
           {tab === "text" && spec.text && (
             <>
               <div className="flex items-center gap-2 py-2">
-                <ColorPicker value={d.textColor ?? d.color} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-12 p-1" />
+                <ColorPicker value={d.textColor ?? d.color} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-8 p-1" />
                 <select className={`${input} w-20`} value={Number(optOf(d, "fontSize"))} onChange={(e) => setOpt("fontSize", Number(e.target.value))}>
                   {[10, 11, 12, 14, 16, 20, 24, 28, 32, 40].map((v) => (
                     <option key={v} value={v} className="text-black">{v}</option>

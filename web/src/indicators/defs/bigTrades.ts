@@ -31,9 +31,17 @@ const INPUTS: InputDef[] = [
   },
   { key: "minSize", label: "Minimum size", type: "int", default: 10, min: 4, max: 200, group: "Bubbles", tooltip: "Diameter of the smallest bubble, in pixels." },
   { key: "maxSize", label: "Maximum size", type: "int", default: 48, min: 4, max: 200, group: "Bubbles", tooltip: "Diameter of the biggest bubble, in pixels." },
-  { key: "opacity", label: "Opacity (%)", type: "int", default: 55, min: 5, max: 100, group: "Bubbles" },
+  { key: "opacity", label: "Opacity (%)", type: "int", default: 72, min: 5, max: 100, group: "Bubbles" },
   { key: "text", label: "Show volume", type: "bool", default: true, group: "Bubbles" },
 ];
+
+/** Pha `color` (`#rrggbb`) với trắng `t` (0..1): viền bubble sáng hơn nền để tách khỏi thân nến cùng màu xanh / đỏ; màu khác định dạng giữ nguyên. */
+export function lighten(color: string, t: number): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(color.trim());
+  if (!m) return color;
+  const hex = m.slice(1).map((h) => Math.round(parseInt(h, 16) + (255 - parseInt(h, 16)) * t).toString(16).padStart(2, "0"));
+  return `#${hex.join("")}`;
+}
 
 const compact = (v: number): string => (v >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${+(v / 1e3).toFixed(1)}K` : String(Math.round(v)));
 
@@ -78,7 +86,7 @@ export function bubblesOf(cells: TickCell[], times: number[], step: number, c: C
       const color = k.up >= k.dn ? items.buy.color : items.sell.color;
       return {
         x: Math.floor(indexAtTime(times, k.t, step)), y: k.p, r: bubbleSize(vols[i], lo, hi, minSize, maxSize) / 2,
-        bg: withAlpha(color, alpha), border: color, ...(text ? { text: compact(vols[i]), textColor: "#ffffff" } : {}),
+        bg: withAlpha(color, alpha), border: lighten(color, 0.6), ...(text ? { text: compact(vols[i]), textColor: "#ffffff" } : {}),
       };
     })
     .sort((a, b) => b.r - a.r);

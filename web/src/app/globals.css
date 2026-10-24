@@ -81,6 +81,7 @@ textarea,
   --border: #2a2e39;
   --hover: #2a2e39;
   --selected: #363a45; /* hàng/ô đang chọn trong danh sách: sáng hơn hover nhưng không loá như khối --fg */
+  --check-border: #787b86; /* viền checkbox chưa chọn: #5d606b của TV chỉ đạt 2.6:1 trên hộp thoại (#1f1f1f), #787b86 đạt >=3.2:1 trên mọi nền tối; hover dùng --muted */
   --accent: #2962ff;
   --accent-text: #5b8cff; /* chữ/icon xanh trên nền tối: #2962ff chỉ đạt 2.8-3.9:1, màu này >=4.3:1; nền/viền vẫn dùng --accent */
   --panel: #1f1f1f; /* thanh nổi (favorites, style drawing) - đo từ TradingView */
@@ -103,6 +104,7 @@ textarea,
   --border: #e0e3eb;
   --hover: #f0f3fa;
   --selected: #dde3f0;
+  --check-border: #787b86; /* 4.4:1 trên nền trắng */
   --accent: #2962ff;
   --accent-text: #2962ff; /* trên nền sáng #2962ff đã đạt 5.2:1 */
   --panel: #ffffff;
@@ -164,6 +166,42 @@ textarea,
   *::-webkit-scrollbar-thumb:hover {
     background-color: var(--scroll-thumb-hover, #5d606b);
   }
+}
+
+/* Checkbox toàn app như TV: ô gốc của trình duyệt trắng chói trên nền tối nên bỏ hẳn (appearance: none) và tự vẽ - ô trong suốt viền xám, chọn thì nền xanh + dấu tick trắng.
+ * Kích thước do class h-4 w-4 của từng chỗ. Dấu tick là ảnh data-URI (không dùng được biến CSS) nên cố định màu trắng, nền xanh --accent đủ tương phản ở cả 2 theme. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  border: 1px solid var(--check-border, #787b86);
+  border-radius: 3px;
+  background: transparent no-repeat center / 100% 100%;
+  transition: background-color 0.1s, border-color 0.1s;
+}
+input[type="checkbox"]:hover:not(:disabled) {
+  border-color: var(--muted, #8a8d98);
+}
+input[type="checkbox"]:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.25 8.5 7 11.25 11.75 5'/%3E%3C/svg%3E");
+}
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+input[type="checkbox"]:disabled {
+  opacity: 0.55;
+}
+
+/* Ô ngày giờ: không khai báo color-scheme thì icon lịch của trình duyệt xám tối trên nền tối (chìm) và bảng chọn ngày bật ra màu trắng.
+ * Chỉ đặt cho các ô này (không đặt toàn app): option của <select> trong hộp thoại vẽ đang dùng chữ đen trên popup trắng. */
+[data-theme="dark"] :is(input[type="datetime-local"], input[type="date"], input[type="time"]) {
+  color-scheme: dark;
+}
+[data-theme="light"] :is(input[type="datetime-local"], input[type="date"], input[type="time"]) {
+  color-scheme: light;
 }
 
 /* Ô số như TV: không có nút tăng / giảm (phím ↑ ↓ vẫn đổi giá trị) */

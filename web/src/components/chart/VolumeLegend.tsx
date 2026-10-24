@@ -76,7 +76,7 @@ export default function VolumeLegend({
   if (vs.removed) return null;
 
   const digits = volDigits(vs);
-  const color = splitColor(volColor(vs, cs, bar ? volUp(bar, prev ?? undefined, vs) : true)).base;
+  const color = splitColor(volColor(vs, bar ? volUp(bar, prev ?? undefined, vs) : true)).base;
   const bars = bar && vs.maOn ? getBars() : [];
   const ma = bar && vs.maOn ? volMaAt(bars, indexOf(bars, bar.t), vs.maLength) : null;
   const showTitle = cs.showIndicatorTitles;
