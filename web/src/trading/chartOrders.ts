@@ -182,6 +182,7 @@ export function createLineDrag(o: Opts): ChartDrag {
   const focusLine = (id: string) => {
     const owner = id in DRAFT_IDS ? "draft" : ownerOf(id);
     if (owner) useTradeFocus.getState().set(owner);
+    if (owner && owner !== "draft") useTicketStore.getState().follow(owner); // thanh bên phải đang mở bảng đặt lệnh thì đổi theo lệnh đang kéo
   };
   const onChartClick = () => useTradeFocus.getState().set(null);
   o.chart.subscribeClick(onChartClick);
@@ -310,6 +311,7 @@ export function createLineDrag(o: Opts): ChartDrag {
     const digits = o.getDigits();
     const tick = sym?.tick_size || 10 ** -digits;
     const key = `${owner.t === "position" ? "p" : "o"}${kind}:${owner.ticket}`;
+    focusLine(key);
     const stop = stopOf(key);
     if (!stop) return;
     // vị thế đo từ giá ĐÓNG (Buy ở Bid, Sell ở Ask), lệnh chờ đo từ giá vào

@@ -13,7 +13,7 @@ import { currentLot, fmtLotValue, lotSpec, normalizeLot, stepLot, writeLot } fro
 import { pendingLabel, resolveOrderType, snapPrice } from "@/trading/orderType";
 import { estimatePnl, pnlSpec, pointsBetween, priceForPnl, type PnlSpec } from "@/trading/pnl";
 import { spreadPips, useQuoteStore } from "@/trading/quote";
-import { seedDraftStop, setDraftMode, submitDraft } from "@/trading/submit";
+import { seedDraftStop, setDraftMode, startDraft, submitDraft } from "@/trading/submit";
 import { useTradeStore } from "@/trading/store";
 import { askCancelOrder, askClosePosition } from "@/trading/tagActions";
 import { useTicketStore, type TicketRest } from "@/trading/ticket";
@@ -258,7 +258,7 @@ function StopRow({ kind, d, entry, lot, digits, tick, spec, ccy }: StopProps) {
 function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
   const { patch, close } = useTicketStore.getState();
   const idle = rest !== undefined; // trạng thái chờ: xem `RestPanel`
-  const start = (side: "buy" | "sell") => useTicketStore.getState().open({ symbol: d.symbol, side, mode: d.mode });
+  const start = (side: "buy" | "sell") => startDraft(d.symbol, side, d.mode);
   const sym = chartGlobal((s) => s.symbols.find((x) => x.name === d.symbol));
   const quote = useQuoteStore((s) => s.quotes[d.symbol]);
   const status = useAuthStore((s) => s.status);

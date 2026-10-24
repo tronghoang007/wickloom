@@ -9,8 +9,9 @@ import { useAuthStore } from "@/store/auth";
 import { chartGlobal } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { useRailStore } from "@/store/rail";
+import { useTradeFocus } from "./focus";
 import { useQuoteStore } from "./quote";
-import { submitDraft } from "./submit";
+import { startDraft, submitDraft } from "./submit";
 import { useTicketStore } from "./ticket";
 
 const account = { id: "S:1", server: "S", broker: "B", login: 1, name: "n", mode: "demo", currency: "USD", leverage: 500, online: true, active: true, seen: 1, ea_trading: true } as Mt5Account;
@@ -89,5 +90,50 @@ describe("đặt lệnh xong: bảng đặt lệnh ở thanh bên phải KHÔNG 
     expect(useTicketStore.getState().draft).toBeNull();
     expect(useTicketStore.getState().rest).toBeNull();
     expect(useRailStore.getState().open).toBeNull();
+  });
+});
+
+describe("bản nháp mới sau khi chọn một lệnh đã đặt", () => {
+  it("mở bản nháp mới thì bỏ focus của lệnh cũ (nếu không bản nháp bị mờ như lệnh khác)", () => {
+    useTradeFocus.getState().set("order:123");
+    useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "market" });
+    expect(useTradeFocus.getState().owner).toBeNull();
+  });
+});
+
+describe("bắt đầu bản nháp từ bảng đang chờ", () => {
+  it("lệnh chờ: có sẵn giá vào gợi ý (Buy dưới thị trường) để chart có đường kéo được", () => {
+    startDraft("XAUUSDm", "buy", "pending");
+    const d = useTicketStore.getState().draft!;
+    expect(d.mode).toBe("pending");
+    expect(parseFloat(d.price)).toBeGreaterThan(0);
+    expect(parseFloat(d.price)).toBeLessThan(4130);
+  });
+  it("market: không cần giá vào", () => {
+    startDraft("XAUUSDm", "sell", "market");
+    expect(useTicketStore.getState().draft!.price).toBe("");
+  });
+});
+
+describe("kéo một lệnh đã đặt", () => {
+  it("thanh bên phải đang ở bảng đặt lệnh thì đổi sang lệnh đang kéo (không dựng lại khi kéo tiếp)", () => {
+    useRailStore.setState({ open: "order", before: null });
+    useTicketStore.getState().follow("order:7");
+    const id = useTicketStore.getState().id;
+    expect(useTicketStore.getState().modifyOwner).toBe("order:7");
+    useTicketStore.getState().follow("order:7");
+    expect(useTicketStore.getState().id).toBe(id);
+    useTicketStore.getState().follow("position:9");
+    expect(useTicketStore.getState().modifyOwner).toBe("position:9");
+  });
+  it("thanh đang đóng hoặc ở panel khác thì kéo không mở nó ra", () => {
+    useRailStore.setState({ open: null, before: null });
+    useTicketStore.setState({ modifyOwner: null });
+    useTicketStore.getState().follow("order:7");
+    expect(useTicketStore.getState().modifyOwner).toBeNull();
+    expect(useRailStore.getState().open).toBeNull();
+    useRailStore.setState({ open: "watchlist" });
+    useTicketStore.getState().follow("order:7");
+    expect(useTicketStore.getState().modifyOwner).toBeNull();
   });
 });

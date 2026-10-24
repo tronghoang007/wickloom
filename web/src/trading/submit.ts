@@ -31,6 +31,12 @@ function seedPendingPrice(symbol: string, side: Side): string {
   return q ? defaultStop("sl", side, side === "buy" ? q.ask : q.bid, tick, digits, e.sym?.stops_level).toFixed(digits) : "";
 }
 
+/** Bắt đầu bản nháp mới từ bảng đang chờ (sau khi đặt xong). Lệnh chờ phải có sẵn giá vào gợi ý, nếu không bản nháp không có đường nào trên chart để kéo. */
+export function startDraft(symbol: string, side: Side, mode: TicketMode, digits?: number): void {
+  const seed = mode === "pending" ? Number(seedPendingPrice(symbol, side)) : NaN;
+  useTicketStore.getState().open({ symbol, side, mode, digits, price: seed > 0 ? seed : undefined });
+}
+
 /** Gửi bản nháp: lỗi thì báo bằng toast và không gửi gì, thành công thì bản nháp bỏ đi nhưng bảng đặt lệnh (thanh bên phải) KHÔNG đóng: nó ở trạng thái chờ như TradingView (`useTicketStore.settle`) tới khi bấm Sell / Buy. Trả true nếu sàn đã nhận lệnh. */
 export async function submitDraft(): Promise<boolean> {
   const d = useTicketStore.getState().draft;

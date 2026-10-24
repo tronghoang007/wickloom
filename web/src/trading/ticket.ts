@@ -20,6 +20,8 @@ type State = {
   id: number;
   /** Bấm chọn (không kéo) một lệnh đã đặt trên chart: bỏ bản nháp đang soạn, mở thanh bên phải ở bảng của lệnh đó và focus nó trên chart. */
   select: (owner: string) => void;
+  /** Kéo (không bấm) một lệnh đã đặt: thanh bên phải đang ở bảng đặt lệnh thì bảng đổi sang lệnh đang kéo; thanh đang đóng / ở panel khác thì không tự mở. */
+  follow: (owner: string) => void;
   open: (s: TicketSeed) => void;
   patch: (p: Partial<Draft>) => void;
   /** Đặt xong: bỏ bản nháp nhưng để bảng mở ở trạng thái chờ. */
@@ -37,12 +39,18 @@ export const useTicketStore = create<State>()((set) => ({
     useTradeFocus.getState().set(owner);
     set((s) => ({ modifyOwner: owner, draft: null, rest: s.draft ? { side: s.draft.side, mode: s.draft.mode } : s.rest, id: s.id + 1 }));
   },
+  follow: (owner) => {
+    const s = useTicketStore.getState();
+    if (useRailStore.getState().open !== "order" || (s.modifyOwner === owner && !s.draft)) return; // gọi mỗi lần di chuột: chỉ dựng lại bảng khi đổi lệnh
+    useTicketStore.setState({ modifyOwner: owner, draft: null, rest: s.draft ? { side: s.draft.side, mode: s.draft.mode } : s.rest, id: s.id + 1 });
+  },
   open: (seed) => {
     const sym = chartGlobal.getState().symbols.find((s) => s.name === seed.symbol);
     const account = useMt5Store.getState().accounts.find((a) => a.active);
     const spec = lotSpec(sym, account?.max_lot);
     const digits = seed.digits ?? sym?.digits ?? 5;
     useRailStore.getState().openOrder(); // bảng đặt lệnh nằm ở thanh bên phải: mở thanh ra
+    useTradeFocus.getState().set(null); // focus còn sót của lệnh đã đặt sẽ làm bản nháp mới bị mờ như "lệnh khác" (nút kéo TP / SL gần như vô hình)
     set((s) => ({
       id: s.id + 1,
       rest: null,
