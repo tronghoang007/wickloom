@@ -237,7 +237,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
         const draggable = live && !(tag.kind === "entry" && tag.owner.t === "position"); // giá vào của vị thế đã khớp không kéo được; SL/TP, lệnh chờ và bản nháp thì có
         const c = l.color;
         const mine = OWNER_ID(tag.owner);
-        const base = tag.pending ? 0.55 : tag.draft && tag.kind !== "entry" ? 0.75 : tag.draft ? 0.9 : 1; // thẻ đang sửa chờ xác nhận mờ đi như TV
+        const base = tag.draft && tag.kind !== "entry" ? 0.75 : tag.draft ? 0.9 : 1; // bản nháp hơi mờ; lệnh đã đặt đang sửa chờ xác nhận (pending) vẫn sáng đủ
         const fade = focus !== null && mine !== focus ? Math.min(base, DIM) : base; // lệnh khác đang được focus: mờ hẳn
         const closeTitle = tag.kind !== "entry" ? `Bỏ ${KIND_NAME[tag.kind]}` : tag.owner.t === "draft" ? "Bỏ bản nháp" : tag.owner.t === "order" ? "Huỷ lệnh chờ" : "Đóng vị thế";
         return [

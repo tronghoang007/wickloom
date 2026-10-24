@@ -215,7 +215,7 @@ export default function WatchlistPanel() {
             <div
               key={s}
               onClick={() => set({ symbol: s })}
-              className={`group grid h-7 cursor-pointer grid-cols-[1fr_66px_54px_52px_18px] items-center gap-x-1 rounded-md px-2 text-[13px] hover:bg-[var(--hover)] ${s === current ? "ring-1 ring-[var(--muted)]" : ""}`}
+              className={`group grid h-7 cursor-pointer grid-cols-[1fr_66px_54px_52px_18px] items-center gap-x-1 border-b border-[var(--border)] px-2 text-[13px] hover:bg-[var(--hover)] ${s === current ? "ring-1 ring-[var(--muted)]" : ""}`}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <SymbolBadge name={s} type={meta(s)?.type} size={20} />
