@@ -30,8 +30,8 @@ export default function RightRail() {
       {active && (
         <div className="flex w-[384px] shrink-0 flex-col border-l border-[var(--border)]">
           {open === "calendar" && (
-            <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
-              <span className="text-sm font-semibold">{active.label}</span>
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2.5">
+              <span className="text-[18px] font-semibold leading-6">{active.label}</span>
               <button className="rounded p-1 hover:bg-[var(--hover)]" onClick={() => setOpen(null)} aria-label="Close">
                 <Close />
               </button>

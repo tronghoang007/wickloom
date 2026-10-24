@@ -143,7 +143,7 @@ export default function CalendarMarkers({ symbol, tf, replay, getChart, getBars 
           <button
             key={`${e.id}:${m.events.length}`}
             type="button"
-            aria-label={`${m.events.length} economic event${m.events.length > 1 ? "s" : ""}: ${shortEventName(e.name)}`}
+            aria-label={`${m.events.length} economic event${m.events.length > 1 ? "s" : ""}: ${shortEventName(e.name, e.country)}`}
             aria-expanded={opened === m}
             data-testid="calendar-marker"
             data-calendar-ui
@@ -172,7 +172,7 @@ export default function CalendarMarkers({ symbol, tf, replay, getChart, getBars 
                 <span className="ml-auto h-2 w-2 rounded-full" style={{ background: IMPORTANCE_COLOR[e.importance] }} />
               </div>
               <div className="mt-0.5 leading-snug" title={e.name}>
-                {shortEventName(e.name)}
+                {shortEventName(e.name, e.country)}
               </div>
               <div className="mt-0.5 flex gap-3 tabular-nums text-[var(--muted)]">
                 {e.actual !== null && (

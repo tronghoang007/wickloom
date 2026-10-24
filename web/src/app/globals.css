@@ -116,7 +116,7 @@ textarea,
   --popup-line: #e0e3eb;
 }
 
-/* Bề mặt nổi (context menu, dropdown, hộp thoại) giống TradingView (cùng bộ token --popup-* ở trên, chỉnh màu ở đó). Đặt NGOÀI @layer để thắng class tiện ích của từng chỗ. Gán lại --bg/--hover/--fg/--border trong cây con để ô nhập, hàng hover, đường kẻ bên trong tự theo màu popup mà không phải sửa từng component. Viền trong suốt ở theme tối (TV không viền) nên kích thước hộp không đổi. */
+/* Bề mặt nổi (context menu, dropdown, hộp thoại) giống TradingView (cùng bộ token --popup-* ở trên, chỉnh màu ở đây). Đặt NGOÀI @layer để thắng class tiện ích của từng chỗ. Gán lại --bg/--hover/--fg/--border trong cây con để ô nhập, hàng hover, đường kẻ bên trong tự theo màu popup mà không phải sửa từng component. Viền trong suốt ở theme tối (TV không viền) nên kích thước hộp không đổi. */
 .popup {
   --bg: var(--popup);
   --hover: var(--popup-hover);

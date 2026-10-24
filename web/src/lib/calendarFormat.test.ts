@@ -84,6 +84,16 @@ describe("shortEventName (kiểu Forex Factory)", () => {
     expect(shortEventName("Gross Domestic Product (GDP) QoQ")).toBe("GDP q/q");
     expect(shortEventName("Core Personal Consumption Expenditures (PCE) Price Index MoM")).toBe("Core PCE Price Index m/m");
     expect(shortEventName("Retail Sales MoM")).toBe("Retail Sales m/m");
+    expect(shortEventName("CPI Median YoY")).toBe("Median CPI y/y");
+    expect(shortEventName("Consumer Price Index Common YoY")).toBe("Common CPI y/y");
+    expect(shortEventName("CPI Trimmed-Mean YoY")).toBe("Trimmed CPI y/y");
+    expect(shortEventName("Core CPI MoM")).toBe("Core CPI m/m");
+    expect(shortEventName("Tertiary Industry Activity MoM")).toBe("Tertiary Industry Activity m/m");
+    expect(shortEventName("ECB Executive Board Member Elderson Speech")).toBe("ECB Executive Board Member Elderson Speaks");
+    expect(shortEventName("Ifo Business Climate", "DE")).toBe("German Ifo Business Climate");
+    expect(shortEventName("German Ifo Business Climate", "DE")).toBe("German Ifo Business Climate");
+    expect(shortEventName("Industrial Production m/m", "FR")).toBe("French Industrial Production m/m");
+    expect(shortEventName("PPI y/y", "EU")).toBe("PPI y/y");
     expect(shortEventName("Purchasing Managers' Index (PMI)")).toBe("PMI");
     expect(shortEventName("ISM Manufacturing PMI")).toBe("ISM Manufacturing PMI");
   });

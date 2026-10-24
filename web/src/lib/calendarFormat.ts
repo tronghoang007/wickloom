@@ -100,6 +100,8 @@ const ABBREVIATE: [RegExp, string][] = [
   [/\bCore Personal Consumption Expenditures(?: \(PCE\))?(?: Price Index)?\b/i, "Core PCE Price Index"],
   [/\bPersonal Consumption Expenditures(?: \(PCE\))?(?: Price Index)?\b/i, "PCE Price Index"],
   [/\bConsumer Price Index(?: \(CPI\))?/i, "CPI"],
+  [/\bCPI (Median|Common)\b/i, "$1 CPI"], // Canada: FF đặt "Median CPI y/y", MT5 đặt "CPI Median YoY"
+  [/\bCPI Trimmed[- ]?Mean\b/i, "Trimmed CPI"],
   [/\bProducer Price Index(?: \(PPI\))?/i, "PPI"],
   [/\bGross Domestic Product(?: \(GDP\))?/i, "GDP"],
   [/\bPurchasing Managers'? Index(?: \(PMI\))?/i, "PMI"],
@@ -112,9 +114,19 @@ const ABBREVIATE: [RegExp, string][] = [
   [/\s*\((?:MoM|YoY|QoQ)\)/gi, ""],
 ];
 
-export function shortEventName(name: string): string {
+// Forex Factory gắn quốc tịch trước tên sự kiện của các nước dùng chung EUR ("German Ifo Business Climate"); MT5 chỉ để mã nước ở `country`.
+const EUR_ADJ: Record<string, [string, RegExp]> = {
+  DE: ["German", /\b(?:German|Germany)\b/i],
+  FR: ["French", /\b(?:French|France)\b/i],
+  IT: ["Italian", /\b(?:Italian|Italy)\b/i],
+  ES: ["Spanish", /\b(?:Spanish|Spain)\b/i],
+};
+
+export function shortEventName(name: string, country?: string): string {
   let s = name.trim().replace(/\s+/g, " ");
   for (const [re, to] of BANK_RATE) if (re.test(s)) return to;
   for (const [re, to] of ABBREVIATE) s = s.replace(re, to);
-  return s.replace(/\b(m\/m|y\/y|q\/q)\b/gi, (m) => m.toLowerCase()).replace(/\s+/g, " ").trim();
+  s = s.replace(/(\S) Speech$/i, "$1 Speaks").replace(/\b(m\/m|y\/y|q\/q)\b/gi, (m) => m.toLowerCase()).replace(/\s+/g, " ").trim();
+  const adj = country ? EUR_ADJ[country.toUpperCase()] : undefined;
+  return adj && !adj[1].test(s) ? `${adj[0]} ${s}` : s;
 }
