@@ -107,10 +107,22 @@ export class IndicatorManager {
 
   // Tính lại tối đa ~4 lần/giây để realtime không tốn CPU
   update(list: IndicatorInstance[], bars: Bar[], feed: FeedKey) {
+    // Đổi symbol/khung: series còn điểm của khung cũ tới lần sync sau (250ms), làm trục thời gian của chart có điểm thừa
+    // xen giữa nến mới -> chỉ số logic lệch so với chỉ số nến lúc Chart đặt góc nhìn. Xoá ngay để trục chỉ còn nến.
+    if (feed.symbol !== this.feed.symbol || feed.tf !== this.feed.tf) this.wipe();
     this.list = list;
     this.bars = bars;
     this.feed = feed;
     this.schedule();
+  }
+
+  private wipe() {
+    for (const l of this.live) {
+      for (const s of l.series) s.setData([] as never);
+      l.anchor?.setData([] as never);
+      l.snaps = l.def.plots.map(() => null);
+      l.anchorKey = "";
+    }
   }
 
   /** Delta tick realtime từ backend (`tick_delta`): `bars` = nến delta các phút vừa đổi (tăng dần, cuối là phút đang chạy), `cells` = [giá, lên, xuống] của phút đang chạy.
