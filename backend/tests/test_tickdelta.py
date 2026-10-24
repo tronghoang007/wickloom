@@ -122,3 +122,183 @@ def test_ticks_hist_over_tcp_feeds_tickvp_endpoint():
     assert r == {"up": [1.0, 0.0, 1.0], "dn": [0.0, 2.0, 0.0]}
     assert c.get("/tickvp", params={"symbol": sym, "from": 60, "to": 120, "lo": 10, "size": 1, "n": 3}).json() == {"up": [0.0, 0.0, 0.0], "dn": [0.0, 1.0, 0.0]}
     assert c.get("/tickvp", params={"symbol": sym, "from": 0, "to": 120, "lo": 10, "size": 0, "n": 3}).status_code == 422
+
+
+def test_tickbig_keeps_the_biggest_cells_in_time_order():
+    from app.store import BarStore
+
+    st = BarStore(__import__("pathlib").Path(tempfile.mkdtemp()) / "b.sqlite")
+    st.put_tickvp("S", 0, 180, [(0, 100.0, 2.0, 1.0), (0, 101.0, 0.0, 6.0), (60, 100.0, 4.0, 0.0), (120, 102.0, 1.0, 1.0), (180, 100.0, 50.0, 0.0)])
+    # phút 180 ngoài [0, 180); min 3 bỏ ô có tổng < 3 (phút 120)
+    assert st.tickbig("S", 0, 180, 3, 10) == [(0, 100.0, 2.0, 1.0), (0, 101.0, 0.0, 6.0), (60, 100.0, 4.0, 0.0)]
+    # limit 2 giữ 2 ô lớn nhất (6 và 4) rồi sắp lại theo thời gian; symbol khác không lẫn
+    assert st.tickbig("S", 0, 180, 1, 2) == [(0, 101.0, 0.0, 6.0), (60, 100.0, 4.0, 0.0)]
+    assert st.tickbig("Other", 0, 180, 1, 2) == []
+
+
+def test_tickbig_endpoint():
+    sym = "TDBIG"
+    # phút 0: giá 10 lên (so với pb 9), 12 lên, 11 xuống; phút 1: 11 bằng nên giữ xuống
+    send_ea([{"type": "ticks_hist", "symbol": sym, "broker_utc_offset": 0, "t": [1000, 2000, 3000, 61000], "p": [10, 12, 11, 11], "pb": 9, "done": True}])
+    c = TestClient(app)
+    r = c.get("/tickbig", params={"symbol": sym, "from": 0, "to": 120, "min": 1, "limit": 10}).json()
+    assert r == {"rows": [[0, 10.0, 1.0, 0.0], [0, 11.0, 0.0, 1.0], [0, 12.0, 1.0, 0.0], [60, 11.0, 0.0, 1.0]]}
+    assert c.get("/tickbig", params={"symbol": sym, "from": 0, "to": 120, "min": 2, "limit": 10}).json() == {"rows": []}
+    assert c.get("/tickbig", params={"symbol": sym, "from": 0, "to": 120, "limit": 0}).status_code == 422
+
+
+def test_tickbig_groups_prices_into_rows():
+    from app.store import BarStore
+
+    st = BarStore(__import__("pathlib").Path(tempfile.mkdtemp()) / "b.sqlite")
+    # phút 0: 100.2 (3 lên), 100.8 (1 lên, 2 xuống) cùng row [100, 101); 101.5 (4 xuống) row [101, 102); phút 60: 100.5 (2 lên)
+    st.put_tickvp("S", 0, 60, [(0, 100.2, 3.0, 0.0), (0, 100.8, 1.0, 2.0), (0, 101.5, 0.0, 4.0), (60, 100.5, 2.0, 0.0)])
+    rows = st.tickbig("S", 0, 120, 1, 10, 1.0)
+    assert [(t, u, d) for t, _, u, d in rows] == [(0, 4.0, 2.0), (0, 0.0, 4.0), (60, 2.0, 0.0)]
+    assert abs(rows[0][1] - (100.2 * 3 + 100.8 * 3) / 6) < 1e-9 and rows[1][1] == 101.5  # giá trung bình theo volume
+    # min 5 chỉ còn row 100 của phút 0 (tổng 6); limit 1 giữ ô lớn nhất
+    assert [(t, u, d) for t, _, u, d in st.tickbig("S", 0, 120, 5, 10, 1.0)] == [(0, 4.0, 2.0)]
+    assert [(t, u, d) for t, _, u, d in st.tickbig("S", 0, 120, 1, 1, 1.0)] == [(0, 4.0, 2.0)]
+    # size 0: đúng từng giá, không gom
+    assert len(st.tickbig("S", 0, 120, 1, 10)) == 4
+
+
+# --- realtime (Live) -----------------------------------------------------------------------------------------------------------------------------------
+
+def _live(asked):
+    clock = [1000.0]
+    return tickdelta.Live(lambda s: asked.append(s), lambda: clock[0]), clock
+
+
+def test_live_accumulates_batches_like_classify_and_splits_minutes():
+    asked = []
+    live, clock = _live(asked)
+    live.sym["S"] = tickdelta._Sym(clock[0])
+    live.sym["S"].acc = tickdelta.Acc(99.5, 1)
+    t = [1, 2, 3, 4, 5, M + 1, M + 2]
+    p = [100, 101, 100, 100, 99, 100, 101]
+    got = []
+    for lo, hi in ((0, 2), (2, 5), (5, 7)):  # ba lô tick, lô giữa chưa tới phút 1, lô cuối sang phút 1
+        got.append(live.feed("S", [(t[i], p[i], 1.0, False) for i in range(lo, hi)]))
+    rows, _, _ = tickdelta.classify(t, p, None, 99.5, 1)
+    assert got[0].closed == [] and got[0].row == {"t": 0, "o": 0.0, "h": 2.0, "l": 0.0, "c": 2.0, "v": 2.0}
+    assert [r for r, _ in got[2].closed] == [rows[0]]  # phút 0 chốt đúng bằng classify cả đợt
+    assert got[2].row == rows[1]
+    assert asked == []  # đã có gốc nên không xin EA
+
+
+def test_live_cells_are_the_minute_histogram():
+    live, clock = _live([])
+    live.sym["S"] = tickdelta._Sym(clock[0])
+    live.sym["S"].acc = tickdelta.Acc(99.0, 1)
+    upd = live.feed("S", [(1, 100.0, 2.0, False), (2, 101.0, 1.0, False), (3, 100.0, 1.0, False), (4, 100.0, 3.0, False)])
+    assert upd.cells == {100.0: [2.0, 4.0], 101.0: [1.0, 0.0]}
+
+
+def test_live_waits_for_ea_history_then_adopts_it_and_drops_duplicates():
+    asked = []
+    live, clock = _live(asked)
+    assert live.feed("S", [(5, 11.0, 1.0, False), (6, 12.0, 1.0, False)]) is None  # chưa có gốc: giữ tick, xin EA
+    assert asked == ["S"]
+    # EA trả lịch sử tới tick lúc 6 ms (đã gồm hai tick trên) kèm tick 3 ms trước đó
+    tickdelta.ingest(TicksHistIn(symbol="S", t=[3, 5, 6], p=[10.0, 11.0, 12.0], pb=9.0, done=True))
+    upd = live.seed("S")
+    assert upd.row == {"t": 0, "o": 0.0, "h": 3.0, "l": 0.0, "c": 3.0, "v": 3.0}  # 3 tick của EA, hai tick trực tiếp trùng không đếm lại
+    # tick trực tiếp mới hơn thì tiếp nối; tick trùng thời điểm cuối của EA bị bỏ
+    upd = live.feed("S", [(6, 12.0, 1.0, False), (7, 11.0, 1.0, False)])
+    assert upd.row["c"] == 2.0 and upd.row["v"] == 4.0
+    assert asked == ["S"]
+
+
+def test_live_ignores_history_that_arrived_before_it_asked():
+    asked = []
+    live, clock = _live(asked)
+    tickdelta.ingest(TicksHistIn(symbol="S", t=[3], p=[10.0], pb=9.0, done=True))  # web xin tính lại từ trước
+    assert live.feed("S", [(5, 11.0, 1.0, False)]) is None
+    assert live.seed("S") is None and asked == ["S"]
+    tickdelta.ingest(TicksHistIn(symbol="S", t=[3, 4], p=[10.0, 10.5], pb=9.0, done=True))
+    assert live.seed("S").row["c"] == 3.0  # 10 lên, 10.5 lên, 11 lên
+
+
+def test_live_falls_back_to_live_ticks_when_ea_never_answers_and_asks_again():
+    asked = []
+    live, clock = _live(asked)
+    assert live.feed("S", [(1, 5.0, 1.0, False)]) is None
+    clock[0] += tickdelta.SEED_RETRY
+    assert live.feed("S", [(2, 6.0, 1.0, False)]) is None and asked == ["S", "S"]
+    clock[0] += tickdelta.SEED_WAIT
+    upd = live.feed("S", [(3, 7.0, 1.0, False)])
+    assert upd.row["v"] == 3.0 and upd.row["c"] == 3.0  # không biết giá trước: tick đầu theo chiều mặc định (lên)
+
+
+def test_live_history_from_web_does_not_replace_a_running_minute_and_reset_asks_again():
+    asked = []
+    live, clock = _live(asked)
+    live.sym["S"] = tickdelta._Sym(clock[0])
+    live.sym["S"].acc = tickdelta.Acc(9.0, 1)
+    live.feed("S", [(1, 10.0, 1.0, False)])
+    tickdelta.ingest(TicksHistIn(symbol="S", t=[1], p=[10.0], pb=9.0, done=True))
+    assert live.seed("S") is None
+    assert live.feed("S", [(2, 11.0, 1.0, False)]).row["v"] == 2.0
+    live.reset("S")
+    assert live.feed("S", [(70_000, 12.0, 1.0, False)]) is None and asked == ["S"]
+
+
+def test_live_skips_unchanged_price_when_flag_is_unknown():
+    live, clock = _live([])
+    live.sym["S"] = tickdelta._Sym(clock[0])
+    live.sym["S"].acc = tickdelta.Acc(10.0, 1)
+    upd = live.feed("S", [(1, 10.0, 1.0, True), (2, 11.0, 1.0, True), (3, 11.0, 1.0, True), (4, 11.0, 1.0, False)])
+    assert upd.row["v"] == 2.0  # hai tick giá không đổi (ask đổi) bị bỏ, tick có cờ thì đếm
+
+
+def test_live_ticks_over_tcp_are_saved_and_published(monkeypatch):
+    import time
+
+    from app import state
+
+    sym = "TDLIVE"
+    m = (int(time.time()) // 60 - 3) * 60  # đủ mới để qua MAX_TICK_AGE_MS
+    ms = m * 1000
+    sent = []
+    monkeypatch.setattr(state.hub, "publish", lambda s, tf, msg: sent.append(msg))
+    state.tick_live.reset(sym)
+    send_ea([
+        # tick trực tiếp trước khi có gốc; tick cuối chỉ đổi ask (cờ không có BID) nên không tính
+        {"type": "ticks", "symbol": sym, "broker_utc_offset": 0, "ticks": [
+            {"t_msc": ms + 59_000, "bid": 11, "f": 2}, {"t_msc": ms + 59_100, "bid": 11, "ask": 12, "f": 4}]},
+        {"type": "ticks_hist", "symbol": sym, "broker_utc_offset": 0, "t": [ms + 58_900], "p": [10], "pb": 9, "done": True},
+        # sang phút kế (cách tick trước dưới 60 giây, không bị coi là luồng tick đứt): phút cũ chốt, phút mới mở
+        {"type": "ticks", "symbol": sym, "broker_utc_offset": 0, "ticks": [{"t_msc": ms + 60_500, "bid": 10, "f": 2}]},
+    ])
+    deltas = [x for x in sent if x["type"] == "tick_delta"]
+    assert deltas[0]["bars"] == [{"t": m, "o": 0.0, "h": 2.0, "l": 0.0, "c": 2.0, "v": 2.0}]
+    assert sorted(deltas[0]["cells"]) == [[10, 1.0, 0.0], [11, 1.0, 0.0]]
+    last = deltas[-1]
+    assert [b["t"] for b in last["bars"]] == [m, m + 60] and last["bars"][0]["c"] == 2.0 and last["bars"][1]["c"] == -1.0
+    assert last["cells"] == [[10, 0.0, 1.0]]
+    c = TestClient(app)
+    rows = c.get("/bars", params={"symbol": sym, "tf": "TD"}).json()
+    assert [(r["t"], r["c"], r["v"]) for r in rows] == [(m, 2.0, 2.0), (m + 60, -1.0, 1.0)]
+    big = c.get("/tickbig", params={"symbol": sym, "from": m, "to": m + 120, "min": 1, "limit": 10}).json()["rows"]
+    assert big == [[m, 10.0, 1.0, 0.0], [m, 11.0, 1.0, 0.0], [m + 60, 10.0, 0.0, 1.0]]
+
+
+def test_live_last_mode_counts_trade_ticks_with_volume(monkeypatch):
+    import time
+
+    from app import state
+
+    sym = "TDLAST"
+    ms = (int(time.time()) // 60 - 3) * 60 * 1000
+    sent = []
+    monkeypatch.setattr(state.hub, "publish", lambda s, tf, msg: sent.append(msg))
+    state.tick_live.reset(sym)
+    state.tick_live.sym[sym] = tickdelta._Sym(0.0)
+    state.tick_live.sym[sym].acc = tickdelta.Acc(100.0, 1)
+    send_ea([{"type": "ticks", "symbol": sym, "broker_utc_offset": 0, "lm": True, "ticks": [
+        {"t_msc": ms + 1, "bid": 99, "last": 101, "vol": 5, "f": 8}, {"t_msc": ms + 2, "bid": 98, "last": 101, "vol": 9, "f": 2},
+        {"t_msc": ms + 3, "bid": 98, "last": 100, "vol": 0, "f": 8}]}])
+    d = [x for x in sent if x["type"] == "tick_delta"][-1]
+    # 101 lên x5; tick chỉ đổi bid bị bỏ; 100 xuống, volume 0 tính 1
+    assert d["bars"][0]["c"] == 4.0 and d["bars"][0]["v"] == 6.0

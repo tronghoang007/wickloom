@@ -388,4 +388,41 @@ describe("LowerFeed xin EA nạp thêm", () => {
     await flush();
     expect(calls.filter((c) => c.tf === "M1")).toEqual([]);
   });
+
+  it("delta tick realtime: push thay nến cuối và nối phút mới, onChange khi tính lại; chưa nạp DB thì bỏ qua", async () => {
+    const db = fakeDb({ TD: run("M1", 0, 10) });
+    const clock = { now: 0 };
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => clock.now, backfill: async () => true, sleep: async () => {} });
+    const need = { tfs: [TICK_TF], from: 0 };
+    expect(feed.push("X", TICK_TF, [bar(540, 5)])).toBe(false); // chưa đọc DB
+    feed.get("X", need, 660);
+    await flush();
+    expect(feed.push("X", TICK_TF, [bar(540, 5), bar(600, 6)])).toBe(true);
+    expect(feed.get("X", need, 660).slice(-3).map((b) => [b.t, b.c])).toEqual([[480, 8], [540, 5], [600, 6]]);
+    // phút đang chạy đổi tiếp, phút trước đã chốt
+    feed.push("X", TICK_TF, [bar(600, 7), bar(660, 1)]);
+    expect(feed.get("X", need, 720).slice(-3).map((b) => [b.t, b.c])).toEqual([[540, 5], [600, 7], [660, 1]]);
+    expect(feed.push("X", TICK_TF, [])).toBe(false);
+  });
+
+  it("đang nhận delta tick realtime thì đuôi TD không nhờ EA tính lại; ngừng nhận 20 giây thì nhờ lại", async () => {
+    const db = fakeDb({ TD: run("M1", 0, 10) });
+    const calls: number[] = [];
+    const clock = { now: 0 };
+    const backfill = async (_s: string, _tf: string, count: number) => (calls.push(count), true);
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => clock.now, backfill, sleep: async () => {} });
+    const need = { tfs: [TICK_TF], from: 0 };
+    feed.get("X", need, 660);
+    await flush();
+    feed.push("X", TICK_TF, [bar(600, 3)]);
+    clock.now = 16_000; // quá 15 giây làm mới đuôi nhưng vừa nhận push
+    feed.get("X", need, 660);
+    await flush();
+    expect(calls).toEqual([]);
+    expect(db.calls).toHaveLength(1); // cũng không đọc lại DB
+    clock.now = 40_000; // ngừng nhận
+    feed.get("X", need, 660);
+    await flush();
+    expect(calls).toEqual([3]);
+  });
 });

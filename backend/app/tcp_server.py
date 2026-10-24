@@ -12,6 +12,10 @@ from .models import BarsIn, SymbolsIn, TicksHistIn, TicksIn
 # tick cũ thành nến sẽ ghi đè bar chuẩn của MT5.
 MAX_TICK_AGE_MS = 5 * 60 * 1000
 
+# Cờ tick của MT5 (ENUM_TICK_FLAG)
+TICK_FLAG_BID = 2
+TICK_FLAG_LAST = 8
+
 # Batch backfill/ticks có thể vượt mặc định 64KB của StreamReader.readline().
 STREAM_LIMIT = 4 * 1024 * 1024
 
@@ -40,12 +44,45 @@ def _handle_ticks(body: TicksIn) -> None:
         t_utc_msc = t.t_msc - offset * 1000
         state.aggregator.tick(body.symbol, t_utc_msc, price, t.vol, offset)
     if fresh:
+        live = _live_ticks(body, fresh)
+        if live:
+            upd = state.tick_live.feed(body.symbol, live)
+            if upd:
+                _publish_delta(body.symbol, upd)
         last = fresh[-1]
         t_utc_msc = last.t_msc - offset * 1000
         state.hub.publish(body.symbol, "", {
             "type": "tick", "symbol": body.symbol, "t_msc": t_utc_msc,
             "bid": last.bid, "ask": last.ask, "last": last.last,
         })
+
+
+def _live_ticks(body: TicksIn, fresh: List[Any]) -> List[tickdelta.LiveTick]:
+    """Tick trực tiếp -> (UTC ms, giá, trọng số, bỏ nếu giá không đổi) theo cùng quy tắc `TickPrice` của EA khi tính lịch sử tick: nến theo Last thì tick giao dịch
+    (trọng số = volume), nến theo Bid thì tick đổi Bid (trọng số 1). EA cũ không gửi cờ tick: tick không đổi Bid được nhận biết bằng giá (`bỏ nếu giá không đổi`)."""
+    off = body.broker_utc_offset * 1000
+    out: List[tickdelta.LiveTick] = []
+    for t in fresh:
+        if body.lm:
+            if t.last > 0 and (t.f is None or t.f & TICK_FLAG_LAST):
+                out.append((t.t_msc - off, t.last, t.vol if t.vol > 0 else 1.0, False))
+        elif t.bid > 0 and (t.f is None or t.f & TICK_FLAG_BID):
+            out.append((t.t_msc - off, t.bid, 1.0, t.f is None))
+    return out
+
+
+def _publish_delta(symbol: str, upd: tickdelta.Update) -> None:
+    """Ghi các phút của một lô tick (phút xong + phút đang chạy) vào bars tf "TD" và tickvp, rồi đẩy xuống web: `bars` = các dòng đó, `cells` = [giá, lên, xuống] của phút đang chạy."""
+    minutes = list(upd.closed) + ([(upd.row, upd.cells)] if upd.row is not None else [])
+    if not minutes:
+        return
+    rows = [r for r, _ in minutes]
+    state.bars.upsert(symbol, tickdelta.TICK_DELTA_TF, rows)
+    state.bars.put_tickvp(symbol, rows[0]["t"], rows[-1]["t"], [(r["t"], p, u, d) for r, cells in minutes for p, (u, d) in cells.items()])
+    state.hub.publish(symbol, "", {
+        "type": "tick_delta", "symbol": symbol, "bars": rows,
+        "cells": [[p, u, d] for p, (u, d) in upd.cells.items()] if upd.row is not None else [],
+    })
 
 
 def _handle_bars(body: BarsIn) -> None:
@@ -66,6 +103,10 @@ def _handle_ticks_hist(body: TicksHistIn) -> None:
     if rows:
         state.bars.upsert(body.symbol, tickdelta.TICK_DELTA_TF, rows)
         state.bars.put_tickvp(body.symbol, rows[0]["t"], rows[-1]["t"], [(m, p, u, d) for (m, p), (u, d) in hist.items()])
+    if body.done:  # lịch sử tick tới giờ hiện tại làm gốc cho delta realtime của symbol này (nếu đang chờ gốc)
+        upd = state.tick_live.seed(body.symbol)
+        if upd:
+            _publish_delta(body.symbol, upd)
 
 
 async def _write(writer: asyncio.StreamWriter, msg: Dict[str, Any]) -> None:

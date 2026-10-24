@@ -37,6 +37,10 @@ class BarStore:
         if not has_vp:
             self.db.execute("DELETE FROM bars WHERE tf='TD'")
         self.db.commit()
+        # Quét tickvp (hàng triệu dòng) chạy ở worker thread và lâu cỡ trăm ms: kết nối đọc riêng để không giữ `_lock` của kết nối ghi, vì event loop ghi delta tick
+        # realtime mỗi lô tick (WAL cho đọc song song với ghi)
+        self.rdb = sqlite3.connect(path, check_same_thread=False)
+        self._rlock = threading.Lock()
 
     def put_tickvp(self, symbol: str, t0: int, t1: int, rows: List[Tuple[int, float, float, float]]) -> None:
         """Ghi histogram các phút [t0, t1] (UTC giây): xoá phút cũ trong khoảng rồi ghi `rows` (t, giá, volume lên, volume xuống), vì bản mới của một phút
@@ -56,13 +60,28 @@ class BarStore:
         up, dn = [0.0] * n, [0.0] * n
         sql = ("SELECT CAST((p - ?) / ? + 1e-6 AS INTEGER) AS i, SUM(up), SUM(dn) FROM tickvp "
                "WHERE symbol=? AND t>=? AND t<? GROUP BY i")
-        with self._lock:
-            rows = self.db.execute(sql, (lo, size, symbol, frm, to)).fetchall()
+        with self._rlock:
+            rows = self.rdb.execute(sql, (lo, size, symbol, frm, to)).fetchall()
         for i, u, d in rows:
             k = min(n - 1, max(0, i))
             up[k] += u
             dn[k] += d
         return up, dn
+
+    def tickbig(self, symbol: str, frm: int, to: int, min_vol: float, limit: int, size: float = 0.0) -> List[Tuple[int, float, float, float]]:
+        """Các ô (phút, giá) trong [frm, to) có tổng volume tick >= `min_vol`: tối đa `limit` ô lớn nhất, trả (t, giá, volume lên, volume xuống) tăng dần theo t.
+        `size` > 0: gom giá của từng phút vào row cao `size` (row i phủ [i*size, (i+1)*size)), giá của ô = giá trung bình theo volume; 0 = đúng từng giá."""
+        if size > 0:
+            sql = ("SELECT t, SUM(p * (up + dn)) / SUM(up + dn) AS pr, SUM(up) AS u, SUM(dn) AS d FROM tickvp WHERE symbol=? AND t>=? AND t<? AND up+dn>0 "
+                   "GROUP BY t, CAST(p / ? + 1e-6 AS INTEGER) HAVING u+d >= ? ORDER BY u+d DESC, t DESC LIMIT ?")
+            args: Tuple[Any, ...] = (symbol, frm, to, size, min_vol, limit)
+        else:
+            sql = "SELECT t, p, up, dn FROM tickvp WHERE symbol=? AND t>=? AND t<? AND up+dn>=? ORDER BY up+dn DESC, t DESC LIMIT ?"
+            args = (symbol, frm, to, min_vol, limit)
+        with self._rlock:
+            rows = self.rdb.execute(sql, args).fetchall()
+        rows.sort(key=lambda r: (r[0], r[1]))
+        return rows
 
     def upsert(self, symbol: str, tf: str, bars: List[Dict[str, Any]]) -> None:
         rows = [(symbol, tf, int(b["t"]), b["o"], b["h"], b["l"], b["c"], b["v"]) for b in bars]

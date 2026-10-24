@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_OBJECTS, ObjectBuilder, emptyObjects, indexAtTime, sanitizeObjects, trimObjects } from "./objects";
+import { MAX_BUBBLES, MAX_OBJECTS, ObjectBuilder, emptyObjects, indexAtTime, sanitizeObjects, trimObjects } from "./objects";
 
 describe("ObjectBuilder", () => {
   it("trả lại chính object để sửa tiếp (như set_x2 của Pine)", () => {
@@ -38,6 +38,16 @@ describe("sanitizeObjects", () => {
     expect(s.boxes).toHaveLength(0);
   });
 
+  it("bubble: bỏ bubble có toạ độ / bán kính na, giữ tối đa MAX_BUBBLES mới nhất; không có bubbles thì không thêm", () => {
+    const b = (x: number, y = 1, r = 5) => ({ x, y, r, bg: "#fff" });
+    const s = sanitizeObjects({ ...emptyObjects(), bubbles: [b(1), b(NaN), b(2, Infinity), b(3, 1, NaN)] });
+    expect(s.bubbles!.map((o) => o.x)).toEqual([1]);
+    const many = sanitizeObjects({ ...emptyObjects(), bubbles: Array.from({ length: MAX_BUBBLES + 10 }, (_, i) => b(i)) });
+    expect(many.bubbles).toHaveLength(MAX_BUBBLES);
+    expect(many.bubbles![0].x).toBe(10);
+    expect(sanitizeObjects(emptyObjects())).not.toHaveProperty("bubbles");
+  });
+
   it("giữ 500 object mới nhất nếu compute trả nhiều hơn", () => {
     const lines = Array.from({ length: 600 }, (_, i) => ({ x1: i, y1: 0, x2: i + 1, y2: 0, color: "#fff" }));
     const s = sanitizeObjects({ ...emptyObjects(), lines });
@@ -61,6 +71,11 @@ describe("trimObjects", () => {
     expect(t.labels[0].x).toBe(3);
     expect(t.boxes[0]).toMatchObject({ x1: -7, x2: 13 });
     expect(set.lines[0].x1).toBe(10);
+  });
+  it("dịch cả x của bubble", () => {
+    const t = trimObjects({ ...set, bubbles: [{ x: 15, y: 1, r: 4, bg: "#fff" }] }, 12);
+    expect(t.bubbles![0].x).toBe(3);
+    expect(trimObjects(set, 12)).not.toHaveProperty("bubbles");
   });
 });
 

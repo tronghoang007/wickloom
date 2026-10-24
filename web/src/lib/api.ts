@@ -70,6 +70,21 @@ export async function fetchTickProfile(symbol: string, from: number, to: number,
   }
 }
 
+/** Một ô (phút, giá) của lịch sử tick: volume tick lên / xuống ở giá `p` trong phút bắt đầu lúc `t`. */
+export type TickCell = { t: number; p: number; up: number; dn: number };
+
+/** Tối đa `limit` ô (phút, giá) lớn nhất trong [from, to) có volume tick >= `min` (backend /tickbig), tăng dần theo t; `size` > 0 gom giá vào row cao `size`. null nếu lỗi. */
+export async function fetchTickBig(symbol: string, from: number, to: number, min: number, limit: number, size: number): Promise<TickCell[] | null> {
+  const q = new URLSearchParams({ symbol, from: String(from), to: String(to), min: String(min), limit: String(limit), size: String(size) });
+  try {
+    const r = await fetch(`${API}/tickbig?${q}`);
+    const j = r.ok ? await r.json() : null;
+    return j && Array.isArray(j.rows) ? j.rows.map(([t, p, up, dn]: number[]) => ({ t, p, up, dn })) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Giây: giờ broker − UTC (EA báo cho backend); 0 nếu backend chưa biết / không trả lời. */
 export async function fetchBrokerOffset(): Promise<number> {
   try {

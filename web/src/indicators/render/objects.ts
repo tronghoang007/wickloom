@@ -172,6 +172,28 @@ export class ObjectsPrimitive implements ISeriesPrimitive<Time> {
             ctx.fillStyle = l.color;
             ctx.fillText(l.text, lay.textX, lay.textY);
           }
+          for (const b of d.bubbles ?? []) {
+            const x = X(b.x), y = Y(b.y);
+            if (x === null || y === null || x < -b.r || x > bitmapSize.width / hpr + b.r) continue;
+            const r = b.r * hpr;
+            ctx.beginPath();
+            ctx.arc(x * hpr, y * vpr, r, 0, 2 * Math.PI);
+            ctx.fillStyle = b.bg;
+            ctx.fill();
+            if (!isClear(b.border)) {
+              ctx.lineWidth = Math.max(1, Math.round(hpr));
+              ctx.strokeStyle = b.border;
+              ctx.stroke();
+            }
+            if (b.text) {
+              // chữ chỉ vẽ khi lọt vào bubble: bubble nhỏ để trống thay vì chữ tràn ra ngoài
+              ctx.font = `${Math.round(Math.min(12 * vpr, r * 0.9))}px -apple-system, "Trebuchet MS", sans-serif`;
+              if (ctx.measureText(b.text).width <= r * 1.7) {
+                ctx.fillStyle = b.textColor ?? "#ffffff";
+                ctx.fillText(b.text, x * hpr, y * vpr);
+              }
+            }
+          }
         });
       },
     }),

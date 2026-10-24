@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import tickdelta
 from .aggregator import Aggregator
 from .config import BARS_DB, BARS_DIR, TF_SECONDS, is_stale
 from .store import BarStore, MetaStore
@@ -57,6 +58,7 @@ def _on_gap(symbol: str, gap_seconds: int) -> None:
             continue
         _gap_seeding[(symbol, tf)] = now
         request_backfill(symbol, tf, min(500, gap_seconds // TF_SECONDS[tf] + 3))
+    tick_live.reset(symbol)  # delta theo tick mất tick trong khoảng đứt: tính lại từ lịch sử tick của EA
 
 
 aggregator = Aggregator(bars.last, _on_update, _on_close, _on_unseeded, _on_gap)
@@ -146,6 +148,10 @@ def request_catchup(symbol: str, tf: str) -> None:
     request_backfill(symbol, tf, count)
 
 
+# Delta theo tick realtime (CVD / Big Trades): xin EA 2 phút tick gần nhất làm gốc cho phút đang chạy
+tick_live = tickdelta.Live(lambda symbol: request_backfill(symbol, tickdelta.TICK_DELTA_TF, 2, before=int(time.time())))
+
+
 def check_broker_switch(company: str, server: str = "") -> bool:
     """So nguồn dữ liệu (server MT5, vd "Exness-MT5Trial17") EA vừa báo qua hello với lần
     trước (bảng settings). Trả True nếu là server KHÁC (cần resync); False nếu giống,
@@ -180,6 +186,7 @@ def resync_after_broker_switch() -> Optional[Path]:
     symbols.clear()
     aggregator.cur.clear()
     aggregator.last_tick.clear()
+    tick_live.clear()
     pending_backfill.clear()  # lệnh neo theo dữ liệu của server cũ
     hub.broadcast({"type": "reset", "reason": "broker"})
     return archive_path

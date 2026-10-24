@@ -18,6 +18,7 @@ class Tick(BaseModel):
     ask: float = 0
     last: float = 0
     vol: float = 0
+    f: Optional[int] = None  # cờ tick của MT5 (TICK_FLAG_BID 2 / LAST 8...; EA >= 2.17); None = EA cũ không báo
 
 
 class SymbolInfo(BaseModel):
@@ -47,6 +48,7 @@ class SymbolsIn(BaseModel):
 class TicksIn(BaseModel):
     broker_utc_offset: int = 0
     symbol: str
+    lm: bool = False  # nến của symbol theo giá Last (EA >= 2.17): delta tick lấy tick giao dịch, trọng số = volume; không thì theo Bid
     ticks: List[Tick]
 
 

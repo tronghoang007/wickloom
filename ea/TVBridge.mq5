@@ -65,14 +65,19 @@
 //|   toi da TickHistChunk tick moi thong diep) - backend tu phan loai  |
 //|   len/xuong va luu delta tung phut. Bang khung nen: gia = Bid neu   |
 //|   chart theo Bid, Last (trong so = volume) neu chart theo Last      |
+//| - 2.17: "ticks" truc tiep gui them co tick ("f", ENUM_TICK_FLAG) va  |
+//|   "lm":1 neu nen theo Last - backend tu phan loai tick realtime cho |
+//|   CVD / Big Trades theo CUNG quy tac voi lich su tick (chi tick doi  |
+//|   Bid, hoac tick giao dich neu theo Last), khong con phai cho EA     |
+//|   tinh lai moi 15 giay                                              |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.16"
+#property version "2.17"
 
-#define EA_VERSION "2.16"
+#define EA_VERSION "2.17"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -751,12 +756,13 @@ void PumpTicks()
     }
     if (n <= 0)
       continue;
-    string js = "{\"type\":\"ticks\",\"broker_utc_offset\":" + IntegerToString(BrokerOffset()) + ",\"symbol\":\"" + Esc(g_subs[i]) + "\",\"ticks\":[";
+    string js = "{\"type\":\"ticks\",\"broker_utc_offset\":" + IntegerToString(BrokerOffset()) + ",\"symbol\":\"" + Esc(g_subs[i]) + "\""
+                + (SymbolInfoInteger(g_subs[i], SYMBOL_CHART_MODE) == SYMBOL_CHART_MODE_LAST ? ",\"lm\":1" : "") + ",\"ticks\":[";
     for (int k = 0; k < n; k++)
     {
       if (k > 0)
         js += ",";
-      js += "{\"t_msc\":" + IntegerToString(ticks[k].time_msc) + ",\"bid\":" + DoubleToString(ticks[k].bid, 8) + ",\"ask\":" + DoubleToString(ticks[k].ask, 8) + ",\"last\":" + DoubleToString(ticks[k].last, 8) + ",\"vol\":" + IntegerToString((long)ticks[k].volume) + "}";
+      js += "{\"t_msc\":" + IntegerToString(ticks[k].time_msc) + ",\"bid\":" + DoubleToString(ticks[k].bid, 8) + ",\"ask\":" + DoubleToString(ticks[k].ask, 8) + ",\"last\":" + DoubleToString(ticks[k].last, 8) + ",\"vol\":" + IntegerToString((long)ticks[k].volume) + ",\"f\":" + IntegerToString((int)ticks[k].flags) + "}";
     }
     js += "]}";
     if (SendLine(js))

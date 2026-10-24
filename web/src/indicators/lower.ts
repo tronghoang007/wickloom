@@ -47,6 +47,7 @@ const TICK_CHUNK = 360;
 const TICK_POLLS = 15; // 30 giây
 const TICK_TAIL_BARS = 3;
 const TICK_TAIL_WAIT_MS = 1500;
+const LIVE_FRESH_MS = 20_000; // đã nhận delta tick realtime (backend gửi sau mỗi lô tick) trong chừng này thì đuôi không cần EA tính lại
 
 /** Ghép các nguồn (mịn → thô): nguồn mịn lấy hết; nến của nguồn thô hơn chỉ được lấy nếu không có nến mịn nào nằm trong khoảng của nó
  *  (vùng cũ hơn dữ liệu mịn, hoặc lỗ hổng bên trong dữ liệu mịn). Kết quả tăng dần theo t. */
@@ -103,7 +104,7 @@ export type Backfill = (symbol: string, tf: string, count: number, before: numbe
 type Opts = { now?: () => number; pageSize?: number; backfill?: Backfill; sleep?: (ms: number) => Promise<void>; chunk?: number; tickChunk?: number };
 type Entry = {
   bars: Bar[]; lo: number; hi: number; busy: boolean; retryAt: number; tailAt: number;
-  tries: Map<string, number>; readyAt: number; holes: { sig: string; gaps: Gap[] } | null;
+  tries: Map<string, number>; readyAt: number; holes: { sig: string; gaps: Gap[] } | null; liveAt: number;
 };
 
 export class LowerFeed {
@@ -140,6 +141,20 @@ export class LowerFeed {
     return this.memo.bars;
   }
 
+  /** Nến khung nhỏ mới nhất do backend đẩy (delta tick realtime: các phút vừa chốt + phút đang chạy, tăng dần). Chỉ ghi vào khung đã nạp từ DB
+   *  (chưa nạp thì lần đọc DB đầu đã có phần này); true nếu có đổi. */
+  push(symbol: string, tf: string, rows: Bar[]): boolean {
+    const e = this.cache.get(`${symbol}|${tf}`);
+    if (!e || e.lo === Infinity || rows.length === 0) return false;
+    let i = e.bars.length;
+    while (i > 0 && e.bars[i - 1].t >= rows[0].t) i--;
+    e.bars = e.bars.slice(0, i).concat(rows);
+    e.hi = Math.max(e.hi, rows[rows.length - 1].t + stepOf(tf));
+    e.liveAt = this.now();
+    this.ver++;
+    return true;
+  }
+
   /** Bỏ hết cache (đổi broker / symbol không cần: cache theo symbol). */
   clear() {
     this.cache.clear();
@@ -150,7 +165,7 @@ export class LowerFeed {
   private ensure(symbol: string, tf: string, from: number, to: number) {
     const key = `${symbol}|${tf}`;
     let e = this.cache.get(key);
-    if (!e) this.cache.set(key, (e = { bars: [], lo: Infinity, hi: -Infinity, busy: false, retryAt: 0, tailAt: 0, tries: new Map(), readyAt: 0, holes: null }));
+    if (!e) this.cache.set(key, (e = { bars: [], lo: Infinity, hi: -Infinity, busy: false, retryAt: 0, tailAt: 0, tries: new Map(), readyAt: 0, holes: null, liveAt: -Infinity }));
     if (e.busy || this.now() < e.retryAt) return;
     const entry = e;
     const first = entry.lo === Infinity;
@@ -262,6 +277,11 @@ export class LowerFeed {
 
   /** Làm mới đuôi: nạp lại từ nến khung nhỏ cuối cùng (có thể mới chỉ chạy dở) tới `to`. Trả về có đổi gì không. */
   private async tail(symbol: string, tf: string, e: Entry, to: number): Promise<boolean> {
+    if (tf === TICK_TF && this.now() - e.liveAt < LIVE_FRESH_MS) {
+      e.tailAt = this.now(); // backend đang tự cập nhật đuôi theo từng tick
+      e.hi = Math.max(to, e.hi);
+      return false;
+    }
     if (tf === TICK_TF && this.backfill) {
       // delta theo tick chỉ có khi EA tính: nhờ EA gửi lại vài phút gần nhất (phút đang chạy dở được ghi đè), đợi một chút rồi đọc
       await this.backfill(symbol, tf, TICK_TAIL_BARS, Math.max(to, e.hi)).catch(() => false);

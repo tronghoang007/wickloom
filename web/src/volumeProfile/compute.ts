@@ -1,4 +1,4 @@
-import type { Bar } from "@/lib/api";
+import type { Bar, TickCell } from "@/lib/api";
 
 // Volume profile dùng chung cho drawings (FRVP / AVP) và indicator (Session / Visible Range Volume Profile).
 
@@ -32,10 +32,12 @@ export function profileLayout(bars: Bar[], tick: number, rows: number, layout = 
   return { lo: lowTick * tick, hi: highTick * tick, size: ticksPerRow * tick, N: Math.max(1, Math.ceil(totalTicks / ticksPerRow)) };
 }
 
-/** Dữ liệu tick cho volume profile "1 tick": `covered(t0)` = tick đã nạp tới đầu `t0`; `hist` = volume lên / xuống của tick trong [t0, t1) gom vào các row của `lay` (null = chưa nạp xong). */
+/** Dữ liệu tick cho volume profile "1 tick": `covered(t0)` = tick đã nạp tới đầu `t0`; `hist` = volume lên / xuống của tick trong [t0, t1) gom vào các row của `lay` (null = chưa nạp xong).
+ *  `big` (Big Trades): các ô (phút, row giá cao `size`) lớn nhất của [t0, t1) có volume >= `min`, tối đa `limit` ô (null = chưa nạp xong). */
 export type TickSource = {
   covered: (t0: number) => boolean;
   hist: (t0: number, t1: number, lay: Layout) => { up: number[]; dn: number[] } | null;
+  big?: (t0: number, t1: number, min: number, limit: number, size: number) => TickCell[] | null;
 };
 
 /** Profile của [t0, t1) từ tick: row chia theo vùng giá của nến chart `chart` (như `computeProfile`), volume lên / xuống do `src` gom theo giá từng tick.

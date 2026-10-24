@@ -81,6 +81,13 @@ def get_tickvp(symbol: str, frm: int = Query(alias="from"), to: int = 0, lo: flo
     return {"up": up, "dn": dn}
 
 
+@app.get("/tickbig")
+def get_tickbig(symbol: str, frm: int = Query(alias="from"), to: int = 0, min: float = Query(1, ge=0), limit: int = Query(500, ge=1, le=5000), size: float = Query(0, ge=0)):
+    """Big Trades "1 tick": các ô (phút, giá) trong [from, to) có volume tick >= min, tối đa `limit` ô lớn nhất; `size` > 0 gom giá vào row cao `size`.
+    rows = [t, giá, volume lên, volume xuống] tăng dần theo t."""
+    return {"rows": [list(r) for r in state.bars.tickbig(symbol, frm, to, min, limit, size)]}
+
+
 @app.post("/backfill")
 def backfill(symbol: str, tf: str, count: int = 500, pos: int = 0, before: int = 0):
     request_backfill(symbol, tf, count, pos, before)

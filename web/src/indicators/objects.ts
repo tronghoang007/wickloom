@@ -2,6 +2,8 @@ import type { ObjBox, ObjLabel, ObjLine, ObjectSet, ProfileSet } from "./schema"
 
 /** `max_lines_count` / `max_labels_count` / `max_boxes_count` lớn nhất của Pine. */
 export const MAX_OBJECTS = 500;
+/** Số bubble tối đa của một indicator (Big Trades): bubble không thuộc Pine nên không bị giới hạn 500. */
+export const MAX_BUBBLES = 3000;
 
 export const emptyObjects = (): ObjectSet => ({ lines: [], labels: [], boxes: [] });
 
@@ -34,6 +36,7 @@ export function sanitizeObjects(s: ObjectSet): ObjectSet {
     lines: s.lines.filter((o) => finite(o.x1, o.y1, o.x2, o.y2)).slice(-MAX_OBJECTS),
     labels: s.labels.filter((o) => finite(o.x, o.y) && typeof o.text === "string").slice(-MAX_OBJECTS),
     boxes: s.boxes.filter((o) => finite(o.x1, o.y1, o.x2, o.y2)).slice(-MAX_OBJECTS),
+    ...(s.bubbles ? { bubbles: s.bubbles.filter((o) => finite(o.x, o.y, o.r)).slice(-MAX_BUBBLES) } : {}),
   };
 }
 
@@ -44,6 +47,7 @@ export function trimObjects(s: ObjectSet, cut: number): ObjectSet {
     lines: s.lines.map((o) => ({ ...o, x1: o.x1 - cut, x2: o.x2 - cut })),
     labels: s.labels.map((o) => ({ ...o, x: o.x - cut })),
     boxes: s.boxes.map((o) => ({ ...o, x1: o.x1 - cut, x2: o.x2 - cut })),
+    ...(s.bubbles ? { bubbles: s.bubbles.map((o) => ({ ...o, x: o.x - cut })) } : {}),
   };
 }
 

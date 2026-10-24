@@ -1299,6 +1299,8 @@ export default function Chart({ paneId }: { paneId: string }) {
         ) {
           if (barsRef.current.length === 0) setStatus("");
           upsert(m.bar);
+        } else if (m.type === "tick_delta" && m.symbol === symbol) {
+          indRef.current?.onTickDelta(m);
         } else if (m.type === "tick" && m.symbol === symbol) {
           tickRef.current = { bid: m.bid, ask: m.ask };
           useQuoteStore.getState().set(symbol, m.bid, m.ask);
