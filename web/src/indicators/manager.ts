@@ -15,7 +15,7 @@ import { ProfilePrimitive } from "./render/profile";
 import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions, scaleId } from "./render/series";
 import type { IndicatorDef, PlotData, TickSource } from "./schema";
 import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
-import { TickBigFeed, TickProfileFeed, addLiveHist, coverSig, coversFrom, liveCut, liveFrom, mergeLiveBig, type LiveMinute } from "./tickProfile";
+import { TickBigFeed, TickProfileFeed, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, type LiveMinute } from "./tickProfile";
 
 type Live = {
   inst: IndicatorInstance;
@@ -41,9 +41,6 @@ export type CandleColorSink = (colors: Map<number, string> | null, from: number 
 
 /** Giá trị 1 plot ở một nến, cho legend. Plot candles cho 4 giá trị (O, H, L, C), cùng `plot` = id plot. */
 export type PlotValue = { id: string; plot: string; title: string; value: number; color: string };
-
-/** Số phút tick gần nhất giữ trong bộ nhớ (phút đang chạy + vài phút vừa đóng chờ bản DB đọc lại theo kịp). */
-const LIVE_KEEP = 3;
 
 const DEFAULT_FORMAT = { type: "price" as const, precision: 2, minMove: 0.01 };
 
@@ -121,8 +118,7 @@ export class IndicatorManager {
   onTickDelta(m: { symbol: string; bars: Bar[]; cells: [number, number, number][] }) {
     if (m.bars.length === 0) return;
     const last = m.bars[m.bars.length - 1];
-    const lives = (this.liveMinute.get(m.symbol) ?? []).filter((l) => l.t < last.t);
-    this.liveMinute.set(m.symbol, [...lives, { t: last.t, cells: m.cells }].slice(-LIVE_KEEP));
+    this.liveMinute.set(m.symbol, appendLive(this.liveMinute.get(m.symbol) ?? [], { t: last.t, cells: m.cells }));
     const pushed = this.lower.push(m.symbol, TICK_TF, m.bars);
     if (m.symbol === this.feed.symbol && (pushed || this.live.some((l) => l.def.ticks))) this.schedule();
   }
@@ -354,11 +350,7 @@ export class IndicatorManager {
     const newest = lives[lives.length - 1];
     return {
       covered: (t0) => coversFrom(cover, t0),
-      hist: (t0, t1, lay) => {
-        const cut = liveCut(newest, t0, t1);
-        const h = this.tickProfiles.get(symbol, t0, t1, lay, `${cut}:${coverSig(cover, t0, cut)}`, cut);
-        return h && addLiveHist(h, lay, liveFrom(lives, this.tickProfiles.heldUpTo(symbol, t0, t1, lay) ?? cut, t0, t1));
-      },
+      hist: (t0, t1, lay) => liveHist(this.tickProfiles, symbol, cover, lives, t0, t1, lay),
       big: (t0, t1, min, limit, size) => {
         const cut = liveCut(newest, t0, t1);
         const cells = this.tickBig.get(symbol, t0, t1, min, limit, size, `${cut}:${coverSig(cover, t0, cut)}`, cut);

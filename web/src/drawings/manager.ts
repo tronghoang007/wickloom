@@ -1,6 +1,6 @@
 import { TF_SECONDS, fetchBars, fetchTickProfile, triggerBackfillAt, type Bar } from "@/lib/api";
 import { LowerFeed, TICK_DEPTH, TICK_TF } from "@/indicators/lower";
-import { TickProfileFeed, coverSig, coversFrom } from "@/indicators/tickProfile";
+import { TickProfileFeed, appendLive, coversFrom, liveHist, type LiveMinute } from "@/indicators/tickProfile";
 import type { TickSource } from "@/volumeProfile/compute";
 import { DrawingDoc, acquireDoc, releaseDoc, type DocView } from "./doc";
 import { noteGuestDrawing } from "./storage";
@@ -82,6 +82,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     backfill: async (symbol, tf, count, before) => (await triggerBackfillAt(symbol, tf, count, before)).ok,
   });
   private tickProfiles = new TickProfileFeed((symbol, from, to, lay) => fetchTickProfile(symbol, from, to, lay.lo, lay.size, lay.N), () => this.tickChanged());
+  private liveMinute = new Map<string, LiveMinute[]>(); // symbol -> vài phút tick gần nhất, cuối là phút đang chạy (backend đẩy sau mỗi lô tick)
   private hoveredId: string | null = null;
   private mode: Mode = { k: "idle" };
   private chartLock: { handleScroll: unknown; handleScale: unknown } | null = null;
@@ -1095,6 +1096,28 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.refresh();
   }
 
+  /** Delta tick realtime từ backend (`tick_delta`, như `IndicatorManager.onTickDelta`): nến delta vào cache nến phủ tick, ô giá của phút đang chạy cộng vào histogram của FRVP / AVP.
+   *  Chỉ vẽ lại khi có profile 1 tick đang hiện mà khoảng của nó gồm một trong các phút vừa đổi. */
+  onTickDelta(m: { symbol: string; bars: Bar[]; cells: [number, number, number][] }) {
+    if (m.bars.length === 0) return;
+    const last = m.bars[m.bars.length - 1];
+    this.liveMinute.set(m.symbol, appendLive(this.liveMinute.get(m.symbol) ?? [], { t: last.t, cells: m.cells }));
+    this.tickCover.push(m.symbol, TICK_TF, m.bars);
+    if (m.symbol === this.symbol && this.tickProfileAt(m.bars)) this.tickChanged();
+  }
+
+  /** Có FRVP / AVP 1 tick đang hiện mà khoảng profile gồm phút của một nến delta trong `minutes`. */
+  private tickProfileAt(minutes: Bar[]): boolean {
+    const lastT = this.o.getBars().at(-1)?.t;
+    if (lastT === undefined) return false;
+    const step = this.step();
+    return this.drawings.some((d) => {
+      if ((d.type !== "frvp" && d.type !== "avp") || ({ ...VP_BY[d.type], ...d.opts }).agg !== "ticks" || !this.shown(d)) return false;
+      const span = profileSpan(d, lastT);
+      return !!span && minutes.some((b) => b.t >= span.t0 && b.t < span.t1 + step);
+    });
+  }
+
   /** Tick cho FRVP / AVP khi Data aggregation = 1 tick và khoảng profile nằm trong độ sâu tick (tính từ nến cuối); không thì undefined (dùng nến khung nhỏ). */
   private tickSource(d: Drawing, bars: Bar[], step: number): TickSource | undefined {
     if ((d.type !== "frvp" && d.type !== "avp") || !this.symbol || this.dragging(d)) return undefined;
@@ -1106,7 +1129,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     const cover = this.tickCover.get(symbol, { tfs: [TICK_TF], from: span.t0 }, last.t + step);
     return {
       covered: (t0) => coversFrom(cover, t0),
-      hist: (t0, t1, lay) => this.tickProfiles.get(symbol, t0, t1, lay, coverSig(cover, t0, t1)),
+      hist: (t0, t1, lay) => liveHist(this.tickProfiles, symbol, cover, this.liveMinute.get(symbol) ?? [], t0, t1, lay),
     };
   }
 

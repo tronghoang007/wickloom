@@ -150,6 +150,19 @@ export const liveCut = (live: LiveMinute | undefined, t0: number, t1: number): n
  *  nên bubble / row của nó không biến mất trong lúc chờ. */
 export const liveFrom = (lives: LiveMinute[], held: number, t0: number, t1: number): LiveMinute[] => lives.filter((l) => l.t >= held && l.t >= t0 && l.t < t1);
 
+/** Số phút tick gần nhất giữ trong bộ nhớ (phút đang chạy + vài phút vừa đóng chờ bản DB đọc lại theo kịp). */
+export const LIVE_KEEP = 3;
+
+/** Thêm phút `live` (mới nhất) vào danh sách phút đang giữ: phút cùng hoặc sau nó bị thay, chỉ giữ `LIVE_KEEP` phút cuối. */
+export const appendLive = (lives: LiveMinute[], live: LiveMinute): LiveMinute[] => [...lives.filter((l) => l.t < live.t), live].slice(-LIVE_KEEP);
+
+/** Histogram của profile [t0, t1) = bản DB (tới đầu phút đang chạy) + các phút `lives` mà bản đó chưa có. null = DB chưa nạp xong. */
+export function liveHist(feed: TickProfileFeed, symbol: string, cover: Bar[], lives: LiveMinute[], t0: number, t1: number, lay: Layout): TickHist | null {
+  const cut = liveCut(lives[lives.length - 1], t0, t1);
+  const h = feed.get(symbol, t0, t1, lay, `${cut}:${coverSig(cover, t0, cut)}`, cut);
+  return h && addLiveHist(h, lay, liveFrom(lives, feed.heldUpTo(symbol, t0, t1, lay) ?? cut, t0, t1));
+}
+
 /** Cộng các phút `lives` vào histogram `h` của profile: tick ở giá `p` vào row `floor((p - lo) / size)` (như backend), giá ngoài khoảng dồn vào row đầu / cuối. */
 export function addLiveHist(h: TickHist, lay: Layout, lives: LiveMinute[]): TickHist {
   if (lives.length === 0) return h;

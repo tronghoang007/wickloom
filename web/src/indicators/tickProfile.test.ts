@@ -1,6 +1,6 @@
 import type { Bar, TickCell } from "@/lib/api";
 import { describe, expect, it } from "vitest";
-import { TickBigFeed, TickProfileFeed, addLiveHist, coverSig, coversFrom, liveCut, liveFrom, mergeLiveBig, type LiveMinute, type TickHist } from "./tickProfile";
+import { LIVE_KEEP, TickBigFeed, TickProfileFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, type LiveMinute, type TickHist } from "./tickProfile";
 
 const td = (t: number, c = 1, v = 1): Bar => ({ t, o: 0, h: 0, l: 0, c, v });
 const lay = { lo: 100, hi: 110, size: 5, N: 2 };
@@ -197,5 +197,34 @@ describe("phút đang chạy (realtime)", () => {
     await Promise.resolve();
     expect(calls[2]).toEqual([10, 180]);
     expect(big.heldUpTo("S", 10, 600, 1, 10, 0)).toBe(180);
+  });
+
+  it("appendLive: phút mới thay phút cùng hoặc sau nó, chỉ giữ LIVE_KEEP phút cuối", () => {
+    const m = (t: number, n = 1): LiveMinute => ({ t, cells: [[100, n, 0]] });
+    expect(appendLive([], m(60))).toEqual([m(60)]);
+    expect(appendLive([m(60), m(120)], m(120, 5))).toEqual([m(60), m(120, 5)]); // cùng phút: thay bằng bản mới
+    expect(appendLive([m(60), m(120), m(180)], m(180, 2)).length).toBe(3);
+    const full = [m(60), m(120), m(180)];
+    expect(full.length).toBe(LIVE_KEEP);
+    expect(appendLive(full, m(240)).map((l) => l.t)).toEqual([120, 180, 240]);
+  });
+
+  it("liveHist: bản DB tới đầu phút đang chạy + các phút bộ nhớ, không có phút đang chạy trong khoảng thì chỉ đọc DB", async () => {
+    const calls: [number, number][] = [];
+    const feed = new TickProfileFeed(async (_s, from, to) => (calls.push([from, to]), { up: [1, 0, 0], dn: [0, 0, 1] }), () => {});
+    const cover = [td(0), td(60)];
+    const lives: LiveMinute[] = [{ t: 60, cells: [[100.2, 1, 0]] }, { t: 120, cells: [[101.5, 0, 4]] }];
+    expect(liveHist(feed, "S", cover, lives, 0, 600, l3)).toBeNull(); // DB chưa nạp: chưa có profile
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual([[0, 120]]); // DB chỉ đọc tới đầu phút đang chạy
+    // DB giữ tới 120: chỉ phút 120 còn thiếu (phút 60 đã nằm trong DB)
+    expect(liveHist(feed, "S", cover, lives, 0, 600, l3)).toEqual({ up: [1, 0, 0], dn: [0, 4, 1] });
+    // phút đang chạy ngoài khoảng: đọc hết t1, không cộng gì
+    expect(liveHist(feed, "S", cover, lives, 0, 100, l3)).toBeNull();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls[1]).toEqual([0, 100]);
+    expect(liveHist(feed, "S", cover, lives, 0, 100, l3)).toEqual({ up: [1, 0, 0], dn: [0, 0, 1] });
   });
 });
