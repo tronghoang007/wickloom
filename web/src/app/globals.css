@@ -74,7 +74,7 @@ textarea,
 }
 
 [data-theme="dark"] {
-  --bg: #0f0f0f; /* nền dark của TV (đo từ TradingView của user) */
+  --bg: #000000; /* nền chart dark: user chọn đen thuần (TV đo được #0f0f0f); phải khớp CHART_THEMES.dark.bg trong store/settings.ts */
   --page: #1a1a1a; /* nền trang của TV (chart-page: dải toolbar trên cùng, khe giữa các khối) - đo từ TradingView */
   --fg: #d1d4dc;
   --muted: #8a8d98; /* chữ phụ: TV dùng #787b86 nhưng chỉ đạt 3.2-4.1:1 trên hover/panel/page, #8a8d98 đạt >=4.1 trên mọi nền tối và vẫn tối hơn --fg rõ rệt */
@@ -89,7 +89,7 @@ textarea,
   --on-solid: #0f0f0f;
   --scroll-thumb: #555966;
   --scroll-thumb-hover: #787b86;
-  /* menu / dropdown / hộp thoại. TV đo được #131313 + hover #1a1a1a + chữ #b8b8b8 + đường kẻ #464646, không viền; nhưng #131313 chỉ hơn chart (#0f0f0f) một nấc nên user thấy "chìm" -> dùng #1f1f1f (= --panel đo từ TV) + hover #2a2a2a, giữ chữ/đường kẻ của TV */
+  /* menu / dropdown / hộp thoại. TV đo được #131313 + hover #1a1a1a + chữ #b8b8b8 + đường kẻ #464646, không viền; nhưng #131313 chỉ hơn chart (TV #0f0f0f) một nấc nên user thấy "chìm" -> dùng #1f1f1f (= --panel đo từ TV) + hover #2a2a2a, giữ chữ/đường kẻ của TV */
   --popup: #1f1f1f;
   --popup-hover: #2a2a2a;
   --popup-fg: #b8b8b8;

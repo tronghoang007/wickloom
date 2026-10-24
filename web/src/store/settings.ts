@@ -78,7 +78,7 @@ export const DOWN = "#f23645";
 export const CHART_THEMES = {
   // sep: đường ngăn giữa các pane (đo từ TV: #2e2e2e trên nền tối)
   // gridDot: chấm của lưới nền (đo từ canvas TV: chấm 1px cách 3px, #3c3c3c trên nền #0f0f0f; theme sáng ước lượng). `grid` còn dùng cho viền trục.
-  dark: { bg: "#0f0f0f", text: "#b2b5be", grid: "#242424", gridDot: "#3c3c3c", label: "#363a45", crosshair: "#758696", sep: "#2e2e2e" },
+  dark: { bg: "#000000", text: "#b2b5be", grid: "#242424", gridDot: "#3c3c3c", label: "#363a45", crosshair: "#758696", sep: "#2e2e2e" },
   light: { bg: "#ffffff", text: "#131722", grid: "#f0f3fa", gridDot: "#d8dbe3", label: "#131722", crosshair: "#758696", sep: "#e0e3eb" },
 };
 
