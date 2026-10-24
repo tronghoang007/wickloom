@@ -196,16 +196,20 @@ export function createLineDrag(o: Opts): ChartDrag {
       const quote = useQuoteStore.getState().quotes[symbol];
       const draft = draftLines(useTicketStore.getState().draft, symbol, quote).map((l) => ({ id: l.key, price: l.price }));
       if (!canMove()) return draft;
+      // đường đã thả (chờ xác nhận / đã gửi) đứng ở giá mới nên phải bắt chuột ở giá mới, và SL/TP vừa kéo ra từ nút mờ (dữ liệu EA chưa có) cũng phải kéo lại được
+      const shown = (id: string, price: number) => edits.get(id)?.preview.price ?? sent.get(id)?.price ?? price;
       const orders = ordersHere().flatMap((x) => [
-        { id: `o:${x.ticket}`, price: x.price_open },
-        ...(x.sl > 0 ? [{ id: `osl:${x.ticket}`, price: x.sl }] : []),
-        ...(x.tp > 0 ? [{ id: `otp:${x.ticket}`, price: x.tp }] : []),
+        { id: `o:${x.ticket}`, price: shown(`o:${x.ticket}`, x.price_open) },
+        ...(x.sl > 0 ? [{ id: `osl:${x.ticket}`, price: shown(`osl:${x.ticket}`, x.sl) }] : []),
+        ...(x.tp > 0 ? [{ id: `otp:${x.ticket}`, price: shown(`otp:${x.ticket}`, x.tp) }] : []),
       ]);
       const positions = positionsHere().flatMap((x) => [
-        ...(x.sl > 0 ? [{ id: `psl:${x.ticket}`, price: x.sl }] : []),
-        ...(x.tp > 0 ? [{ id: `ptp:${x.ticket}`, price: x.tp }] : []),
+        ...(x.sl > 0 ? [{ id: `psl:${x.ticket}`, price: shown(`psl:${x.ticket}`, x.sl) }] : []),
+        ...(x.tp > 0 ? [{ id: `ptp:${x.ticket}`, price: shown(`ptp:${x.ticket}`, x.tp) }] : []),
       ]);
-      return [...draft, ...orders, ...positions];
+      const have = new Set([...orders, ...positions].map((t) => t.id));
+      const created = [...new Set([...edits.keys(), ...sent.keys()])].filter((k) => STOP_ID.test(k) && !have.has(k) && stopOf(k) !== null).map((k) => ({ id: k, price: shown(k, 0) }));
+      return [...draft, ...orders, ...positions, ...created];
     },
     digits: o.getDigits,
     tickSize: () => symbolInfo()?.tick_size || 10 ** -o.getDigits(),
