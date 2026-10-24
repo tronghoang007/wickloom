@@ -1,17 +1,24 @@
-import { drawingGlobal, type DrawingDefaults } from "@/drawings/store";
+import { drawingGlobal, type CursorMode, type DrawingDefaults, type DrawingGlobal, type MagnetMode } from "@/drawings/store";
 import { apiFetch } from "@/lib/api";
 import { useAuthStore } from "./auth";
 
-// Mặc định công cụ vẽ (màu, độ dày, tuỳ chọn như Row Size của FRVP...) theo TÀI KHOẢN như TradingView (hình vẽ mới là của từng layout):
+// Tuỳ chọn công cụ vẽ theo TÀI KHOẢN như TradingView (hình vẽ thì theo layout, xem drawings/doc.ts): mặc định từng công cụ (màu, độ dày, Row Size của FRVP...),
+// thanh yêu thích, nam châm, giữ công cụ sau khi vẽ, công cụ gần nhất, kiểu con trỏ.
 //  - khách: chỉ nhớ trong localStorage (`tv-drawing-prefs`) như trước;
-//  - user: nằm ở `/me/prefs` (document `{ v: 1, toolDefaults }`), đăng nhập thì lấy về, đổi thì lưu lên; localStorage vẫn giữ một bản để mở nhanh / khi backend tắt.
-// Server thắng khi đã có dữ liệu; tài khoản chưa có gì thì mặc định đang có trên máy này (từ lúc còn là khách) được đưa lên. Đổi trước khi lấy xong thì gộp theo từng công cụ (bên đổi thắng).
+//  - user: nằm ở `/me/prefs` (một document `{ v: 1, ...các khoá bên dưới }`): đăng nhập thì lấy về, đổi thì lưu lên; localStorage vẫn giữ một bản để mở nhanh / khi backend tắt.
+//    Vị trí thanh yêu thích (`favoritesPos`) ở lại máy vì nó theo kích thước màn hình.
+// Server thắng ở khoá nó đã có; khoá server chưa có thì giá trị đang có trên máy được đưa lên. Đổi trước khi lấy xong: khoá đó bên vừa đổi thắng (mặc định công cụ gộp theo từng công cụ).
 
 const PREFS_VERSION = 1;
 const SAVE_DELAY = 800;
 const RETRY_MS = 10_000;
 
 type ToolDefaults = Record<string, DrawingDefaults>;
+type Synced = Pick<DrawingGlobal, "toolDefaults" | "favorites" | "showFavs" | "magnet" | "magnetMode" | "stay" | "lastTool" | "cursor">;
+type Key = keyof Synced;
+
+/** Khoá của `drawingGlobal` lưu theo tài khoản, theo thứ tự cố định (so sánh chuỗi JSON). */
+export const SYNCED_KEYS: Key[] = ["toolDefaults", "favorites", "showFavs", "magnet", "magnetMode", "stay", "lastTool", "cursor"];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const isPrimitive = (v: unknown) => typeof v === "number" || typeof v === "string" || typeof v === "boolean";
@@ -33,17 +40,39 @@ export function parseToolDefaults(raw: unknown): ToolDefaults | null {
   return out;
 }
 
-const keyOf = (d: ToolDefaults) => JSON.stringify(d);
-const nonEmpty = (d: ToolDefaults) => Object.keys(d).length > 0;
+const CURSORS: CursorMode[] = ["cross", "dot", "arrow", "eraser"];
+const MAGNETS: MagnetMode[] = ["weak", "strong"];
+
+/** Các khoá hợp lệ của document trên server (khoá sai kiểu / vắng bị bỏ). */
+export function parsePrefs(raw: unknown): Partial<Synced> {
+  if (!isRecord(raw)) return {};
+  const out: Partial<Synced> = {};
+  const td = parseToolDefaults(raw.toolDefaults);
+  if (td) out.toolDefaults = td;
+  if (Array.isArray(raw.favorites) && raw.favorites.every((x) => typeof x === "string")) out.favorites = raw.favorites as string[];
+  if (typeof raw.showFavs === "boolean") out.showFavs = raw.showFavs;
+  if (typeof raw.magnet === "boolean") out.magnet = raw.magnet;
+  if (MAGNETS.includes(raw.magnetMode as MagnetMode)) out.magnetMode = raw.magnetMode as MagnetMode;
+  if (typeof raw.stay === "boolean") out.stay = raw.stay;
+  if (isRecord(raw.lastTool) && Object.values(raw.lastTool).every((x) => typeof x === "string")) out.lastTool = raw.lastTool as Record<string, string>;
+  if (CURSORS.includes(raw.cursor as CursorMode)) out.cursor = raw.cursor as CursorMode;
+  return out;
+}
+
+const snapshot = (): Synced => {
+  const s = drawingGlobal.getState();
+  return { toolDefaults: s.toolDefaults, favorites: s.favorites, showFavs: s.showFavs, magnet: s.magnet, magnetMode: s.magnetMode, stay: s.stay, lastTool: s.lastTool, cursor: s.cursor };
+};
+const keyOf = (d: Partial<Synced>) => JSON.stringify(SYNCED_KEYS.map((k) => d[k] ?? null));
 
 type Opts = { fetch?: typeof fetch; delay?: number; retryMs?: number };
 
 export class PrefsSync {
   private uid: string | null = null;
   private loaded = false;
-  private dirty = false; // đổi trước khi lấy xong từ server
+  private dirty = new Set<Key>(); // khoá đổi trước khi lấy xong từ server
   private applying = false;
-  private saved = ""; // bản đang có trên server (khoá JSON)
+  private saved = ""; // bản đang có trên server (khoá JSON của phần app hiểu được)
   private timer: ReturnType<typeof setTimeout> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private offs: (() => void)[] = [];
@@ -54,7 +83,7 @@ export class PrefsSync {
     return this.o.fetch ? this.o.fetch(path, init) : apiFetch(path, init);
   }
 
-  /** Nghe đăng nhập / đăng xuất và thay đổi mặc định công cụ. */
+  /** Nghe đăng nhập / đăng xuất và thay đổi tuỳ chọn công cụ vẽ. */
   start() {
     this.offs = [useAuthStore.subscribe(this.onAuth), drawingGlobal.subscribe(this.onDrawing)];
     this.onAuth(useAuthStore.getState());
@@ -69,7 +98,7 @@ export class PrefsSync {
   private reset() {
     this.uid = null;
     this.loaded = false;
-    this.dirty = false;
+    this.dirty.clear();
     if (this.timer) clearTimeout(this.timer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.timer = this.retryTimer = null;
@@ -84,16 +113,18 @@ export class PrefsSync {
     } else if (s.status === "guest") this.reset(); // khách: localStorage như cũ (bản đang có giữ nguyên)
   };
 
-  private onDrawing = (s: ReturnType<typeof drawingGlobal.getState>, prev: ReturnType<typeof drawingGlobal.getState>) => {
-    if (this.applying || !this.uid || s.toolDefaults === prev.toolDefaults) return;
+  private onDrawing = (s: DrawingGlobal, prev: DrawingGlobal) => {
+    if (this.applying || !this.uid) return;
+    const changed = SYNCED_KEYS.filter((k) => s[k] !== prev[k]);
+    if (changed.length === 0) return;
     if (this.loaded) this.schedule();
-    else this.dirty = true;
+    else changed.forEach((k) => this.dirty.add(k));
   };
 
-  private apply(d: ToolDefaults) {
+  private apply(patch: Partial<Synced>) {
     this.applying = true;
     try {
-      drawingGlobal.setState({ toolDefaults: d });
+      drawingGlobal.setState(patch);
     } finally {
       this.applying = false;
     }
@@ -106,20 +137,21 @@ export class PrefsSync {
       if (this.uid !== uid) return;
       if (r.status === 401) return; // hết phiên: auth store xử lý, đăng nhập lại thì onAuth chạy lại
       if (r.status !== 404 && !r.ok) throw new Error(`HTTP ${r.status}`);
-      const server = r.status === 404 ? null : parseToolDefaults(((await r.json()) as { data?: { toolDefaults?: unknown } })?.data?.toolDefaults);
+      const server = r.status === 404 ? {} : parsePrefs(((await r.json()) as { data?: unknown })?.data);
       if (this.uid !== uid) return;
-      const local = drawingGlobal.getState().toolDefaults;
-      this.loaded = true;
-      if (server === null) {
-        this.saved = ""; // tài khoản chưa có gì: đưa mặc định đang có lên
-        if (nonEmpty(local)) this.schedule();
-      } else {
-        this.saved = keyOf(server);
-        const merged = this.dirty ? { ...server, ...local } : server;
-        if (keyOf(merged) !== keyOf(local)) this.apply(merged);
-        if (keyOf(merged) !== this.saved) this.schedule();
+      const local = snapshot();
+      const merged: Partial<Synced> = {};
+      for (const k of SYNCED_KEYS) {
+        if (k === "toolDefaults" && server.toolDefaults && this.dirty.has(k)) merged.toolDefaults = { ...server.toolDefaults, ...local.toolDefaults };
+        else if (server[k] !== undefined && !this.dirty.has(k)) (merged as Record<string, unknown>)[k] = server[k];
+        else (merged as Record<string, unknown>)[k] = local[k];
       }
-      this.dirty = false;
+      this.loaded = true;
+      this.saved = keyOf(server);
+      const patch = Object.fromEntries(SYNCED_KEYS.filter((k) => JSON.stringify(merged[k]) !== JSON.stringify(local[k])).map((k) => [k, merged[k]]));
+      if (Object.keys(patch).length > 0) this.apply(patch as Partial<Synced>);
+      this.dirty.clear();
+      if (keyOf(merged) !== this.saved) this.schedule(); // server thiếu khoá nào / có đổi chưa lưu: đưa lên
     } catch {
       if (this.uid === uid) this.retryTimer = setTimeout(() => void this.load(), this.o.retryMs ?? RETRY_MS);
     }
@@ -133,10 +165,10 @@ export class PrefsSync {
   private async save() {
     this.timer = null;
     const uid = this.uid;
-    const d = drawingGlobal.getState().toolDefaults;
+    const d = snapshot();
     if (!uid || !this.loaded || keyOf(d) === this.saved) return;
     try {
-      const r = await this.f("/me/prefs", { method: "PUT", body: JSON.stringify({ v: PREFS_VERSION, toolDefaults: d }) });
+      const r = await this.f("/me/prefs", { method: "PUT", body: JSON.stringify({ v: PREFS_VERSION, ...d }) });
       if (this.uid !== uid) return;
       if (r.ok) this.saved = keyOf(d);
       else if (r.status !== 401) throw new Error(`HTTP ${r.status}`);
