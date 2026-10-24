@@ -35,6 +35,8 @@ function closeSim(paneId: string, kind: "entry" | "sl" | "tp", sym: Parameters<t
 
 const KIND_NAME = { sl: "SL", tp: "TP" } as const;
 const SIM_TICKET = -1; // vị thế giả lập của Replay (không phải lệnh thật)
+const PNL_UP = "#089981"; // số lãi / lỗ trên thẻ (nhãn bắt đầu bằng + / -) tô xanh / đỏ theo dấu, không theo màu đường
+const PNL_DOWN = "#f23645";
 const DIM = 0.3; // độ đục của lệnh không được focus
 const ownerName = (o: TagOwner) => (o.t === "draft" ? "Bản nháp" : `${o.t === "order" ? "Lệnh chờ" : "Vị thế"} #${o.ticket}`);
 
@@ -128,6 +130,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
     dirty.current = true;
   }, [focus]);
 
+  const hoverRef = useRef<string | null>(null); // chủ của thẻ đang được trỏ vào: đọc mỗi khung hình nên không cần render lại
   useEffect(() => {
     let raf = 0;
     let synced: ISeriesApi<SeriesType> | null = null;
@@ -200,6 +203,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
       for (const [owner, g] of groups) {
         if (g.length < 2) continue;
         const entry = g.find((l) => l.tag?.kind === "entry") ?? g[0];
+        if (!entry.tag?.draft && owner !== f && owner !== hoverRef.current) continue; // lệnh đã đặt: đường nối chỉ hiện khi chọn (focus) hoặc trỏ vào thẻ
         const op = f !== null && owner !== f ? DIM : entry.tag?.draft ? 0.6 : 0.9;
         const w = f === owner ? 2 : 1;
         const gy = g.map((l) => ys.get(l.key) as number);
@@ -223,7 +227,6 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
   }, [getChart, getSeries]);
 
   const events = tool ? "pointer-events-none" : "pointer-events-auto";
-  const bg = "color-mix(in srgb, var(--bg) 88%, transparent)";
   const digits = getDigits();
 
   return (
@@ -237,9 +240,10 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
         const draggable = live && !(tag.kind === "entry" && tag.owner.t === "position"); // giá vào của vị thế đã khớp không kéo được; SL/TP, lệnh chờ và bản nháp thì có
         const c = l.color;
         const mine = OWNER_ID(tag.owner);
-        const tagBg = pendingOwners.has(mine) ? "var(--bg)" : bg; // lệnh đang có thay đổi chờ xác nhận: nền thẻ đặc, không lộ nến phía sau
         const base = tag.draft && tag.kind !== "entry" ? 0.75 : tag.draft ? 0.9 : 1; // bản nháp hơi mờ; lệnh đã đặt đang sửa chờ xác nhận (pending) vẫn sáng đủ
         const fade = focus !== null && mine !== focus ? Math.min(base, DIM) : base; // lệnh khác đang được focus: mờ hẳn
+        // mờ bằng độ đục của màu chữ / viền, không phải opacity cả thẻ: nền thẻ phải đặc để đường giá chạy ngang không lộ xuyên qua
+        const fc = (x: string) => withAlpha(x, fade);
         const closeTitle = tag.kind !== "entry" ? `Bỏ ${KIND_NAME[tag.kind]}` : tag.owner.t === "draft" ? "Bỏ bản nháp" : tag.owner.t === "order" ? "Huỷ lệnh chờ" : "Đóng vị thế";
         return [
           <div
@@ -250,13 +254,17 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
             }}
             data-testid="trade-tag"
             data-tag={l.key}
+            onPointerEnter={() => (hoverRef.current = mine)}
+            onPointerLeave={() => {
+              if (hoverRef.current === mine) hoverRef.current = null;
+            }}
             onPointerDownCapture={() => useTradeFocus.getState().set(mine)} // chạm vào bất cứ phần nào của thẻ (kể cả bắt đầu kéo) = focus lệnh này
             onClick={(e) => {
               // bấm (không kéo: kéo thì LineDrag giữ con trỏ nên không có click ở đây) vào thẻ của lệnh đã đặt = chọn lệnh, mở bảng Modify; nút trên thẻ tự xử lý
               if (tag.owner.t !== "draft" && !(e.target as Element).closest("button")) useTicketStore.getState().select(mine);
             }}
             className="absolute left-auto top-0 hidden select-none items-center gap-2 text-[12px] font-medium leading-none"
-            style={{ height: TAG_H, opacity: fade, zIndex: focus === mine ? 2 : undefined }}
+            style={{ height: TAG_H, zIndex: focus === mine ? 2 : undefined }}
           >
             {tag.kind === "entry" && live && pendingOwners.has(OWNER_ID(tag.owner)) && (
               <>
@@ -295,8 +303,8 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
                     e.stopPropagation();
                     onGhost(tag.owner, k, e.nativeEvent);
                   }}
-                  className={`${events} min-w-[38px] cursor-grab rounded border border-dotted px-3 font-semibold opacity-70 hover:opacity-100 active:cursor-grabbing`}
-                  style={{ height: TAG_H, color: k === "tp" ? "#089981" : "#ff9800", borderColor: k === "tp" ? "#089981" : "#ff9800", background: bg }}
+                  className={`${events} min-w-[38px] cursor-grab rounded border border-dotted px-3 font-semibold hover:brightness-125 active:cursor-grabbing`}
+                  style={{ height: TAG_H, color: fc(k === "tp" ? "#089981" : "#ff9800"), borderColor: fc(k === "tp" ? "#089981" : "#ff9800"), background: "var(--bg)" }}
                 >
                   {KIND_NAME[k]}
                 </button>
@@ -305,12 +313,12 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
               data-line-key={live ? l.key : undefined}
               title={`${ownerName(tag.owner)} · ${tag.kind === "entry" ? "giá vào" : KIND_NAME[tag.kind]}`}
               className={`${events} flex items-stretch overflow-hidden rounded border tabular-nums ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
-              style={{ height: TAG_H, color: c, borderColor: c, background: tagBg, boxShadow: focus === mine ? `0 0 0 1px ${c}` : undefined }}
+              style={{ height: TAG_H, color: fc(c), borderColor: fc(c), background: "var(--bg)", boxShadow: focus === mine ? `0 0 0 1px ${c}` : undefined }}
             >
-              <span className="flex items-center border-r px-2" style={{ borderColor: c }}>
+              <span className="flex items-center border-r px-2" style={{ borderColor: fc(c) }}>
                 {tag.qty}
               </span>
-              <span className="flex min-w-[52px] items-center justify-center whitespace-nowrap px-2.5" style={{ borderColor: c }}>
+              <span className="flex min-w-[52px] items-center justify-center whitespace-nowrap px-2.5" style={{ borderColor: fc(c), color: tag.label.startsWith("+") ? fc(PNL_UP) : tag.label.startsWith("-") ? fc(PNL_DOWN) : undefined }}>
                 {tag.label}
               </span>
               {live && !tag.pending && (
@@ -321,7 +329,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
                   aria-label={closeTitle}
                   onClick={() => (isSim ? closeSim(paneId, tag.kind, symInfo, ccy) : closeFromTag(l, symbol, digits))}
                   className="flex w-6 cursor-pointer items-center justify-center border-l hover:bg-white/10"
-                  style={{ borderColor: c }}
+                  style={{ borderColor: fc(c) }}
                 >
                   {/* vẽ bằng SVG để dấu × nằm đúng tâm nút (ký tự × lệch xuống theo đường cơ sở của chữ) */}
                   <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden>

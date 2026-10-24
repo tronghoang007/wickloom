@@ -11,7 +11,7 @@ import { cancelOwnerEdits, confirmOwnerEdits, pendingFor, useEditBridge } from "
 import { fmtLot, fmtPnl, fmtPx, orderLabel, positionPnl, sideLabel } from "@/trading/format";
 import { currentLot, fmtLotValue, lotSpec, normalizeLot, stepLot, writeLot } from "@/trading/lot";
 import { pendingLabel, resolveOrderType, snapPrice } from "@/trading/orderType";
-import { estimatePnl, pnlSpec, pointsBetween, priceForPnl, priceFromPoints, type PnlSpec } from "@/trading/pnl";
+import { estimatePnl, pnlSpec, pointsBetween, priceForPnl, type PnlSpec } from "@/trading/pnl";
 import { spreadPips, useQuoteStore } from "@/trading/quote";
 import { seedDraftStop, setDraftMode, submitDraft } from "@/trading/submit";
 import { useTradeStore } from "@/trading/store";
@@ -208,30 +208,45 @@ function StopRow({ kind, d, entry, lot, digits, tick, spec, ccy }: StopProps) {
   const set = (p: number | null) => patch({ [kind]: p !== null && p > 0 ? snapPrice(p, tick, digits).toFixed(digits) : "" });
   const toggle = (checked: boolean) => (checked ? seedDraftStop(kind) : patch({ [kind]: "" }));
   const valid = on && value > 0 && entry > 0;
-  const points = valid ? String(pointsBetween(entry, value, digits)) : "";
-  const amount = valid && spec ? Math.abs(estimatePnl(d.side, lot, entry, value, spec)).toFixed(2) : "";
+  const dir = d.side === "buy" ? 1 : -1;
+  const gain = (value - entry) * dir >= 0; // đúng phía có lãi so với giá vào (SL kéo qua giá vào thì dương)
+  const points = valid ? `${gain ? "+" : "-"}${pointsBetween(entry, value, digits)}` : "";
+  const amount = valid && spec ? fmtPnl(estimatePnl(d.side, lot, entry, value, spec)) : "";
+  // ô điểm / lãi lỗ: gõ có dấu thì theo dấu (+ lãi, - lỗ); không dấu thì mặc định TP lãi, SL lỗ
+  const signed = (t: string) => {
+    const n = parseNum(t);
+    return !n ? null : /^\s*[+-]/.test(t) ? n : profit ? Math.abs(n) : -Math.abs(n);
+  };
   const name = profit ? "Take profit" : "Stop loss";
   return (
-    <div className="mb-3">
+    <div className="mb-3 border-t border-[var(--border)] pt-3">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-[13px] font-medium" style={{ color: profit ? "#089981" : "#ff9800" }}>
           {name}
         </span>
         <Switch on={on} onChange={toggle} label={`Enable ${name}`} />
       </div>
+      <div className={`${COLS} mb-1 text-[11px] text-[var(--fg)]/80`} aria-hidden>
+        <span>Price</span>
+        <span>Points</span>
+        <span>P/L</span>
+      </div>
       <div className={COLS}>
-        <Cell aria={`${name} price`} title="Giá" value={d[kind]} disabled={!on} onCommit={(v) => patch({ [kind]: v })} />
-        <Cell aria={`${name} points`} title="Điểm" value={points} disabled={!on || !(entry > 0)} onCommit={(v) => (parseNum(v) > 0 ? set(priceFromPoints(entry, parseNum(v), kind, d.side, digits)) : null)} />
+        <Cell aria={`${name} price`} title="Price" value={d[kind]} disabled={!on} onCommit={(v) => patch({ [kind]: v })} />
+        <Cell aria={`${name} points`} title="Points" value={points} disabled={!on || !(entry > 0)} onCommit={(v) => {
+          const n = signed(v);
+          if (n !== null) set(entry + dir * n * 10 ** -digits);
+        }} />
         <Cell
           aria={`${name} amount`}
-          title={profit ? "Lãi dự kiến" : "Lỗ dự kiến"}
+          title="P/L"
           value={amount}
           suffix={ccy}
           disabled={!on || !spec || !(entry > 0)}
           onCommit={(v) => {
-            const n = parseNum(v);
-            if (!spec || !(n > 0)) return;
-            const p = priceForPnl(d.side, lot, entry, profit ? n : -n, spec);
+            const n = signed(v);
+            if (!spec || n === null) return;
+            const p = priceForPnl(d.side, lot, entry, n, spec);
             if (p !== null) set(p);
           }}
         />
@@ -395,12 +410,6 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
           </div>
         </div>
 
-        <div className="mb-2 text-xs font-semibold text-[var(--muted)]">Exits</div>
-        <div className={`${COLS} mb-1 text-[10px] text-[var(--muted)]`} aria-hidden>
-          <span>Giá</span>
-          <span>Điểm</span>
-          <span>Lãi / Lỗ</span>
-        </div>
         <StopRow kind="tp" d={d} entry={entry} lot={lot} digits={digits} tick={tick} spec={pnl} ccy={ccy} />
         <StopRow kind="sl" d={d} entry={entry} lot={lot} digits={digits} tick={tick} spec={pnl} ccy={ccy} />
 
