@@ -90,7 +90,7 @@ describe("pane / thang giá", () => {
   it("đi vòng lưu/đọc pane và scale; giá trị lạ bị bỏ", () => {
     const a = inst("rsi", "r", { pane: "p:1", scale: "left" });
     expect(migrateInstance(JSON.parse(JSON.stringify(a)))).toEqual(a);
-    expect(migrateInstance({ uid: "u", id: "rsi", pane: "", scale: "middle" })).toEqual({ v: 1, uid: "u", id: "rsi", inputs: {} });
-    expect(migrateInstance({ uid: "u", id: "rsi", pane: 5 })).toEqual({ v: 1, uid: "u", id: "rsi", inputs: {} });
+    expect(migrateInstance({ v: 2, uid: "u", id: "rsi", pane: "", scale: "middle" })).toEqual({ v: 2, uid: "u", id: "rsi", inputs: {} });
+    expect(migrateInstance({ v: 2, uid: "u", id: "rsi", pane: 5 })).toEqual({ v: 2, uid: "u", id: "rsi", inputs: {} });
   });
 });

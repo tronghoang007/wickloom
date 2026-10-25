@@ -3,7 +3,48 @@ import { findDef } from "./catalog";
 import type { IndicatorDef, InputDef, InputValue, Inputs, LineStyleName, PlotType } from "./schema";
 import { SOURCES } from "./ta";
 
-export const INSTANCE_V = 1;
+export const INSTANCE_V = 2;
+
+// Instance lưu chỉ phần user đã đặt, còn lại theo mặc định của def. Khi mặc định đổi theo TV (2026-10-25: SMA/EMA/WMA length 9, màu BB / EMA / WMA...),
+// instance cũ (v < 2) phải giữ nguyên bộ cũ: điền lại vào chỗ user chưa đặt rồi lưu thành v2.
+type Legacy = { inputs?: Inputs; plots?: Record<string, string>; fills?: Record<string, string>; items?: Record<string, string> };
+const LEGACY_V1: Record<string, Legacy> = {
+  sma: { inputs: { length: 20 } },
+  ema: { inputs: { length: 20 }, plots: { ema: "#ff9800" } },
+  wma: { inputs: { length: 20 }, plots: { wma: "#e91e63" } },
+  rsi: { inputs: { smoothType: "None" } },
+  cci: { inputs: { smoothType: "None" } },
+  stoch: { inputs: { smooth: 3 } },
+  bb: { plots: { basis: "#ff6d00", upper: "#2962ff", lower: "#2962ff" }, fills: { band: "#2196f31a" } },
+  supertrend: { plots: { down: "#ff5252" }, fills: { downFill: "#ff52521a" } },
+  adx: { plots: { adx: "#f50057" } },
+  dmi: { plots: { adx: "#f23645" } },
+  ichimoku: { plots: { leadB: "#faa1a4" } },
+  vwap: { plots: { upper3: "#00897b", lower3: "#00897b" }, fills: { fill3: "#00897b0d" } },
+  pivots: { items: Object.fromEntries(["R1", "R2", "R3", "R4", "R5"].map((k) => [k, "#f23645"]).concat(["S1", "S2", "S3", "S4", "S5"].map((k) => [k, "#089981"]))) },
+};
+
+/** Điền mặc định cũ vào instance v1 (chỗ user chưa đặt). */
+function applyLegacy(def: IndicatorDef, inputs: Inputs, style: IndicatorInstance["style"]): { inputs: Inputs; style: IndicatorInstance["style"] } {
+  const lg = LEGACY_V1[def.id];
+  if (!lg) return { inputs, style };
+  const out = { ...inputs };
+  for (const [k, v] of Object.entries(lg.inputs ?? {})) if (out[k] === undefined && def.inputs.some((i) => i.key === k)) out[k] = v;
+  const next: NonNullable<IndicatorInstance["style"]> = { ...style };
+  const fill = <T extends { color?: string }>(cur: Record<string, T> | undefined, legacy: Record<string, string> | undefined, ids: string[] | undefined) => {
+    if (!legacy) return cur;
+    const res = { ...cur } as Record<string, T>;
+    for (const [id, color] of Object.entries(legacy)) if (ids?.includes(id) && !res[id]?.color) res[id] = { ...res[id], color } as T;
+    return res;
+  };
+  const plots = fill(style?.plots, lg.plots, def.plots.map((p) => p.id));
+  const fills = fill(style?.fills, lg.fills, def.fills?.map((f) => f.id));
+  const items = fill(style?.items, lg.items, def.items?.map((i) => i.id));
+  if (plots) next.plots = plots;
+  if (fills) next.fills = fills;
+  if (items) next.items = items;
+  return { inputs: out, style: Object.keys(next).length ? next : undefined };
+}
 
 export type PlotStyle = { color?: string; colorDown?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName; type?: PlotType };
 export type LevelStyle = { value?: number; color?: string; visible?: boolean; width?: number; lineStyle?: LineStyleName };
@@ -85,7 +126,12 @@ export function migrateInstance(raw: unknown): IndicatorInstance | null {
       if (v !== undefined) inputs[i.key] = v;
     }
 
-  const style = sanitizeStyle(raw, def);
+  let style = sanitizeStyle(raw, def);
+  if (typeof raw.v !== "number" || raw.v < 2) {
+    const legacy = applyLegacy(def, inputs, style);
+    Object.assign(inputs, legacy.inputs);
+    style = legacy.style;
+  }
 
   return {
     v: INSTANCE_V,

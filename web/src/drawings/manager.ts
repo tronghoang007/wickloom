@@ -23,7 +23,7 @@ import { isActivePane, useLayoutStore } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
 import { visibleOn } from "./visibility";
-import { DEFAULT_COLOR, defaultOpts, GROUPS, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, VP_BY, type Ctx, type OneClickView } from "./tools";
+import { DEFAULT_COLOR, defaultOpts, GROUPS, hasTextTab, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, VP_BY, type Ctx, type OneClickView } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
 
 type Opts = {
@@ -35,6 +35,7 @@ type Opts = {
   getTf: () => string;
   getDigits: () => number;
   getTickSize: () => number;
+  getMinQty?: () => number | undefined; // lượng nhỏ nhất của symbol, cho QTY precision mặc định của Position
 };
 
 type Hit = { kind: "point"; index: number } | { kind: "body" };
@@ -481,6 +482,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       profileStep: this.profileBars.get(d.id)?.step,
       ticks: this.tickSource(d, bars, step),
       tickSize: this.o.getTickSize(),
+      minQty: this.o.getMinQty?.(),
       hovered: d.id === this.hoveredId,
       selected: d.id === this.st.selectedId,
       dragging: this.dragging(d),
@@ -695,21 +697,23 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private onDbl = (e: MouseEvent) => {
     const m = this.mode;
     if (m.k === "idle") {
-      // double-click vào hình có text: sửa text tại chỗ
+      // Như TV: double-click vào hình mở Settings, ở tab Text (ô nhập chữ được focus) nếu hình có tab đó
       const p = this.rel(e);
       const f = this.st.tool ? null : this.hitAt(p);
-      if (f && SPEC[f.d.type].prompt && !f.d.locked) {
-        this.consume(e);
-        this.startEdit(f.d.id, false);
-      } else if (f && SPEC[f.d.type].grid && !f.d.locked) {
+      if (!f) return;
+      if (SPEC[f.d.type].grid) {
         // Table: sửa đúng ô được double-click
         const origin = this.built(f.d, this.view())?.c.p[0];
         const cell = origin && tableCellAt(f.d, origin, p);
-        if (cell) {
+        if (cell && !f.d.locked) {
           this.consume(e);
           this.startEdit(f.d.id, false, cell);
         }
+        return;
       }
+      this.consume(e);
+      this.select(f.d.id);
+      this.setSt({ settingsOpen: true, settingsTab: hasTextTab(f.d.type) ? "text" : null });
       return;
     }
     if (m.k !== "drafting" || SPEC[m.d.type]?.n !== 0) return;
@@ -984,6 +988,26 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   }
 
   // Anchor của TV: ghim hình đang chọn cố định trên màn hình / bỏ ghim (về lại thời gian + giá ở chỗ đang đứng)
+  /** Chỉ số nến (bar) của thời điểm, như cột "bar" ở tab Coordinates của TV (nến đầu = 0, trước đó âm). */
+  barIndexAt(time: number): number {
+    return Math.round(this.timeToLogical(time) ?? 0);
+  }
+
+  /** Ngược lại: thời điểm của nến thứ `index`. */
+  timeAtBar(index: number): number | null {
+    return this.logicalToTime(index);
+  }
+
+  /** Số lẻ của giá trên trục (ô giá ở tab Coordinates làm tròn theo đó, như TV). */
+  digits() {
+    return this.o.getDigits();
+  }
+
+  /** Bước giá của symbol đang xem (Settings của Position đổi giữa Ticks và Price). */
+  tickSize() {
+    return this.o.getTickSize();
+  }
+
   toggleAnchor() {
     const d = this.selected();
     const b = d && SPEC[d.type]?.anchorable ? this.built(d, this.view()) : null;

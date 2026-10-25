@@ -46,6 +46,18 @@ describe("periodKeys theo giờ broker", () => {
   });
 });
 
+describe("kỳ nhiều năm của Pivot Points (TV: Biyearly / Triyearly / Quinquennially)", () => {
+  it("năm chia theo bội số của 2 / 3 / 5", () => {
+    const t = ["2024", "2025", "2026", "2027"].map((y) => utc(`${y}-06-01T00:00:00`));
+    const two = periodKeys(t, "year2", { offset: 0 });
+    expect([two[0] === two[1], two[2] === two[3], two[2] === two[1] + 1]).toEqual([true, true, true]); // {2024,2025} {2026,2027}
+    const three = periodKeys(t, "year3", { offset: 0 });
+    expect([three[0] + 1 === three[1], three[1] === three[2], three[2] === three[3]]).toEqual([true, true, true]); // {2024} {2025,2026,2027}
+    const five = periodKeys(t, "year5", { offset: 0 });
+    expect([five[0] + 1 === five[1], five[1] === five[3]]).toEqual([true, true]);
+  });
+});
+
 describe("dayOpens (mốc D1 thật) sửa lệch DST", () => {
   // Offset hiện tại = UTC+3 (mùa hè). Ngày mùa đông của broker mở 00:00 UTC+2 = 22:00 UTC.
   const opts = (dayOpens?: number[]) => ({ offset: 3 * H, dayOpens });

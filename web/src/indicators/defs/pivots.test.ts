@@ -150,9 +150,9 @@ describe("object của Pivot Points", () => {
     expect(line).toMatchObject({ width: 3, style: "dotted" });
   });
 
-  it("màu theo vai trò (P cam, R đỏ, S xanh); đổi kiểu đổi số mức; Weekly gom nhiều ngày", () => {
+  it("mọi mức cùng màu cam của TV; đổi kiểu đổi số mức; Weekly gom nhiều ngày", () => {
     const o = run({ back: 1 });
-    expect(new Set(o.lines.map((l) => l.color))).toEqual(new Set(["#fb8c00", "#f23645", "#089981"]));
+    expect(new Set(o.lines.map((l) => l.color))).toEqual(new Set(["#fb8c00"]));
     expect(run({ back: 1, type: "DM" }).lines).toHaveLength(3);
     expect(run({ back: 1, type: "Fibonacci" }).lines).toHaveLength(7);
     const w = run({ frame: "Weekly", back: 5 });

@@ -7,8 +7,10 @@ import { length, sessionInputs, withSession } from "./common";
 // Pivot Points Standard: từ H/L/C (và O) của kỳ TRƯỚC tính các mức, vẽ ngang suốt kỳ HIỆN TẠI. Kỳ theo giờ broker.
 
 export const PIVOT_TYPES = ["Traditional", "Fibonacci", "Woodie", "Classic", "DM", "Camarilla"] as const;
-export const PIVOT_FRAMES = ["Auto", "Daily", "Weekly", "Monthly", "Yearly"] as const;
-const PERIOD_OF: Record<string, Period> = { Daily: "day", Weekly: "week", Monthly: "month", Yearly: "year" };
+export const PIVOT_FRAMES = ["Auto", "Daily", "Weekly", "Monthly", "Quarterly", "Yearly", "Biyearly", "Triyearly", "Quinquennially", "Decennially"] as const;
+const PERIOD_OF: Record<string, Period> = {
+  Daily: "day", Weekly: "week", Monthly: "month", Quarterly: "quarter", Yearly: "year", Biyearly: "year2", Triyearly: "year3", Quinquennially: "year5", Decennially: "decade",
+};
 
 /** OHLC của một kỳ (O = mở nến đầu, C = đóng nến cuối). */
 export type Ohlc = { o: number; h: number; l: number; c: number };
@@ -95,7 +97,8 @@ export function decimalsOf(bars: Bar[]): number {
   return d;
 }
 
-const COLORS = { P: "#fb8c00", R: "#f23645", S: "#089981" };
+// Màu mặc định các mức đo trên TV (2026-10-25): tất cả #fb8c00
+const COLORS = { P: "#fb8c00", R: "#fb8c00", S: "#fb8c00" };
 /** Mỗi mức một hàng style (P, R1–R5, S1–S5): màu / nét / độ dày / bật-tắt. Mức mà kiểu pivot đang chọn không có thì bỏ qua. */
 const ITEMS: ItemDef[] = ["P", "R1", "R2", "R3", "R4", "R5", "S1", "S2", "S3", "S4", "S5"].map((id) => ({
   id, title: id, color: COLORS[id[0] as "P" | "R" | "S"], line: { width: 1, style: "solid" },
@@ -105,11 +108,11 @@ export const pivots: IndicatorDef = {
   id: "pivots", name: "Pivots", title: "Pivot points standard", overlay: true,
   inputs: [
     { key: "type", label: "Type", type: "select", default: "Traditional", options: [...PIVOT_TYPES] },
-    { key: "frame", label: "Pivots Timeframe", type: "select", default: "Auto", options: [...PIVOT_FRAMES] },
-    length(15, "back", "Number of Pivots Back"),
-    { key: "labels", label: "Show Labels", type: "bool", default: true },
-    { key: "labelsPos", label: "Labels Position", type: "select", default: "Left", options: ["Left", "Right"] },
-    { key: "prices", label: "Show Prices", type: "bool", default: true },
+    { key: "frame", label: "Pivots timeframe", type: "select", default: "Auto", options: [...PIVOT_FRAMES] },
+    length(15, "back", "Number of pivots back"),
+    { key: "labels", label: "Show labels", type: "bool", default: true, group: "Labels" },
+    { key: "prices", label: "Show prices", type: "bool", default: true, group: "Labels" },
+    { key: "labelsPos", label: "Labels position", type: "select", default: "Left", options: ["Left", "Right"], group: "Labels" },
     ...sessionInputs(),
   ],
   plots: [],

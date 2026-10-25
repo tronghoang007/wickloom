@@ -2,37 +2,47 @@ import { periodKeys, type Period } from "../calendar";
 import { num, str, type FillRef, type IndicatorDef, type InputDef, type Inputs, type PlotDef } from "../schema";
 import * as ta from "../ta";
 import type { Num } from "../ta";
-import { SRC, length, maTypeInput, maWarmup, offsetInput, sessionInputs, sourceInput, warm, withSession } from "./common";
+import { SRC, length, maTypeInput, maWarmup, offsetInput, sessionInputs, smoothing, smoothingFills, smoothingInputs, smoothingPlots, smoothWarmup, sourceInput, warm, withSession } from "./common";
 import { barStep } from "./pivots";
 
+// Mặc định đo trên TV (2026-10-25, indicator "Simple/Exponential/Weighted moving average"): length 9, màu #2962ff, nhóm Smoothing
+// (Type None, Length 14, BB StdDev 2). Smoothed MA (length 7) và Hull MA (9) không có Offset.
 export const sma: IndicatorDef = {
   id: "sma", name: "SMA", title: "Simple moving average", overlay: true,
-  inputs: [length(20), SRC, offsetInput()],
-  plots: [{ id: "sma", title: "SMA", type: "line", color: "#2962ff", offset: "offset" }],
-  warmup: (i) => num(i, "length"),
-  compute: ({ inputs, src }) => ({ sma: ta.sma(src(str(inputs, "src")), num(inputs, "length")) }),
+  inputs: [length(9), SRC, offsetInput(), ...smoothingInputs()],
+  plots: [{ id: "sma", title: "MA", type: "line", color: "#2962ff", offset: "offset" }, ...smoothingPlots("SMA")],
+  fills: smoothingFills,
+  warmup: (i) => num(i, "length") + smoothWarmup(i),
+  compute: ({ bars, inputs, src }) => {
+    const m = ta.sma(src(str(inputs, "src")), num(inputs, "length"));
+    return { sma: m, ...smoothing(inputs, m, bars.map((b) => b.v)) };
+  },
 };
 
 export const ema: IndicatorDef = {
   id: "ema", name: "EMA", title: "Exponential moving average", overlay: true,
-  inputs: [length(20), SRC, offsetInput()],
-  plots: [{ id: "ema", title: "EMA", type: "line", color: "#ff9800", offset: "offset" }],
-  warmup: (i) => warm(4, num(i, "length")),
-  compute: ({ inputs, src }) => ({ ema: ta.ema(src(str(inputs, "src")), num(inputs, "length")) }),
+  inputs: [length(9), SRC, offsetInput(), ...smoothingInputs()],
+  plots: [{ id: "ema", title: "EMA", type: "line", color: "#2962ff", offset: "offset" }, ...smoothingPlots("EMA")],
+  fills: smoothingFills,
+  warmup: (i) => warm(4, num(i, "length")) + smoothWarmup(i),
+  compute: ({ bars, inputs, src }) => {
+    const m = ta.ema(src(str(inputs, "src")), num(inputs, "length"));
+    return { ema: m, ...smoothing(inputs, m, bars.map((b) => b.v)) };
+  },
 };
 
 export const wma: IndicatorDef = {
   id: "wma", name: "WMA", title: "Weighted moving average", overlay: true,
-  inputs: [length(20), SRC, offsetInput()],
-  plots: [{ id: "wma", title: "WMA", type: "line", color: "#e91e63", offset: "offset" }],
+  inputs: [length(9), SRC, offsetInput()],
+  plots: [{ id: "wma", title: "WMA", type: "line", color: "#2962ff", offset: "offset" }],
   warmup: (i) => num(i, "length"),
   compute: ({ inputs, src }) => ({ wma: ta.wma(src(str(inputs, "src")), num(inputs, "length")) }),
 };
 
 export const smma: IndicatorDef = {
   id: "smma", name: "SMMA", title: "Smoothed moving average", overlay: true,
-  inputs: [length(7), SRC, offsetInput()],
-  plots: [{ id: "smma", title: "SMMA", type: "line", color: "#673ab7", offset: "offset" }],
+  inputs: [length(7), SRC],
+  plots: [{ id: "smma", title: "SMMA", type: "line", color: "#673ab7" }],
   warmup: (i) => warm(10, num(i, "length")),
   compute: ({ inputs, src }) => ({ smma: ta.rma(src(str(inputs, "src")), num(inputs, "length")) }),
 };
@@ -47,8 +57,8 @@ export const vwma: IndicatorDef = {
 
 export const hma: IndicatorDef = {
   id: "hma", name: "HMA", title: "Hull moving average", overlay: true,
-  inputs: [length(9), SRC, offsetInput()],
-  plots: [{ id: "hma", title: "HMA", type: "line", color: "#2962ff", offset: "offset" }],
+  inputs: [length(9), SRC],
+  plots: [{ id: "hma", title: "HMA", type: "line", color: "#2962ff" }],
   warmup: (i) => num(i, "length") + Math.ceil(Math.sqrt(num(i, "length"))),
   compute: ({ inputs, src }) => ({ hma: ta.hma(src(str(inputs, "src")), num(inputs, "length")) }),
 };
@@ -57,11 +67,11 @@ export const bb: IndicatorDef = {
   id: "bb", name: "Bollinger Bands", title: "Bollinger Bands", overlay: true,
   inputs: [length(20), maTypeInput("maType", "Basis MA Type"), SRC, { key: "mult", label: "StdDev", type: "float", default: 2, min: 0.001, step: 0.1 }, offsetInput()],
   plots: [
-    { id: "basis", title: "Basis", type: "line", color: "#ff6d00", offset: "offset" },
-    { id: "upper", title: "Upper", type: "line", color: "#2962ff", offset: "offset" },
-    { id: "lower", title: "Lower", type: "line", color: "#2962ff", offset: "offset" },
+    { id: "basis", title: "Basis", type: "line", color: "#2962ff", offset: "offset" },
+    { id: "upper", title: "Upper", type: "line", color: "#f23645", offset: "offset" },
+    { id: "lower", title: "Lower", type: "line", color: "#089981", offset: "offset" },
   ],
-  fills: [{ id: "band", title: "Background", between: [{ plot: "upper" }, { plot: "lower" }], color: "#2196f31a" }],
+  fills: [{ id: "band", title: "Background", between: [{ plot: "upper" }, { plot: "lower" }], color: "#2196f30d" }],
   warmup: (i) => maWarmup(str(i, "maType"), num(i, "length")),
   compute: ({ bars, inputs, src }) => {
     const s = src(str(inputs, "src")), n = num(inputs, "length"), k = num(inputs, "mult");
@@ -71,7 +81,7 @@ export const bb: IndicatorDef = {
 };
 
 const ANCHORS: Record<string, Period> = { Session: "day", Week: "week", Month: "month", Quarter: "quarter", Year: "year", Decade: "decade", Century: "century" };
-const BAND_COLORS = ["#4caf50", "#808000", "#00897b"]; // green, olive, teal của Pine (nền 5% đục)
+const BAND_COLORS = ["#4caf50", "#808000", "#089981"]; // màu 3 dải đo trên TV (nền 5% đục)
 const BANDS = [1, 2, 3];
 const bandOn = (n: number) => (i: Inputs) => !!i[`showBand${n}`];
 

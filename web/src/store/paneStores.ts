@@ -2,6 +2,7 @@
 // công cụ vẽ, Settings...) vẫn ở các store toàn cục. Không import facade nào ở đây để tránh vòng phụ thuộc:
 // store/chart.ts, indicators/store.ts... import file này, không phải ngược lại.
 import type { DrawingManager } from "@/drawings/manager";
+import type { SettingsTab } from "@/drawings/tools";
 import type { Drawing } from "@/drawings/types";
 import type { Visibility } from "@/drawings/visibility";
 import { byId } from "@/indicators/catalog";
@@ -96,6 +97,7 @@ export type DrawPane = {
   drawings: Drawing[];
   selectedId: string | null;
   settingsOpen: boolean;
+  settingsTab: SettingsTab | null; // tab mở sẵn khi vào Settings (double-click hình có tab Text -> Text); null = tab đầu tiên
   editing: { id: string; isNew: boolean; cell?: [number, number] } | null; // đang sửa text inline trên chart (cell: ô của Table)
   api: DrawingManager | null;
 };
@@ -179,6 +181,7 @@ export function createPane(id: string, init: PaneInit = {}): Pane {
     drawings: [],
     selectedId: null,
     settingsOpen: false,
+    settingsTab: null,
     editing: null,
     api: null,
   }));

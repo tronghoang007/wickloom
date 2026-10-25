@@ -6,10 +6,10 @@ describe("resolveInputs", () => {
   const sma = byId("sma");
 
   it("thiếu / sai kiểu -> mặc định; số nguyên được làm tròn và chặn min", () => {
-    expect(resolveInputs(sma, undefined)).toEqual({ length: 20, src: "close", offset: 0 });
-    expect(resolveInputs(sma, { length: "9", src: "nope" })).toEqual({ length: 20, src: "close", offset: 0 });
-    expect(resolveInputs(sma, { length: 9.6, src: "hl2" })).toEqual({ length: 10, src: "hl2", offset: 0 });
-    expect(resolveInputs(sma, { length: -5, offset: 9999 })).toEqual({ length: 1, src: "close", offset: 500 });
+    expect(resolveInputs(sma, undefined)).toMatchObject({ length: 9, src: "close", offset: 0, smoothType: "None" }); // mặc định TV: length 9
+    expect(resolveInputs(sma, { length: "20", src: "nope" })).toMatchObject({ length: 9, src: "close", offset: 0 });
+    expect(resolveInputs(sma, { length: 9.6, src: "hl2" })).toMatchObject({ length: 10, src: "hl2", offset: 0 });
+    expect(resolveInputs(sma, { length: -5, offset: 9999 })).toMatchObject({ length: 1, src: "close", offset: 500 });
   });
 
   it("bool và select", () => {
@@ -27,12 +27,35 @@ describe("migrateInstance", () => {
   it("dạng cũ {uid,id,inputs,colors[]}: colors[k] -> màu plot thứ k", () => {
     const m = migrateInstance({ uid: "u1", id: "bb", inputs: { length: 10, mult: 2.5, src: "close" }, colors: ["#111111", "#222222", "#333333"] });
     expect(m).toEqual({
-      v: 1,
+      v: 2,
       uid: "u1",
       id: "bb",
       inputs: { length: 10, mult: 2.5, src: "close" },
-      style: { plots: { basis: { color: "#111111" }, upper: { color: "#222222" }, lower: { color: "#333333" } } },
+      style: { plots: { basis: { color: "#111111" }, upper: { color: "#222222" }, lower: { color: "#333333" } }, fills: { band: { color: "#2196f31a" } } },
     });
+  });
+
+  it("instance cũ (v1) giữ mặc định trước khi đối chiếu TV, instance mới theo TV", () => {
+    // user chưa đặt gì: SMA / EMA vẫn length 20, EMA vẫn cam, RSI chưa có đường MA, Stochastic smooth 3
+    expect(migrateInstance({ v: 1, uid: "a", id: "sma", inputs: {} })?.inputs).toEqual({ length: 20 });
+    const ema = migrateInstance({ v: 1, uid: "b", id: "ema" });
+    expect(ema?.inputs).toEqual({ length: 20 });
+    expect(ema?.style?.plots?.ema?.color).toBe("#ff9800");
+    expect(migrateInstance({ uid: "c", id: "rsi" })?.inputs).toEqual({ smoothType: "None" });
+    expect(migrateInstance({ v: 1, uid: "d", id: "stoch" })?.inputs).toEqual({ smooth: 3 });
+    // phần user đã đặt thắng mặc định cũ
+    const own = migrateInstance({ v: 1, uid: "e", id: "ema", inputs: { length: 50 }, style: { plots: { ema: { color: "#123456" } } } });
+    expect(own?.inputs).toEqual({ length: 50 });
+    expect(own?.style?.plots?.ema?.color).toBe("#123456");
+    // đã là v2 (kể cả instance mới) thì không điền gì và theo mặc định TV
+    expect(migrateInstance({ v: 2, uid: "f", id: "ema" })?.inputs).toEqual({});
+    expect(resolveInputs(byId("ema"), newInstance("ema").inputs).length).toBe(9);
+    expect(plotColor(newInstance("ema"), byId("ema"), "ema")).toBe("#2962ff");
+    // Pivots cũ: R đỏ, S xanh
+    const piv = migrateInstance({ v: 1, uid: "g", id: "pivots" });
+    expect(piv?.style?.items?.R1?.color).toBe("#f23645");
+    expect(piv?.style?.items?.S3?.color).toBe("#089981");
+    expect(piv?.style?.items?.P).toBeUndefined();
   });
 
   it("dạng mới đi vòng lưu/đọc không mất gì", () => {
@@ -41,7 +64,7 @@ describe("migrateInstance", () => {
   });
 
   it("bỏ input lạ / sai kiểu, giữ phần còn lại", () => {
-    const m = migrateInstance({ uid: "u3", id: "sma", inputs: { length: "x", src: "hl2", junk: 1 } });
+    const m = migrateInstance({ v: 2, uid: "u3", id: "sma", inputs: { length: "x", src: "hl2", junk: 1 } });
     expect(m?.inputs).toEqual({ src: "hl2" });
   });
 
@@ -81,8 +104,8 @@ describe("plotColor / withPlotColor / inputsText", () => {
   });
 
   it("legend: giá trị đã điền mặc định, bool không hiện", () => {
-    expect(inputsText(def, inst)).toBe("14 close");
-    expect(inputsText(byId("sma"), newInstance("sma"))).toBe("20 close 0");
+    expect(inputsText(def, inst)).toBe("14 close SMA 14 2"); // RSI bật SMA 14 mặc định như TV
+    expect(inputsText(byId("sma"), newInstance("sma"))).toBe("9 close 0 None 14 2");
     expect(inputsText(byId("vwap"), { ...newInstance("vwap"), inputs: { anchor: "Week" } })).toBe("Week hlc3 0"); // Session start và các ô của band không in lên legend
     expect(inputsText(byId("cvd"), newInstance("cvd"))).toBe("1D Time 1");
   });
@@ -106,10 +129,10 @@ describe("trạng thái hiển thị của instance", () => {
 
   it("giá trị rác bị bỏ, khoảng visibility được chặn về giới hạn của đơn vị", () => {
     const m = migrateInstance({
-      uid: "u", id: "rsi", hidden: "yes", precision: 99, priceLabel: 1, statusValues: true,
+      v: 2, uid: "u", id: "rsi", hidden: "yes", precision: 99, priceLabel: 1, statusValues: true,
       visibility: { minutes: { on: true, from: -4, to: 500 }, bogus: { on: true, from: 1, to: 2 }, hours: { on: "x", from: 1, to: 2 } },
     });
-    expect(m).toEqual({ v: 1, uid: "u", id: "rsi", inputs: {}, visibility: { minutes: { on: true, from: 1, to: 59 } } });
+    expect(m).toEqual({ v: 2, uid: "u", id: "rsi", inputs: {}, visibility: { minutes: { on: true, from: 1, to: 59 } } });
   });
 
   it("instanceShown: mắt và khung thời gian", () => {
@@ -148,7 +171,7 @@ describe("style đã lưu (nét, độ dày, kiểu, levels, fills)", () => {
   it("giá trị lạ bị bỏ; plot perBar không đổi được kiểu; level/fill không còn trong def bị bỏ", () => {
     const m = migrateInstance({
       uid: "m", id: "macd",
-      style: { plots: { hist: { type: "line", width: 9 }, macd: { type: "bogus", lineStyle: "wavy", width: 2 } }, levels: { zero: { value: 1 } }, fills: { x: { color: "#fff" } } },
+      style: { plots: { hist: { type: "line", width: 9 }, macd: { type: "bogus", lineStyle: "wavy", width: 2 } }, levels: { nope: { value: 1 } }, fills: { x: { color: "#fff" } } },
     });
     expect(m?.style).toEqual({ plots: { macd: { width: 2 } } });
     const r = migrateInstance({ uid: "r", id: "rsi", style: { levels: { upper: { value: "x", color: "red" }, nope: { value: 1 } } } });
@@ -165,7 +188,7 @@ describe("màu nến giảm của plot candles", () => {
 
 describe("màu fill thứ hai (mây Ichimoku)", () => {
   it("chỉ fill có colorDown giữ colorDown đã lưu", () => {
-    const k = migrateInstance({ uid: "u", id: "ichimoku", style: { fills: { cloud: { colorDown: "#ff0000", color: "#00ff00" } } } });
+    const k = migrateInstance({ v: 2, uid: "u", id: "ichimoku", style: { fills: { cloud: { colorDown: "#ff0000", color: "#00ff00" } } } });
     expect(k?.style).toEqual({ fills: { cloud: { color: "#00ff00", colorDown: "#ff0000" } } });
     const r = migrateInstance({ uid: "u", id: "rsi", style: { fills: { band: { colorDown: "#ff0000", color: "#00ff00" } } } });
     expect(r?.style).toEqual({ fills: { band: { color: "#00ff00" } } });
@@ -175,7 +198,7 @@ describe("màu fill thứ hai (mây Ichimoku)", () => {
 describe("style của items (mức pivot, profile...)", () => {
   it("giữ phần hợp lệ của item mà def còn có, bỏ item lạ và giá trị sai", () => {
     const m = migrateInstance({
-      uid: "u", id: "pivots",
+      v: 2, uid: "u", id: "pivots",
       style: { items: { R1: { color: "#ff0000", visible: false, width: 3, lineStyle: "dashed" }, S2: { width: 9, lineStyle: "wavy", color: "red" }, ZZ: { color: "#00ff00" } } },
     });
     expect(m?.style).toEqual({ items: { R1: { color: "#ff0000", visible: false, width: 3, lineStyle: "dashed" } } });

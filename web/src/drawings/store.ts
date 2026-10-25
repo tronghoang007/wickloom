@@ -85,7 +85,7 @@ export const drawingGlobal = create<DrawingGlobal>()(
 );
 
 /** Các khoá của `useDrawingStore` thuộc về từng pane (DrawPane); còn lại là chung toàn app. */
-export const DRAW_PANE_KEYS = ["drawings", "selectedId", "settingsOpen", "editing", "api"] as const;
+export const DRAW_PANE_KEYS = ["drawings", "selectedId", "settingsOpen", "settingsTab", "editing", "api"] as const;
 
 /** Cho UI ngoài chart: công cụ vẽ chung + hình vẽ / hình đang chọn / DrawingManager của pane ĐANG ACTIVE. */
 export const useDrawingStore = composeStore({

@@ -2,7 +2,7 @@
 // Nến lưu `t` = UTC epoch giây; ngày của broker = UTC + offset (backend: bar_open). Offset đổi theo DST của server,
 // nên khi có mốc mở nến D1 thật (`dayOpens`) thì ngày được lấy từ đó: ngày mùa đông không lệch 1 giờ so với offset hiện tại.
 
-export type Period = "day" | "week" | "month" | "quarter" | "year" | "decade" | "century";
+export type Period = "day" | "week" | "month" | "quarter" | "year" | "year2" | "year3" | "year5" | "decade" | "century";
 
 /** Mốc đổi "ngày" cho CVD / Session Volume Profile. Không đặt = 00:00 giờ broker (cùng nến D1 của MT5), vàng nghỉ một tiếng giữa phiên nên mốc đó không trùng phiên thật.
  *  hour: phiên mở lúc `hour` giờ broker (phiên mở từ 12h trở đi được tính là ngày giao dịch hôm sau, như CME).
@@ -40,6 +40,9 @@ function periodKey(dayNum: number, period: Period): number {
     case "month": { const [y, m] = civil(dayNum); return y * 12 + m; }
     case "quarter": { const [y, m] = civil(dayNum); return y * 4 + Math.floor(m / 3); }
     case "year": return civil(dayNum)[0];
+    case "year2": return Math.floor(civil(dayNum)[0] / 2);
+    case "year3": return Math.floor(civil(dayNum)[0] / 3);
+    case "year5": return Math.floor(civil(dayNum)[0] / 5);
     case "decade": return Math.floor(civil(dayNum)[0] / 10);
     case "century": return Math.floor(civil(dayNum)[0] / 100);
   }

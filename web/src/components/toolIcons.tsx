@@ -71,6 +71,31 @@ const fork = (handle: P, mid: P, a: P, b: P, extra?: ReactNode) => (
   </>
 );
 
+
+// Long/Short position: toạ độ đo trên icon của TV (lưới 28px, nét 1px) đổi sang lưới 24 của Svg24: u = 2 + px / 1.4.
+// Vùng lời (target) có chữ L / S, entry là đường không chấm, target và stop có vòng tròn neo ở mép trái.
+const u = (px: number) => f(2 + px / 1.4);
+const tvPath = (d: string) => <path key={`p${k++}`} d={d.replace(/-?\d*\.?\d+/g, (n) => String(u(+n)))} />;
+const posIcon = (long: boolean) => {
+  const entry = long ? 17.5 : 11.5;
+  const anchor = (y: number) => (
+    <>
+      <circle key={`c${k++}`} cx={u(5.5)} cy={u(y)} r={f(2 / 1.4)} />
+      {tvPath(`M7.5 ${y}H25`)}
+    </>
+  );
+  return (
+    <>
+      {anchor(6.5)}
+      {tvPath(`M5 ${entry}H25`)}
+      {anchor(22.5)}
+      {long
+        ? tvPath("M13.5 9V14.5H17")
+        : tvPath("M17.1 14.6C16.7 13.8 16 13.5 15.4 13.5C14.4 13.5 13.7 14.1 13.7 14.9C13.7 16.9 17.3 16.1 17.3 18.5C17.3 19.5 16.5 20.5 15.4 20.5C14.5 20.5 13.8 20.1 13.5 19.3")}
+    </>
+  );
+};
+
 const ICONS: Record<string, ReactNode> = {
   // --- lines -------------------------------------------------------------------
   trendline: chain([
@@ -441,26 +466,8 @@ const ICONS: Record<string, ReactNode> = {
   ),
 
   // --- forecasting & measurement -------------------------------------------------
-  longpos: (
-    <>
-      {link([4.5, 6.5], [20, 6.5], true, false)}
-      {node([4.5, 6.5])}
-      {label(12, 13.2, "L")}
-      <path d="M4.5 15.5H20" />
-      {link([4.5, 19], [20, 19], true, false)}
-      {node([4.5, 19])}
-    </>
-  ),
-  shortpos: (
-    <>
-      {link([4.5, 5], [20, 5], true, false)}
-      {node([4.5, 5])}
-      <path d="M4.5 8.5H20" />
-      {label(12, 15.5, "S")}
-      {link([4.5, 19], [20, 19], true, false)}
-      {node([4.5, 19])}
-    </>
-  ),
+  longpos: posIcon(true),
+  shortpos: posIcon(false),
   forecast: (
     <>
       <path d="M6 4.5v15M10.5 6v12" />

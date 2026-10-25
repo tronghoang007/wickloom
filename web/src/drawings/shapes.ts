@@ -57,6 +57,27 @@ function textWidth(text: string, font: string, size: number) {
   return measurer.measureText(text).width;
 }
 
+/** Ngắt dòng theo chiều rộng tối đa (px) như "Text wrap" của TV: ngắt ở khoảng trắng; từ dài hơn khung thì để nguyên. */
+export function wrapText(text: string, size: number, bold: boolean, italic: boolean, maxW: number): string {
+  const font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px sans-serif`;
+  return text
+    .split("\n")
+    .map((para) => {
+      const out: string[] = [];
+      let cur = "";
+      for (const word of para.split(" ")) {
+        const next = cur ? `${cur} ${word}` : word;
+        if (cur && textWidth(next, font, size) > maxW) {
+          out.push(cur);
+          cur = word;
+        } else cur = next;
+      }
+      out.push(cur);
+      return out.join("\n");
+    })
+    .join("\n");
+}
+
 type TextShape = Extract<Shape, { k: "text" }>;
 
 export function textBox(s: TextShape) {

@@ -39,7 +39,7 @@ describe("computeInstance", () => {
   it("sma / ema / wma dùng đúng hàm ta với input đã lưu", () => {
     expect(run("sma", { length: 7 }, bars).sma.values).toEqual(ta.sma(close, 7));
     expect(run("ema", { length: 7, src: "high" }, bars).ema.values).toEqual(ta.ema(bars.map((b) => b.h), 7));
-    expect(run("wma", {}, bars).wma.values).toEqual(ta.wma(close, 20));
+    expect(run("wma", {}, bars).wma.values).toEqual(ta.wma(close, 9)); // mặc định TV: length 9
   });
 
   it("Bollinger: basis = sma, band = basis ± mult·stdev tổng thể", () => {
@@ -53,7 +53,10 @@ describe("computeInstance", () => {
     const o = run("macd", {}, bars);
     const i = 120;
     expect(o.hist.values[i]).toBeCloseTo(o.macd.values[i] - o.signal.values[i], 9);
-    expect(o.hist.colors?.[i]).toBe(o.hist.values[i] >= 0 ? "#26a69a" : "#ef5350");
+    // histogram 4 màu của TV: trên 0 tăng #26a69a / giảm #b2dfdb, dưới 0 tăng #ffcdd2 / giảm #ff5252
+    const h = o.hist.values, rising = h[i - 1] < h[i];
+    expect(o.hist.colors?.[i]).toBe(h[i] >= 0 ? (rising ? "#26a69a" : "#b2dfdb") : rising ? "#ffcdd2" : "#ff5252");
+    expect(new Set(o.hist.colors)).toEqual(new Set(["#26a69a", "#b2dfdb", "#ffcdd2", "#ff5252"]));
   });
 
   it("Stochastic: %K nằm trong [0,100], %D = sma(%K)", () => {
@@ -172,7 +175,7 @@ describe("trimPlot / historyTarget", () => {
     const a = { ...newInstance("sma") };
     expect(historyTarget(defs, [a], 500, 5000)).toBe(5000);
     const big = { ...newInstance("rsi"), inputs: { length: 900 } };
-    expect(historyTarget(defs, [a, big], 500, 5000)).toBe(900 * 10 + 500);
+    expect(historyTarget(defs, [a, big], 500, 5000)).toBe(900 * 10 + 14 + 500); // +14: RSI bật SMA 14 mặc định
     expect(historyTarget(defs, [], 500, 5000)).toBe(5000);
   });
 });

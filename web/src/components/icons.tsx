@@ -74,10 +74,10 @@ export const Magnet = ({ strong = false }: { strong?: boolean }) => (
   </Tv>
 );
 export const Trash = () => (
-  <Svg>
-    <path d="M6.5 8.5h15M11.5 8.5v-2h5v2" />
-    <path d="M8.5 8.5l1 14h9l1-14" />
-  </Svg>
+  <Tv>
+    <path d="M5 7.5h18M10.5 7.5V6A1.5 1.5 0 0 1 12 4.5h4A1.5 1.5 0 0 1 17.5 6v1.5" />
+    <path d="M7.5 8l1.3 14.4a1 1 0 0 0 1 .6h8.4a1 1 0 0 0 1-.6L20.5 8" />
+  </Tv>
 );
 // Undo/Redo/Replay trên TV nhỏ (~13x10, 14x11px): vẽ theo toạ độ px của TV.
 export const Undo = ({ size = 28 }: { size?: number }) => (
@@ -184,12 +184,29 @@ export const TemplatesI = () => (
     <rect x="15.5" y="15.5" width="6" height="6" rx="2" />
   </Tv>
 );
+// Templates của thanh nổi trên hình đang chọn (TV): 3 ô + dấu cộng
+export const TemplatesAddI = () => (
+  <Tv>
+    <rect x="6.5" y="6.5" width="6" height="6" rx="1.5" />
+    <rect x="15.5" y="6.5" width="6" height="6" rx="1.5" />
+    <rect x="6.5" y="15.5" width="6" height="6" rx="1.5" />
+    <path d="M15.5 18.5h6M18.5 15.5v6" />
+  </Tv>
+);
+// Create limit order của Position: khung chừa góc dưới phải cho dấu cộng, 2 mũi tên mua / bán
+export const LimitOrderI = () => (
+  <Tv>
+    <path d="M16 22.5H6.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h15a2 2 0 0 1 2 2V15" />
+    <path d="M12.3 10.7L16 13.4l3.7-2.7M8.3 17.3l3.7-2.7 3.7 2.7" />
+    <path d="M21.5 17v7M18 20.5h7" />
+  </Tv>
+);
 export const AlertI = () => (
   <Tv>
-    <path d="M4.5 9.5L9 5M18 5l4.5 4.5" />
-    <path d="M20.7 12.3A8 8 0 1 0 13.5 23" />
-    <path d="M13.5 10.5v5h3.5" />
-    <path d="M17 21h7M20.5 17.5v7" />
+    <path d="M19.2 4.8l3.9 4.3M7.8 4.8L3.9 9.1" />
+    <path d="M21.5 15v-.5a8 8 0 1 0-8 8h.5" />
+    <path d="M13.5 9v5.5H10" />
+    <path d="M19.5 16v9M15 20.5h9" />
   </Tv>
 );
 export const LayoutI = () => (
@@ -198,10 +215,10 @@ export const LayoutI = () => (
   </Tv>
 );
 export const SettingsI = () => (
-  <Svg>
-    <path d="M4.5 14l4.75-8.25h9.5L23.5 14l-4.75 8.25h-9.5z" />
+  <Tv>
+    <path d="M8.8 5.5h10.4l4.7 8.5-4.7 8.5H8.8L4.1 14z" />
     <circle cx="14" cy="14" r="3.5" />
-  </Svg>
+  </Tv>
 );
 export const FullscreenI = () => (
   <Tv>
@@ -243,9 +260,9 @@ export const Stay = () => (
 );
 export const Lock = ({ open }: { open: boolean }) => (
   <Tv>
-    <rect x="6.5" y="11.5" width="15" height="11" rx="2.5" />
-    <path d={open ? "M10.5 11.5v-4a3.5 3.5 0 0 1 6.8-1.2" : "M10.5 11.5v-4a3.5 3.5 0 0 1 7 0v4"} />
-    <path d="M14 15.5v3" />
+    <rect x="6.5" y="12.5" width="15" height="11" rx="2" />
+    <path d={open ? "M10.5 12.5V9a3.5 3.5 0 0 1 6.8-1.2" : "M10.5 12.5V9a3.5 3.5 0 0 1 7 0v3.5"} />
+    <path d="M14 17v2" strokeWidth="2" />
   </Tv>
 );
 export const Eye = ({ off }: { off: boolean }) => (
@@ -341,25 +358,26 @@ export const PenI = () => (
   </Svg>
 );
 export const BucketI = () => (
-  <Svg>
-    <path d="M13.5 5.5L21 13l-5.8 5.8a1.6 1.6 0 0 1-2.3 0l-5.2-5.2a1.6 1.6 0 0 1 0-2.3z" />
-    <path d="M7.8 12.5h12.6" />
-    <path d="M22 16.5c-.8 1.2-1.4 2-1.4 2.8a1.4 1.4 0 0 0 2.8 0c0-.8-.6-1.6-1.4-2.8z" />
-  </Svg>
+  <Tv>
+    <path d="M17.5 10.5l-3-3-7 7 7.6 7.6a2 2 0 0 0 2.8 0l4.2-4.2a2 2 0 0 0 0-2.8z" />
+    <path d="M17.5 10.5v-4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v6" />
+    <g fill="currentColor" stroke="none">
+      <circle cx="13.5" cy="13.5" r="1.5" />
+      <path d="M4 20.5C4 19 6.5 16 6.5 16S9 19 9 20.5 8 23 6.5 23 4 22 4 20.5z" />
+    </g>
+  </Tv>
 );
 export const TextColorI = () => (
-  <Svg>
-    <path d="M8 20.5l6-14 6 14M10.3 15.5h7.4" />
-  </Svg>
+  <Tv>
+    <path d="M8 10.5V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v2.5M14 7v14M11.5 21h5" />
+  </Tv>
 );
 export const DotsI = () => (
-  <Svg>
-    <g fill="currentColor" stroke="none">
-      <circle cx="8.5" cy="14" r="1.5" />
-      <circle cx="14" cy="14" r="1.5" />
-      <circle cx="19.5" cy="14" r="1.5" />
-    </g>
-  </Svg>
+  <Tv>
+    <circle cx="7.5" cy="14.5" r="2" />
+    <circle cx="14.5" cy="14.5" r="2" />
+    <circle cx="21.5" cy="14.5" r="2" />
+  </Tv>
 );
 export const AnchorI = () => (
   <Svg>

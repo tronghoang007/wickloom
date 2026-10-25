@@ -821,6 +821,10 @@ export default function Chart({ paneId }: { paneId: string }) {
           .getState()
           .symbols.find((item) => item.name === pane.chart.getState().symbol)
           ?.tick_size ?? 10 ** -digitsRef.current,
+      getMinQty: () => {
+        const info = useChartStore.getState().symbols.find((item) => item.name === pane.chart.getState().symbol);
+        return info?.volume_min && info.contract_size ? info.volume_min * info.contract_size : undefined;
+      },
     });
 
     // Góc nhìn + crosshair của chart này cho "Sync in layout" (store/paneSync.ts). Thời gian là đơn vị chung giữa các khung.

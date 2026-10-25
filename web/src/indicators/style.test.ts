@@ -19,7 +19,7 @@ describe("style hiệu lực", () => {
     expect(levelStyle(i, rsi.levels![0]).value).toBe(75);
     const macd = byId("macd");
     const m = { ...newInstance("macd"), style: { plots: { hist: { type: "line" as const } } } };
-    expect(plotStyle(m, macd.plots[2]).type).toBe("histogram");
+    expect(plotStyle(m, macd.plots.find((p) => p.id === "hist")!).type).toBe("histogram");
   });
 
   it("fill chỉ vẽ khi chưa tắt và hai đầu còn hiện", () => {
@@ -55,7 +55,7 @@ describe("style của items", () => {
   const piv = byId("pivots");
   it("mặc định theo def, user đặt thắng", () => {
     const r1 = piv.items!.find((i) => i.id === "R1")!;
-    expect(itemStyle(newInstance("pivots"), r1)).toEqual({ color: "#f23645", visible: true, width: 1, style: "solid" });
+    expect(itemStyle(newInstance("pivots"), r1)).toEqual({ color: "#fb8c00", visible: true, width: 1, style: "solid" }); // TV: mọi mức #fb8c00
     const i = { ...newInstance("pivots"), style: { items: { R1: { color: "#111111", width: 2, lineStyle: "dotted" as const, visible: false as const } } } };
     expect(itemStyle(i, r1)).toEqual({ color: "#111111", visible: false, width: 2, style: "dotted" });
     expect(Object.keys(itemStyles(newInstance("pivots"), piv))).toHaveLength(11);

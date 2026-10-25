@@ -7,7 +7,7 @@ const KC_STYLES = ["Average True Range", "True Range", "Range"];
 export const kc: IndicatorDef = {
   id: "kc", name: "KC", title: "Keltner Channels", overlay: true,
   inputs: [
-    length(20),
+    length(20, "length", "length"),
     { key: "mult", label: "Multiplier", type: "float", default: 2, min: 0.001, step: 0.1 },
     SRC,
     { key: "ema", label: "Use Exponential MA", type: "bool", default: true },
@@ -34,7 +34,7 @@ export const kc: IndicatorDef = {
 
 export const dc: IndicatorDef = {
   id: "dc", name: "DC", title: "Donchian Channels", overlay: true,
-  inputs: [length(20), offsetInput()],
+  inputs: [length(20, "length", "length"), offsetInput()],
   plots: [
     { id: "basis", title: "Basis", type: "line", color: "#ff6d00", offset: "offset" },
     { id: "upper", title: "Upper", type: "line", color: "#2962ff", offset: "offset" },

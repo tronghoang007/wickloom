@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import { textBox, type Shape } from "./shapes";
-import { computeProfile, defaultOpts, encodeFibLevels, fibLevelsOf, fibPrice, fmtVol, gannGrid, posConstrain, positionStats, profileSource, regression, SPEC, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
+import { computeProfile, defaultOpts, encodeFibLevels, fibLevelsOf, fibPrice, floatBar, fmtVol, fontSizeOf, gannGrid, hasTextTab, POS_DEFAULTS, posConstrain, positionStats, profileSource, regression, settingsTabs, SPEC, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
 import type { TickSource } from "@/volumeProfile/compute";
 import type { Anchor } from "./types";
 
@@ -129,6 +129,22 @@ describe("positionStats", () => {
     const o = { account: 1000, lot: 1, risk: 250, riskMode: "money", leverage: 1 };
     expect(positionStats([], p, true, { ...o, qtyPrecision: "2" }).qty).toBe(0.24);
     expect(positionStats([], p, true, { ...o, qtyPrecision: "0" }).qty).toBe(0);
+  });
+
+  it("Qty hiện như TV: có chọn precision thì làm tròn thường; Default theo lượng nhỏ nhất của symbol", () => {
+    // TV XAUUSD 17.6398: Default → 17, Integer → 18, 1 decimal → 17.6
+    const gold = pos(3990, 3990 + 25.443, 3990 - 25.443);
+    const o = { account: 1000, lot: 1, risk: 448.81, riskMode: "money", minQty: 1 };
+    expect(positionStats([], gold, true, o).qty).toBe(17);
+    expect(positionStats([], gold, true, { ...o, qtyPrecision: "0" }).qty).toBe(18);
+    expect(positionStats([], gold, true, { ...o, qtyPrecision: "1" }).qty).toBe(17.6);
+    // TV BTCUSDT.P (lượng nhỏ nhất 0.001): 0.4376 → 0.438, 0.35008 → 0.35; Integer 0.7001 → 1
+    const btc = pos(80000, 80571.3, 79428.7);
+    const b = { account: 1000, lot: 1, riskMode: "money", minQty: 0.001 };
+    expect(positionStats([], btc, true, { ...b, risk: 250 }).qty).toBe(0.438);
+    expect(positionStats([], btc, true, { ...b, risk: 200 }).qty).toBe(0.35);
+    expect(positionStats([], btc, true, { ...b, risk: 400, qtyPrecision: "0" }).qty).toBe(1);
+    expect(positionStats([], btc, true, { ...b, risk: 250 }).tpAmount).toBeCloseTo(1250, 6); // Amount theo Qty chưa làm tròn
   });
 
   it("lệnh mở ở nến chạm entry, rồi mới xét target/stop", () => {
@@ -1015,6 +1031,42 @@ describe("nhãn Position không đè nhau", () => {
   });
 });
 
+describe("Position như TV: đường entry, chữ, mặc định", () => {
+  const Y = (price: number) => 1000 - price * 10;
+  const points = [{ time: 100, price: 100 }, { time: 100, price: 110 }, { time: 300, price: 100 }, { time: 100, price: 95 }];
+  const mk = (type: "longpos" | "shortpos", opts?: Record<string, string | number | boolean>): Ctx => ({
+    d: { id: "x", type, points, color: "#fff", width: 1, locked: false, hidden: false, opts },
+    p: points.map((a) => ({ x: a.time, y: Y(a.price) })), w: 1000, h: 1000, bars: [], tickSize: 0.01, hovered: false, selected: true,
+    step: 1, barsBetween: (a, b) => b - a, X: (t) => t, Y, fp: (v) => v.toFixed(2), digits: 2,
+  });
+
+  it("đường entry 1px #808080 suốt chiều rộng, vẽ trên các vùng nền (TV đo từng pixel)", () => {
+    const sh = SPEC.longpos.build(mk("longpos"));
+    const lines = sh.filter((s): s is Extract<Shape, { k: "line" }> => s.k === "line");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ color: "#808080", w: 1, a: { x: 100, y: Y(100) }, b: { x: 300, y: Y(100) } });
+    expect(sh.indexOf(lines[0])).toBeGreaterThan(sh.findIndex((s) => s.k === "poly"));
+    // đổi Lines trong Settings
+    const l2 = SPEC.longpos.build(mk("longpos", { lineColor: "#ff0000", lineWidth: 3 })).find((s) => s.k === "line");
+    expect(l2).toMatchObject({ color: "#ff0000", w: 3 });
+  });
+
+  it("cỡ chữ theo Text size (mặc định 12) và nhãn trục entry theo màu Lines", () => {
+    const sizes = (opts?: Record<string, string | number | boolean>) => SPEC.shortpos.build(mk("shortpos", opts)).filter((s) => s.k === "text").map((s) => (s as Extract<Shape, { k: "text" }>).size);
+    expect(new Set(sizes())).toEqual(new Set([12]));
+    expect(new Set(sizes({ fontSize: 16 }))).toEqual(new Set([16]));
+    const axis = SPEC.longpos.build(mk("longpos", { lineColor: "#123456" })).filter((s) => s.k === "axis") as Extract<Shape, { k: "axis" }>[];
+    expect(axis.find((a) => a.text === "100.00")?.bg).toBe("#123456");
+  });
+
+  it("mặc định như TV: rủi ro 250 theo tiền, Amount 1250 / 750", () => {
+    expect(POS_DEFAULTS).toMatchObject({ account: 1000, lot: 1, risk: 250, riskMode: "money", leverage: 10000 });
+    const s = positionStats([], pos(80000, 80571.3, 79428.7), true, POS_DEFAULTS);
+    expect(s.tpAmount).toBeCloseTo(1250, 6);
+    expect(s.slAmount).toBeCloseTo(750, 6);
+  });
+});
+
 describe("Table (như TV)", () => {
   const mk = (opts?: Record<string, string | number | boolean>): Ctx => ({
     d: { id: "t", type: "table", points: [{ time: 100, price: 1 }], color: "#575757", width: 1, locked: false, hidden: false, opts },
@@ -1128,3 +1180,131 @@ describe("defaultOpts: tuỳ chọn lưu làm mặc định cho lần vẽ sau",
   });
 });
 
+
+describe("thanh nổi và tab Settings theo từng tool (đo trên TV 2026-10-25)", () => {
+  it("mỗi tool có nút / tab hợp lệ, mọi nút thuộc danh sách biết", () => {
+    const known = new Set(["lc", "bg", "fill", "tc", "fs", "w", "st", "col", "row", "al", "anc", "profit", "stop", "limit"]);
+    for (const id of Object.keys(SPEC)) {
+      for (const t of floatBar(id)) expect(known.has(t), `${id}: nút ${t}`).toBe(true);
+      const tabs = settingsTabs(id);
+      if (tabs) expect(tabs.at(-1), id).toBe("visibility");
+    }
+  });
+
+  it("các ví dụ đã đo: rect đủ nút, circle không có style / alert, crossline không alert, text có anchor, FRVP trống", () => {
+    expect(floatBar("rect")).toEqual(["lc", "bg", "tc", "w", "st", "al"]);
+    expect(floatBar("circle")).toEqual(["lc", "bg", "tc", "w"]);
+    expect(floatBar("crossline")).toEqual(["lc", "w", "st"]);
+    expect(floatBar("text")).toContain("anc");
+    expect(floatBar("frvp")).toEqual([]);
+    expect(floatBar("regression")).toEqual(["w"]);
+    expect(floatBar("table").slice(0, 2)).toEqual(["col", "row"]);
+  });
+
+  it("tab: không Coordinates ở position / fib wedge / ellipse; text chỉ Text + Visibility; callout không Style", () => {
+    expect(settingsTabs("longpos")).toEqual(["inputs", "style", "visibility"]);
+    expect(settingsTabs("fibwedge")).toEqual(["style", "visibility"]);
+    expect(settingsTabs("ellipse")).toEqual(["style", "text", "visibility"]);
+    expect(settingsTabs("text")).toEqual(["text", "visibility"]);
+    expect(settingsTabs("callout")).toEqual(["text", "coords", "visibility"]);
+    expect(settingsTabs("fib")).toBeNull(); // mặc định: Style · Coordinates · Visibility
+  });
+
+  it("cỡ chữ: opts.fontSize, không có thì mặc định TV (comment 16, signpost 12, Text cũ theo độ dày)", () => {
+    const d = (type: string, width = 1, opts?: Record<string, string | number | boolean>) => ({ id: "x", type, points: [], color: "#fff", width, locked: false, hidden: false, opts }) as never;
+    expect(fontSizeOf(d("comment"))).toBe(16);
+    expect(fontSizeOf(d("signpost"))).toBe(12);
+    expect(fontSizeOf(d("text", 1))).toBe(14);
+    expect(fontSizeOf(d("text", 2))).toBe(16);
+    expect(fontSizeOf(d("callout", 1, { fontSize: 20 }))).toBe(20);
+  });
+
+  it("Background color riêng: hình có nền dùng màu nền, viền vẫn màu đường", () => {
+    const pts = [{ time: 100, price: 1 }, { time: 140, price: 2 }];
+    const mk = (opts?: Record<string, string | number | boolean>): Ctx => ({
+      d: { id: "x", type: "circle", points: pts, color: "#ff9800", width: 2, locked: false, hidden: false, opts },
+      p: [{ x: 100, y: 100 }, { x: 140, y: 100 }], w: 1000, h: 800, bars: [], tickSize: 0.01, hovered: false, selected: false,
+      step: 1, barsBetween: (a, b) => b - a, X: (t) => t, Y: (v) => v, fp: (v) => v.toFixed(2), digits: 2,
+    });
+    const polys = (c: Ctx) => SPEC.circle.build(c).filter((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly");
+    const [fill, stroke] = polys(mk({ backgroundColor: "#2962ff" }));
+    expect(fill).toMatchObject({ fill: 0.2, noStroke: true, color: "#2962ff" });
+    expect(stroke.fill).toBeUndefined();
+    expect(polys(mk())[0].color).toBe("#ff9800"); // chưa chọn: lấy màu đường như trước
+    expect(polys(mk({ background: false }))).toHaveLength(1); // tắt Background: chỉ còn viền
+  });
+});
+
+describe("tab Text của từng tool (đo trên TV 2026-10-25)", () => {
+  const mkText = (type: string, n: number, text?: string, opts?: Record<string, string | number | boolean>, width = 1): Ctx => {
+    const pts = [{ time: 100, price: 10 }, { time: 200, price: 14 }, { time: 150, price: 6 }, { time: 120, price: 9 }].slice(0, n);
+    return {
+      d: { id: "x", type, points: pts, color: "#ff9800", width, locked: false, hidden: false, text, opts },
+      p: pts.map((a) => ({ x: a.time, y: 1000 - a.price * 10 })), w: 1000, h: 1000, bars: [], tickSize: 0.01, hovered: true, selected: true,
+      step: 1, barsBetween: (a, b) => b - a, X: (t) => t, Y: (v) => 1000 - v * 10, fp: (v) => v.toFixed(2), digits: 2,
+    };
+  };
+  const texts = (sh: Shape[]) => sh.filter((q): q is Extract<Shape, { k: "text" }> => q.k === "text");
+
+  it("hình nào có tab Text: đường, rect, circle, callout, text...; fib và position thì không", () => {
+    for (const id of ["trendline", "rect", "circle", "ellipse", "channel", "flat", "disjoint", "arrowmarker", "arrowup", "arrowdown", "pricerange", "daterange", "text", "note", "pin", "callout", "comment", "signpost"]) expect(hasTextTab(id), id).toBe(true);
+    for (const id of ["fib", "longpos", "pitchfork", "crossline", "pricelabel"]) expect(hasTextTab(id), id).toBe(false);
+  });
+
+  it("Parallel channel / Flat / Disjoint: chữ chạy dọc cạnh trên, căn trái", () => {
+    for (const [type, n] of [["channel", 3], ["flat", 3], ["disjoint", 3]] as const) {
+      const [t] = texts(SPEC[type].build(mkText(type, n, "Hello")));
+      expect(t, type).toMatchObject({ text: "Hello", align: "left", size: 14 });
+      expect(t.angle).toBeDefined();
+    }
+    expect(texts(SPEC.channel.build(mkText("channel", 3)))).toHaveLength(0);
+  });
+
+  it("Circle / Ellipse: chữ giữa hình, màu chữ mặc định = màu đường; Bold / cỡ theo tab Text", () => {
+    const c = texts(SPEC.circle.build(mkText("circle", 2, "Hi", { fontSize: 20, bold: true })))[0];
+    expect(c).toMatchObject({ text: "Hi", align: "center", size: 20, bold: true, color: "#ff9800" });
+    expect(c.at).toEqual({ x: 100, y: 900 }); // tâm = điểm 1
+    const e = texts(SPEC.ellipse.build(mkText("ellipse", 2, "Hi")))[0];
+    expect(e.at).toEqual({ x: 150, y: 880 }); // giữa hộp
+  });
+
+  it("Arrow marker: chữ đậm cỡ 16 sau đuôi mũi tên; Arrow mark up: chữ dưới mũi tên, down: trên mũi tên", () => {
+    const m = texts(SPEC.arrowmarker.build(mkText("arrowmarker", 2, "Go")))[0];
+    expect(m).toMatchObject({ text: "Go", bold: true, size: 16, align: "right" }); // mũi tên hướng sang phải: chữ bên trái đuôi
+    expect(m.at.x).toBeLessThan(100);
+    const up = texts(SPEC.arrowup.build(mkText("arrowup", 1, "Up")))[0], down = texts(SPEC.arrowdown.build(mkText("arrowdown", 1, "Down")))[0];
+    expect(up.at.y).toBeGreaterThan(900); // dưới điểm (y tăng xuống)
+    expect(down.at.y).toBeLessThan(900);
+  });
+
+  it("Text: Background / Border tắt sẵn, bật thì có nền và viền; Text wrap ngắt dòng; cỡ cũ theo độ dày nét", () => {
+    const plain = texts(SPEC.text.build(mkText("text", 1, "Hello")))[0];
+    expect(plain.bg).toBeUndefined();
+    expect(plain.border).toBeUndefined();
+    const boxed = texts(SPEC.text.build(mkText("text", 1, "Hello", { background: true, border: true, backgroundColor: "#112233", borderColor: "#445566" })))[0];
+    expect(boxed).toMatchObject({ bg: "#112233", border: "#445566" });
+    const long = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon";
+    expect(texts(SPEC.text.build(mkText("text", 1, long)))[0].text).toBe(long);
+    expect(texts(SPEC.text.build(mkText("text", 1, long, { wrap: true })))[0].text).toContain("\n");
+    expect(texts(SPEC.text.build(mkText("text", 1, "x", undefined, 2)))[0].size).toBe(16); // Text cũ: cỡ 12 + 2 × độ dày
+    expect(texts(SPEC.text.build(mkText("text", 1, "x", { fontSize: 24 }, 2)))[0].size).toBe(24);
+  });
+
+  it("Callout / Comment: nền = màu chính, viền riêng khi chọn; Comment không có B / I; Pin giữ nền tối + viền", () => {
+    const call = texts(SPEC.callout.build(mkText("callout", 2, "C", { borderColor: "#00ff00", bold: true })))[0];
+    expect(call).toMatchObject({ bg: "#ff9800", border: "#00ff00", bold: true, color: "#ffffff" });
+    expect(texts(SPEC.callout.build(mkText("callout", 2, "C")))[0].border).toBeUndefined();
+    expect(SPEC.comment.text).toMatchObject({ noStyle: true, size: 16 });
+    const pin = texts(SPEC.pin.build(mkText("pin", 1, "P")))[0];
+    expect(pin).toMatchObject({ bg: "#2e2e2e", border: "#4a4a4a", color: "#dbdbdb" });
+    const bare = texts(SPEC.pin.build(mkText("pin", 1, "P", { background: false, border: false })))[0];
+    expect([bare.bg, bare.border]).toEqual([undefined, undefined]);
+  });
+
+  it("Measurers: tab Text chỉnh kiểu chữ của nhãn số liệu (trắng, cỡ 12), không có ô nhập chữ", () => {
+    expect(SPEC.pricerange.text).toMatchObject({ noText: true, size: 12, color: "#ffffff" });
+    const t = texts(SPEC.pricerange.build(mkText("pricerange", 2, undefined, { fontSize: 16, bold: true })))[0];
+    expect(t).toMatchObject({ size: 16, bold: true, color: "#ffffff" });
+    expect(texts(SPEC.pricerange.build(mkText("pricerange", 2)))[0].size).toBe(12);
+  });
+});

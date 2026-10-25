@@ -59,7 +59,7 @@ export function drawingMenuItems(api: DrawingManager, d: Drawing, tf: string, mo
     {
       label: "Settings…",
       icon: <SettingsI />,
-      onSelect: () => useDrawingStore.setState({ settingsOpen: true }),
+      onSelect: () => useDrawingStore.setState({ settingsOpen: true, settingsTab: null }),
     },
   ];
 }

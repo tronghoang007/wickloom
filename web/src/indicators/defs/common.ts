@@ -1,5 +1,6 @@
 import type { CalendarOpts } from "../calendar";
-import type { InputDef, Inputs, PlotData } from "../schema";
+import type { FillDef, InputDef, Inputs, PlotData, PlotDef } from "../schema";
+import * as ta from "../ta";
 import { MA_TYPES, type Num, type SourceName } from "../ta";
 
 export const sourceInput = (d: SourceName = "close"): InputDef => ({ key: "src", label: "Source", type: "source", default: d });
@@ -40,4 +41,42 @@ export function withSession(calendar: CalendarOpts, inputs: Inputs): CalendarOpt
   if (inputs.sessionStart === SESSION_HOUR) return { ...calendar, session: { mode: "hour", hour: inputs.sessionHour as number } };
   if (inputs.sessionStart === SESSION_BREAK) return { ...calendar, session: { mode: "break", minutes: inputs.sessionBreak as number } };
   return calendar;
+}
+
+// Nhóm "Smoothing" của TV (RSI, CCI, OBV, SMA, EMA...): đường MA của chính indicator, hoặc MA + dải Bollinger quanh nó.
+export const SMOOTH_TYPES = ["None", "SMA", "SMA + Bollinger Bands", "EMA", "SMMA (RMA)", "WMA", "VWMA"];
+const smoothOn = (i: Inputs) => i.smoothType !== "None";
+const smoothBB = (i: Inputs) => i.smoothType === "SMA + Bollinger Bands";
+
+/** `def`: loại mặc định (TV: RSI và CCI bật SMA sẵn, các indicator khác None). */
+export const smoothingInputs = (def = "None"): InputDef[] => [
+  { key: "smoothType", label: "Type", type: "select", default: def, options: SMOOTH_TYPES, group: "Smoothing" },
+  { key: "smoothLength", label: "Length", type: "int", default: 14, min: 1, group: "Smoothing", enabledIf: smoothOn },
+  { key: "smoothMult", label: "BB StdDev", type: "float", default: 2, min: 0.001, step: 0.1, group: "Smoothing", enabledIf: smoothBB },
+];
+
+/** Plot của nhóm Smoothing: `name` là tên indicator ("RSI" -> "RSI-based MA"). */
+export const smoothingPlots = (name: string): PlotDef[] => [
+  { id: "sm", title: `${name}-based MA`, type: "line", color: "#fdd835", showIf: smoothOn },
+  { id: "smUpper", title: "Upper Bollinger Band", type: "line", color: "#4caf50", showIf: smoothBB },
+  { id: "smLower", title: "Lower Bollinger Band", type: "line", color: "#4caf50", showIf: smoothBB },
+];
+export const smoothingFills: FillDef[] = [
+  { id: "smBand", title: "Bollinger Bands Background Fill", between: [{ plot: "smUpper" }, { plot: "smLower" }], color: "#4caf501a", showIf: smoothBB },
+];
+
+/** Số nến cần thêm để MA của nhóm Smoothing hội tụ. */
+export const smoothWarmup = (i: Inputs): number =>
+  smoothOn(i) ? maWarmup(smoothBB(i) ? "SMA" : String(i.smoothType), Number(i.smoothLength)) : 0;
+
+/** Giá trị các plot của nhóm Smoothing tính từ chuỗi `s` (vol cho VWMA). */
+export function smoothing(inputs: Inputs, s: Num, vol: Num): Record<string, Num> {
+  const empty = ta.nan(s.length);
+  if (!smoothOn(inputs)) return { sm: empty, smUpper: empty, smLower: empty };
+  const n = Number(inputs.smoothLength);
+  const bb = smoothBB(inputs);
+  const m = ta.ma(bb ? "SMA" : String(inputs.smoothType), s, n, vol);
+  if (!bb) return { sm: m, smUpper: empty, smLower: empty };
+  const dev = ta.stdev(s, n), k = Number(inputs.smoothMult);
+  return { sm: m, smUpper: m.map((x, i) => x + k * dev[i]), smLower: m.map((x, i) => x - k * dev[i]) };
 }

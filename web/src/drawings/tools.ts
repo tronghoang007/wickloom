@@ -1,6 +1,6 @@
 import type { Bar } from "@/lib/api";
 import { computeProfile, computeTickProfile, type TickSource } from "@/volumeProfile/compute";
-import { textBox, type Ext, type Pt, type Shape } from "./shapes";
+import { textBox, wrapText, type Ext, type Pt, type Shape } from "./shapes";
 import type { Anchor, Drawing } from "./types";
 
 export type Ctx = {
@@ -13,6 +13,7 @@ export type Ctx = {
   profileStep?: number; // giây mỗi nến của profileBars
   ticks?: TickSource; // tick cho volume profile khi Data aggregation = 1 tick (manager cấp; chưa nạp xong thì profile dùng nến khung nhỏ)
   tickSize: number;
+  minQty?: number; // lượng nhỏ nhất của symbol (volume_min × contract_size), cho QTY precision mặc định của Position
   hovered: boolean;
   selected: boolean;
   dragging?: boolean; // đang vẽ / đang kéo hình này (Volume profile chỉ hiện vạch dọc, thả ra mới tính)
@@ -77,8 +78,23 @@ export type ToolOption = { key: string; label: string; section?: string } & (
   | { def: string; color: true } // "" = dùng màu đường
 );
 
-// Tab Text của TV: chữ chạy dọc đường (line), nằm trong hộp (box); kèm default cỡ chữ + căn lề
-export type TextSpec = { kind: "line" | "box"; size: number; v: "top" | "middle" | "bottom"; h: "left" | "center" | "right" };
+// Tab Text của TV: chữ chạy dọc đường (line), nằm trong hộp (box); kèm default cỡ chữ + căn lề.
+// Các cờ còn lại mô tả tab Text của từng tool (đo trên TV 2026-10-25).
+export type TextSpec = {
+  kind: "line" | "box";
+  size: number;
+  v: "top" | "middle" | "bottom";
+  h: "left" | "center" | "right";
+  fixed?: boolean; // chữ có vị trí cố định theo hình (giữa hình, cạnh mũi tên...): tab Text không có hàng Text alignment
+  bold?: boolean; // mặc định đậm (Arrow marker)
+  color?: string; // màu chữ mặc định khi khác màu đường (Pin: #dbdbdb)
+  noColor?: boolean; // không có ô màu chữ (Signpost)
+  noStyle?: boolean; // không có nút B / I (Comment)
+  noText?: boolean; // không có ô nhập chữ (Measurers: chữ là số liệu tự tính, tab chỉ chỉnh kiểu chữ)
+  bg?: "main" | { def: boolean; color: string }; // hàng Background: "main" = màu chính d.color (Callout, Comment), object = ô bật + màu riêng
+  border?: { def: boolean; color: string; always?: boolean }; // hàng Border (always: chỉ ô màu, "" = cùng màu nền)
+  wrap?: boolean; // ô Text wrap (ngắt dòng ở 200px)
+};
 
 const EXTEND: [string, string][] = [["none", "Don't extend"], ["left", "Extend left"], ["right", "Extend right"], ["both", "Extend both"]];
 
@@ -86,19 +102,42 @@ const EXTEND: [string, string][] = [["none", "Don't extend"], ["left", "Extend l
 export function optOf(d: Drawing, key: string): number | string | boolean | undefined {
   const spec = SPEC[d.type];
   const t = spec?.text;
-  const textDef = t && { fontSize: t.size, bold: false, italic: false, vAlign: t.v, hAlign: t.h }[key];
+  const textDef = t && {
+    fontSize: t.size, bold: t.bold ?? false, italic: false, vAlign: t.v, hAlign: t.h, wrap: false,
+    background: typeof t.bg === "object" ? t.bg.def : undefined, backgroundColor: typeof t.bg === "object" ? t.bg.color : undefined,
+    border: t.border?.def, borderColor: t.border?.color,
+  }[key];
   return d.opts?.[key] ?? spec?.options?.find((o) => o.key === key)?.def ?? textDef;
+}
+
+// Cỡ chữ của các tool chú thích (thanh nổi Font size): opts.fontSize, không có thì cỡ mặc định của TV
+const FONT_DEFAULT: Record<string, number> = { callout: 14, comment: 16, pricelabel: 14, signpost: 12, pin: 14, table: 14 };
+export function fontSizeOf(d: Drawing): number {
+  const v = Number(d.opts?.fontSize);
+  if (v > 0) return v;
+  return d.type === "text" ? 12 + d.width * 2 : (FONT_DEFAULT[d.type] ?? 14); // Text cũ lưu cỡ trong độ dày nét
 }
 
 // Chữ của tab Text: cỡ, đậm, nghiêng, màu (mặc định màu đường)
 function textStyle(c: Ctx) {
   return {
-    size: Number(optOf(c.d, "fontSize")) || 14,
+    size: Number(c.d.opts?.fontSize) || (c.d.type === "text" ? 12 + c.d.width * 2 : Number(optOf(c.d, "fontSize")) || 14), // Text cũ lưu cỡ trong độ dày nét
     bold: Boolean(optOf(c.d, "bold")),
     italic: Boolean(optOf(c.d, "italic")),
-    color: c.d.textColor ?? c.d.color,
+    color: c.d.textColor ?? SPEC[c.d.type]?.text?.color ?? c.d.color,
   };
 }
+
+// Nền / viền riêng của hộp chữ (tab Text của Text, Pin): ô bật + màu
+const boxFx = (c: Ctx) => ({
+  ...(optOf(c.d, "background") ? { bg: String(optOf(c.d, "backgroundColor")) } : {}),
+  ...(optOf(c.d, "border") ? { border: String(optOf(c.d, "borderColor")) } : {}),
+});
+
+// Text wrap của TV: bật thì ngắt dòng ở 200px
+const WRAP_W = 200;
+const wrapIf = (c: Ctx, text: string, st: { size: number; bold: boolean; italic: boolean }) =>
+  optOf(c.d, "wrap") ? wrapText(text, st.size, st.bold, st.italic, WRAP_W) : text;
 
 // Như TV: chữ của trend line chạy dọc theo đường (xoay theo góc), căn trái/giữa/phải theo đoạn
 // đang thấy; Top/Bottom = phía trên/dưới đường.
@@ -278,6 +317,20 @@ const FIB_OPTIONS: ToolOption[] = [
 // tỉ lệ giá (vd 0.5 giữa 4110 và 4170 là √(4110×4170) = 4139.891) thay vì theo hiệu giá
 const logFib = (c: Ctx, ...prices: number[]) => Boolean(c.log && optOf(c.d, "logLevels") && prices.every((p) => p > 0));
 const BG: ToolOption = { key: "background", label: "Background", def: true };
+// Màu nền riêng như nút Background color của TV; chưa chọn ("") thì lấy màu đường
+const BGC: ToolOption = { key: "backgroundColor", label: "Background color", def: "", color: true };
+const bgOf = (c: Ctx) => String(optOf(c.d, "backgroundColor") || c.d.color);
+// Hình kín có nền riêng + viền: nền không viền (màu nền) rồi viền (màu đường)
+// Chữ nằm giữa hình (Circle, Ellipse của TV): màu chữ mặc định = màu đường
+const centerText = (c: Ctx, at: Pt): Shape[] => {
+  if (!c.d.text) return [];
+  const st = textStyle(c);
+  return [txt(at, c.d.text, { ...st, align: "center" })];
+};
+const filledShape = (c: Ctx, pts: Pt[], alpha: number, open = false): Shape[] => [
+  ...(optOf(c.d, "background") === false ? [] : [poly(pts, { closed: true, fill: alpha, noStroke: true, color: bgOf(c) })]),
+  poly(pts, open ? {} : { closed: true }),
+];
 const TREND = { dash: 1 as const, w: 1, color: "#787b86" }; // đường nối các điểm (TV: xám nét đứt)
 
 // Đường dọc theo các mức thời gian, tô dải giữa 2 mức, nhãn ở đáy (Trend-based fib time, Fib time zone)
@@ -376,7 +429,7 @@ const ratioOf = (num: number, den: number, digits = 3) => (den ? String(+Math.ab
 function pattern(c: Ctx, names: string[], links: [number, number, string][], fills: number[][] = []): Shape[] {
   const p = c.p;
   return [
-    ...fills.map((f) => poly(f.map((i) => p[i]), { closed: true, fill: 0.15, noStroke: true })),
+    ...fills.map((f) => poly(f.map((i) => p[i]), { closed: true, fill: 0.15, noStroke: true, color: bgOf(c) })),
     poly(p.slice(0, Math.max(names.length, 2))),
     ...links.flatMap(([i, j, text]) => [seg(p[i], p[j], { dash: 2, w: 1 }), ...(text ? [txt(mid(p[i], p[j]), text, { align: "center", bg: c.d.color, size: 12 })] : [])]),
     ...letters(c, names, true),
@@ -411,7 +464,7 @@ function headShoulders(c: Ctx): Shape[] {
     return txt({ x: p[i].x, y: p[i].y + (p[i].y < neck ? -14 : 14) }, text, { align: "center", bg: c.d.color, size: 12 });
   };
   return [
-    ...[[L, p[1], p[2]], [p[2], p[3], p[4]], [p[4], p[5], R]].map((t) => poly(t, { closed: true, fill: 0.15, noStroke: true })),
+    ...[[L, p[1], p[2]], [p[2], p[3], p[4]], [p[4], p[5], R]].map((t) => poly(t, { closed: true, fill: 0.15, noStroke: true, color: bgOf(c) })),
     poly(p),
     seg(L, R, { dash: 2, w: 1 }),
     label(1, "Left Shoulder"), label(3, "Head"), label(5, "Right Shoulder"),
@@ -425,7 +478,7 @@ function trianglePattern(c: Ctx): Shape[] {
   const out: Shape[] = [];
   if (apex && apex.x > Math.max(a.x, b.x, cc.x, d.x)) {
     const top = intersect(b, d, a, { x: a.x, y: a.y + 1 }) ?? b;
-    out.push(poly([a, top, apex], { closed: true, fill: 0.15, noStroke: true }), seg(a, apex, { dash: 2, w: 1 }), seg(top, apex, { dash: 2, w: 1 }), seg(a, top, { dash: 2, w: 1 }));
+    out.push(poly([a, top, apex], { closed: true, fill: 0.15, noStroke: true, color: bgOf(c) }), seg(a, apex, { dash: 2, w: 1 }), seg(top, apex, { dash: 2, w: 1 }), seg(a, top, { dash: 2, w: 1 }));
   } else {
     out.push(ray(a, cc, { dash: 2, w: 1 }), ray(b, d, { dash: 2, w: 1 }));
   }
@@ -642,7 +695,7 @@ function rangeBox(c: Ctx, o: { vArrow: boolean; hArrow: boolean; hEdges: boolean
   const color = o.color ?? c.d.color;
   const m = mid(a, b);
   const [x0, x1, y0, y1] = [Math.min(a.x, b.x), Math.max(a.x, b.x), Math.min(a.y, b.y), Math.max(a.y, b.y)];
-  const out: Shape[] = [poly([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }], { closed: true, fill: 0.15, noStroke: true, color })];
+  const out: Shape[] = [poly([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }], { closed: true, fill: 0.15, noStroke: true, color: o.color ?? bgOf(c) })];
   if (o.hEdges) out.push(seg({ x: x0, y: a.y }, { x: x1, y: a.y }, { color }), seg({ x: x0, y: b.y }, { x: x1, y: b.y }, { color }));
   if (o.vEdges) out.push(seg({ x: a.x, y: y0 }, { x: a.x, y: y1 }, { color }), seg({ x: b.x, y: y0 }, { x: b.x, y: y1 }, { color }));
   if (o.vArrow) out.push(seg({ x: m.x, y: a.y }, { x: m.x, y: b.y }, { color }), head({ x: m.x, y: a.y }, { x: m.x, y: b.y }, 8, { color }));
@@ -650,8 +703,10 @@ function rangeBox(c: Ctx, o: { vArrow: boolean; hArrow: boolean; hEdges: boolean
   const text = o.lines.filter(Boolean).join("\n");
   if (text) {
     const up = b.y <= a.y;
-    const half = (o.lines.filter(Boolean).length * 12 * 1.3) / 2 + (o.box ? 5 : 0) + 6;
-    out.push(txt({ x: m.x, y: up ? y0 - half : y1 + half }, text, { align: "center", size: 12, ...(o.box ? { bg: o.box, color: "#ffffff" } : { color }) }));
+    // tab Text của TV chỉnh kiểu chữ của nhãn số liệu (màu mặc định trắng, cỡ 12)
+    const st = SPEC[c.d.type]?.text ? textStyle(c) : { size: 12, bold: false, italic: false, color: o.box ? "#ffffff" : color };
+    const half = (o.lines.filter(Boolean).length * st.size * 1.3) / 2 + (o.box ? 5 : 0) + 6;
+    out.push(txt({ x: m.x, y: up ? y0 - half : y1 + half }, text, { align: "center", ...st, ...(o.box ? { bg: o.box } : {}) }));
   }
   return out;
 }
@@ -667,9 +722,10 @@ function measure(c: Ctx, directional = false): Shape[] {
   });
 }
 
-// riskMode như TV riskDisplayMode: risk là % tài khoản (percent) hay số tiền (money).
-// leverage giới hạn Qty (TV mặc định 10000); qtyPrecision: "default" = số nguyên như TV, hoặc số lẻ "1"…"10"
-export const POS_DEFAULTS = { account: 1000, lot: 1, risk: 2, riskMode: "percent", leverage: 10000, qtyPrecision: "default", profit: "#089981", stop: "#f23645", alpha: 0.2 };
+// riskMode như TV riskDisplayMode: risk là % tài khoản (percent) hay số tiền (money); TV tạo hình mới với 250 (money).
+// leverage giới hạn Qty (TV mặc định 10000); qtyPrecision: "default" = theo lượng nhỏ nhất của symbol, hoặc số lẻ "0"…"10".
+// lineColor / lineWidth: đường entry (TV linecolor #808080, linewidth 1); fontSize: cỡ chữ nhãn (TV 12)
+export const POS_DEFAULTS = { account: 1000, lot: 1, risk: 250, riskMode: "money", leverage: 10000, qtyPrecision: "default", profit: "#089981", stop: "#f23645", alpha: 0.2, lineColor: "#808080", lineWidth: 1, fontSize: 12 };
 
 // Số lẻ của bước giá (0.001 -> 3, 0.25 -> 2) và làm tròn giá theo bước đó
 const decimals = (x: number) => {
@@ -679,11 +735,13 @@ const decimals = (x: number) => {
 };
 export const roundToTick = (v: number, tick: number) => +(Math.round(v / tick) * tick).toFixed(decimals(tick));
 
-type PosOpts = Pick<typeof POS_DEFAULTS, "account" | "lot" | "risk"> & Partial<Pick<typeof POS_DEFAULTS, "riskMode" | "leverage" | "qtyPrecision">>;
+type PosOpts = Pick<typeof POS_DEFAULTS, "account" | "lot" | "risk"> & Partial<Pick<typeof POS_DEFAULTS, "riskMode" | "leverage" | "qtyPrecision">> & { minQty?: number };
 
 // Khối lượng theo rủi ro và kết quả lệnh, như TV:
-// - Qty = rủi ro / (stop × lot), nhưng không quá tài khoản × leverage / (entry × lot); hiện Qty làm
-//   tròn xuống theo QTY precision, còn Amount / PnL tính theo Qty chưa làm tròn
+// - Qty = rủi ro / (stop × lot), nhưng không quá tài khoản × leverage / (entry × lot); Amount / PnL
+//   tính theo Qty chưa làm tròn. Hiện Qty (đo trên TV): chọn QTY precision thì làm tròn thường
+//   (0.7001 → "1"); Default thì lấy số lẻ của lượng nhỏ nhất, và symbol giao dịch theo đơn vị nguyên
+//   (vàng, forex: 17.64 → "17") làm tròn xuống, symbol có lượng lẻ (BTC: 0.4376 → "0.438") làm tròn thường
 // - lệnh chỉ mở khi giá chạm entry (tính cả gap qua entry so với giá đóng cửa nến trước), rồi mới
 //   xét stop (cùng nến thì tính stop) / target tới mép phải
 // - chưa đóng (kể cả chưa khớp entry) thì PnL theo giá đóng cửa nến cuối trong khối
@@ -694,8 +752,11 @@ export function positionStats(bars: Bar[], points: Anchor[], long: boolean, o: P
   const lev = o.leverage ?? POS_DEFAULTS.leverage;
   let qtyRaw = riskAmt / (dS * o.lot);
   if (lev > 0 && pe.price > 0) qtyRaw = Math.min(qtyRaw, (o.account * lev) / (pe.price * o.lot));
-  const prec = Number(o.qtyPrecision) || 0;
-  const qty = Math.floor(qtyRaw * 10 ** prec + 1e-9) / 10 ** prec;
+  const minQty = o.minQty && o.minQty > 0 ? o.minQty : 1;
+  const auto = o.qtyPrecision === undefined || o.qtyPrecision === "default";
+  const prec = auto ? decimals(minQty) : Number(o.qtyPrecision) || 0;
+  const scaled = qtyRaw * 10 ** prec;
+  const qty = (auto && minQty >= 1 ? Math.floor(scaled + 1e-9) : Math.round(scaled)) / 10 ** prec;
 
   let closed = false, exitPrice = pe.price, exitT: number | null = null, entryT: number | null = null;
   let prevC: number | null = null;
@@ -752,7 +813,8 @@ function position(c: Ctx): Shape[] {
   const pe = c.d.points[0];
   const long = c.d.type !== "shortpos"; // như TV: theo loại tool, không suy từ vị trí target
   const x0 = Math.min(e.x, r.x), x1 = Math.max(e.x, r.x);
-  const st = positionStats(c.bars, c.d.points, long, o);
+  const st = positionStats(c.bars, c.d.points, long, { ...o, minQty: c.minQty });
+  const fs = Number(o.fontSize) || 12;
   const num = (v: number, max = 2, useGrouping = true) => v.toLocaleString(undefined, { maximumFractionDigits: max, useGrouping });
 
   const box = (xa: number, xb: number, y0: number, y1: number, color: string) =>
@@ -767,9 +829,11 @@ function position(c: Ctx): Shape[] {
   if (nx !== null && ex !== null && ey !== null) {
     out.push(box(nx, ex, e.y, ey, st.pnlPts >= 0 ? o.profit : o.stop), seg({ x: nx, y: e.y }, { x: ex, y: ey }, { dash: 1, w: 1, color: "#b2b5be" }));
   }
+  // Như TV (đo từng pixel): đường entry linecolor chạy suốt chiều rộng, vẽ trên các vùng nền
+  out.push(seg({ x: x0, y: e.y }, { x: x1, y: e.y }, { color: o.lineColor, w: Number(o.lineWidth) || 1 }));
 
   if (on("priceLabels")) {
-    for (const [y, price, bg] of [[e.y, pe.price, "#808080"], [t.y, c.d.points[1].price, o.profit], [s.y, c.d.points[3].price, o.stop]] as const) {
+    for (const [y, price, bg] of [[e.y, pe.price, o.lineColor], [t.y, c.d.points[1].price, o.profit], [s.y, c.d.points[3].price, o.stop]] as const) {
       out.push({ k: "axis", y, text: c.fp(price), bg, color: "#ffffff", always: true });
     }
   }
@@ -797,16 +861,16 @@ function position(c: Ctx): Shape[] {
     const midText = mid.filter(Boolean).join("\n");
     // nhãn target/stop nằm ngoài vùng, nhưng không đè nhãn PnL ở giữa khi target/stop sát entry
     const lines = midText ? midText.split("\n").length : 0;
-    const gap = lines ? (lines * 12 * 1.3) / 2 + 5 + (12 * 1.3) / 2 + 5 + 2 : 0;
+    const gap = lines ? (lines * fs * 1.3) / 2 + 5 + (fs * 1.3) / 2 + 5 + 2 : 0;
     const away = (y: number, fallback: 1 | -1) => {
       const dir = Math.sign(y - e.y) || fallback;
       return e.y + dir * Math.max(Math.abs(y + dir * 14 - e.y), gap);
     };
     const tText = side("tp", "Target", st.dT, st.tpAmount, st.tpPL), sText = side("sl", "Stop", st.dS, st.slAmount, -st.slPL);
-    if (tText) out.push(txt({ x: cx, y: away(t.y, long ? -1 : 1) }, tText, { align: "center", bg: o.profit, color: tc, size: 12 }));
-    if (sText) out.push(txt({ x: cx, y: away(s.y, long ? 1 : -1) }, sText, { align: "center", bg: o.stop, color: tc, size: 12 }));
+    if (tText) out.push(txt({ x: cx, y: away(t.y, long ? -1 : 1) }, tText, { align: "center", bg: o.profit, color: tc, size: fs }));
+    if (sText) out.push(txt({ x: cx, y: away(s.y, long ? 1 : -1) }, sText, { align: "center", bg: o.stop, color: tc, size: fs }));
     // như TV: nhãn PnL (theo giá) nằm giữa, ngay trên đường entry
-    if (midText) out.push(txt({ x: cx, y: e.y }, midText, { align: "center", bg: st.pnlPts >= 0 ? o.profit : o.stop, color: tc, size: 12 }));
+    if (midText) out.push(txt({ x: cx, y: e.y }, midText, { align: "center", bg: st.pnlPts >= 0 ? o.profit : o.stop, color: tc, size: fs }));
   }
   return out;
 }
@@ -883,9 +947,9 @@ function table(c: Ctx): Shape[] {
   return out;
 }
 
-const noteShapes = (c: Ctx, text: string): Shape[] => {
+const noteShapes = (c: Ctx, text: string, st: Partial<ReturnType<typeof textStyle>> = {}): Shape[] => {
   const [a, b] = c.p;
-  return [seg(a, b, { w: 1 }), poly(circle(a, 3, 12), { closed: true, fill: 1 }), txt(b, text, { align: "left", bg: c.d.color, size: 12 })];
+  return [seg(a, b, { w: 1 }), poly(circle(a, 3, 12), { closed: true, fill: 1 }), txt(b, text, { align: "left", bg: bgOf(c), size: 12, ...st })];
 };
 
 const offsetPt = (a: Anchor, v: OneClickView, bars = 10, pct = 0.002): Anchor => ({ time: v.addBars(a.time, bars), price: a.price * (1 + pct) });
@@ -1172,7 +1236,7 @@ const span = (c: Ctx) => ({ t0: Math.min(pt(c, 0).time, pt(c, 1).time), t1: Math
 export const TOOLS: ToolSpec[] = [
   // Lines
   // Như TV: trend line, ray, extended, info line, arrow là cùng 1 loại, chỉ khác default
-  { id: "trendline", label: "Trend line", n: 2, build: lineTool, options: lineOptions("none", false), text: LINE_TEXT },
+  { id: "trendline", label: "Trendline", n: 2, build: lineTool, options: lineOptions("none", false), text: LINE_TEXT },
   { id: "ray", label: "Ray", n: 2, build: lineTool, options: lineOptions("right", false), text: LINE_TEXT },
   { id: "infoline", label: "Info line", n: 2, build: lineTool, options: lineOptions("none", true), text: LINE_TEXT },
   { id: "extended", label: "Extended line", n: 2, build: lineTool, options: lineOptions("both", false), text: LINE_TEXT },
@@ -1202,23 +1266,24 @@ export const TOOLS: ToolSpec[] = [
     handles: (c) => [{ x: c.p[0].x, y: c.h / 2 }],
   },
   {
-    id: "crossline", label: "Cross line", n: 1,
+    id: "crossline", label: "Crossline", n: 1,
     build: (c) => [seg({ x: c.p[0].x, y: 0 }, { x: c.p[0].x, y: c.h }), seg({ x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y })],
   },
   // Channels
   {
     // TV: mức 0 và 1 (2 cạnh) + 0.5 nét đứt, nền 20%
-    id: "channel", label: "Parallel channel", n: 3,
-    options: [{ key: "extend", label: "Extend", def: "none", choices: EXTEND }, { key: "middleLine", label: "Middle line", def: true }, BG],
+    id: "channel", label: "Parallel channel", n: 3, text: { kind: "line", size: 14, v: "top", h: "left" },
+    options: [{ key: "extend", label: "Extend", def: "none", choices: EXTEND }, { key: "middleLine", label: "Middle line", def: true }, BG, BGC],
     build: (c) => {
       const [a, b, p] = c.p;
       const o = { x: 0, y: channelOffset(a, b, p) };
       const a2 = add(a, o), b2 = add(b, o);
       const line = (u: Pt, v: Pt, extra: O = {}): Shape => ({ k: "line", ...lineExt(c, [u, v]), ...extra }) as Shape;
       const out: Shape[] = [];
-      if (optOf(c.d, "background")) out.push(poly([a, b, b2, a2], { closed: true, fill: 0.2, noStroke: true }));
+      if (optOf(c.d, "background")) out.push(poly([a, b, b2, a2], { closed: true, fill: 0.2, noStroke: true, color: bgOf(c) }));
       out.push(line(a, b), line(a2, b2));
       if (optOf(c.d, "middleLine")) out.push(line(lerp(a, a2, 0.5), lerp(b, b2, 0.5), { dash: 1, w: 1 }));
+      out.push(...lineText(c, a, b)); // TV: chữ chạy dọc cạnh trên, căn trái
       return out;
     },
   },
@@ -1256,21 +1321,21 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
-    id: "flat", label: "Flat top/bottom", n: 3, style: { color: "#ff9800" }, options: [BG],
+    id: "flat", label: "Flat top/bottom", n: 3, style: { color: "#ff9800" }, options: [BG, BGC], text: { kind: "line", size: 14, v: "top", h: "left" },
     build: (c) => {
       const [a, b, p] = c.p;
       const f1 = { x: a.x, y: p.y }, f2 = { x: b.x, y: p.y };
-      return [...(optOf(c.d, "background") ? [poly([a, b, f2, f1], { closed: true, fill: 0.2, noStroke: true })] : []), seg(a, b), seg(f1, f2)];
+      return [...(optOf(c.d, "background") ? [poly([a, b, f2, f1], { closed: true, fill: 0.2, noStroke: true, color: bgOf(c) })] : []), seg(a, b), seg(f1, f2), ...lineText(c, a, b)];
     },
   },
   {
     // TV: đường 2 dốc ngược đường 1, đi từ (x điểm 1, giá p3 + Δ) tới (x điểm 2, giá p3); thời gian p3
     // không dùng, handle 3 nằm ở đầu phải đường 2; tô hình nơ giữa 2 đường
-    id: "disjoint", label: "Disjoint channel", n: 3, style: { color: "#089981" }, options: [BG],
+    id: "disjoint", label: "Disjoint channel", n: 3, style: { color: "#089981" }, options: [BG, BGC], text: { kind: "line", size: 14, v: "top", h: "left" },
     build: (c) => {
       const [a, b, p] = c.p;
       const end = { x: b.x, y: p.y }, start = { x: a.x, y: p.y + (b.y - a.y) };
-      return [...(optOf(c.d, "background") ? [poly([a, b, end, start], { closed: true, fill: 0.2, noStroke: true })] : []), seg(a, b), seg(start, end)];
+      return [...(optOf(c.d, "background") ? [poly([a, b, end, start], { closed: true, fill: 0.2, noStroke: true, color: bgOf(c) })] : []), seg(a, b), seg(start, end), ...lineText(c, a, b)];
     },
     handles: (c) => [c.p[0], c.p[1], { x: c.p[1].x, y: c.p[2].y }],
     moveHandle: (pts, i, q) => (i < 2 ? pts.map((x, j) => (j === i ? q : { ...x })) : [{ ...pts[0] }, { ...pts[1] }, { time: pts[1].time, price: q.price }]),
@@ -1461,9 +1526,9 @@ export const TOOLS: ToolSpec[] = [
 
   // Patterns
   // Màu mặc định theo TV
-  { id: "xabcd", label: "XABCD pattern", n: 5, build: (c) => harmonic(c, false) },
-  { id: "cypher", label: "Cypher pattern", n: 5, build: (c) => harmonic(c, true) },
-  { id: "headshoulders", label: "Head and shoulders", n: 7, style: { color: "#089981" }, build: headShoulders },
+  { id: "xabcd", label: "XABCD pattern", n: 5, options: [BGC], build: (c) => harmonic(c, false) },
+  { id: "cypher", label: "Cypher pattern", n: 5, options: [BGC], build: (c) => harmonic(c, true) },
+  { id: "headshoulders", label: "Head and shoulders", n: 7, style: { color: "#089981" }, options: [BGC], build: headShoulders },
   {
     id: "abcd", label: "ABCD pattern", n: 4, style: { color: "#089981" },
     build: (c) => {
@@ -1471,7 +1536,7 @@ export const TOOLS: ToolSpec[] = [
       return pattern(c, ["A", "B", "C", "D"], [[0, 2, ratioOf(C - B, B - A)], [1, 3, ratioOf(D - C, C - B)]]);
     },
   },
-  { id: "trianglepattern", label: "Triangle pattern", n: 4, style: { color: "#673ab7" }, build: trianglePattern },
+  { id: "trianglepattern", label: "Triangle pattern", n: 4, style: { color: "#673ab7" }, options: [BGC], build: trianglePattern },
   {
     // TV: không có chữ, 2 đường chấm nối đỉnh drive kèm tỉ lệ mở rộng
     id: "threedrives", label: "Three drives pattern", n: 7, style: { color: "#673ab7" },
@@ -1502,14 +1567,14 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     // TV: nửa đường tròn thật (đường kính = khoảng 2 điểm) lặp 2 phía, nền xanh lá 50%
-    id: "timecycles", label: "Time cycles", n: 2, style: { color: "#159980" }, options: [BG],
+    id: "timecycles", label: "Time cycles", n: 2, style: { color: "#159980" }, options: [BG, { ...BGC, def: "#6aa84f" }],
     build: (c) => {
       const [a, b] = c.p;
       const dx = Math.abs(b.x - a.x) || 1;
       const out: Shape[] = [];
       for (let k = Math.floor(-a.x / dx); k <= Math.ceil((c.w - a.x) / dx) && out.length < 400; k++) {
         const arc = arcPts({ x: a.x + (k + 0.5) * dx, y: a.y }, dx / 2, Math.PI, Math.PI * 2);
-        if (optOf(c.d, "background")) out.push(poly(arc, { closed: true, fill: 0.5, noStroke: true, color: "#6aa84f" }));
+        if (optOf(c.d, "background")) out.push(poly(arc, { closed: true, fill: 0.5, noStroke: true, color: bgOf(c) }));
         out.push(poly(arc));
       }
       return out;
@@ -1534,11 +1599,11 @@ export const TOOLS: ToolSpec[] = [
   { id: "barspattern", label: "Bars pattern", n: 2, build: () => [], disabled: true },
   { id: "ghost", label: "Ghost feed", n: 2, build: () => [], disabled: true },
   {
-    id: "sector", label: "Sector", n: 3,
+    id: "sector", label: "Sector", n: 3, options: [BG, BGC],
     build: (c) => {
       const [a, b, p] = c.p;
       const R = dist(a, b), a0 = Math.atan2(b.y - a.y, b.x - a.x), a1 = shortSweep(a0, Math.atan2(p.y - a.y, p.x - a.x));
-      return [poly([a, ...arcPts(a, R, a0, a1)], { closed: true, fill: 0.15 })];
+      return filledShape(c, [a, ...arcPts(a, R, a0, a1)], 0.15);
     },
   },
   // Volume
@@ -1570,11 +1635,12 @@ export const TOOLS: ToolSpec[] = [
   // Measurers
   {
     // TV: nhãn không nền "0.60%, 2,500.0" (khoảng giá ẩn mặc định)
-    id: "pricerange", label: "Price range", n: 2,
+    id: "pricerange", label: "Price range", n: 2, text: { kind: "box", size: 12, v: "middle", h: "center", fixed: true, noText: true, color: "#ffffff" },
     options: [
       { key: "showPriceRange", label: "Price range", def: false },
       { key: "showPercent", label: "Percent change", def: true },
       { key: "showPips", label: "Change in pips", def: true },
+      BGC,
     ],
     build: (c) => {
       const t = rangeText(c);
@@ -1584,14 +1650,14 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     // TV: nhãn ô tối "20 bars, 5h" / "Vol 138.84K"
-    id: "daterange", label: "Date range", n: 2,
-    options: [{ key: "showVolume", label: "Volume", def: true }],
+    id: "daterange", label: "Date range", n: 2, text: { kind: "box", size: 12, v: "middle", h: "center", fixed: true, noText: true, color: "#ffffff" },
+    options: [{ key: "showVolume", label: "Volume", def: true }, BGC],
     build: (c) => {
       const t = rangeText(c);
       return rangeBox(c, { vArrow: false, hArrow: true, hEdges: false, vEdges: true, lines: [t.time, optOf(c.d, "showVolume") ? t.vol : ""], box: "#2e2e2e" });
     },
   },
-  { id: "daterangeprice", label: "Date and price range", n: 2, build: (c) => measure(c) },
+  { id: "daterangeprice", label: "Date and price range", n: 2, options: [BGC], text: { kind: "box", size: 12, v: "middle", h: "center", fixed: true, noText: true, color: "#ffffff" }, build: (c) => measure(c) },
   { id: "measure", label: "Measure", n: 2, build: (c) => measure(c, true), ephemeral: true },
   { id: "zoom", label: "Zoom in", n: 2, action: "zoom", build: (c) => [poly([c.p[0], { x: c.p[1].x, y: c.p[0].y }, c.p[1], { x: c.p[0].x, y: c.p[1].y }], { closed: true, fill: 0.1, dash: 1, w: 1 })] },
 
@@ -1600,27 +1666,36 @@ export const TOOLS: ToolSpec[] = [
   { id: "highlighter", label: "Highlighter", n: -1, style: { color: "#f5c542", width: 3 }, build: (c) => [poly(c.p, { w: c.d.width * 6, alpha: 0.35 })] },
   // Arrows
   {
-    id: "arrowmarker", label: "Arrow marker", n: 2, style: { color: "#1e53e5" },
+    // TV: chữ đậm cỡ 16 nằm sau đuôi mũi tên (ngược chiều mũi), cùng màu mũi tên
+    id: "arrowmarker", label: "Arrow marker", n: 2, style: { color: "#1e53e5" }, text: { kind: "box", size: 16, v: "middle", h: "left", fixed: true, bold: true },
     build: (c) => {
       const [a, b] = c.p;
       const u = unit(sub(b, a)), n = { x: -u.y, y: u.x };
       const L = Math.min(26, dist(a, b) * 0.4), hb = sub(b, mul(u, L));
-      return [poly([a, add(hb, mul(n, 3)), add(hb, mul(n, 9)), b, sub(hb, mul(n, 9)), sub(hb, mul(n, 3))], { closed: true, fill: 1 })];
+      const out: Shape[] = [poly([a, add(hb, mul(n, 3)), add(hb, mul(n, 9)), b, sub(hb, mul(n, 9)), sub(hb, mul(n, 3))], { closed: true, fill: 1 })];
+      if (c.d.text) {
+        const st = textStyle(c);
+        const right = b.x >= a.x; // mũi tên hướng sang phải: chữ nằm bên trái đuôi
+        out.push(txt({ x: a.x + (right ? -8 : 8), y: a.y }, c.d.text, { ...st, align: right ? "right" : "left" }));
+      }
+      return out;
     },
   },
   { id: "arrow", label: "Arrow", n: 2, build: lineTool, options: lineOptions("none", false, "arrow"), text: LINE_TEXT },
   {
-    id: "arrowup", label: "Arrow mark up", n: 1, style: { color: "#089981" },
+    id: "arrowup", label: "Arrow mark up", n: 1, style: { color: "#089981" }, text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true },
     build: (c) => {
       const { x, y } = c.p[0], s = 8 + c.d.width * 3;
-      return [poly([{ x, y }, { x: x - s, y: y + s }, { x: x - s / 2, y: y + s }, { x: x - s / 2, y: y + s * 2.2 }, { x: x + s / 2, y: y + s * 2.2 }, { x: x + s / 2, y: y + s }, { x: x + s, y: y + s }], { closed: true, fill: 1 })];
+      const label = c.d.text ? [txt({ x, y: y + s * 2.2 + 4 + (c.d.text.split("\n").length * textStyle(c).size * 1.3) / 2 }, c.d.text, { ...textStyle(c), align: "center" })] : [];
+      return [...label, poly([{ x, y }, { x: x - s, y: y + s }, { x: x - s / 2, y: y + s }, { x: x - s / 2, y: y + s * 2.2 }, { x: x + s / 2, y: y + s * 2.2 }, { x: x + s / 2, y: y + s }, { x: x + s, y: y + s }], { closed: true, fill: 1 })];
     },
   },
   {
-    id: "arrowdown", label: "Arrow mark down", n: 1, style: { color: "#cc2f3c" },
+    id: "arrowdown", label: "Arrow mark down", n: 1, style: { color: "#cc2f3c" }, text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true },
     build: (c) => {
       const { x, y } = c.p[0], s = 8 + c.d.width * 3;
-      return [poly([{ x, y }, { x: x - s, y: y - s }, { x: x - s / 2, y: y - s }, { x: x - s / 2, y: y - s * 2.2 }, { x: x + s / 2, y: y - s * 2.2 }, { x: x + s / 2, y: y - s }, { x: x + s, y: y - s }], { closed: true, fill: 1 })];
+      const label = c.d.text ? [txt({ x, y: y - s * 2.2 - 4 - (c.d.text.split("\n").length * textStyle(c).size * 1.3) / 2 }, c.d.text, { ...textStyle(c), align: "center" })] : [];
+      return [...label, poly([{ x, y }, { x: x - s, y: y - s }, { x: x - s / 2, y: y - s }, { x: x - s / 2, y: y - s * 2.2 }, { x: x + s / 2, y: y - s * 2.2 }, { x: x + s / 2, y: y - s }, { x: x + s, y: y - s }], { closed: true, fill: 1 })];
     },
   },
   // Shapes
@@ -1637,29 +1712,32 @@ export const TOOLS: ToolSpec[] = [
     moveHandle: moveRectHandle,
   },
   {
-    id: "rotrect", label: "Rotated rectangle", n: 3, style: { color: "#4caf50" },
+    id: "rotrect", label: "Rotated rectangle", n: 3, style: { color: "#4caf50" }, options: [BG, BGC],
     build: (c) => {
       const [a, b, p] = c.p;
       const u = unit(sub(b, a)), n = { x: -u.y, y: u.x };
       const off = mul(n, (p.x - a.x) * n.x + (p.y - a.y) * n.y);
-      return [poly([a, b, add(b, off), add(a, off)], { closed: true, fill: 0.2 })];
+      return filledShape(c, [a, b, add(b, off), add(a, off)], 0.2);
     },
   },
   { id: "path", label: "Path", n: 0, build: (c) => (c.p.length > 1 ? [poly(c.p), head(c.p[c.p.length - 2], c.p[c.p.length - 1], 10 + c.d.width * 2)] : []) },
-  { id: "circle", label: "Circle", n: 2, style: { color: "#ff9800" }, build: (c) => [poly(circle(c.p[0], dist(c.p[0], c.p[1])), { closed: true, fill: 0.2 })] },
   {
-    id: "ellipse", label: "Ellipse", n: 2, shift: "square",
+    id: "circle", label: "Circle", n: 2, style: { color: "#ff9800" }, options: [BG, BGC], text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true },
+    build: (c) => [...filledShape(c, circle(c.p[0], dist(c.p[0], c.p[1])), 0.2), ...centerText(c, c.p[0])],
+  },
+  {
+    id: "ellipse", label: "Ellipse", n: 2, shift: "square", options: [BG, BGC], text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true },
     build: (c) => {
       const m = mid(c.p[0], c.p[1]), rx = Math.abs(c.p[1].x - c.p[0].x) / 2, ry = Math.abs(c.p[1].y - c.p[0].y) / 2;
-      return [poly(circle(m, 1).map((q) => ({ x: m.x + (q.x - m.x) * rx, y: m.y + (q.y - m.y) * ry })), { closed: true, fill: 0.15 })];
+      return [...filledShape(c, circle(m, 1).map((q) => ({ x: m.x + (q.x - m.x) * rx, y: m.y + (q.y - m.y) * ry })), 0.15), ...centerText(c, m)];
     },
   },
   // màu mặc định theo TV
-  { id: "polyline", label: "Polyline", n: 0, style: { color: "#00bcd4" }, build: (c) => [poly(c.p, { fill: 0.2 })] },
-  { id: "triangle", label: "Triangle", n: 3, style: { color: "#089981" }, build: (c) => [poly(c.p.slice(0, 3), { closed: true, fill: 0.2 })] },
+  { id: "polyline", label: "Polyline", n: 0, style: { color: "#00bcd4" }, options: [BG, BGC], build: (c) => filledShape(c, c.p, 0.2, true) },
+  { id: "triangle", label: "Triangle", n: 3, style: { color: "#089981" }, options: [BG, BGC], build: (c) => filledShape(c, c.p.slice(0, 3), 0.2) },
   {
     // TV: nửa elip, đáy là đoạn p1–p2, cao tới p3 (khoảng cách vuông góc từ p3 tới p1–p2); nền 20%
-    id: "arc", label: "Arc", n: 3, style: { color: "#e91e63" },
+    id: "arc", label: "Arc", n: 3, style: { color: "#e91e63" }, options: [BG, BGC],
     build: (c) => {
       const [a, b, p] = c.p;
       const m = mid(a, b), u = unit(sub(b, a)), n = { x: -u.y, y: u.x };
@@ -1668,7 +1746,7 @@ export const TOOLS: ToolSpec[] = [
         const th = Math.PI - (Math.PI * i) / 64;
         return add(m, add(mul(u, rx * Math.cos(th)), mul(n, h * Math.sin(th))));
       });
-      return [poly(pts, { closed: true, fill: 0.2, noStroke: true }), poly(pts)];
+      return [...(optOf(c.d, "background") === false ? [] : [poly(pts, { closed: true, fill: 0.2, noStroke: true, color: bgOf(c) })]), poly(pts)];
     },
   },
   { id: "curve", label: "Curve", n: 2, build: (c) => [poly(bezier(c.p[0], { x: c.p[1].x, y: c.p[0].y }, { x: c.p[1].x, y: c.p[0].y }, c.p[1]))] },
@@ -1683,21 +1761,33 @@ export const TOOLS: ToolSpec[] = [
 
   // Text & notes
   // TV: chữ xanh cỡ 14 (width 1 → 14)
-  { id: "text", label: "Text", n: 1, prompt: "Text", anchorable: true, style: { width: 1 }, build: (c) => [txt(c.p[0], c.d.text ?? "Text", { size: 12 + c.d.width * 2 })] },
-  { id: "note", label: "Note", n: 2, prompt: "Note", oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)], build: (c) => noteShapes(c, c.d.text ?? "Note") },
+  {
+    // TV: chữ màu đường cỡ 14, tab Text có Background / Border / Text wrap (tắt sẵn)
+    id: "text", label: "Text", n: 1, prompt: "Text", anchorable: true, style: { width: 1 },
+    text: { kind: "box", size: 14, v: "middle", h: "left", fixed: true, bg: { def: false, color: "#2962ff40" }, border: { def: false, color: "#707070" }, wrap: true },
+    build: (c) => {
+      const st = textStyle(c);
+      return [txt(c.p[0], wrapIf(c, c.d.text ?? "Text", st), { ...st, ...boxFx(c) })];
+    },
+  },
+  {
+    id: "note", label: "Note", n: 2, prompt: "Note", options: [BGC], text: { kind: "box", size: 14, v: "middle", h: "left", fixed: true, color: "#ffffff" },
+    oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)], build: (c) => noteShapes(c, c.d.text ?? "Note", textStyle(c)),
+  },
   {
     // TV: đường từ điểm 1 tới ô giá ở điểm 2; chữ (tab Text) chạy dọc theo đường
-    id: "pricenote", label: "Price note", n: 2, oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)],
+    id: "pricenote", label: "Price note", n: 2, options: [BGC], oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)],
     text: { kind: "line", size: 14, v: "top", h: "center" },
     build: (c) => [...noteShapes(c, c.fp(c.d.points[0].price)), ...lineText(c, c.p[0], c.p[1])],
   },
   {
     // TV ("note"): chỉ là ghim màu đường; chữ hiện trong ô tối khi hover / chọn
     id: "pin", label: "Pin", n: 1, prompt: "Pin text", anchorable: true,
+    text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true, color: "#dbdbdb", bg: { def: true, color: "#2e2e2e" }, border: { def: true, color: "#4a4a4a" } },
     build: (c) => {
       const { x, y } = c.p[0];
       const out: Shape[] = [poly([{ x, y }, { x: x - 7, y: y - 14 }, { x: x + 7, y: y - 14 }], { closed: true, fill: 1 }), poly(circle({ x, y: y - 19 }, 9, 24), { closed: true, fill: 1 })];
-      if (c.d.text && (c.hovered || c.selected)) out.push(txt({ x, y: y - 46 }, c.d.text, { align: "center", bg: "#2e2e2e", border: "#4a4a4a", color: "#dbdbdb", size: 14 }));
+      if (c.d.text && (c.hovered || c.selected)) out.push(txt({ x, y: y - 46 }, c.d.text, { ...textStyle(c), align: "center", ...boxFx(c) }));
       return out;
     },
   },
@@ -1711,10 +1801,12 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     // TV: ô màu (teal) chữ trắng ở điểm 2, đuôi nhọn chỉ về điểm 1
-    id: "callout", label: "Callout", n: 2, prompt: "Callout", style: { color: "#0097a7" }, oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)],
+    id: "callout", label: "Callout", n: 2, prompt: "Callout", style: { color: "#0097a7" },
+    text: { kind: "box", size: 14, v: "middle", h: "left", fixed: true, color: "#ffffff", bg: "main", border: { def: true, color: "", always: true }, wrap: true }, oneClick: (a, v) => [a, offsetPt(a, v, 8, 0.002)],
     build: (c) => {
       const [a, b] = c.p;
-      const label = { k: "text", at: b, text: c.d.text ?? "Callout", size: 14, align: "left", bg: c.d.color, color: "#ffffff" } as Extract<Shape, { k: "text" }>;
+      const st = textStyle(c);
+      const label = { k: "text", at: b, text: wrapIf(c, c.d.text ?? "Callout", st), ...st, align: "left", bg: c.d.color, border: String(optOf(c.d, "borderColor") || "") || undefined } as Extract<Shape, { k: "text" }>;
       const box = textBox(label);
       const ctr = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
       const n = mul({ x: -unit(sub(a, ctr)).y, y: unit(sub(a, ctr)).x }, Math.min(10, box.h / 2 - 2));
@@ -1724,9 +1816,10 @@ export const TOOLS: ToolSpec[] = [
   {
     // TV: bong bóng bo tròn chữ trắng cỡ 16, góc dưới-trái nhọn chỉ vào điểm
     id: "comment", label: "Comment", n: 1, prompt: "Comment",
+    text: { kind: "box", size: 16, v: "middle", h: "left", fixed: true, color: "#ffffff", noStyle: true, bg: "main", border: { def: true, color: "", always: true } },
     build: (c) => {
       const { x, y } = c.p[0];
-      return [poly([{ x, y }, { x: x + 4, y: y - 14 }, { x: x + 20, y: y - 14 }], { closed: true, fill: 1 }), txt({ x: x + 6, y: y - 28 }, c.d.text ?? "Comment", { align: "left", bg: c.d.color, color: "#ffffff", size: 16, radius: 16 })];
+      return [poly([{ x, y }, { x: x + 4, y: y - 14 }, { x: x + 20, y: y - 14 }], { closed: true, fill: 1 }), txt({ x: x + 6, y: y - 28 }, c.d.text ?? "Comment", { ...textStyle(c), align: "left", bg: c.d.color, border: String(optOf(c.d, "borderColor") || "") || undefined, radius: 16 })];
     },
   },
   {
@@ -1736,16 +1829,17 @@ export const TOOLS: ToolSpec[] = [
       const { x, y } = c.p[0];
       return [
         poly([{ x, y }, { x: x + 5, y: y - 14 }, { x: x + 15, y: y - 14 }], { closed: true, fill: 1 }),
-        txt({ x: x + 11, y: y - 24 }, c.fp(c.d.points[0].price), { align: "left", bg: c.d.color, color: "#ffffff", bold: true, size: 14 }),
+        txt({ x: x + 11, y: y - 24 }, c.fp(c.d.points[0].price), { align: "left", bg: c.d.color, color: c.d.textColor ?? "#ffffff", bold: true, size: fontSizeOf(c.d) }),
       ];
     },
   },
   {
     // TV: ô tối viền xám chữ sáng, cột xám từ ô xuống điểm neo
     id: "signpost", label: "Signpost", n: 1, prompt: "Signpost",
+    text: { kind: "box", size: 12, v: "middle", h: "center", fixed: true, color: "#dbdbdb", noColor: true },
     build: (c) => {
       const { x, y } = c.p[0];
-      return [seg({ x, y }, { x, y: y - 40 }, { w: 1, color: "#787b86" }), txt({ x, y: y - 52 }, c.d.text ?? "Signpost", { align: "center", bg: "#2e2e2e", border: "#4a4a4a", color: "#dbdbdb", size: 12 })];
+      return [seg({ x, y }, { x, y: y - 40 }, { w: 1, color: "#787b86" }), txt({ x, y: y - 52 }, c.d.text ?? "Signpost", { ...textStyle(c), align: "center", bg: "#2e2e2e", border: "#4a4a4a" })];
     },
   },
   {
@@ -1822,5 +1916,47 @@ export const GROUPS: Group[] = [
     ],
   },
 ];
+
+// Thanh nổi của TV theo từng tool (đo trên TV 2026-10-25, tab trích bằng showPropertiesDialog + DOM `.tv-floating-toolbar`).
+// lc = màu đường, bg = màu nền (opts.backgroundColor), fill = màu hình (d.color: nền bong bóng, mũi tên, cờ),
+// tc = màu chữ, fs = cỡ chữ, w = độ dày, st = kiểu nét, col / row = thêm cột / hàng (Table), al = alert, anc = anchor.
+// Thứ tự hiện: Templates · các nút của tool · Settings · alert · Lock · anchor · Remove · More.
+// Position có nút riêng: profit / stop (màu nền lời / lỗ) và limit (Create limit order).
+const FLOAT_BAR: Record<string, string> = {
+  trendline: "lc tc w st al", ray: "lc tc w st al", infoline: "lc tc w st al", extended: "lc tc w st al",
+  hline: "lc tc w st al", hray: "lc tc w st al", vline: "lc tc w st al", trendangle: "lc w st al", crossline: "lc w st",
+  channel: "lc bg tc w al", regression: "w", flat: "lc bg tc w st al", disjoint: "lc bg tc w st al",
+  pitchfork: "lc w", schiff: "lc w", mschiff: "lc w", insidefork: "lc w",
+  fib: "lc w al", fibext: "lc w al", fibchannel: "lc", fibtimezone: "lc w st", fibfan: "lc w st", fibtimeext: "lc w", fibcircles: "lc w",
+  fibspiral: "lc w", fibarcs: "lc w", fibwedge: "lc w", pitchfan: "lc w",
+  gannbox: "lc w st", gannsqfixed: "lc w", gannsquare: "lc w", gannfan: "lc w",
+  xabcd: "lc bg tc w", cypher: "lc bg tc w", headshoulders: "lc bg tc w", trianglepattern: "lc bg tc w", abcd: "lc tc w", threedrives: "lc tc w",
+  elliottimpulse: "lc w", elliottcorrection: "lc w", elliotttriangle: "lc w", elliottdouble: "lc w", elliotttriple: "lc w",
+  cyclic: "lc w", timecycles: "lc bg w st", sine: "lc w st",
+  longpos: "tc profit stop limit al", shortpos: "tc profit stop limit al", sector: "lc bg w", avwap: "lc w al", frvp: "", avp: "",
+  pricerange: "lc bg tc w", daterange: "lc bg tc w", daterangeprice: "lc bg tc w",
+  brush: "lc w", highlighter: "lc w", arrowmarker: "fill tc", arrow: "lc tc w st al", arrowup: "lc tc", arrowdown: "lc tc",
+  rect: "lc bg tc w st al", rotrect: "lc bg w", path: "lc w st", circle: "lc bg tc w", ellipse: "lc bg tc w", polyline: "lc bg w st",
+  triangle: "lc bg w", arc: "lc bg w", curve: "lc w st", doublecurve: "lc w st",
+  text: "tc fs anc", note: "lc bg tc", pricenote: "lc bg tc", pin: "lc tc fs anc", table: "col row lc bg tc anc",
+  callout: "tc fill fs", comment: "tc fill fs", pricelabel: "tc fill fs", signpost: "fs", flag: "fill",
+};
+export const floatBar = (id: string): string[] => (FLOAT_BAR[id] ?? "lc tc w st al").split(" ").filter(Boolean);
+
+// Tab của hộp Settings theo từng tool (đo trên TV): i = Inputs, s = Style, t = Text, c = Coordinates, v = Visibility.
+// Tool không có trong bảng: Style · Coordinates · Visibility (+ Text nếu có spec.text).
+const TV_TABS: Record<string, string> = {
+  trendline: "s t c v", ray: "s t c v", infoline: "s t c v", extended: "s t c v", trendangle: "s c v", hline: "s t c v", hray: "s t c v", vline: "s t c v", crossline: "s c v",
+  channel: "s t c v", regression: "i s c v", flat: "s t v", disjoint: "s t v", fibwedge: "s v", sector: "s v", avwap: "i s v",
+  pricerange: "s t c v", daterange: "s t c v", daterangeprice: "s t c v", arrowmarker: "s t c v", arrow: "s t c v", arrowup: "s t c v", arrowdown: "s t c v",
+  rect: "s t c v", rotrect: "s v", path: "s v", circle: "s t c v", ellipse: "s t v", polyline: "s v", arc: "s v", brush: "s v", highlighter: "s v",
+  text: "t v", note: "s t c v", pricenote: "s t c v", pin: "s t c v", table: "s v", callout: "t c v", comment: "t c v", pricelabel: "s c v", signpost: "s t c v", flag: "s c v",
+  longpos: "i s v", shortpos: "i s v",
+};
+export type SettingsTab = "inputs" | "style" | "text" | "coords" | "visibility";
+/** Hình có tab Text trong Settings (tool có spec.text và TV không bỏ tab đó). */
+export const hasTextTab = (id: string): boolean => Boolean(SPEC[id]?.text) && (settingsTabs(id)?.includes("text") ?? true);
+const TAB_KEY: Record<string, SettingsTab> = { i: "inputs", s: "style", t: "text", c: "coords", v: "visibility" };
+export const settingsTabs = (id: string): SettingsTab[] | null => TV_TABS[id]?.split(" ").map((k) => TAB_KEY[k]) ?? null;
 
 export const DEFAULT_FAVORITES = ["shortpos", "longpos", "rect", "frvp", "hray", "trendline", "fib"];

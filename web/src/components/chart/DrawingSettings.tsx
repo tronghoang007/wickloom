@@ -2,7 +2,7 @@
 
 import { useDrawingStore } from "@/drawings/store";
 import ColorPicker from "./ColorPicker";
-import { DEFAULT_COLOR, defaultOpts, encodeFibLevels, fibLevelsOf, optOf, POS_DEFAULTS, SPEC, VP_BY, VP_DEFAULTS, type FibLevel } from "@/drawings/tools";
+import { DEFAULT_COLOR, defaultOpts, encodeFibLevels, fibLevelsOf, optOf, POS_DEFAULTS, SPEC, settingsTabs, VP_BY, VP_DEFAULTS, type FibLevel, type SettingsTab } from "@/drawings/tools";
 import type { Drawing } from "@/drawings/types";
 import { UNITS, type Unit } from "@/drawings/visibility";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -42,13 +42,43 @@ function FibLevels({ levels, onChange }: { levels: FibLevel[]; onChange: (lv: Fi
   );
 }
 
-const toLocal = (t: number) => {
-  const d = new Date(t * 1000);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-};
+// Thanh trượt 2 đầu của tab Visibility (TV): kéo từng núm giữa min và max
+function RangeSlider({ min, max, from, to, disabled, onChange }: { min: number; max: number; from: number; to: number; disabled?: boolean; onChange: (from: number, to: number) => void }) {
+  const track = useRef<HTMLDivElement>(null);
+  const pct = (v: number) => ((v - min) / (max - min || 1)) * 100;
+  const drag = (which: "from" | "to") => (e: React.PointerEvent) => {
+    if (disabled) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const r = track.current!.getBoundingClientRect();
+      const v = Math.round(min + Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * (max - min));
+      if (which === "from") onChange(Math.min(v, to), to);
+      else onChange(from, Math.max(v, from));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return (
+    <div ref={track} className={`relative mx-2 h-1.5 flex-1 rounded-full bg-[var(--border)] ${disabled ? "opacity-50" : ""}`}>
+      <div className="absolute inset-y-0 rounded-full bg-[var(--fg)]" style={{ left: `${pct(from)}%`, right: `${100 - pct(to)}%` }} />
+      {(["from", "to"] as const).map((k) => (
+        <div
+          key={k}
+          className="absolute top-1/2 h-[14px] w-[14px] -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border-2 border-[var(--fg)] bg-[var(--bg)]"
+          style={{ left: `${pct(k === "from" ? from : to)}%` }}
+          onPointerDown={drag(k)}
+        />
+      ))}
+    </div>
+  );
+}
 
-function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
+function Dialog({ init, startTab, onClose }: { init: Drawing; startTab: SettingsTab | null; onClose: () => void }) {
   const api = useDrawingStore((s) => s.api);
   const spec = SPEC[init.type];
   const isPos = spec.panel === "position";
@@ -66,9 +96,16 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
     },
     [],
   );
-  const [tab, setTab] = useState<"inputs" | "style" | "text" | "coords" | "visibility">(
-    isPos || isVol ? "inputs" : "style",
-  );
+  // Tab theo từng tool như TV; tab chưa có nội dung (Text của tool chưa có spec.text) thì chưa hiện
+  const tabKeys: SettingsTab[] = (
+    settingsTabs(init.type) ?? [...(isPos || isVol ? (["inputs"] as const) : []), "style", "text", "coords", "visibility"]
+  ).filter((k) => (k !== "text" || spec.text) && (k !== "inputs" || isPos || isVol));
+  const [tab, setTab] = useState<SettingsTab>(startTab && tabKeys.includes(startTab) ? startTab : (tabKeys[0] ?? "style"));
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  // Mở bằng double-click hình: ô nhập chữ được focus và bôi đen chữ cũ như TV
+  useEffect(() => {
+    if (startTab === "text") textRef.current?.select();
+  }, [startTab]);
   const [templateMenu, setTemplateMenu] = useState(false);
   const o = { ...POS_DEFAULTS, ...d.opts } as typeof POS_DEFAULTS;
   const v = {
@@ -76,6 +113,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
     ...d.opts,
   } as typeof VP_DEFAULTS;
 
+  const textSize = Number(d.opts?.fontSize) || (d.type === "text" ? 12 + d.width * 2 : Number(optOf(d, "fontSize")) || 14); // Text cũ lưu cỡ trong độ dày nét
   const setOpt = (k: string, val: number | string | boolean) =>
     setD({ ...d, opts: { ...d.opts, [k]: val } });
   const setPoint = (i: number, patch: Partial<Drawing["points"][number]>) => {
@@ -87,13 +125,8 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
   const num = (v: string, fallback: number) =>
     Number.isFinite(Number(v)) && v !== "" ? Number(v) : fallback;
 
-  const tabs = [
-    ...(isPos || isVol ? [["inputs", "Inputs"] as const] : []),
-    ["style", "Style"] as const,
-    ...(spec.text ? [["text", "Text"] as const] : []),
-    ["coords", "Coordinates"] as const,
-    ["visibility", "Visibility"] as const,
-  ];
+  const TAB_LABEL: Record<SettingsTab, string> = { inputs: "Inputs", style: "Style", text: "Text", coords: "Coordinates", visibility: "Visibility" };
+  const tabs = tabKeys.map((k) => [k, TAB_LABEL[k]] as const);
   // Như tab Visibility của TV: mỗi đơn vị khung thời gian bật/tắt + khoảng từ–đến
   const visRange = (u: Unit, max: number) => d.visibility?.[u] ?? { on: true, from: 1, to: max };
   const setVis = (u: Unit, max: number, patch: Partial<{ on: boolean; from: number; to: number }>) => {
@@ -136,19 +169,25 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   {o.section && o.section !== all[i - 1]?.section && (
                     <div className="pb-1 pt-3 text-[11px] font-semibold tracking-wide text-[var(--muted)]">{o.section}</div>
                   )}
-                <Row label={o.label}>
-                  {"color" in o ? (
-                    <ColorPicker value={String(optOf(d, o.key) || d.color)} onChange={(c) => setOpt(o.key, c)} className="h-8 w-8 p-1" />
-                  ) : "choices" in o ? (
-                    <select className={input} value={String(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.value)}>
-                      {o.choices.map(([v, label]) => (
-                        <option key={v} value={v} className="text-black">{label}</option>
-                      ))}
-                    </select>
-                  ) : (
+                {"color" in o || "choices" in o ? (
+                  <Row label={o.label}>
+                    {"color" in o ? (
+                      <ColorPicker value={String(optOf(d, o.key) || d.color)} onChange={(c) => setOpt(o.key, c)} className="h-8 w-8 p-1" />
+                    ) : (
+                      <select className={input} value={String(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.value)}>
+                        {o.choices.map(([v, label]) => (
+                          <option key={v} value={v} className="text-black">{label}</option>
+                        ))}
+                      </select>
+                    )}
+                  </Row>
+                ) : (
+                  // Như TV: ô chọn nằm bên trái nhãn
+                  <label className="flex items-center gap-3 py-2 text-sm">
                     <input type="checkbox" className="h-4 w-4" checked={Boolean(optOf(d, o.key))} onChange={(e) => setOpt(o.key, e.target.checked)} />
-                  )}
-                </Row>
+                    {o.label}
+                  </label>
+                )}
                 </div>
               ));
 
@@ -363,30 +402,36 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                   onChange={(e) => setOpt("leverage", num(e.target.value, o.leverage))}
                 />
               </Row>
-              <Row label="Profit level (price)">
-                <input
-                  className={input}
-                  type="number"
-                  value={d.points[1].price}
-                  onChange={(e) =>
-                    setPoint(1, {
-                      price: num(e.target.value, d.points[1].price),
-                    })
-                  }
-                />
-              </Row>
-              <Row label="Stop level (price)">
-                <input
-                  className={input}
-                  type="number"
-                  value={d.points[3].price}
-                  onChange={(e) =>
-                    setPoint(3, {
-                      price: num(e.target.value, d.points[3].price),
-                    })
-                  }
-                />
-              </Row>
+              {/* Như TV: mỗi mức có Ticks (khoảng cách tới entry) và Price, sửa ô nào thì ô kia đổi theo */}
+              {([["PROFIT LEVEL", 1, 1], ["STOP LEVEL", 3, -1]] as const).map(([title, i, sign]) => {
+                const tick = api?.tickSize() || 0;
+                const dir = (d.type === "shortpos" ? -1 : 1) * sign; // chiều của mức so với entry
+                const ticks = tick > 0 ? Math.round(Math.abs(d.points[i].price - d.points[0].price) / tick) : 0;
+                return (
+                  <div key={title}>
+                    <div className="pb-1 pt-3 text-[11px] font-semibold tracking-wide text-[var(--muted)]">{title}</div>
+                    {tick > 0 && (
+                      <Row label="Ticks">
+                        <input
+                          className={input}
+                          type="number"
+                          min={1}
+                          value={ticks}
+                          onChange={(e) => setPoint(i, { price: d.points[0].price + dir * Math.max(1, Math.round(num(e.target.value, ticks))) * tick })}
+                        />
+                      </Row>
+                    )}
+                    <Row label="Price">
+                      <input
+                        className={input}
+                        type="number"
+                        value={d.points[i].price}
+                        onChange={(e) => setPoint(i, { price: num(e.target.value, d.points[i].price) })}
+                      />
+                    </Row>
+                  </div>
+                );
+              })}
               <Row label="QTY precision">
                 <select className={input} value={o.qtyPrecision} onChange={(e) => setOpt("qtyPrecision", e.target.value)}>
                   {[["default", "Default"], ["0", "Integer"], ...Array.from({ length: 10 }, (_, i) => [String(i + 1), `${i + 1} decimal${i ? "s" : ""}`])].map(([v, l]) => (
@@ -399,14 +444,31 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
 
           {tab === "style" && isPos && (
             <>
-              <Row label="Profit color">
-                <ColorPicker value={o.profit} onChange={(c) => setOpt("profit", c)} className="h-8 w-8 p-1" />
+              <Row label="Lines">
+                <span className="flex items-center gap-2">
+                  <ColorPicker value={o.lineColor} onChange={(c) => setOpt("lineColor", c)} className="h-8 w-8 p-1" />
+                  <select className={`${input} w-20`} value={o.lineWidth} onChange={(e) => setOpt("lineWidth", Number(e.target.value))}>
+                    {[1, 2, 3, 4].map((w) => (
+                      <option key={w} value={w} className="text-black">{w}px</option>
+                    ))}
+                  </select>
+                </span>
               </Row>
               <Row label="Stop color">
                 <ColorPicker value={o.stop} onChange={(c) => setOpt("stop", c)} className="h-8 w-8 p-1" />
               </Row>
-              <Row label="Text color">
-                <ColorPicker value={d.textColor ?? "#ffffff"} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-8 p-1" />
+              <Row label="Target color">
+                <ColorPicker value={o.profit} onChange={(c) => setOpt("profit", c)} className="h-8 w-8 p-1" />
+              </Row>
+              <Row label="Text">
+                <span className="flex items-center gap-2">
+                  <ColorPicker value={d.textColor ?? "#ffffff"} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-8 p-1" />
+                  <select className={`${input} w-20`} value={o.fontSize} onChange={(e) => setOpt("fontSize", Number(e.target.value))}>
+                    {[10, 11, 12, 14, 16, 20, 24, 28, 32, 40].map((n) => (
+                      <option key={n} value={n} className="text-black">{n}</option>
+                    ))}
+                  </select>
+                </span>
               </Row>
               <Row label="Fill opacity (%)">
                 <input
@@ -485,96 +547,137 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
             </>
           )}
 
-          {/* Tab Text như TV: (màu) <cỡ> B I · textarea · căn lề dọc / ngang */}
+          {/* Tab Text như TV: (màu) <cỡ> B I · textarea · căn lề · Background / Border / Text wrap tùy tool */}
           {tab === "text" && spec.text && (
             <>
               <div className="flex items-center gap-2 py-2">
-                <ColorPicker value={d.textColor ?? d.color} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-8 p-1" />
-                <select className={`${input} w-20`} value={Number(optOf(d, "fontSize"))} onChange={(e) => setOpt("fontSize", Number(e.target.value))}>
+                {!spec.text.noColor && (
+                  <ColorPicker value={d.textColor ?? spec.text.color ?? d.color} onChange={(c) => setD({ ...d, textColor: c })} className="h-8 w-8 p-1" />
+                )}
+                <select className={`${input} w-20`} value={textSize} onChange={(e) => setOpt("fontSize", Number(e.target.value))}>
                   {[10, 11, 12, 14, 16, 20, 24, 28, 32, 40].map((v) => (
                     <option key={v} value={v} className="text-black">{v}</option>
                   ))}
                 </select>
-                {(["bold", "italic"] as const).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    className={`h-8 w-8 rounded border border-[var(--border)] text-sm ${optOf(d, k) ? "bg-[var(--fg)] text-[var(--bg)]" : ""}`}
-                    style={{ fontWeight: k === "bold" ? 700 : 400, fontStyle: k === "italic" ? "italic" : "normal" }}
-                    onClick={() => setOpt(k, !optOf(d, k))}
-                  >
-                    {k === "bold" ? "B" : "I"}
-                  </button>
-                ))}
+                {!spec.text.noStyle &&
+                  (["bold", "italic"] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className={`h-8 w-8 rounded border border-[var(--border)] text-sm ${optOf(d, k) ? "bg-[var(--fg)] text-[var(--bg)]" : ""}`}
+                      style={{ fontWeight: k === "bold" ? 700 : 400, fontStyle: k === "italic" ? "italic" : "normal" }}
+                      onClick={() => setOpt(k, !optOf(d, k))}
+                    >
+                      {k === "bold" ? "B" : "I"}
+                    </button>
+                  ))}
               </div>
-              <textarea
-                className="w-full resize-y rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-                rows={4}
-                placeholder="Add text"
-                value={d.text ?? ""}
-                onChange={(e) => setD({ ...d, text: e.target.value })}
-              />
-              <Row label="Text alignment">
-                <span className="flex gap-2">
-                  <select className={`${input} w-24`} value={String(optOf(d, "vAlign"))} onChange={(e) => setOpt("vAlign", e.target.value)}>
-                    {[["top", "Top"], ["middle", spec.text.kind === "box" ? "Middle" : "Center"], ["bottom", "Bottom"]].map(([v, l]) => (
-                      <option key={v} value={v} className="text-black">{l}</option>
-                    ))}
-                  </select>
-                  <select className={`${input} w-24`} value={String(optOf(d, "hAlign"))} onChange={(e) => setOpt("hAlign", e.target.value)}>
-                    {[["left", "Left"], ["center", "Center"], ["right", "Right"]].map(([v, l]) => (
-                      <option key={v} value={v} className="text-black">{l}</option>
-                    ))}
-                  </select>
-                </span>
-              </Row>
+              {!spec.text.noText && (
+                <textarea
+                  ref={textRef}
+                  autoFocus
+                  className="w-full resize-y rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                  rows={4}
+                  placeholder="Add text"
+                  value={d.text ?? ""}
+                  onChange={(e) => setD({ ...d, text: e.target.value })}
+                />
+              )}
+              {!spec.text.fixed && (
+                <Row label="Text alignment">
+                  <span className="flex gap-2">
+                    <select className={`${input} w-24`} value={String(optOf(d, "vAlign"))} onChange={(e) => setOpt("vAlign", e.target.value)}>
+                      {[["top", "Top"], ["middle", spec.text.kind === "box" ? "Middle" : "Center"], ["bottom", "Bottom"]].map(([v, l]) => (
+                        <option key={v} value={v} className="text-black">{l}</option>
+                      ))}
+                    </select>
+                    <select className={`${input} w-24`} value={String(optOf(d, "hAlign"))} onChange={(e) => setOpt("hAlign", e.target.value)}>
+                      {[["left", "Left"], ["center", "Center"], ["right", "Right"]].map(([v, l]) => (
+                        <option key={v} value={v} className="text-black">{l}</option>
+                      ))}
+                    </select>
+                  </span>
+                </Row>
+              )}
+              {/* Background: "main" = màu chính của hình (Callout, Comment); còn lại ô bật + màu riêng */}
+              {spec.text.bg === "main" && (
+                <Row label="Background">
+                  <ColorPicker value={d.color} onChange={(c) => setD({ ...d, color: c })} className="h-8 w-8 p-1" />
+                </Row>
+              )}
+              {typeof spec.text.bg === "object" && (
+                <label className="flex items-center gap-3 py-2 text-sm">
+                  <input type="checkbox" className="h-4 w-4" checked={Boolean(optOf(d, "background"))} onChange={(e) => setOpt("background", e.target.checked)} />
+                  <span className="flex-1">Background</span>
+                  <ColorPicker value={String(optOf(d, "backgroundColor"))} onChange={(c) => setOpt("backgroundColor", c)} className="h-8 w-8 p-1" />
+                </label>
+              )}
+              {spec.text.border &&
+                (spec.text.border.always ? (
+                  <Row label="Border">
+                    <ColorPicker value={String(optOf(d, "borderColor") || d.color)} onChange={(c) => setOpt("borderColor", c)} className="h-8 w-8 p-1" />
+                  </Row>
+                ) : (
+                  <label className="flex items-center gap-3 py-2 text-sm">
+                    <input type="checkbox" className="h-4 w-4" checked={Boolean(optOf(d, "border"))} onChange={(e) => setOpt("border", e.target.checked)} />
+                    <span className="flex-1">Border</span>
+                    <ColorPicker value={String(optOf(d, "borderColor"))} onChange={(c) => setOpt("borderColor", c)} className="h-8 w-8 p-1" />
+                  </label>
+                ))}
+              {spec.text.wrap && (
+                <label className="flex items-center gap-3 py-2 text-sm">
+                  <input type="checkbox" className="h-4 w-4" checked={Boolean(optOf(d, "wrap"))} onChange={(e) => setOpt("wrap", e.target.checked)} />
+                  Text wrap
+                </label>
+              )}
             </>
           )}
 
           {tab === "coords" &&
-            d.points.map((p, i) => (
-              <div
-                key={i}
-                className="border-b border-[var(--border)] py-2 last:border-0"
-              >
-                <div className="pb-1 text-xs font-semibold text-[var(--muted)]">
-                  POINT {i + 1}
+            d.points.map((p, i) => {
+              const timeOnly = spec.axes === "time";
+              const priceOnly = spec.axes === "price";
+              return (
+                <div key={i} className="flex items-center justify-between gap-3 py-2">
+                  <span className="text-sm">{`#${i + 1} (${[priceOnly ? "price" : timeOnly ? "" : "price", priceOnly ? "" : "bar"].filter(Boolean).join(", ")})`}</span>
+                  <span className="flex gap-2">
+                    {!timeOnly && (
+                      <input
+                        className={input} style={{ width: 110 }}
+                        type="number"
+                        value={+p.price.toFixed(api?.digits() ?? 8)}
+                        onChange={(e) => setPoint(i, { price: num(e.target.value, p.price) })}
+                      />
+                    )}
+                    {!priceOnly && (
+                      <input
+                        className={input} style={{ width: 90 }}
+                        type="number"
+                        step={1}
+                        value={api ? api.barIndexAt(p.time) : 0}
+                        onChange={(e) => {
+                          const t = api?.timeAtBar(Math.round(num(e.target.value, api.barIndexAt(p.time))));
+                          if (t != null) setPoint(i, { time: t });
+                        }}
+                      />
+                    )}
+                  </span>
                 </div>
-                <Row label="Price">
-                  <input
-                    className={input}
-                    type="number"
-                    value={p.price}
-                    onChange={(e) =>
-                      setPoint(i, { price: num(e.target.value, p.price) })
-                    }
-                  />
-                </Row>
-                <Row label="Time">
-                  <input
-                    className={`${input} w-52`}
-                    type="datetime-local"
-                    value={toLocal(p.time)}
-                    onChange={(e) => {
-                      const t = new Date(e.target.value).getTime() / 1000;
-                      if (Number.isFinite(t)) setPoint(i, { time: t });
-                    }}
-                  />
-                </Row>
-              </div>
-            ))}
+              );
+            })}
 
+          {/* Như TV: [x] Đơn vị  <từ>  ——o——o——  <đến> (Ticks / Ranges chỉ có ô bật) */}
           {tab === "visibility" &&
             UNITS.map(({ id, label, max }) => {
               const r = visRange(id, max);
               return (
                 <div key={id} className="flex items-center gap-3 py-2">
-                  <label className="flex w-28 items-center gap-2 text-sm">
+                  <label className="flex w-28 shrink-0 items-center gap-2 text-sm">
                     <input type="checkbox" className="h-4 w-4" checked={r.on} onChange={(e) => setVis(id, max, { on: e.target.checked })} />
                     {label}
                   </label>
                   <input
-                    className={`${input} w-20`}
+                    className={input} style={{ width: 64 }}
                     type="number"
                     min={1}
                     max={max}
@@ -582,9 +685,9 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                     value={r.from}
                     onChange={(e) => setVis(id, max, { from: num(e.target.value, r.from) })}
                   />
-                  <span className="text-[var(--muted)]">–</span>
+                  <RangeSlider min={1} max={max} from={r.from} to={r.to} disabled={!r.on} onChange={(from, to) => setVis(id, max, { from, to })} />
                   <input
-                    className={`${input} w-20`}
+                    className={input} style={{ width: 64 }}
                     type="number"
                     min={1}
                     max={max}
@@ -604,7 +707,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
               className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]"
               onClick={() => setTemplateMenu(!templateMenu)}
             >
-              Mặc định ▾
+              Template ▾
             </button>
             {templateMenu && (
               <>
@@ -627,7 +730,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                       setTemplateMenu(false);
                     }}
                   >
-                    Lưu làm mặc định
+                    Save as default
                   </button>
                   <button
                     type="button"
@@ -646,7 +749,7 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
                       setTemplateMenu(false);
                     }}
                   >
-                    Khôi phục gốc
+                    Reset to factory default
                   </button>
                 </div>
               </>
@@ -680,13 +783,14 @@ function Dialog({ init, onClose }: { init: Drawing; onClose: () => void }) {
 }
 
 export default function DrawingSettings() {
-  const { settingsOpen, selectedId, drawings } = useDrawingStore();
+  const { settingsOpen, settingsTab, selectedId, drawings } = useDrawingStore();
   const d = drawings.find((x) => x.id === selectedId);
   if (!settingsOpen || !d || !SPEC[d.type]) return null;
   return (
     <Dialog
       key={d.id}
       init={d}
+      startTab={settingsTab}
       onClose={() => useDrawingStore.setState({ settingsOpen: false })}
     />
   );

@@ -200,7 +200,7 @@ describe("dao động mới", () => {
     const out = run("ao").ao;
     const hl2 = ta.source(bars, "hl2");
     same(out.values, ta.sub(ta.sma(hl2, 5), ta.sma(hl2, 34)));
-    for (const i of [50, 120, 300]) expect(out.colors![i]).toBe(out.values[i] > out.values[i - 1] ? "#089981" : "#f23645");
+    for (const i of [50, 120, 300]) expect(out.colors![i]).toBe(out.values[i] > out.values[i - 1] ? "#009688" : "#f44336"); // palette AO của TV: tăng #009688, giảm #f44336
   });
   it("Momentum và ROC", () => {
     same(run("mom").mom.values, ta.mom(close, 10));
@@ -213,5 +213,76 @@ describe("dao động mới", () => {
   });
   it("RSI, Stochastic có đường giữa 50 mờ", () => {
     for (const id of ["rsi", "stoch", "stochrsi", "mfi"]) expect(byId(id).levels!.find((l) => l.id === "middle")?.value, id).toBe(50);
+  });
+});
+
+describe("mặc định đo trên TV (2026-10-25)", () => {
+  const def = (id: string) => Object.fromEntries(byId(id).inputs.map((i) => [i.key, i.default]));
+  const colors = (id: string) => Object.fromEntries(byId(id).plots.map((p) => [p.id, p.color]));
+
+  it("MA: length 9 (SMMA 7, VWMA 20), màu #2962ff; SMMA và HMA không có Offset", () => {
+    expect(def("sma")).toMatchObject({ length: 9, src: "close", offset: 0, smoothType: "None", smoothLength: 14, smoothMult: 2 });
+    expect(def("ema").length).toBe(9);
+    expect(def("wma").length).toBe(9);
+    expect(def("smma").length).toBe(7);
+    expect(def("vwma").length).toBe(20);
+    expect(colors("ema").ema).toBe("#2962ff");
+    expect(colors("wma").wma).toBe("#2962ff");
+    expect("offset" in def("smma")).toBe(false);
+    expect("offset" in def("hma")).toBe(false);
+  });
+
+  it("Bollinger: basis xanh, upper đỏ, lower xanh lá; nền 5%", () => {
+    expect(colors("bb")).toEqual({ basis: "#2962ff", upper: "#f23645", lower: "#089981" });
+    expect(byId("bb").fills![0].color).toBe("#2196f30d");
+  });
+
+  it("Nhóm Smoothing: RSI và CCI bật SMA 14, OBV / SMA / EMA là None; SMA + Bollinger Bands thêm 2 dải", () => {
+    expect(def("rsi")).toMatchObject({ length: 14, smoothType: "SMA", smoothLength: 14, smoothMult: 2 });
+    expect(def("cci").smoothType).toBe("SMA");
+    expect(def("obv").smoothType).toBe("None");
+    const rsi = run("rsi");
+    expect(rsi.sm.values[100]).toBeCloseTo(ta.sma(rsi.rsi.values, 14)[100], 9);
+    expect(run("rsi", { smoothType: "None" }).sm.values.every(Number.isNaN)).toBe(true);
+    const bb = run("rsi", { smoothType: "SMA + Bollinger Bands", smoothLength: 20, smoothMult: 2 });
+    const sd = ta.stdev(bb.rsi.values, 20);
+    expect(bb.smUpper.values[150]).toBeCloseTo(bb.sm.values[150] + 2 * sd[150], 9);
+    expect(bb.smLower.values[150]).toBeCloseTo(bb.sm.values[150] - 2 * sd[150], 9);
+    const ema = run("rsi", { smoothType: "EMA", smoothLength: 9 });
+    same(ema.sm.values, ta.ema(ema.rsi.values, 9));
+  });
+
+  it("Stochastic: %K Length 14, %K Smoothing 1, %D Smoothing 3 -> %K là stoch thô", () => {
+    expect(def("stoch")).toMatchObject({ k: 14, smooth: 1, d: 3 });
+    const hh = ta.highest(high, 14), ll = ta.lowest(low, 14);
+    const raw = bars.map((b, i) => (100 * (b.c - ll[i])) / (hh[i] - ll[i]));
+    same(run("stoch").k.values, raw);
+  });
+
+  it("MACD: thứ tự input / plot như TV, đổi loại MA", () => {
+    expect(byId("macd").inputs.map((i) => i.label)).toEqual(["Source", "Fast length", "Slow length", "Signal length", "Oscillator MA type", "Signal MA type"]);
+    expect(byId("macd").plots.map((p) => p.title)).toEqual(["Histogram", "MACD", "Signal"]);
+    const sma = run("macd", { oscMa: "SMA", signalMa: "SMA" });
+    const line = ta.sub(ta.sma(close, 12), ta.sma(close, 26));
+    same(sma.macd.values, line);
+    same(sma.signal.values, ta.sma(line, 9));
+  });
+
+  it("ATR: Smoothing RMA / SMA / EMA / WMA; MFI không có Source; ADX #f23645, DMI ADX #f50057", () => {
+    same(run("atr").atr.values, ta.atr(bars, 14));
+    same(run("atr", { smoothing: "SMA" }).atr.values, ta.sma(ta.trueRange(bars), 14));
+    same(run("atr", { smoothing: "WMA", length: 10 }).atr.values, ta.wma(ta.trueRange(bars), 10));
+    expect(byId("mfi").inputs.map((i) => i.key)).toEqual(["length"]);
+    expect(colors("adx").adx).toBe("#f23645");
+    expect(colors("dmi")).toEqual({ adx: "#f50057", plus: "#2962ff", minus: "#ff6d00" });
+  });
+
+  it("Supertrend / Pivots / VWAP: màu và danh sách khung như TV", () => {
+    expect(colors("supertrend").down).toBe("#f23645");
+    expect(byId("ichimoku").plots.find((p) => p.id === "leadB")?.color).toBe("#ef9a9a");
+    expect(byId("pivots").items!.every((i) => i.color === "#fb8c00")).toBe(true);
+    const frames = byId("pivots").inputs.find((i) => i.key === "frame");
+    expect(frames && "options" in frames && frames.options).toEqual(["Auto", "Daily", "Weekly", "Monthly", "Quarterly", "Yearly", "Biyearly", "Triyearly", "Quinquennially", "Decennially"]);
+    expect(colors("vwap").upper3).toBe("#089981");
   });
 });
