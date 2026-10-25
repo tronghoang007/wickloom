@@ -4,7 +4,6 @@ import { useDrawingStore } from "@/drawings/store";
 import { fetchSymbols } from "@/lib/api";
 import { useSettingsStore } from "@/store/settings";
 import { toggleReplay, useReplayStore } from "@/replay/store";
-import { useIndicatorStore } from "@/indicators/store";
 import { useChartStore, type ChartType } from "@/store/chart";
 import { useEffect, useState, type ReactNode } from "react";
 import {
@@ -13,7 +12,6 @@ import {
   BarsIcon,
   CameraI,
   Candles,
-  FootprintI,
   CompareI,
   FullscreenI,
   Heikin,
@@ -41,9 +39,6 @@ const CHART_TYPES: { v: ChartType; label: string; icon: ReactNode }[] = [
   { v: "area", label: "Area", icon: <AreaIcon /> },
   { v: "heikin", label: "Heikin Ashi", icon: <Heikin /> },
 ];
-
-/** "Volume footprint" không phải một ChartType: là nến + indicator `footprint` (nến chính ẩn đi, indicator tự vẽ nến và các ô theo row giá). */
-const FOOTPRINT = { label: "Volume footprint", icon: <FootprintI /> };
 
 const btn =
   "flex h-[38px] items-center gap-1.5 rounded px-2 text-sm hover:bg-[var(--hover)] disabled:opacity-55 disabled:hover:bg-transparent";
@@ -102,8 +97,6 @@ export default function Toolbar() {
   const api = useDrawingStore((s) => s.api);
   const replayOn = useReplayStore((s) => s.active || s.selecting);
   const [typeOpen, setTypeOpen] = useState(false);
-  const { list, add, remove } = useIndicatorStore();
-  const fp = list.filter((i) => i.id === "footprint");
 
   useEffect(() => {
     const load = () =>
@@ -115,7 +108,7 @@ export default function Toolbar() {
     return () => clearInterval(id);
   }, [set]);
 
-  const cur = fp.length > 0 ? FOOTPRINT : CHART_TYPES.find((c) => c.v === chartType)!;
+  const cur = CHART_TYPES.find((c) => c.v === chartType)!;
   const fullscreen = () =>
     document.fullscreenElement
       ? document.exitFullscreen()
@@ -143,7 +136,6 @@ export default function Toolbar() {
           <button
             key={c.v}
             onClick={() => {
-              for (const i of fp) remove(i.uid); // chọn kiểu nến khác thì bỏ Volume footprint
               set({ chartType: c.v });
               setTypeOpen(false);
             }}
@@ -152,16 +144,6 @@ export default function Toolbar() {
             {c.icon} {c.label}
           </button>
         ))}
-        <button
-          onClick={() => {
-            set({ chartType: "candles" });
-            if (fp.length === 0) add("footprint");
-            setTypeOpen(false);
-          }}
-          className={`flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm hover:bg-[var(--hover)] ${fp.length > 0 ? "text-[var(--accent-text)]" : ""}`}
-        >
-          {FOOTPRINT.icon} {FOOTPRINT.label}
-        </button>
       </Menu>
       {sep}
       <IndicatorsDialog className={btn} icon={<IndicatorsI />} />

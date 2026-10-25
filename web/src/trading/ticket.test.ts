@@ -38,9 +38,17 @@ describe("đóng bảng đặt lệnh", () => {
     expect(useTicketStore.getState().draft).not.toBeNull();
     expect(useRailStore.getState().open).toBeNull();
   });
+  it("mở bản nháp mới khi chưa chọn lệnh nào cũng focus bản nháp (lệnh đã đặt mờ đi)", () => {
+    useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "market" });
+    expect(useTradeFocus.getState().owner).toBe("draft");
+  });
+  it("đặt xong bản nháp thì bỏ focus để các lệnh hết mờ", () => {
+    useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "market" });
+    useTicketStore.getState().settle({ side: "buy", mode: "market" });
+    expect(useTradeFocus.getState().owner).toBeNull();
+  });
   it("đóng bản nháp cũng bỏ focus", () => {
     useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "market" });
-    useTradeFocus.getState().set("draft");
     useTicketStore.getState().close();
     expect(useTradeFocus.getState().owner).toBeNull();
     expect(useTicketStore.getState().draft).toBeNull();

@@ -52,7 +52,7 @@ export const useTicketStore = create<State>()((set) => ({
     const spec = lotSpec(sym, account?.max_lot);
     const digits = seed.digits ?? sym?.digits ?? 5;
     useRailStore.getState().openOrder(); // bảng đặt lệnh nằm ở thanh bên phải: mở thanh ra
-    useTradeFocus.getState().set(null); // focus còn sót của lệnh đã đặt sẽ làm bản nháp mới bị mờ như "lệnh khác" (nút kéo TP / SL gần như vô hình)
+    useTradeFocus.getState().set("draft"); // focus bản nháp mới: các lệnh đã đặt mờ đi như khi chọn một lệnh khác; để nguyên focus cũ thì chính bản nháp bị mờ (nút kéo TP / SL gần như vô hình)
     set((s) => ({
       id: s.id + 1,
       rest: null,
@@ -71,7 +71,10 @@ export const useTicketStore = create<State>()((set) => ({
     }));
   },
   patch: (p) => set((s) => (s.draft ? { draft: { ...s.draft, ...p } } : s)),
-  settle: (rest) => set({ draft: null, rest, modifyOwner: null }),
+  settle: (rest) => {
+    if (useTradeFocus.getState().owner === "draft") useTradeFocus.getState().set(null); // bản nháp đã đặt xong: các lệnh còn lại hết mờ
+    set({ draft: null, rest, modifyOwner: null });
+  },
   close: () => {
     useTradeFocus.getState().set(null); // đóng bảng (×, Esc) cũng bỏ chọn lệnh trên chart: không để lệnh khác bị mờ mà không còn bảng nào
     useRailStore.getState().closeOrder(); // trả thanh về panel trước đó, không đóng cả thanh

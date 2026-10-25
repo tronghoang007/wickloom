@@ -94,10 +94,10 @@ describe("đặt lệnh xong: bảng đặt lệnh ở thanh bên phải KHÔNG 
 });
 
 describe("bản nháp mới sau khi chọn một lệnh đã đặt", () => {
-  it("mở bản nháp mới thì bỏ focus của lệnh cũ (nếu không bản nháp bị mờ như lệnh khác)", () => {
+  it("mở bản nháp mới thì focus chuyển sang bản nháp: lệnh cũ mờ đi, bản nháp không bị mờ như lệnh khác", () => {
     useTradeFocus.getState().set("order:123");
     useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "market" });
-    expect(useTradeFocus.getState().owner).toBeNull();
+    expect(useTradeFocus.getState().owner).toBe("draft");
   });
 });
 
