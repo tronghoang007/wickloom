@@ -57,6 +57,8 @@ type Built = { key: string; c: Ctx; shapes: Shape[] };
 type Mods = { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean };
 
 const LOWER_TFS = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]; // như danh sách khung của TV (backend không có M3)
+const PROFILE_RETRY_MS = 10_000; // tải nến khung nhỏ của VP lỗi (mạng chớp): đợi chừng này rồi mới thử lại, khỏi gọi dồn khi mạng đứt
+const isProfile = (d: Drawing) => d.type === "frvp" || d.type === "avp";
 const HANDLE_R = 8;
 const DRAG_MIN = 5; // px: nhả chuột xa hơn chỗ nhấn mới tính là nhấn-kéo-thả
 const AXIS_BG = "#2962ff";
@@ -78,7 +80,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private cache = new WeakMap<Drawing, Built>();
   private profileBars = new Map<string, { bars: Bar[]; step: number }>(); // nến khung nhỏ của VP + giây mỗi nến
   private profileKeys = new Map<string, string>();
-  private profileVer = 0;
+  private profileFailed = new Map<string, { key: string; at: number }>(); // lần tải nến khung nhỏ lỗi gần nhất của từng hình
+  private profileVer = 0; // đổi khi dữ liệu của VP đổi (nến khung nhỏ, tick): chỉ FRVP / AVP dựng lại, hình khác giữ shape cũ
   // "1 tick" của FRVP / AVP: nến delta tick (EA gửi lịch sử tick, chỉ để biết phút nào đã có tick) và histogram giá gom theo row, dùng chung cách với indicator
   private tickCover = new LowerFeed((symbol, tf, from, to, limit) => fetchBars(symbol, tf, to, limit, from), () => this.tickChanged(), {
     backfill: async (symbol, tf, count, before) => (await triggerBackfillAt(symbol, tf, count, before)).ok,
@@ -449,7 +452,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     // Giá ở 3 điểm trên trục: bắt được cả cuộn/zoom giá lẫn đổi linear <-> log
     const key = [
       w, h, r?.from, r?.to, s?.coordinateToPrice(0), s?.coordinateToPrice(h / 2), s?.coordinateToPrice(h),
-      bars.length, bars[0]?.t, last?.t, last?.h, last?.l, last?.c, step, this.o.getDigits(), this.o.getTickSize(), this.profileVer,
+      bars.length, bars[0]?.t, last?.t, last?.h, last?.l, last?.c, step, this.o.getDigits(), this.o.getTickSize(),
     ].join("|");
     return { w, h, bars, step, key };
   }
@@ -509,7 +512,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   // Shape của drawing đã lưu chỉ build lại khi drawing / khung nhìn / hover / chọn đổi.
   // Trước đây mỗi frame và mỗi lần di chuột đều build lại tất cả (VP, VWAP lặp toàn bộ nến).
   private built(d: Drawing, v: View): Built | null {
-    const key = `${v.key}|${d.id === this.hoveredId}|${d.id === this.st.selectedId}|${this.dragging(d)}|${this.st.editing?.id === d.id}`;
+    const key = `${v.key}|${d.id === this.hoveredId}|${d.id === this.st.selectedId}|${this.dragging(d)}|${this.st.editing?.id === d.id}|${isProfile(d) ? this.profileVer : ""}`;
     const hit = this.cache.get(d);
     if (hit?.key === key) return hit;
     const c = this.ctx(d, v);
@@ -1222,6 +1225,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.unlockChart();
     this.profileBars.clear();
     this.profileKeys.clear();
+    this.profileFailed.clear();
     this.profileVer++;
     this.setSt({ drawings: [], selectedId: null });
     this.refresh();
@@ -1288,6 +1292,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     const key = `${base}|${to}`;
     const prev = this.profileKeys.get(d.id);
     if (prev === key) return;
+    const failed = this.profileFailed.get(d.id);
+    if (failed?.key === key && Date.now() < failed.at + PROFILE_RETRY_MS) return; // vừa lỗi: chưa thử lại ngay
     this.profileKeys.set(d.id, key);
     // Chỉ dài thêm đuôi (có nến mới): giữ dữ liệu cũ tới khi tải xong, khỏi nháy về nến chart
     if (!prev?.startsWith(`${base}|`)) this.setProfileBars(d.id, undefined);
@@ -1302,11 +1308,16 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
           break;
         }
       }
+      this.profileFailed.delete(d.id);
       if (fine) this.setProfileBars(d.id, fine.bars, fine.step);
       else this.setProfileBars(d.id, undefined);
       this.refresh();
     })().catch(() => {
-      if (this.profileKeys.get(d.id) === key) this.refresh();
+      if (this.profileKeys.get(d.id) !== key) return;
+      // Bỏ khoá để lần refresh sau (hết PROFILE_RETRY_MS) tải lại; không thì khoá cũ chặn mãi tới khi reload / đổi khung
+      this.profileKeys.delete(d.id);
+      this.profileFailed.set(d.id, { key, at: Date.now() });
+      this.refresh();
     });
   }
 
@@ -1318,6 +1329,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.doc = acquireDoc(symbol, this, useLayoutStore.getState().layoutId); // chart khác đang mở symbol này thì dùng chung doc (đã nạp sẵn)
     this.profileBars.clear();
     this.profileKeys.clear();
+    this.profileFailed.clear();
     this.profileVer++;
     this.mode = { k: "idle" };
     this.unlockChart();

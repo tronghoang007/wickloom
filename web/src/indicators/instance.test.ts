@@ -107,7 +107,7 @@ describe("plotColor / withPlotColor / inputsText", () => {
     expect(inputsText(def, inst)).toBe("14 close SMA 14 2"); // RSI bật SMA 14 mặc định như TV
     expect(inputsText(byId("sma"), newInstance("sma"))).toBe("9 close 0 None 14 2");
     expect(inputsText(byId("vwap"), { ...newInstance("vwap"), inputs: { anchor: "Week" } })).toBe("Week hlc3 0"); // Session start và các ô của band không in lên legend
-    expect(inputsText(byId("cvd"), newInstance("cvd"))).toBe("1D Time 1");
+    expect(inputsText(byId("cvd"), newInstance("cvd"))).toBe("1D");
   });
 });
 

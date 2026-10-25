@@ -9,7 +9,7 @@ import type {
     SeriesType,
     Time,
 } from "lightweight-charts";
-import type { LabelSize, LabelStyle, LineStyleName, ObjLine, ObjectSet } from "../schema";
+import type { LabelSize, LabelStyle, LineStyleName, ObjBubble, ObjLine, ObjectSet } from "../schema";
 
 /** Cỡ chữ (px) của `size.*` trong Pine: xấp xỉ, chỉnh lại khi so với TV. */
 export const LABEL_PX: Record<LabelSize, number> = { tiny: 8, small: 10, normal: 12, large: 16, huge: 24 };
@@ -30,6 +30,28 @@ export function extendSegment(s: Seg, ext: NonNullable<ObjLine["extend"]>, left:
     b.x = right;
   }
   return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+}
+
+/** Toạ độ ngang của chỉ số nến lẻ `v`: LWC chỉ đổi được chỉ số nguyên (số lẻ trả về 0, tức mép trái), nên nội suy giữa hai chỉ số nguyên liền kề (`at` = đổi chỉ số nguyên ra toạ độ). */
+export function fractionalX(at: (i: number) => number | null, v: number): number | null {
+  const i = Math.floor(v);
+  const a = at(i);
+  if (v === i) return a;
+  const b = at(i + 1);
+  return a === null || b === null ? null : a + (b - a) * (v - i);
+}
+
+/** Khung chữ: tâm (x, y) và kích thước, cùng đơn vị. */
+export type TextBox = { x: number; y: number; w: number; h: number };
+
+/** Chọn nhãn nào được vẽ: duyệt theo thứ tự ưu tiên (bubble lớn trước), bỏ nhãn đè lên một nhãn đã chọn, để các bubble chồng nhau vẫn còn một số đọc được. `true` = vẽ. */
+export function pickLabels(boxes: TextBox[]): boolean[] {
+  const kept: TextBox[] = [];
+  return boxes.map((b) => {
+    const hit = kept.some((k) => Math.abs(k.x - b.x) * 2 < k.w + b.w && Math.abs(k.y - b.y) * 2 < k.h + b.h);
+    if (!hit) kept.push(b);
+    return !hit;
+  });
 }
 
 export type LabelLayout = {
@@ -172,8 +194,9 @@ export class ObjectsPrimitive implements ISeriesPrimitive<Time> {
             ctx.fillStyle = l.color;
             ctx.fillText(l.text, lay.textX, lay.textY);
           }
+          const numbers: { b: ObjBubble; x: number; y: number }[] = [];
           for (const b of d.bubbles ?? []) {
-            const x = X(b.x), y = Y(b.y);
+            const x = fractionalX(X, b.x), y = Y(b.y); // x lẻ: bubble nằm đúng phút trong nến
             if (x === null || y === null || x < -b.r || x > bitmapSize.width / hpr + b.r) continue;
             const r = b.r * hpr;
             ctx.beginPath();
@@ -185,13 +208,22 @@ export class ObjectsPrimitive implements ISeriesPrimitive<Time> {
               ctx.strokeStyle = b.border;
               ctx.stroke();
             }
-            if (b.text) {
-              // số luôn được vẽ với cỡ chữ cố định (Text Size như DeepCharts), bubble nhỏ hơn chữ thì chữ tràn ra ngoài
-              ctx.font = `${Math.round((b.textSize ?? 11) * vpr)}px -apple-system, "Trebuchet MS", sans-serif`;
-              ctx.fillStyle = b.textColor ?? "#ffffff";
-              ctx.fillText(b.text, x * hpr, y * vpr);
-            }
+            if (b.text) numbers.push({ b, x: x * hpr, y: y * vpr });
           }
+          // Số vẽ sau mọi vòng tròn (không bị bubble nhỏ hơn nằm trên che) với cỡ chữ cố định (Text Size như DeepCharts), bubble nhỏ hơn chữ thì chữ tràn ra ngoài;
+          // bubble chồng nhau (phút khác nhau cùng row) chỉ giữ số của bubble lớn nhất
+          const fonts = numbers.map(({ b }) => `${Math.round((b.textSize ?? 11) * vpr)}px -apple-system, "Trebuchet MS", sans-serif`);
+          const boxes = numbers.map(({ b, x, y }, i) => {
+            ctx.font = fonts[i];
+            return { x, y, w: ctx.measureText(b.text ?? "").width, h: (b.textSize ?? 11) * vpr };
+          });
+          const show = pickLabels(boxes);
+          numbers.forEach(({ b, x, y }, i) => {
+            if (!show[i]) return;
+            ctx.font = fonts[i];
+            ctx.fillStyle = b.textColor ?? "#ffffff";
+            ctx.fillText(b.text ?? "", x, y);
+          });
         });
       },
     }),

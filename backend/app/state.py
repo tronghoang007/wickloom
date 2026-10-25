@@ -59,6 +59,27 @@ def _on_gap(symbol: str, gap_seconds: int) -> None:
         _gap_seeding[(symbol, tf)] = now
         request_backfill(symbol, tf, min(500, gap_seconds // TF_SECONDS[tf] + 3))
     tick_live.reset(symbol)  # delta theo tick mất tick trong khoảng đứt: tính lại từ lịch sử tick của EA
+    _backfill_tick_gap(symbol, gap_seconds, now)
+
+
+# Lịch sử tick (tf "TD") của khoảng đứt: EA tính từng đoạn TICK_GAP_CHUNK phút (tải / gom tick nặng, như web khi lấp đầu dữ liệu), tối đa TICK_GAP_MAX phút gần nhất.
+# Máy ngủ / EA mất kết nối chỉ làm đứt luồng tick chứ MT5 vẫn lấy lại được tick của broker, không bù thì CVD / Big Trades / profile tick có lỗ vĩnh viễn ở đó.
+TICK_GAP_CHUNK = 360
+TICK_GAP_MAX = 1440
+
+
+def _backfill_tick_gap(symbol: str, gap_seconds: int, now: float) -> None:
+    """Xin EA tick của khoảng đứt `gap_seconds` giây (cộng 3 phút dư), mới → cũ; chặn gửi lặp cùng symbol trong 30s."""
+    key = (symbol, tickdelta.TICK_DELTA_TF)
+    if now - _gap_seeding.get(key, 0) < 30:
+        return
+    _gap_seeding[key] = now
+    minutes, before = min(TICK_GAP_MAX, gap_seconds // 60 + 3), int(now)
+    while minutes > 0:
+        n = min(TICK_GAP_CHUNK, minutes)
+        request_backfill(symbol, tickdelta.TICK_DELTA_TF, n, before=before)
+        minutes -= n
+        before -= n * 60
 
 
 aggregator = Aggregator(bars.last, _on_update, _on_close, _on_unseeded, _on_gap)

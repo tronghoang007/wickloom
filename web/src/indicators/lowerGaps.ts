@@ -29,12 +29,12 @@ function lowerBound(bars: Bar[], t: number): number {
 
 /** Lỗ hổng bên trong dữ liệu (kết thúc sau `from`), mới → cũ. MT5 không tạo nến khi không có tick và thị trường nghỉ (nghỉ giữa ngày, cuối tuần)
  *  cũng để lại khoảng trống, nên chỉ coi là lỗ khi khung thô hơn (`oracle`) có một nến nằm trọn trong chỗ trống (thị trường mở lúc đó). */
-export function holeGaps(bars: Bar[], step: number, from: number, oracle: Bar[], oracleStep: number): Gap[] {
+export function holeGaps(bars: Bar[], step: number, from: number, oracle: Bar[], oracleStep: number, minSteps = 1): Gap[] {
   const out: Gap[] = [];
   for (let i = Math.max(1, lowerBound(bars, from + 1)); i < bars.length; i++) {
     const a = bars[i - 1].t + step; // nến mịn đầu tiên bị thiếu
     const b = bars[i].t;
-    if (b - a < oracleStep) continue;
+    if (b - a < Math.max(oracleStep, minSteps * step)) continue; // `minSteps`: lỗ ngắn hơn chừng này nến mịn không tính (tick delta: phút chỉ có tick cùng giá không có nến TD)
     const o = oracle[lowerBound(oracle, a)];
     if (o && o.t + oracleStep <= b) out.push({ kind: "hole", from: a, to: b, before: b, bars: Math.round((b - a) / step), key: `hole:${b}` });
   }

@@ -1,6 +1,6 @@
 import type { Bar } from "@/lib/api";
 import type { CalendarOpts } from "./calendar";
-import type { Profile, TickSource } from "@/volumeProfile/compute";
+import type { LineKind, Profile, TickSource } from "@/volumeProfile/compute";
 
 export type { TickSource };
 import type { LowerNeed } from "./lower";
@@ -69,12 +69,14 @@ export type LabelStyle = "none" | "up" | "down" | "left" | "right" | "center";
 export type LabelSize = "tiny" | "small" | "normal" | "large" | "huge";
 export type ObjLabel = { x: number; y: number; text: string; color: string; bg?: string; style?: LabelStyle; size?: LabelSize };
 export type ObjBox = { x1: number; y1: number; x2: number; y2: number; bg?: string; border?: string; borderWidth?: number; borderStyle?: LineStyleName; extendRight?: boolean };
-/** Bubble tròn (Big Trades): tâm ở (x, y), bán kính `r` là px nên không đổi theo zoom; `text` (nếu có) vẽ giữa bubble với cỡ `textSize` px (mặc định 11), bubble nhỏ hơn chữ thì chữ tràn ra ngoài. */
+/** Bubble tròn (Big Trades): tâm ở (x, y) với x là chỉ số nến (lẻ = giữa hai nến: Big Trades đặt theo phút trong nến), bán kính `r` là px nên không đổi theo zoom; `text` (nếu có) vẽ giữa bubble với cỡ `textSize` px (mặc định 11),
+ *  bubble nhỏ hơn chữ thì chữ tràn ra ngoài, số của bubble bị bubble lớn hơn đè lên thì không vẽ. */
 export type ObjBubble = { x: number; y: number; r: number; bg: string; border?: string; borderWidth?: number; text?: string; textColor?: string; textSize?: number };
 export type ObjectSet = { lines: ObjLine[]; labels: ObjLabel[]; boxes: ObjBox[]; bubbles?: ObjBubble[] };
 
 /** Một volume profile đã tính (`computeProfile`) kèm vị trí ngang: `x1..x2` = chỉ số nến đầu/cuối của phiên (không dùng khi `style.pinned`). */
-export type PlacedProfile = Profile & { x1: number; x2: number };
+/** `end`: chỉ số nến đầu tiên sau phiên mà vùng giá cắt qua từng đường (chỉ khi bật Extend); không có = chưa nến nào cắt, đường kéo hết pane. */
+export type PlacedProfile = Profile & { x1: number; x2: number; end?: Partial<Record<LineKind, number>> };
 export type ProfileLine = { show: boolean; color: string; width: number; style: LineStyleName };
 export type ProfileStyle = {
   volume: "updown" | "total" | "delta" | "deltatotal"; // deltatotal: Delta bên trái trục, Total bên phải (Deep Profile "Delta and Total Volume")

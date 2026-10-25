@@ -10,6 +10,11 @@ describe("parseNum", () => {
     expect(parseNum("")).toBe(0);
     expect(parseNum("  ")).toBe(0);
     expect(parseNum("4120,5")).toBe(4120.5);
+    expect(parseNum("0,01")).toBe(0.01);
+    expect(parseNum("4,120.50")).toBe(4120.5); // phẩy nghìn + chấm thập phân (dán từ nhãn giá)
+    expect(parseNum("80,244.88")).toBe(80244.88);
+    expect(parseNum("4.120,50")).toBe(4120.5); // chấm nghìn + phẩy thập phân
+    expect(parseNum("1,234,567.5")).toBe(1234567.5);
     expect(parseNum("4120.")).toBe(4120);
     expect(parseNum("abc")).toBeNaN();
   });

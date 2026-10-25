@@ -13,11 +13,12 @@ export type LiveMinute = { t: number; cells: [number, number, number][] };
 type Fetch = (symbol: string, from: number, to: number, lay: Layout) => Promise<TickHist | null>;
 type FetchBig = (symbol: string, from: number, to: number, min: number, limit: number, size: number) => Promise<TickCell[] | null>;
 type FetchFp = (symbol: string, bars: number[], end: number, size: number) => Promise<FpCell[] | null>;
-type Entry<T> = { sig: string; data: T | null; busy: boolean; retryAt: number; upTo: number };
+type Entry<T> = { sig: string; data: T | null; busy: boolean; retryAt: number; upTo: number; meta?: unknown };
 
 const MAX_ACTIVE = 2; // số yêu cầu backend chạy cùng lúc
 const MAX_ENTRIES = 64; // kết quả giữ trong bộ nhớ (kéo chart với Visible Range liên tục tạo khoá mới)
 const RETRY_MS = 10_000;
+const NEAR = 0.8; // histogram của profile khác dùng tạm được khi khoảng thời gian trùng từng đó (xem `TickProfileFeed.nearby`)
 const HEAD_SLACK = 300; // giây: nến delta đầu tiên muộn hơn đầu profile quá chừng này là chưa nạp tới đầu (giống LowerFeed: 5 phút)
 
 /** Dữ liệu tick đã nạp (nến delta "TD", tăng dần) phủ tới đầu `t0` chưa. */
@@ -50,17 +51,38 @@ class SigFeed<T> {
 
   constructor(private onChange: () => void, private now: () => number) {}
 
-  get(key: string, sig: string, load: () => Promise<T | null>, upTo = Infinity): T | null {
+  get(key: string, sig: string, load: () => Promise<T | null>, upTo = Infinity, meta?: unknown): T | null {
     let e = this.cache.get(key);
     if (e) {
       this.cache.delete(key); // LRU: mới dùng thì xếp cuối
       this.cache.set(key, e);
     } else {
-      this.cache.set(key, (e = { sig: "", data: null, busy: false, retryAt: 0, upTo }));
+      this.cache.set(key, (e = { sig: "", data: null, busy: false, retryAt: 0, upTo, meta }));
       if (this.cache.size > MAX_ENTRIES) this.cache.delete(this.cache.keys().next().value as string);
     }
     if (e.sig !== sig && !e.busy && this.active < MAX_ACTIVE && this.now() >= e.retryAt) void this.run(load, sig, e, upTo);
     return e.data;
+  }
+
+  /** Lần nạp gần nhất của `key` lỗi và chưa tới lúc thử lại. */
+  failed(key: string): boolean {
+    const e = this.cache.get(key);
+    return !!e && e.retryAt > this.now();
+  }
+
+  /** Entry khác `skip` (đã nạp xong, có `meta`) có điểm `score(meta)` cao nhất và >= `min`; điểm bằng nhau lấy entry dùng gần đây hơn. */
+  nearest<M>(skip: string, score: (meta: M) => number, min: number): { data: T; meta: M } | null {
+    let best: { data: T; meta: M } | null = null;
+    let top = min;
+    for (const [k, e] of this.cache) {
+      if (k === skip || !e.data || e.meta === undefined) continue;
+      const v = score(e.meta as M);
+      if (v >= top) {
+        top = v;
+        best = { data: e.data, meta: e.meta as M };
+      }
+    }
+    return best;
   }
 
   /** Dữ liệu đang giữ của `key` được đọc từ DB tới mốc nào (undefined nếu chưa có). */
@@ -93,6 +115,43 @@ class SigFeed<T> {
   }
 }
 
+type Win = { symbol: string; t0: number; t1: number; lay: Layout };
+
+/** Hai khoảng thời gian trùng nhau bao nhiêu phần (phần chung / phần hợp, 0..1). */
+export function overlapRatio(a0: number, a1: number, b0: number, b1: number): number {
+  const union = Math.max(a1, b1) - Math.min(a0, b0);
+  return union > 0 ? Math.max(0, Math.min(a1, b1) - Math.max(a0, b0)) / union : 0;
+}
+
+/** Chia lại histogram `h` (row của `from`) sang row của `to`: volume mỗi row cũ trải theo phần giá chồng lên từng row mới, phần nằm ngoài vùng giá mới dồn vào row đầu / cuối (như backend). */
+export function rebin(h: TickHist, from: Layout, to: Layout): TickHist {
+  if (from.lo === to.lo && from.size === to.size && from.N === to.N) return h;
+  const up = new Array<number>(to.N).fill(0);
+  const dn = new Array<number>(to.N).fill(0);
+  const top = to.lo + to.N * to.size;
+  for (let i = 0; i < from.N; i++) {
+    const u = h.up[i] ?? 0;
+    const d = h.dn[i] ?? 0;
+    if (!(u > 0 || d > 0)) continue;
+    const a = from.lo + i * from.size;
+    const b = a + from.size;
+    const put = (j: number, share: number) => {
+      up[j] += u * share;
+      dn[j] += d * share;
+    };
+    put(0, Math.max(0, Math.min(b, to.lo) - a) / from.size); // dưới vùng mới
+    put(to.N - 1, Math.max(0, b - Math.max(a, top)) / from.size); // trên vùng mới
+    const j0 = Math.max(0, Math.floor((a - to.lo) / to.size));
+    const j1 = Math.min(to.N - 1, Math.ceil((b - to.lo) / to.size) - 1);
+    for (let j = j0; j <= j1; j++) {
+      const rl = to.lo + j * to.size;
+      const share = (Math.min(b, rl + to.size) - Math.max(a, rl)) / from.size;
+      if (share > 0) put(j, share);
+    }
+  }
+  return { up, dn };
+}
+
 export class TickProfileFeed {
   private feed: SigFeed<TickHist>;
 
@@ -100,13 +159,23 @@ export class TickProfileFeed {
     this.feed = new SigFeed(onChange, now);
   }
 
-  /** Histogram đã nạp của profile [t0, t1) chia theo `lay`; chưa có thì null và nạp ngầm rồi gọi `onChange`. `sig` đổi (dữ liệu đổi) thì nạp lại nhưng vẫn trả bản cũ trong lúc chờ.
+  /** Histogram đã nạp của profile [t0, t1) chia theo `lay`; chưa có thì nạp ngầm rồi gọi `onChange`, trong lúc chờ trả bản của profile gần giống (xem `nearby`) hoặc null. `sig` đổi (dữ liệu đổi) thì nạp lại nhưng vẫn trả bản cũ trong lúc chờ.
    *  `upTo` (< t1): chỉ đọc DB tới đó (phần còn lại là phút đang chạy, xem `liveCut`). */
   get(symbol: string, t0: number, t1: number, lay: Layout, sig: string, upTo = t1): TickHist | null {
-    return this.feed.get(this.key(symbol, t0, t1, lay), sig, async () => {
+    const key = this.key(symbol, t0, t1, lay);
+    const h = this.feed.get(key, sig, async () => {
       const h = await this.fetch(symbol, t0, upTo, lay);
       return h && h.up.length === lay.N && h.dn.length === lay.N ? h : null;
-    }, upTo);
+    }, upTo, { symbol, t0, t1, lay } satisfies Win);
+    return h ?? this.nearby(key, symbol, t0, t1, lay);
+  }
+
+  /** Chưa có bản của khoá này (phiên dài thêm một nến, thêm đỉnh / đáy làm đổi row, kéo / zoom Visible Range): thay vì để profile rơi về nến cho tới khi backend trả,
+   *  dùng tạm histogram đã nạp của một profile cùng symbol phủ gần như cùng khoảng thời gian (chia lại sang row mới). Lần nạp trước đó lỗi thì không dùng. */
+  private nearby(key: string, symbol: string, t0: number, t1: number, lay: Layout): TickHist | null {
+    if (this.feed.failed(key)) return null;
+    const near = this.feed.nearest<Win>(key, (w) => (w.symbol === symbol ? overlapRatio(w.t0, w.t1, t0, t1) : 0), NEAR);
+    return near && rebin(near.data, near.meta.lay, lay);
   }
 
   /** Bản đang giữ của `get` cùng đối số đọc DB tới đâu. */

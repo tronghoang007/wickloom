@@ -17,7 +17,15 @@ export type Draft = {
   untilText: string; // datetime-local
 };
 
-export const parseNum = (t: string): number => (t.trim() === "" ? 0 : parseFloat(t.replace(",", ".")));
+/** Số người dùng gõ / dán: "0,01" là 0.01 (dấu phẩy thập phân); có cả hai dấu thì dấu đứng sau cùng là dấu thập phân, dấu kia là phân cách nghìn ("4,120.50" và "4.120,50" đều là 4120.5). */
+export const parseNum = (t: string): number => {
+  const s = t.trim();
+  if (s === "") return 0;
+  const comma = s.lastIndexOf(",");
+  const dot = s.lastIndexOf(".");
+  if (comma >= 0 && dot >= 0) return parseFloat(comma > dot ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, ""));
+  return parseFloat(s.replace(",", "."));
+};
 
 export type DraftField = "price" | "sl" | "tp";
 export const DRAFT_IDS: Record<string, DraftField> = { "d:entry": "price", "d:sl": "sl", "d:tp": "tp" };

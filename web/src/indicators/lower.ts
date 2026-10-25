@@ -26,6 +26,10 @@ export const stepOf = (tf: string): number => (tf === TICK_TF ? 60 : TF_SECONDS[
 /** Một indicator cần nến khung nhỏ nào: các khung ứng viên (mịn → thô, mọi khung nhỏ hơn khung chart) phủ từ `from` (UTC giây). */
 export type LowerNeed = { tfs: string[]; from: number };
 
+/** Khung chỉ để biết nơi nào của khung mịn nhất thiếu thật (có nến khung này mà khung mịn không có): không ghép vào kết quả. Chỉ cần khi `need.tfs` có đúng một khung:
+ *  delta tick TD không có khung thô hơn nào cùng loại, nên dùng M1 (phút nào có nến M1 thì có tick; thị trường nghỉ thì M1 cũng không có nến). */
+const oracleOf = (need: LowerNeed): string | undefined => (need.tfs.length === 1 && need.tfs[0] === TICK_TF ? "M1" : undefined);
+
 export type LowerSource = { tf: string; step: number; bars: Bar[] };
 
 const PAGE = 50_000; // giới hạn của /bars
@@ -41,6 +45,7 @@ const MAX_TRIES = 2; // xin hai lần cho mỗi chỗ thiếu; không có thêm 
 const WAIT_MS = 30_000; // giữa hai lần xin
 const HEAD_MARGIN = 50;
 const HOLE_MARGIN = 10;
+const TICK_MIN_HOLE = 3; // phút: lỗ TD ngắn hơn không xin EA (phút chỉ có tick cùng giá không có nến TD, EA cũng không có gì để gửi)
 // Lịch sử tick ("TD"): mỗi yêu cầu là số nến M1 (~60k tick vàng cho 360 nến), EA phải tải / gom tick nên chờ lâu hơn, và đuôi không có sẵn trong DB
 // (khác nến thường, backend không gom tick thành delta) nên mỗi lần làm mới đuôi phải nhờ EA tính lại vài phút gần nhất.
 const TICK_CHUNK = 360;
@@ -132,6 +137,8 @@ export class LowerFeed {
   /** Nến khung nhỏ đã có (ghép) trong `[need.from, to)`; thiếu thì xin nạp ngầm và gọi `onChange` khi xong. */
   get(symbol: string, need: LowerNeed, to: number): Bar[] {
     for (const tf of need.tfs) this.ensure(symbol, tf, need.from, to);
+    const oracle = oracleOf(need);
+    if (oracle && this.backfill) this.ensure(symbol, oracle, need.from, to); // chỉ cần khi sẽ xin EA lấp lỗ
     this.fill(symbol, need, to);
     const key = `${symbol}|${need.tfs.join(",")}|${need.from}`;
     if (this.memo?.key !== key || this.memo.ver !== this.ver) {
@@ -206,12 +213,14 @@ export class LowerFeed {
       if (!e || e.lo === Infinity || e.busy) return; // còn đang đọc DB: chờ
       entries.push(e);
     }
-    const job = this.nextGap(need, to, entries);
+    const oracle = oracleOf(need);
+    const ref = oracle ? this.cache.get(`${symbol}|${oracle}`) : undefined;
+    const job = this.nextGap(need, to, entries, oracle && ref && ref.lo !== Infinity && !ref.busy ? { tf: oracle, entry: ref } : undefined);
     if (job) void this.runFill(symbol, job.tf, job.entry, job.gap);
   }
 
   /** Thứ tự ưu tiên: thiếu đầu của khung mịn nhất; hết đường (đã xin, không có thêm) thì thiếu đầu của khung thô hơn; mịn nhất đủ đầu thì lỗ hổng bên trong (mới → cũ). */
-  private nextGap(need: LowerNeed, to: number, entries: Entry[]): { tf: string; entry: Entry; gap: Gap } | null {
+  private nextGap(need: LowerNeed, to: number, entries: Entry[], oracle?: { tf: string; entry: Entry }): { tf: string; entry: Entry; gap: Gap } | null {
     const now = this.now();
     const status = (e: Entry, g: Gap) => ((e.tries.get(g.key) ?? 0) >= MAX_TRIES ? "done" : now < e.readyAt ? "wait" : "ready");
     for (let i = 0; i < entries.length; i++) {
@@ -219,8 +228,10 @@ export class LowerFeed {
       const tf = need.tfs[i];
       const head = headGap(e.bars, stepOf(tf), need.from, to);
       if (!head) {
-        if (i > 0 || entries.length < 2) return null;
-        const gap = this.holes(e, stepOf(tf), need.from, entries[1], stepOf(need.tfs[1])).find((g) => status(e, g) === "ready");
+        if (i > 0) return null;
+        const ref = entries.length > 1 ? { tf: need.tfs[1], entry: entries[1] } : oracle; // khung thô hơn kế tiếp; không có thì khung chuẩn (đã đọc xong)
+        if (!ref) return null;
+        const gap = this.holes(e, stepOf(tf), need.from, ref.entry, stepOf(ref.tf), tf === TICK_TF ? TICK_MIN_HOLE : 1).find((g) => status(e, g) === "ready");
         return gap ? { tf, entry: e, gap } : null;
       }
       const s = status(e, head);
@@ -230,10 +241,10 @@ export class LowerFeed {
     return null;
   }
 
-  private holes(e: Entry, step: number, from: number, oracle: Entry, oracleStep: number): Gap[] {
+  private holes(e: Entry, step: number, from: number, oracle: Entry, oracleStep: number, minSteps: number): Gap[] {
     const edge = (b: Bar[]) => `${b.length}:${b[0]?.t}:${b[b.length - 1]?.t}`;
     const sig = `${edge(e.bars)}|${edge(oracle.bars)}|${from}`;
-    if (e.holes?.sig !== sig) e.holes = { sig, gaps: holeGaps(e.bars, step, from, oracle.bars, oracleStep) };
+    if (e.holes?.sig !== sig) e.holes = { sig, gaps: holeGaps(e.bars, step, from, oracle.bars, oracleStep, minSteps) };
     return e.holes.gaps;
   }
 

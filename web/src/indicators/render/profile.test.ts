@@ -2,7 +2,7 @@ import type { Bar } from "@/lib/api";
 import { computeProfile } from "@/volumeProfile/compute";
 import { describe, expect, it } from "vitest";
 import type { ProfileStyle } from "../schema";
-import { layoutProfile } from "./profile";
+import { layoutProfile, lineEndX } from "./profile";
 
 const line = { show: true, color: "#fff", width: 1, style: "solid" as const };
 const style = (over: Partial<ProfileStyle> = {}): ProfileStyle => ({
@@ -130,3 +130,19 @@ describe("layoutProfile: Delta + Total", () => {
   });
 });
 
+
+describe("lineEndX", () => {
+  const xOf = (k: number) => 100 + k * 10;
+  const p = { ...vp, x1: 0, x2: 5, end: { poc: 8 } };
+  it("không Extend: hết phiên; ghim: hết pane", () => {
+    expect(lineEndX(p, "poc", style(), 60, 500, xOf)).toBe(60);
+    expect(lineEndX(p, "poc", style({ pinned: true }), 60, 500, xOf)).toBe(500);
+    expect(lineEndX(p, "poc", style({ pinned: true, extend: true }), 60, 500, xOf)).toBe(500);
+  });
+  it("Extend: tới nến đầu tiên cắt qua mức, chưa nến nào cắt thì hết pane", () => {
+    expect(lineEndX(p, "poc", style({ extend: true }), 60, 500, xOf)).toBe(180);
+    expect(lineEndX(p, "vah", style({ extend: true }), 60, 500, xOf)).toBe(500);
+    expect(lineEndX({ ...p, end: undefined }, "poc", style({ extend: true }), 60, 500, xOf)).toBe(500);
+    expect(lineEndX(p, "poc", style({ extend: true }), 60, 500, () => null)).toBe(500);
+  });
+});

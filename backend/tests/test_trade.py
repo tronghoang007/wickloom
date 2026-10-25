@@ -300,7 +300,7 @@ def test_rate_limit_per_account():
         trade.broker.clock = lambda: now[0]
         ea = FakeEA(lambda m: OK)
         aid = online(ea)
-        cmd = {"type": "position_close", "ticket": 5, "volume": 0}
+        cmd = {"type": "order_send", "symbol": "XAUUSDm", "side": "buy", "volume": 0.1, "sl": 0, "tp": 0, "client_id": CID}
         for _ in range(trade.MAX_PER_MINUTE):
             await trade.broker.run(aid, ea, "u1", cmd, None)
         with pytest.raises(Exception) as e:
@@ -308,6 +308,33 @@ def test_rate_limit_per_account():
         assert e.value.status_code == 429 and len(ea.sent) == trade.MAX_PER_MINUTE
         now[0] += 61
         await trade.broker.run(aid, ea, "u1", cmd, None)  # qua một phút thì gửi lại được
+
+    asyncio.run(run())
+
+
+def test_closing_and_cancelling_are_not_blocked_by_the_new_order_limit():
+    """Chặn 20 lệnh MỚI/phút không được cản việc thoát: "Close all" / "Cancel all" với nhiều hơn 20 lệnh vẫn phải chạy hết; chỉ có trần riêng, cao hơn."""
+    async def run():
+        now = [1000.0]
+        trade.broker.clock = lambda: now[0]
+        ea = FakeEA(lambda m: OK)
+        aid = online(ea)
+        new = {"type": "order_send", "symbol": "XAUUSDm", "side": "buy", "volume": 0.1, "sl": 0, "tp": 0, "client_id": CID}
+        for _ in range(trade.MAX_PER_MINUTE):
+            await trade.broker.run(aid, ea, "u1", new, None)
+        with pytest.raises(Exception) as e:
+            await trade.broker.run(aid, ea, "u1", new, None)
+        assert e.value.status_code == 429
+        close = {"type": "position_close", "ticket": 5, "volume": 0}
+        for _ in range(trade.MAX_PER_MINUTE + 10):  # đã hết hạn mức lệnh mới mà vẫn đóng được
+            assert (await trade.broker.run(aid, ea, "u1", close, None))["ok"] is True
+        for _ in range(trade.MAX_MANAGE_PER_MINUTE - trade.MAX_PER_MINUTE - 10):
+            await trade.broker.run(aid, ea, "u1", {"type": "order_delete", "ticket": 6}, None)
+        with pytest.raises(Exception) as e:  # nhưng vẫn có trần riêng
+            await trade.broker.run(aid, ea, "u1", close, None)
+        assert e.value.status_code == 429
+        now[0] += 61
+        await trade.broker.run(aid, ea, "u1", close, None)
 
     asyncio.run(run())
 

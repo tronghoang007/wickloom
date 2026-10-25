@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extendSegment, layoutLabel } from "./objects";
+import { extendSegment, fractionalX, layoutLabel, pickLabels } from "./objects";
 
 describe("extendSegment", () => {
   const s = { x1: 100, y1: 50, x2: 200, y2: 100 }; // dốc 0.5
@@ -63,5 +63,46 @@ describe("layoutLabel", () => {
   });
   it("bubble rộng hơn chữ (có padding)", () => {
     expect(layoutLabel(0, 0, w, font, "center").bubble!.w).toBeGreaterThan(w);
+  });
+});
+
+describe("pickLabels", () => {
+  const box = (x: number, y: number, w = 20, h = 10) => ({ x, y, w, h });
+  it("không đè nhau thì vẽ hết", () => {
+    expect(pickLabels([box(0, 0), box(30, 0), box(0, 20)])).toEqual([true, true, true]);
+  });
+  it("nhãn đè lên nhãn đã chọn thì bỏ, bubble ưu tiên (đứng trước) được giữ", () => {
+    expect(pickLabels([box(0, 0), box(5, 2), box(40, 0)])).toEqual([true, false, true]);
+  });
+  it("chỉ so với nhãn đã được giữ: nhãn bị bỏ không chặn nhãn sau", () => {
+    // 2 đè 1; 3 đè 2 nhưng không đè 1 -> 3 được vẽ
+    expect(pickLabels([box(0, 0), box(15, 0), box(30, 0)])).toEqual([true, false, true]);
+  });
+  it("chạm cạnh (không chồng) không tính là đè; cao thấp tính riêng", () => {
+    expect(pickLabels([box(0, 0), box(20, 0)])).toEqual([true, true]);
+    expect(pickLabels([box(0, 0), box(0, 10)])).toEqual([true, true]);
+    expect(pickLabels([box(0, 0), box(0, 9)])).toEqual([true, false]);
+  });
+  it("rỗng", () => {
+    expect(pickLabels([])).toEqual([]);
+  });
+});
+
+describe("fractionalX", () => {
+  // như LWC: chỉ nhận chỉ số nguyên (số lẻ trả 0), nến cách nhau 10px, chỉ số 0 ở x = 100
+  const at = (i: number) => (Number.isInteger(i) ? 100 + i * 10 : 0);
+  it("chỉ số nguyên: đúng toạ độ của LWC", () => {
+    expect(fractionalX(at, 5)).toBe(150);
+    expect(fractionalX(at, -3)).toBe(70);
+  });
+  it("chỉ số lẻ: nội suy giữa hai nến liền kề (không rơi về 0 như LWC)", () => {
+    expect(fractionalX(at, 5.5)).toBe(155);
+    expect(fractionalX(at, 4.8)).toBeCloseTo(148, 9);
+    expect(fractionalX(at, -0.25)).toBeCloseTo(97.5, 9);
+  });
+  it("LWC không trả toạ độ (null): null", () => {
+    expect(fractionalX(() => null, 2.5)).toBeNull();
+    expect(fractionalX((i) => (i === 2 ? 50 : null), 2.5)).toBeNull();
+    expect(fractionalX((i) => (i === 2 ? 50 : null), 2)).toBe(50);
   });
 });

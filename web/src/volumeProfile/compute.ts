@@ -32,6 +32,18 @@ export function profileLayout(bars: Bar[], tick: number, rows: number, layout = 
   return { lo: lowTick * tick, hi: highTick * tick, size: ticksPerRow * tick, N: Math.max(1, Math.ceil(totalTicks / ticksPerRow)) };
 }
 
+export type LineKind = "poc" | "vah" | "val";
+
+/** Giá của ba đường: VAH = đỉnh row cao nhất của Value Area, VAL = đáy row thấp nhất, POC = giữa row POC. */
+export function profileLevels(vp: Profile): { kind: LineKind; price: number }[] {
+  const { lo, hi, size, poc, vl, vh } = vp;
+  return [
+    { kind: "vah", price: Math.min(hi, lo + size * (vh + 1)) },
+    { kind: "val", price: lo + size * vl },
+    { kind: "poc", price: (lo + size * poc + Math.min(hi, lo + size * (poc + 1))) / 2 },
+  ];
+}
+
 /** Dữ liệu tick cho volume profile "1 tick": `covered(t0)` = tick đã nạp tới đầu `t0`; `hist` = volume lên / xuống của tick trong [t0, t1) gom vào các row của `lay` (null = chưa nạp xong).
  *  `big` (Big Trades): các ô (phút, row giá cao `size`) lớn nhất của [t0, t1) có volume >= `min`, tối đa `limit` ô (null = chưa nạp xong). */
 export type TickSource = {
@@ -57,7 +69,9 @@ export function computeProfile(bars: Bar[], tick: number, rows: number, va: numb
   const { lo, size, N } = lay;
   const up = new Array(N).fill(0), dn = new Array(N).fill(0);
   for (const b of bars) {
-    const i0 = Math.min(N - 1, Math.floor((b.l - lo) / size)), i1 = Math.min(N - 1, Math.floor((b.h - lo) / size));
+    // `lo` = floor(low / tick) * tick có thể lớn hơn low thật vài ulp (3748.4300000000003 > 3748.43): kẹp để nến ở đáy không rơi vào row -1
+    const row = (p: number) => Math.max(0, Math.min(N - 1, Math.floor((p - lo) / size)));
+    const i0 = row(b.l), i1 = row(b.h);
     // Như TV: đóng > mở là up volume, còn lại (kể cả doji) là down
     const v = b.v, range = b.h - b.l, bucket = b.c > b.o ? up : dn;
     if (!(v > 0)) continue;

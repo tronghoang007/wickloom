@@ -219,16 +219,42 @@ def test_tick_gap_requests_backfill_sized_to_the_gap_and_not_repeatedly():
     state._gap_seeding.clear()
     state.aggregator.tfs["GAPSYM"] = {"M1", "M15"}
     state._on_gap("GAPSYM", 3600)
-    cmds = {(c["tf"]): c["count"] for c in state.pending_backfill if c["symbol"] == "GAPSYM"}
+    cmds = {(c["tf"]): c["count"] for c in state.pending_backfill if c["symbol"] == "GAPSYM" and c["tf"] != "TD"}  # (tick TD của khoảng đứt: test riêng bên dưới)
     assert cmds == {"M1": 63, "M15": 7}  # 3600s = 60 nến M1 / 4 nến M15, cộng 3
     state._on_gap("GAPSYM", 3600)  # tick kế tiếp ngay sau đó: không xin lại
-    assert len([c for c in state.pending_backfill if c["symbol"] == "GAPSYM"]) == 2
+    assert len([c for c in state.pending_backfill if c["symbol"] == "GAPSYM" and c["tf"] != "TD"]) == 2
     state._gap_seeding.clear()
     state.pending_backfill.clear()  # (lệnh trùng khoá đang chờ thì không xếp thêm)
     state._on_gap("GAPSYM", 10 * 86400)  # đứt qua cuối tuần: trần 500 nến
-    assert max(c["count"] for c in state.pending_backfill if c["symbol"] == "GAPSYM") == 500
+    assert max(c["count"] for c in state.pending_backfill if c["symbol"] == "GAPSYM" and c["tf"] != "TD") == 500
     state.pending_backfill.clear()
     state.aggregator.tfs.pop("GAPSYM", None)
+
+
+def test_tick_gap_also_requests_tick_history_for_the_gap_in_chunks_newest_first():
+    state.pending_backfill.clear()
+    state._gap_seeding.clear()
+    state.aggregator.tfs["GAPTD"] = {"M1"}
+    before = int(time.time())
+    state._on_gap("GAPTD", 900)  # đứt 15 phút (máy ngủ): xin đúng 15 + 3 phút tick
+    td = [c for c in state.pending_backfill if c["symbol"] == "GAPTD" and c["tf"] == "TD"]
+    assert [c["count"] for c in td] == [18]
+    assert before <= td[0]["before"] <= int(time.time())
+    state._on_gap("GAPTD", 900)  # tick kế tiếp ngay sau đó: không xin lại
+    assert len([c for c in state.pending_backfill if c["symbol"] == "GAPTD" and c["tf"] == "TD"]) == 1
+    state._gap_seeding.clear()
+    state.pending_backfill.clear()
+    state._on_gap("GAPTD", 10 * 3600)  # đứt 10 giờ: 600 + 3 phút chia hai đoạn, đoạn mới nhất trước
+    td = [c for c in state.pending_backfill if c["symbol"] == "GAPTD" and c["tf"] == "TD"]
+    assert [c["count"] for c in td] == [state.TICK_GAP_CHUNK, 603 - state.TICK_GAP_CHUNK]
+    assert td[0]["before"] - td[1]["before"] == state.TICK_GAP_CHUNK * 60  # đoạn sau lùi đúng một đoạn
+    state._gap_seeding.clear()
+    state.pending_backfill.clear()
+    state._on_gap("GAPTD", 10 * 86400)  # đứt qua cuối tuần: trần TICK_GAP_MAX phút
+    td = [c for c in state.pending_backfill if c["symbol"] == "GAPTD" and c["tf"] == "TD"]
+    assert sum(c["count"] for c in td) == state.TICK_GAP_MAX
+    state.pending_backfill.clear()
+    state.aggregator.tfs.pop("GAPTD", None)
 
 
 def test_catchup_refreshes_last_bars_even_when_cache_is_not_stale():

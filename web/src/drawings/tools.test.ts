@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import { textBox, type Shape } from "./shapes";
-import { computeProfile, defaultOpts, encodeFibLevels, fibLevelsOf, fibPrice, floatBar, fmtVol, fontSizeOf, gannGrid, hasTextTab, POS_DEFAULTS, posConstrain, positionStats, profileSource, regression, settingsTabs, SPEC, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
+import { computeProfile, defaultOpts, encodeFibLevels, fibLevelsOf, fibPrice, floatBar, fmtVol, fontSizeOf, gannGrid, hasTextTab, POS_DEFAULTS, posConstrain, positionStats, profileRange, profileSource, regression, settingsTabs, SPEC, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
 import type { TickSource } from "@/volumeProfile/compute";
 import type { Anchor } from "./types";
 
@@ -232,6 +232,14 @@ describe("computeProfile theo help của TV", () => {
     expect(vp.up[0]).toBeCloseTo(10, 9);
     expect(vp.dn[0]).toBeCloseTo(60, 9);
   });
+
+  it("đáy profile lệch vài ulp (lo = 3748.4300000000003 > low 3748.43): nến phẳng ở đáy vẫn vào row 0, không mất volume", () => {
+    const low = 3748.43;
+    expect(Math.floor(low / 0.01) * 0.01).toBeGreaterThan(low); // đúng ca gây lỗi
+    const vp = computeProfile([bar(low, low, 5, low, low), bar(low, low + 1, 1)], 0.01, 24, 70)!;
+    expect(vp.total.reduce((s, v) => s + v, 0)).toBeCloseTo(6, 9);
+    expect(vp.total[0]).toBeGreaterThanOrEqual(5);
+  });
 });
 
 describe("profileSource: ghép nến khung nhỏ với nến chart", () => {
@@ -398,6 +406,30 @@ describe("volume profile vẽ dạng thanh", () => {
       const c = ctx("frvp", 10);
       SPEC.frvp.build({ ...c, d: { ...c.d, opts: { agg: "ticks" } }, dragging: true, ticks });
       expect(asked).toHaveLength(0);
+    });
+
+    describe("neo nằm giữa nến (đổi sang khung lớn hơn khung lúc vẽ)", () => {
+      // nến chart 10s: [0, 10) giá 0..40, [10, 20) giá 30..60, [20, 30) giá 50..100; neo 5 nằm giữa nến đầu
+      const coarse: Bar[] = [
+        { t: 0, o: 0, h: 40, l: 0, c: 40, v: 1 },
+        { t: 10, o: 30, h: 60, l: 30, c: 60, v: 1 },
+        { t: 20, o: 50, h: 100, l: 50, c: 100, v: 1 },
+      ];
+      const mid = (): Ctx => {
+        const c = ctx("frvp", 10);
+        return { ...c, bars: coarse, step: 10, d: { ...c.d, points: [{ time: 5, price: 0 }, { time: 25, price: 100 }], opts: { rows: 10, agg: "ticks" } } };
+      };
+
+      it("vùng giá chia row gồm cả nến chứa neo, không thì tick của nó bị dồn vào row biên", () => {
+        let lay: { lo: number; hi: number } | null = null;
+        const ticks: TickSource = { covered: () => true, hist: (_t0, _t1, l) => ((lay = l), null) };
+        SPEC.frvp.build({ ...mid(), ticks });
+        expect(lay).toMatchObject({ lo: 0, hi: 100 });
+      });
+
+      it("profileRange (handle, nhãn trục giá) cũng gồm nến chứa neo", () => {
+        expect(profileRange(mid())).toEqual({ hi: 100, lo: 0 });
+      });
     });
   });
 

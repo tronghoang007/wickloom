@@ -19,12 +19,13 @@ const ITEMS: ItemDef[] = [
 const INPUTS: InputDef[] = [
   {
     key: "min", label: "Minimum volume", type: "int", default: 0, min: 0, group: "Filter",
-    tooltip: "Smallest number of ticks at one price within one minute that gets a bubble. 0 = automatic: only the biggest bubbles of the loaded range are shown (see Maximum bubbles).",
+    tooltip: "Smallest number of ticks at one price within one minute that gets a bubble. 0 = automatic: only the biggest bubbles of the visible range are shown (see Maximum bubbles).",
   },
-  { key: "count", label: "Maximum bubbles", type: "int", default: 100, min: 1, max: 3000, group: "Filter", tooltip: "Keeps only this many of the biggest bubbles of the loaded range." },
+  { key: "count", label: "Maximum bubbles", type: "int", default: 100, min: 1, max: 3000, group: "Filter", tooltip: "Keeps only this many of the biggest bubbles of the visible range, so every part of the chart gets its own biggest bubbles when you scroll or zoom." },
   {
     key: "max", label: "Maximum volume", type: "int", default: 0, min: 0, group: "Filter",
-    tooltip: "Volume drawn with the biggest bubble size; bigger volumes are not drawn any bigger. 0 = the biggest volume shown.",
+    tooltip: "Volume drawn with the biggest bubble size; bigger volumes are not drawn any bigger. 0 = the biggest volume shown. Used only when Standard deviation is 0.",
+    enabledIf: (i) => num(i, "dev") === 0,
   },
   {
     key: "group", label: "Price grouping (ticks)", type: "int", default: 0, min: 0, group: "Filter",
@@ -52,6 +53,14 @@ export function lighten(color: string, t: number): string {
 }
 
 const compact = (v: number): string => (v >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${+(v / 1e3).toFixed(1)}K` : String(Math.round(v)));
+
+/** Số ô lớn nhất đọc về cho cả khoảng đã nạp (bằng giới hạn của /tickbig): `count` bubble của vùng đang nhìn được chọn từ đây nên kéo / zoom không phải hỏi lại backend. */
+export const BIG_POOL = 5000;
+
+/** `count` ô lớn nhất (volume giảm dần, bằng nhau thì phút mới hơn trước) trong số các ô có phút nằm trong [from, to). */
+export function topInRange(cells: TickCell[], from: number, to: number, count: number): TickCell[] {
+  return cells.filter((k) => k.t >= from && k.t < to).sort((a, b) => b.up + b.dn - (a.up + a.dn) || b.t - a.t).slice(0, count);
+}
 
 /** Đầu khoảng cần tick: nến đầu của chart, nhưng không xa hơn độ sâu tick tính từ nến cuối (cũ hơn thì broker không còn tick). */
 export const bubbleFrom = (bars: Bar[], cut: number, step: number): number | null =>
@@ -89,7 +98,15 @@ export function sizeFractions(vols: number[], lo: number, hi: number, dev: numbe
   return vols.map((v) => (sd > 0 ? Math.min(1, Math.max(0, 0.5 + (v - mean) / (2 * dev * sd))) : 0.5));
 }
 
-/** Bubble của các ô tick `cells`: x = chỉ số nến chứa phút của ô (`times` tăng dần, `step` giây một nến), y = giá. Bubble lớn vẽ trước để bubble nhỏ cùng chỗ nằm trên. */
+/** Vị trí ngang (chỉ số nến, lẻ) của bubble phút `t` (UTC giây): trong nến chứa nó ở đúng chỗ của phút đó (nến trải từ chỉ số - 0,5 tới + 0,5, tâm phút = `t` + 30 giây), nên các phút của cùng một nến M5 / M15
+ *  cùng row giá không chồng đúng lên nhau; nến M1 thì đúng tâm nến. */
+export function bubbleX(times: number[], t: number, step: number): number {
+  const i = Math.floor(indexAtTime(times, t, step));
+  const start = times[i];
+  return start === undefined ? i : i - 0.5 + Math.min(1, Math.max(0, (t + 30 - start) / step));
+}
+
+/** Bubble của các ô tick `cells`: x = vị trí của phút của ô trong nến chứa nó (`times` tăng dần, `step` giây một nến), y = giá. Bubble lớn vẽ trước để bubble nhỏ cùng chỗ nằm trên. */
 export function bubblesOf(cells: TickCell[], times: number[], step: number, c: Ctx): ObjBubble[] {
   if (cells.length === 0 || times.length === 0) return [];
   const { inputs, items } = c;
@@ -108,7 +125,7 @@ export function bubblesOf(cells: TickCell[], times: number[], step: number, c: C
       const color = k.up >= k.dn ? items.buy.color : items.sell.color;
       const alpha = opMin + (opMax - opMin) * fr[i]; // bubble càng lớn càng đậm
       return {
-        x: Math.floor(indexAtTime(times, k.t, step)), y: k.p, r: (minSize + (maxSize - minSize) * fr[i]) / 2,
+        x: bubbleX(times, k.t, step), y: k.p, r: (minSize + (maxSize - minSize) * fr[i]) / 2,
         ...(hollow ? { bg: withAlpha(color, 0), border: withAlpha(color, alpha), borderWidth: 2 } : { bg: withAlpha(color, alpha), border: lighten(color, 0.6) }),
         ...(text ? { text: compact(vols[i]), textColor: items.text.color, textSize: num(inputs, "textSize") } : {}),
       };
@@ -121,6 +138,7 @@ export const bigTrades: IndicatorDef = {
   inputs: INPUTS,
   plots: [],
   items: ITEMS,
+  needsRange: true,
   warmup: () => 0,
   compute: () => ({}),
   ticks: (_inputs, { bars, cut, step }) => {
@@ -134,7 +152,17 @@ export const bigTrades: IndicatorDef = {
     const t0 = bubbleFrom(bars, c.cut, step);
     if (t0 === null || !c.ticks?.big) return empty;
     const size = rowSize(bars.slice(c.cut), c.tick, num(c.inputs, "group"));
-    const cells = c.ticks.big(t0, bars[bars.length - 1].t + step, Math.max(1, num(c.inputs, "min")), num(c.inputs, "count"), size);
-    return cells ? { ...empty, bubbles: bubblesOf(cells, bars.map((b) => b.t), step, c) } : empty;
+    const min = Math.max(1, num(c.inputs, "min"));
+    const count = num(c.inputs, "count");
+    const pool = c.ticks.big(t0, bars[bars.length - 1].t + step, min, BIG_POOL, size);
+    if (!pool) return empty;
+    // top `count` của vùng đang nhìn (chưa biết vùng nhìn thì cả chart)
+    const v0 = Math.max(t0, bars[Math.max(c.cut, c.range?.from ?? c.cut)].t);
+    const v1 = bars[Math.min(bars.length - 1, c.range?.to ?? bars.length - 1)].t + step;
+    if (v1 <= v0) return empty;
+    let cells = topInRange(pool, v0, v1, count);
+    // Pool đã đầy mà vùng nhìn hẹp (zoom sâu) chỉ có ít ô trong pool: các ô nhỏ hơn ô bé nhất của pool bị cắt, nên hỏi riêng vùng này; chờ kết quả thì vẫn hiện phần lấy từ pool
+    if (cells.length < count && pool.length >= BIG_POOL) cells = c.ticks.big(v0, v1, min, count, size) ?? cells;
+    return { ...empty, bubbles: bubblesOf(cells, bars.map((b) => b.t), step, c) };
   },
 };

@@ -1,6 +1,6 @@
 import type { Bar, TickCell } from "@/lib/api";
 import { describe, expect, it } from "vitest";
-import { LIVE_KEEP, TickBigFeed, TickProfileFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, type LiveMinute, type TickHist } from "./tickProfile";
+import { LIVE_KEEP, TickBigFeed, TickProfileFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, overlapRatio, rebin, type LiveMinute, type TickHist } from "./tickProfile";
 
 const td = (t: number, c = 1, v = 1): Bar => ({ t, o: 0, h: 0, l: 0, c, v });
 const lay = { lo: 100, hi: 110, size: 5, N: 2 };
@@ -226,5 +226,99 @@ describe("phút đang chạy (realtime)", () => {
     await Promise.resolve();
     expect(calls[1]).toEqual([0, 100]);
     expect(liveHist(feed, "S", cover, lives, 0, 100, l3)).toEqual({ up: [1, 0, 0], dn: [0, 0, 1] });
+  });
+});
+
+describe("rebin / overlapRatio", () => {
+  const sum = (h: TickHist) => [h.up.reduce((a, b) => a + b, 0), h.dn.reduce((a, b) => a + b, 0)];
+
+  it("cùng row: trả nguyên bản; thêm row ở đáy cùng cỡ: volume nằm đúng giá", () => {
+    const h = { up: [1, 2], dn: [3, 4] };
+    expect(rebin(h, lay, lay)).toBe(h);
+    // lay: [100,105) [105,110); thêm một row dưới: [95,100) [100,105) [105,110)
+    expect(rebin(h, lay, { lo: 95, hi: 110, size: 5, N: 3 })).toEqual({ up: [0, 1, 2], dn: [0, 3, 4] });
+  });
+
+  it("row to hơn gộp, row nhỏ hơn chia theo phần chồng, tổng volume giữ nguyên", () => {
+    const h = { up: [4, 8], dn: [2, 6] }; // [100,105) [105,110)
+    expect(rebin(h, lay, { lo: 100, hi: 110, size: 10, N: 1 })).toEqual({ up: [12], dn: [8] });
+    expect(rebin(h, lay, { lo: 100, hi: 110, size: 2.5, N: 4 })).toEqual({ up: [2, 2, 4, 4], dn: [1, 1, 3, 3] });
+    const odd = rebin(h, lay, { lo: 101, hi: 111, size: 3, N: 3 });
+    expect(sum(odd)[0]).toBeCloseTo(12);
+    expect(sum(odd)[1]).toBeCloseTo(8);
+  });
+
+  it("phần nằm ngoài vùng giá mới dồn vào row đầu / cuối", () => {
+    const h = { up: [5, 7], dn: [0, 0] };
+    expect(rebin(h, lay, { lo: 105, hi: 110, size: 5, N: 1 })).toEqual({ up: [12], dn: [0] }); // row dưới nằm ngoài -> dồn vào row duy nhất
+    expect(rebin(h, lay, { lo: 105, hi: 115, size: 5, N: 2 })).toEqual({ up: [5 + 7, 0], dn: [0, 0] });
+  });
+
+  it("overlapRatio: phần chung / phần hợp", () => {
+    expect(overlapRatio(0, 100, 0, 100)).toBe(1);
+    expect(overlapRatio(0, 100, 0, 110)).toBeCloseTo(100 / 110);
+    expect(overlapRatio(0, 100, 100, 200)).toBe(0);
+    expect(overlapRatio(0, 0, 0, 0)).toBe(0);
+  });
+});
+
+describe("TickProfileFeed: dùng tạm bản của profile gần giống", () => {
+  const mk = () => {
+    let release: (() => void)[] = [];
+    const feed = new TickProfileFeed((_s, _f, _t, l) => new Promise<TickHist | null>((res) => release.push(() => res({ up: new Array(l.N).fill(1), dn: new Array(l.N).fill(2) }))), () => {});
+    return { feed, flush: async () => { const r = release; release = []; r.forEach((f) => f()); await Promise.resolve(); await Promise.resolve(); } };
+  };
+  const wide = { lo: 100, hi: 120, size: 5, N: 4 };
+
+  it("phiên dài thêm một nến: trong lúc nạp trả bản cũ, nạp xong trả bản mới", async () => {
+    const { feed, flush } = mk();
+    feed.get("S", 0, 900, wide, "a");
+    await flush();
+    const grown = feed.get("S", 0, 1000, wide, "a"); // khoá mới (t1 đổi), chưa có dữ liệu
+    expect(grown).toEqual({ up: [1, 1, 1, 1], dn: [2, 2, 2, 2] });
+    await flush();
+    expect(feed.get("S", 0, 1000, wide, "a")).toEqual({ up: [1, 1, 1, 1], dn: [2, 2, 2, 2] });
+  });
+
+  it("thêm đỉnh mới đổi layout: bản cũ được chia lại sang N mới (đủ độ dài)", async () => {
+    const { feed, flush } = mk();
+    feed.get("S", 0, 900, wide, "a");
+    await flush();
+    const taller = { lo: 100, hi: 125, size: 5, N: 5 };
+    const h = feed.get("S", 0, 900, taller, "a");
+    expect(h?.up).toEqual([1, 1, 1, 1, 0]);
+    expect(h?.dn).toEqual([2, 2, 2, 2, 0]);
+  });
+
+  it("khoảng thời gian khác hẳn hoặc symbol khác: không dùng tạm", async () => {
+    const { feed, flush } = mk();
+    feed.get("S", 0, 900, wide, "a");
+    await flush();
+    expect(feed.get("S", 900, 1000, wide, "a")).toBeNull(); // liền kề, không trùng
+    expect(feed.get("T", 0, 900, wide, "a")).toBeNull(); // symbol khác
+    expect(feed.get("S", 0, 1000, wide, "a")).not.toBeNull();
+  });
+
+  it("lần nạp của khoá mới lỗi thì thôi dùng tạm (rơi về nến) tới khi thử lại", async () => {
+    let fail = false;
+    let clock = 0;
+    const pending: (() => void)[] = [];
+    const feed = new TickProfileFeed(
+      (_s, _f, _t, l) => new Promise<TickHist | null>((res) => pending.push(() => res(fail ? null : { up: new Array(l.N).fill(1), dn: new Array(l.N).fill(0) }))),
+      () => {},
+      () => clock,
+    );
+    feed.get("S", 0, 900, wide, "a");
+    pending.shift()!();
+    await Promise.resolve();
+    await Promise.resolve();
+    fail = true;
+    expect(feed.get("S", 0, 1000, wide, "a")).not.toBeNull(); // đang nạp: dùng tạm
+    pending.shift()!();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(feed.get("S", 0, 1000, wide, "a")).toBeNull(); // lỗi
+    clock += 11_000;
+    expect(feed.get("S", 0, 1000, wide, "a")).not.toBeNull(); // thử lại: lại dùng tạm
   });
 });

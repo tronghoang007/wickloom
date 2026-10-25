@@ -1,4 +1,4 @@
-import type { Profile } from "@/volumeProfile/compute";
+import { profileLevels, type LineKind, type Profile } from "@/volumeProfile/compute";
 import type {
     IPrimitivePaneRenderer,
     IPrimitivePaneView,
@@ -10,14 +10,14 @@ import type {
     SeriesType,
     Time,
 } from "lightweight-charts";
-import type { LineStyleName, ProfileSet, ProfileStyle } from "../schema";
+import type { LineStyleName, PlacedProfile, ProfileSet, ProfileStyle } from "../schema";
 
 export type RowSeg = { x0: number; x1: number; color: string; alpha: number };
 export type RowLabel = { x: number; text: string; align: "left" | "right" };
 /** `labels`: nhãn riêng của row (Delta + Total: delta bên trái, total bên phải); không có thì một nhãn `shown` ở cuối thanh. */
 export type RowLayout = { i: number; priceLo: number; priceHi: number; segs: RowSeg[]; len: number; shown: number; labels?: RowLabel[] };
 /** `axis`: hoành độ trục giữa của Delta + Total (delta kéo sang trái, total sang phải). */
-export type ProfileLayout = { rows: RowLayout[]; lines: { kind: "poc" | "vah" | "val"; price: number }[]; base: number; dir: 1 | -1; axis?: number };
+export type ProfileLayout = { rows: RowLayout[]; lines: { kind: LineKind; price: number }[]; base: number; dir: 1 | -1; axis?: number };
 
 const VA_ALPHA = 0.75;
 const OUT_ALPHA = 0.4;
@@ -26,7 +26,7 @@ const OUT_ALPHA = 0.4;
  *  hoặc hai đoạn ngược chiều quanh một trục (Delta + Total: bề rộng histogram chia đôi, delta theo |delta| / row lệch nhất sang trái, total theo volume / row lớn nhất sang phải);
  *  row nằm trong Value Area đậm hơn; kèm giá POC / VAH / VAL. Cùng cách vẽ với FRVP / AVP của drawings. */
 export function layoutProfile(vp: Profile, st: ProfileStyle, left: number, right: number): ProfileLayout {
-  const { lo, hi, size, N, up, dn, total, mv, poc, vl, vh } = vp;
+  const { lo, hi, size, N, up, dn, total, mv, vl, vh } = vp;
   const histW = Math.max(20, ((right - left) * st.width) / 100);
   const dir: 1 | -1 = st.place === "right" ? -1 : 1;
   const base = dir === 1 ? left : right;
@@ -69,12 +69,16 @@ export function layoutProfile(vp: Profile, st: ProfileStyle, left: number, right
     base,
     dir,
     ...(st.volume === "deltatotal" ? { axis } : {}),
-    lines: [
-      { kind: "vah", price: Math.min(hi, lo + size * (vh + 1)) },
-      { kind: "val", price: lo + size * vl },
-      { kind: "poc", price: (lo + size * poc + Math.min(hi, lo + size * (poc + 1))) / 2 },
-    ],
+    lines: profileLevels(vp),
   };
+}
+
+/** Hoành độ cuối của đường `kind`: ghim (Visible Range) thì hết pane; Extend thì tới nến đầu tiên cắt qua mức (`p.end`, như TV "extend right"), chưa nến nào cắt thì hết pane; không thì hết phiên (`right`). */
+export function lineEndX(p: PlacedProfile, kind: LineKind, st: ProfileStyle, right: number, W: number, xOf: (logical: number) => number | null): number {
+  if (st.pinned) return W;
+  if (!st.extend) return right;
+  const k = p.end?.[kind];
+  return (k === undefined ? null : xOf(k)) ?? W;
 }
 
 const dash = (style: LineStyleName, w: number): number[] => (style === "dashed" ? [6 * w, 6 * w] : style === "dotted" ? [w, 3 * w] : []);
@@ -174,7 +178,6 @@ export class ProfilePrimitive implements ISeriesPrimitive<Time> {
                 ctx.stroke();
               }
             }
-            const xEnd = st.extend || st.pinned ? W : right;
             ctx.setLineDash([]);
             for (const l of lay.lines) {
               const cfg = st[l.kind];
@@ -186,7 +189,7 @@ export class ProfilePrimitive implements ISeriesPrimitive<Time> {
               ctx.setLineDash(dash(cfg.style, w));
               ctx.beginPath();
               ctx.moveTo(left * hpr, y * vpr);
-              ctx.lineTo(xEnd * hpr, y * vpr);
+              ctx.lineTo(lineEndX(p, l.kind, st, right, W, (k) => ts.logicalToCoordinate(k as Logical)) * hpr, y * vpr);
               ctx.stroke();
             }
             ctx.setLineDash([]);

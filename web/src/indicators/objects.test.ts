@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MAX_BUBBLES, MAX_OBJECTS, ObjectBuilder, emptyObjects, indexAtTime, sanitizeObjects, trimObjects } from "./objects";
+import type { ProfileSet } from "./schema";
+import { MAX_BUBBLES, MAX_OBJECTS, ObjectBuilder, emptyObjects, indexAtTime, sanitizeObjects, trimObjects, trimProfiles } from "./objects";
 
 describe("ObjectBuilder", () => {
   it("trả lại chính object để sửa tiếp (như set_x2 của Pine)", () => {
@@ -76,6 +77,19 @@ describe("trimObjects", () => {
     const t = trimObjects({ ...set, bubbles: [{ x: 15, y: 1, r: 4, bg: "#fff" }] }, 12);
     expect(t.bubbles![0].x).toBe(3);
     expect(trimObjects(set, 12)).not.toHaveProperty("bubbles");
+  });
+});
+
+describe("trimProfiles", () => {
+  const line = { show: true, color: "#fff", width: 1, style: "solid" as const };
+  const style = { volume: "updown", width: 30, place: "left", values: false, extend: true, pinned: false, up: "", down: "", vaUp: "", vaDown: "", poc: line, vah: line, val: line } as const;
+  const prof = (x1: number, x2: number, end?: { poc?: number }) => ({ lo: 0, hi: 1, size: 1, N: 1, up: [1], dn: [0], total: [1], mv: 1, poc: 0, vl: 0, vh: 0, x1, x2, ...(end ? { end } : {}) });
+
+  it("dịch x1 / x2 và chỉ số nến cắt (end) sang trái cut; không có end thì không thêm", () => {
+    const set: ProfileSet = { profiles: [prof(10, 20, { poc: 25 }), prof(30, 40)], style };
+    const out = trimProfiles(set, 5);
+    expect(out.profiles.map((p) => [p.x1, p.x2, p.end])).toEqual([[5, 15, { poc: 20 }], [25, 35, undefined]]);
+    expect(trimProfiles(set, 0)).toBe(set);
   });
 });
 

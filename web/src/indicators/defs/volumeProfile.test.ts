@@ -1,10 +1,11 @@
 import type { Bar } from "@/lib/api";
+import { computeProfile, profileLevels } from "@/volumeProfile/compute";
 import { describe, expect, it } from "vitest";
 import { byId } from "../catalog";
 import { computeExtras } from "../engine";
 import { newInstance } from "../instance";
 import type { TickSource } from "../schema";
-import { profileSource, rangeLowerTf, svp, vrvp } from "./volumeProfile";
+import { crossings, profileSource, rangeLowerTf, svp, vrvp } from "./volumeProfile";
 
 const DAY = 86400;
 const M15 = 900;
@@ -59,6 +60,16 @@ describe("Session Volume Profile", () => {
     const p = run();
     expect(p.profiles.map((x) => [x.x1, x.x2])).toEqual([[0, 95], [96, 191], [192, 287]]);
     expect(p.style.pinned).toBe(false);
+  });
+
+  it("Extend: mỗi đường có chỉ số nến đầu tiên sau phiên cắt qua mức của nó; không bật Extend thì không có", () => {
+    expect(run().profiles.every((x) => x.end === undefined)).toBe(true);
+    const p = run({ extend: true }).profiles;
+    for (const x of p) {
+      expect(x.end).toBeDefined();
+      for (const k of Object.values(x.end!)) expect(k).toBeGreaterThan(x.x2);
+    }
+    expect(p[2].end).toEqual({}); // phiên cuối: chưa nến nào sau nó
   });
 
   it("tổng volume các row = tổng volume nguồn: phiên 1 từ nến chart, phiên 2-3 từ M1", () => {
@@ -266,5 +277,23 @@ describe("Data aggregation = 1 tick", () => {
     const wide = Array.from({ length: 30 }, (_, d) => chart(100 + d, 96)).flat();
     expect(need({ agg: "1 tick" }, { from: 0, to: 100 }, wide)).toBeNull(); // vùng bắt đầu từ 30 ngày trước
     expect(need({ agg: "1 tick" }, { from: 20 * 96, to: 29 * 96 }, wide)).toEqual({ from: wide[20 * 96].t });
+  });
+});
+
+describe("crossings", () => {
+  const b = (o: number, h: number, l: number, c: number, v: number) => bar(0, o, h, l, c, v);
+  // 100..110, tick 1, 10 row: volume dồn ở 104..106 nên POC ~105, VA quanh nó
+  const vp = computeProfile([b(100, 102, 100, 102, 30), b(106, 106, 104, 104, 60), b(108, 110, 108, 110, 10)], 1, 10, 70)!;
+  const lv = Object.fromEntries(profileLevels(vp).map((l) => [l.kind, l.price]));
+  it("nến đầu tiên từ chỉ số cho trước có [l, h] chứa mức; mỗi đường một chỉ số riêng", () => {
+    const after = [b(90, 91, 90, 91, 1), b(lv.poc - 1, lv.poc + 3, lv.poc - 0.5, lv.poc, 1), b(120, 130, 120, 121, 1)];
+    expect(crossings(vp, after, 0).poc).toBe(1);
+    expect(crossings(vp, after, 2)).toEqual({}); // bắt đầu sau nến cắt
+    const wide = [b(90, 91, 90, 91, 1), b(100, 111, 99, 100, 1)];
+    expect(crossings(vp, wide, 0)).toEqual({ poc: 1, vah: 1, val: 1 }); // một nến phủ cả ba mức
+  });
+  it("không nến nào cắt thì không có khoá", () => {
+    expect(crossings(vp, [b(500, 500, 500, 500, 1), b(500, 501, 500, 501, 1)], 0)).toEqual({});
+    expect(crossings(vp, [], 0)).toEqual({});
   });
 });

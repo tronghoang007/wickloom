@@ -53,7 +53,7 @@ export function trimObjects(s: ObjectSet, cut: number): ObjectSet {
 
 /** Như `trimObjects` cho volume profile: dịch chỉ số nến đầu/cuối của từng phiên sang trái `cut` (profile ghim không dùng x nên giữ nguyên). */
 export function trimProfiles(s: ProfileSet, cut: number): ProfileSet {
-  return cut === 0 || s.style.pinned ? s : { ...s, profiles: s.profiles.map((p) => ({ ...p, x1: p.x1 - cut, x2: p.x2 - cut })) };
+  return cut === 0 || s.style.pinned ? s : { ...s, profiles: s.profiles.map((p) => ({ ...p, x1: p.x1 - cut, x2: p.x2 - cut, ...(p.end ? { end: Object.fromEntries(Object.entries(p.end).map(([k, v]) => [k, v - cut])) } : {}) })) };
 }
 
 /** Như `trimObjects` cho footprint: bỏ nến lịch sử ngầm (x < cut) và dịch chỉ số nến sang trái `cut`. */

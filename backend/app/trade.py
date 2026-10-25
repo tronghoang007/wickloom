@@ -21,7 +21,9 @@ from .mt5 import registry
 from .store import MetaStore
 
 ORDER_TIMEOUT = 10.0  # giây chờ EA trả kết quả
-MAX_PER_MINUTE = 20  # lệnh gửi xuống một account trong 60s - chặn vòng lặp lỗi ở client
+MAX_PER_MINUTE = 20  # lệnh MỚI (market / lệnh chờ) gửi xuống một account trong 60s - chặn vòng lặp lỗi ở client mở thêm vị thế
+MAX_MANAGE_PER_MINUTE = 120  # đóng / huỷ / sửa lệnh đã có: không thêm rủi ro nên cao hơn nhiều, để "Close all" / "Cancel all" nhiều lệnh không bị chặn giữa chừng
+OPENING = ("order_send", "order_pending")
 DEDUPE_TTL = 600.0  # nhớ client_id bao lâu
 CLIENT_ID_RE = r"^[A-Za-z0-9_-]{8,32}$"
 
@@ -151,7 +153,7 @@ class TradeBroker:
         self._meta: Dict[str, Tuple[str, Optional[str], float]] = {}  # req_id -> (account_id, client_id, lúc gửi), giữ cả sau khi quá hạn để ghép kết quả muộn
         self._busy: Dict[str, str] = {}  # account_id -> req_id đang chờ EA (một lệnh một lúc)
         self._seen: Dict[Tuple[str, str], Dict[str, Any]] = {}  # (account_id, client_id) -> {at, status, result}
-        self._sent: Dict[str, Deque[float]] = {}
+        self._sent: Dict[Tuple[str, bool], Deque[float]] = {}  # (account_id, là lệnh mới?) -> thời điểm gửi trong 60s qua
 
     def _purge(self, now: float) -> None:
         for k in [k for k, v in self._seen.items() if now - v["at"] > DEDUPE_TTL]:
@@ -170,11 +172,13 @@ class TradeBroker:
                 raise HTTPException(409, "Lệnh này đã gửi nhưng chưa biết kết quả: xem tab Positions trước khi gửi lại")
         if aid in self._busy:
             raise HTTPException(409, "Đang xử lý lệnh trước, đợi vài giây")
-        sent = self._sent.setdefault(aid, deque())
+        opening = cmd["type"] in OPENING
+        limit = MAX_PER_MINUTE if opening else MAX_MANAGE_PER_MINUTE
+        sent = self._sent.setdefault((aid, opening), deque())
         while sent and now - sent[0] > 60:
             sent.popleft()
-        if len(sent) >= MAX_PER_MINUTE:
-            raise HTTPException(429, f"Quá {MAX_PER_MINUTE} lệnh trong 1 phút")
+        if len(sent) >= limit:
+            raise HTTPException(429, f"Quá {limit} yêu cầu {'đặt lệnh mới' if opening else 'đóng / sửa / huỷ lệnh'} trong 1 phút")
         sent.append(now)
 
         req_id = uuid.uuid4().hex

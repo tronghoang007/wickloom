@@ -1,5 +1,5 @@
 import type { Bar } from "@/lib/api";
-import { computeProfile, computeTickProfile } from "@/volumeProfile/compute";
+import { computeProfile, computeTickProfile, profileLevels, type Profile } from "@/volumeProfile/compute";
 import { periodKeys, periodStarts, type Period } from "../calendar";
 import { TICK_DEPTH, lowerCandidates, overlaps, tickStart, withinBudget } from "../lower";
 import { num, str, type Ctx, type IndicatorDef, type InputDef, type ItemDef, type PlacedProfile, type ProfileSet, type ProfileStyle } from "../schema";
@@ -70,6 +70,21 @@ export function profileSource(chart: Bar[], lower: Bar[], t0: number, t1: number
   return fill.length === 0 ? fine : [...fine, ...fill].sort((a, b) => a.t - b.t);
 }
 
+/** Chỉ số nến đầu tiên từ `from` trở đi mà vùng giá [l, h] chứa mức của từng đường POC / VAH / VAL (đường không có nến nào cắt thì không có khoá): đường "Extend" dừng ở đó như TV. */
+export function crossings(vp: Profile, bars: Bar[], from: number): NonNullable<PlacedProfile["end"]> {
+  const end: NonNullable<PlacedProfile["end"]> = {};
+  const todo = profileLevels(vp);
+  for (let i = from; i < bars.length && todo.length > 0; i++) {
+    for (let k = todo.length - 1; k >= 0; k--) {
+      if (bars[i].l <= todo[k].price && todo[k].price <= bars[i].h) {
+        end[todo[k].kind] = i;
+        todo.splice(k, 1);
+      }
+    }
+  }
+  return end;
+}
+
 const layoutKind = (c: Ctx) => (str(c.inputs, "layout") === "Ticks Per Row" ? "ticks" : "rows");
 
 const compute = (c: Ctx, src: Bar[]) => computeProfile(src, c.tick, num(c.inputs, "rows"), num(c.inputs, "va"), layoutKind(c));
@@ -86,7 +101,7 @@ export const svp: IndicatorDef = {
     { key: "session", label: "Session", type: "select", default: "Day", options: Object.keys(SESSIONS) },
     ...sessionInputs(),
     widthInput(30), placeInput("Left"), valuesInput,
-    { key: "extend", label: "Extend POC/VAH/VAL", type: "bool", default: false },
+    { key: "extend", label: "Extend POC/VAH/VAL", type: "bool", default: false, tooltip: "Extends the lines to the right until a candle crosses them (to the edge of the chart if none does)." },
   ],
   plots: [],
   items: ITEMS,
@@ -118,7 +133,7 @@ export const svp: IndicatorDef = {
     for (const s of sessions) {
       if (s.last < c.cut) continue; // phiên nằm hẳn trong lịch sử ẩn
       const vp = profileOf(c, bars.slice(s.first, s.last + 1), bars[s.first].t, bars[s.last].t + step, step);
-      if (vp) profiles.push({ ...vp, x1: s.first, x2: s.last });
+      if (vp) profiles.push({ ...vp, x1: s.first, x2: s.last, ...(c.inputs.extend ? { end: crossings(vp, bars, s.last + 1) } : {}) });
     }
     return { profiles, style };
   },

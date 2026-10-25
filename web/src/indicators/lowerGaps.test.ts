@@ -47,6 +47,14 @@ describe("holeGaps", () => {
   it("không có khung thô: không biết", () => {
     expect(holeGaps(m1, 60, 0, [], 300)).toEqual([]);
   });
+  it("minSteps: lỗ ngắn hơn chừng đó nến mịn không tính, đủ dài thì tính (khung chuẩn cùng độ mịn)", () => {
+    const tick = run(0, 2, 60).concat(run(240, 2, 60), run(600, 2, 60)); // thiếu 2 phút (120, 180) rồi 4 phút (360..540)
+    const m1 = run(0, 12, 60);
+    expect(holeGaps(tick, 60, 0, m1, 60).map((g) => g.bars)).toEqual([4, 2]);
+    expect(holeGaps(tick, 60, 0, m1, 60, 3).map((g) => g.bars)).toEqual([4]);
+    expect(holeGaps(tick, 60, 0, m1, 60, 4).map((g) => g.bars)).toEqual([4]);
+    expect(holeGaps(tick, 60, 0, m1, 60, 5)).toEqual([]);
+  });
 });
 
 describe("spliceRange", () => {
