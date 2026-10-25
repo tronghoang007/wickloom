@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { computeExtras } from "../engine";
 import { newInstance } from "../instance";
 import type { TickSource } from "../schema";
-import { fpBar, fpRowSize, fpText, footprint, isImbalance, stackedRuns, type ImbalanceOpts } from "./footprint";
+import { fpBar, fpPair, fpRowSize, fpText, footprint, isImbalance, stackedRuns, type ImbalanceOpts } from "./footprint";
 
 const M5 = 300;
 const W = M5 * 64; // cửa sổ xin tick
@@ -23,6 +23,25 @@ describe("fpRowSize", () => {
     expect(fpRowSize(flat(60), 0.01, inputs())).toBeCloseTo(10, 9); // 12 -> 10
     expect(fpRowSize(flat(0.01), 0.01, inputs())).toBeCloseTo(0.01, 12);
     expect(fpRowSize([], 0.01, inputs())).toBeCloseTo(0.01, 12);
+  });
+  it("Auto: nến đang chạy (nến cuối) không đổi row size", () => {
+    const base = flat(10, 60);
+    const spiky = [...base.slice(0, -1), bar(59, { o: 100, c: 100, h: 1000, l: 100 })]; // nến cuối đang chạy giãn rất rộng
+    expect(fpRowSize(spiky, 0.01, inputs())).toBeCloseTo(fpRowSize(base, 0.01, inputs()), 12);
+  });
+  it("Auto: một nến đã đóng biến động mạnh chưa làm nhảy nấc (trung vị nhiều nến)", () => {
+    const quiet = flat(10, 60);
+    const withSpike = [...quiet, bar(60, { o: 100, c: 100, h: 200, l: 100 }), bar(61, { o: 100, c: 100, h: 110, l: 100 })]; // ATR nến cuối đóng tăng ~64%: cách cũ nhảy 2 -> 5
+    expect(fpRowSize(quiet, 0.01, inputs())).toBeCloseTo(2, 9);
+    expect(fpRowSize(withSpike, 0.01, inputs())).toBeCloseTo(2, 9);
+  });
+  it("Auto: biến động đổi hẳn thì row size đổi theo", () => {
+    const calm = flat(10, 60);
+    const wild = [...calm, ...flat(60, 60).map((b, i) => ({ ...b, t: T0 + (60 + i) * M5 }))];
+    expect(fpRowSize(wild, 0.01, inputs())).toBeCloseTo(10, 9);
+  });
+  it("Auto: chỉ có một nến thì dùng nến đó", () => {
+    expect(fpRowSize(flat(10, 1), 0.01, inputs({ atrLen: 1 }))).toBeCloseTo(2, 9);
   });
 });
 
@@ -81,6 +100,17 @@ describe("fpBar", () => {
   });
 });
 
+describe("fpPair", () => {
+  it("[sell, buy]: Normal đủ số, K gọn, Auto đủ số nếu cả hai số vừa", () => {
+    expect(fpPair(35, 61, "normal")).toEqual(["35", "61"]);
+    expect(fpPair(1234, 61, "normal")).toEqual(["1234", "61"]);
+    expect(fpPair(1234, 61, "k")).toEqual(["1.2K", "61"]);
+    expect(fpPair(1234, 61, "auto")).toEqual(["1234", "61"]);
+    expect(fpPair(1234, 61, "auto", (a, b) => !(a === "1234" && b === "61"))).toEqual(["1.2K", "61"]);
+    expect(fpPair(0, 3, "auto")).toEqual(["0", "3"]); // số 0 vẫn hiện như ATAS
+  });
+});
+
 describe("fpText", () => {
   it("Normal luôn đủ số, K luôn gọn từ 1000, Auto đủ số nếu vừa ô không thì gọn", () => {
     expect(fpText(1234, "normal")).toBe("1234");
@@ -122,6 +152,13 @@ describe("footprint.footprints", () => {
     expect(at(7)).toMatchObject({ rows: [], o: 100, h: 110, l: 90, c: 105 });
   });
 
+  it("mặc định đối diện = 0 không tính imbalance (tick chỉ vào một bên); bật Include zero thì tính", () => {
+    const cells: FpCell[] = [[5, 100, 2, 0], [5, 101, 5, 0]]; // r101: mua 5 so với bán 0 ở r100
+    const at = (inputs = {}) => run(() => cells, { from: 5, to: 5 }, inputs).bars.find((b) => b.x === 5)!;
+    expect(at().buyImb).toEqual([false, false]);
+    expect(at({ imbZero: true }).buyImb).toEqual([false, true]);
+  });
+
   it("chưa nạp xong (fp trả null) / tick chưa phủ tới / không có nguồn tick: chỉ vẽ nến", () => {
     expect(run(() => null, { from: 5, to: 7 }).bars.every((b) => b.rows.length === 0)).toBe(true);
     expect(run(() => [[0, 100, 1, 1]], { from: 5, to: 7 }, {}, false).bars.every((b) => b.rows.length === 0)).toBe(true);
@@ -134,6 +171,29 @@ describe("footprint.footprints", () => {
     const fp = vi.fn<Fp>(() => []);
     run(fp, { from: 0, to: 199 });
     expect(fp).not.toHaveBeenCalled();
+  });
+
+  it("cỡ chữ mặc định 14 (như ATAS), user đặt thì theo user", () => {
+    const size = (inputs = {}) => run(() => [], { from: 5, to: 7 }, inputs).style.textSize;
+    expect(size()).toBe(14);
+    expect(size({ textSize: 9 })).toBe(9);
+  });
+
+  it("Mode mặc định là Box (ô tô kín như ATAS), chọn Profile thì thanh theo volume", () => {
+    const mode = (inputs = {}) => run(() => [], { from: 5, to: 7 }, inputs).style.mode;
+    expect(mode()).toBe("box");
+    expect(mode({ mode: "Profile" })).toBe("profile");
+  });
+
+  it("Type: Bid x Ask (mặc định) / Delta / Volume / Delta + Volume, không còn kiểu hai cột; giá trị lạ về Bid x Ask", () => {
+    const type = (t?: string) => run(() => [], { from: 5, to: 7 }, t === undefined ? {} : { type: t }).style.type;
+    expect(type()).toBe("bidask");
+    expect(type("Bid x Ask")).toBe("bidask");
+    expect(type("Delta")).toBe("delta");
+    expect(type("Volume")).toBe("volume");
+    expect(type("Delta + Volume")).toBe("deltavol");
+    expect(type("Bid x Ask (1 column)")).toBe("bidask"); // tên tạm đã bỏ
+    expect((footprint.inputs.find((i) => i.key === "type") as { options: string[] }).options).toEqual(["Bid x Ask", "Delta", "Volume", "Delta + Volume"]);
   });
 
   it("style từ inputs / items; hook ticks xin từ nến đầu vùng nhìn (có đệm)", () => {

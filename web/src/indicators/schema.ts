@@ -99,7 +99,7 @@ export type FpBar = {
 };
 export type FpType = "bidask" | "delta" | "volume" | "deltavol";
 export type FpStyle = {
-  type: FpType; // bidask: Sell bên trái nến, Buy bên phải; delta / volume: một cột bên phải nến; deltavol: hai cột (delta, total)
+  type: FpType; // nến sát mép trái, cột ô bên phải: bidask in hai số sell, buy quanh tâm ô mỗi row (kiểu ATAS), delta / volume một số mỗi row; deltavol: hai cột (delta, total)
   mode: "profile" | "box"; // profile: bề rộng ô theo volume; box: mọi ô cùng bề rộng
   color: "fading" | "fixed" | "none"; // nền ô: đậm dần theo volume / cố định / không nền
   textSize: number; textFormat: "auto" | "normal" | "k";

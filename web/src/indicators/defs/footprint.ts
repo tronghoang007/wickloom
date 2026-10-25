@@ -21,19 +21,19 @@ const MAX_BARS = 150;
 const TYPES: Record<string, FpType> = { "Bid x Ask": "bidask", Delta: "delta", Volume: "volume", "Delta + Volume": "deltavol" };
 
 const INPUTS: InputDef[] = [
-  { hideInLegend: true, key: "rowMode", label: "Row size", type: "select", default: "Auto", options: ["Auto", "Manual"], group: "Rows", tooltip: "Auto: 0.2 × ATR, rounded to a 1 / 2 / 5 step so rows do not change on every candle. Manual: Ticks per row." },
+  { hideInLegend: true, key: "rowMode", label: "Row size", type: "select", default: "Auto", options: ["Auto", "Manual"], group: "Rows", tooltip: "Auto: 0.2 × ATR (median of the last 50 closed candles), rounded to a 1 / 2 / 5 step so rows do not change on every candle. Manual: Ticks per row." },
   { hideInLegend: true, key: "atrLen", label: "ATR length", type: "int", default: 14, min: 1, max: 200, group: "Rows", enabledIf: (i) => i.rowMode === "Auto" },
   { hideInLegend: true, key: "ticks", label: "Ticks per row", type: "int", default: 10, min: 1, max: 100000, group: "Rows", enabledIf: (i) => i.rowMode === "Manual" },
-  { key: "type", label: "Type", type: "select", default: "Bid x Ask", options: Object.keys(TYPES), group: "Style", tooltip: "Bid x Ask: sell volume left of the candle, buy volume right. Delta / Volume: one column right of the candle. Delta + Volume: two columns." },
-  { hideInLegend: true, key: "mode", label: "Mode", type: "select", default: "Profile", options: ["Profile", "Box"], group: "Style", tooltip: "Profile: cell width follows the volume. Box: all cells have the same width." },
+  { key: "type", label: "Type", type: "select", default: "Bid x Ask", options: Object.keys(TYPES), group: "Style", tooltip: "Bid x Ask: one column right of the candle with the sell and buy volume side by side on every level, like ATAS (imbalance colours the number). Delta / Volume: one number per level. Delta + Volume: two columns." },
+  { hideInLegend: true, key: "mode", label: "Mode", type: "select", default: "Box", options: ["Profile", "Box"], group: "Style", tooltip: "Profile: cell width follows the volume. Box: all cells have the same width." },
   { hideInLegend: true, key: "color", label: "Color mode", type: "select", default: "Fading", options: ["Fading", "Fixed", "None"], group: "Style", tooltip: "Fading: cell background gets stronger with its volume. Fixed: one strength. None: no background." },
-  { hideInLegend: true, key: "textSize", label: "Text size", type: "int", default: 10, min: 6, max: 24, group: "Style" },
+  { hideInLegend: true, key: "textSize", label: "Text size", type: "int", default: 14, min: 6, max: 24, group: "Style", tooltip: "Largest size of the numbers; they shrink to fit the height of a level." },
   { hideInLegend: true, key: "textFormat", label: "Text format", type: "select", default: "Auto", options: ["Auto", "Normal", "K"], group: "Style", tooltip: "Auto: 1.2K only when the full number does not fit. Normal: always the full number. K: thousands as 1.2K." },
   { hideInLegend: true, key: "summary", label: "Info box", type: "bool", default: true, group: "Style", tooltip: "Total volume and delta below each candle." },
   { hideInLegend: true, key: "imb", label: "Imbalance", type: "bool", default: true, group: "Imbalance", tooltip: "Buy volume at a level against sell volume one level below (and sell against buy one level above)." },
   { hideInLegend: true, key: "imbPct", label: "Imbalance %", type: "int", default: 300, min: 100, max: 10000, group: "Imbalance", enabledIf: (i) => !!i.imb, tooltip: "The bigger side must be at least this % of the smaller side." },
   { hideInLegend: true, key: "imbMin", label: "Minimum volume difference", type: "int", default: 1, min: 0, group: "Imbalance", enabledIf: (i) => !!i.imb },
-  { hideInLegend: true, key: "imbZero", label: "Include zero", type: "bool", default: true, group: "Imbalance", enabledIf: (i) => !!i.imb, tooltip: "A level facing an empty level counts as an imbalance." },
+  { hideInLegend: true, key: "imbZero", label: "Include zero", type: "bool", default: false, group: "Imbalance", enabledIf: (i) => !!i.imb, tooltip: "A level facing an empty level counts as an imbalance. Off by default: tick data puts each tick on one side only, so on small timeframes most of these are noise." },
   { hideInLegend: true, key: "stacked", label: "Stacked imbalance", type: "bool", default: true, group: "Imbalance", enabledIf: (i) => !!i.imb },
   { hideInLegend: true, key: "stackN", label: "Stacked levels", type: "int", default: 3, min: 2, max: 20, group: "Imbalance", enabledIf: (i) => !!i.imb && !!i.stacked },
   { hideInLegend: true, key: "poc", label: "POC", type: "bool", default: true, group: "Point of control / Value area" },
@@ -53,17 +53,19 @@ const ITEMS: ItemDef[] = [
   { id: "va", title: "Value area", color: "#2962ff", group: "Lines", plain: true },
 ];
 
-/** Cao (giá) của một row: Manual = số tick user đặt, Auto = 0.2 × ATR làm tròn nấc 1 / 2 / 5 (không nhỏ hơn 1 tick). */
+/** Auto: lấy trung vị của chừng này ATR gần nhất (không kể nến đang chạy) để row không nhảy nấc khi ATR chạm ngưỡng làm tròn. */
+const AUTO_WINDOW = 50;
+
+/** Cao (giá) của một row: Manual = số tick user đặt, Auto = 0.2 × ATR làm tròn nấc 1 / 2 / 5 (không nhỏ hơn 1 tick).
+ *  ATR của nến đang chạy đổi theo từng tick và đổi row size làm mọi nến regroup + tải lại, nên Auto bỏ nến cuối và lấy trung vị `AUTO_WINDOW` ATR gần nhất. */
 export function fpRowSize(bars: Bar[], tick: number, inputs: Ctx["inputs"]): number {
   if (str(inputs, "rowMode") === "Manual") return Math.max(1, Math.round(num(inputs, "ticks"))) * tick;
   const a = atr(bars, num(inputs, "atrLen"));
-  let last = NaN;
-  for (let i = a.length - 1; i >= 0; i--)
-    if (!Number.isNaN(a[i])) {
-      last = a[i];
-      break;
-    }
-  const ticks = Number.isFinite(last) && last > 0 ? niceStep((0.2 * last) / tick) : 1;
+  const valid = (xs: number[]) => xs.filter((v) => !Number.isNaN(v));
+  const done = valid(a.slice(0, -1)).slice(-AUTO_WINDOW);
+  const recent = done.length > 0 ? done : valid(a).slice(-1); // chỉ có một nến: dùng luôn nó
+  const med = recent.length > 0 ? [...recent].sort((x, y) => x - y)[recent.length >> 1] : NaN;
+  const ticks = Number.isFinite(med) && med > 0 ? niceStep((0.2 * med) / tick) : 1;
   return Math.max(1, Math.round(ticks)) * tick;
 }
 
@@ -127,6 +129,13 @@ export function fpText(v: number, format: FpStyle["textFormat"], fits: (s: strin
   const full = String(Math.round(v));
   const k = Math.abs(v) >= 1000 ? `${+(v / 1000).toFixed(1)}K` : full;
   return format === "normal" ? full : format === "k" ? k : fits(full) ? full : k;
+}
+
+/** Chữ của một ô kiểu "Bid x Ask": [sell, buy] (renderer đặt hai số quanh tâm ô và tô màu từng số). Auto: đủ số nếu `fits(sell, buy)` (đo cả hai số) không thì gọn (1.2K). */
+export function fpPair(dn: number, up: number, format: FpStyle["textFormat"], fits: (sell: string, buy: string) => boolean = () => true): [string, string] {
+  const full: [string, string] = [fpText(dn, "normal"), fpText(up, "normal")];
+  const short: [string, string] = [fpText(dn, "k"), fpText(up, "k")];
+  return format === "normal" ? full : format === "k" ? short : fits(...full) ? full : short;
 }
 
 function styleOf(c: Ctx): FpStyle {

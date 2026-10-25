@@ -9,53 +9,59 @@ import type {
   SeriesType,
   Time,
 } from "lightweight-charts";
-import { fpText } from "../defs/footprint";
+import { fpPair, fpText } from "../defs/footprint";
 import type { FootprintSet, FpBar, FpRow, FpStyle, FpType } from "../schema";
 
-// Vẽ Volume footprint (xem defs/footprint.ts): mỗi nến một cột ô theo row giá, nến mảnh ở giữa (Bid x Ask) hoặc bên trái (các kiểu một cột), imbalance, POC, Value Area, Info box.
+// Vẽ Volume footprint (xem defs/footprint.ts): mỗi nến một cột ô theo row giá (nến mảnh sát mép trái, cột ô bên phải nến), imbalance, POC, Value Area, Info box.
 // Hình học và giá trị ô là hàm thuần (test được); phần canvas chỉ ghép chúng lại.
 
-export type FpCol = { x0: number; x1: number; side: "left" | "right" }; // side: cột nằm bên nào của nến (căn chữ / chiều thanh Profile)
+export type FpCol = { x0: number; x1: number };
 export type FpGeom = { candleX: number; candleW: number; cols: FpCol[] };
 
-/** Hình học ngang của một nến có tâm `x` (px) khi hai nến cách nhau `spacing` px. Bid x Ask: nến giữa, Sell bên trái, Buy bên phải;
- *  Delta / Volume: nến sát mép trái, một cột bên phải; Delta + Volume: hai cột bên phải nến (delta rồi total). */
+/** Hình học ngang của một nến có tâm `x` (px) khi hai nến cách nhau `spacing` px: nến sát mép trái, các cột bên phải nến.
+ *  Bid x Ask / Delta / Volume: một cột; Delta + Volume: hai cột (delta rồi total). */
 export function fpGeometry(x: number, spacing: number, type: FpType): FpGeom {
   const half = spacing * 0.46;
   const candleW = Math.max(1, Math.min(6, Math.round(spacing * 0.08)));
-  if (type === "bidask") {
-    const gap = candleW / 2 + 1;
-    return { candleX: x, candleW, cols: [{ x0: x - half, x1: x - gap, side: "left" }, { x0: x + gap, x1: x + half, side: "right" }] };
-  }
   const candleX = x - half + candleW / 2;
   const start = candleX + candleW / 2 + 1;
   if (type === "deltavol") {
     const mid = (start + x + half) / 2;
-    return { candleX, candleW, cols: [{ x0: start, x1: mid - 1, side: "right" }, { x0: mid + 1, x1: x + half, side: "right" }] };
+    return { candleX, candleW, cols: [{ x0: start, x1: mid - 1 }, { x0: mid + 1, x1: x + half }] };
   }
-  return { candleX, candleW, cols: [{ x0: start, x1: x + half, side: "right" }] };
+  return { candleX, candleW, cols: [{ x0: start, x1: x + half }] };
 }
 
-/** Giá trị hiển thị và bên tô màu của cột `col` ở row `r`: bidask = sell | buy; delta = up − down; volume = tổng; deltavol = delta | tổng. Màu theo dấu delta / bên nhiều volume hơn. */
+/** Giá trị dùng cho nền và bên tô màu của cột `col` ở row `r`: bidask / volume = tổng; delta = up − down; deltavol = delta | tổng. Màu theo dấu delta / bên nhiều volume hơn.
+ *  (Chữ của Bid x Ask là hai số sell / buy nên vẽ riêng, xem `fpPair` và `fpPairLayout`.) */
 export function fpCell(type: FpType, col: number, r: FpRow): { v: number; side: "buy" | "sell" } {
   const delta = r.up - r.dn;
   const total = r.up + r.dn;
   const dominant = r.up >= r.dn ? "buy" : "sell";
   switch (type) {
-    case "bidask":
-      return col === 0 ? { v: r.dn, side: "sell" } : { v: r.up, side: "buy" };
     case "delta":
       return { v: delta, side: delta >= 0 ? "buy" : "sell" };
-    case "volume":
-      return { v: total, side: dominant };
-    default:
+    case "deltavol":
       return col === 0 ? { v: delta, side: delta >= 0 ? "buy" : "sell" } : { v: total, side: dominant };
+    default: // bidask, volume
+      return { v: total, side: dominant };
   }
 }
 
 /** Số lớn nhất theo |giá trị| của từng cột trong nến (chuẩn hoá bề rộng thanh Profile và độ đậm nền). */
 export function colMaxima(type: FpType, rows: FpRow[], nCols: number): number[] {
   return Array.from({ length: nCols }, (_, c) => Math.max(0, ...rows.map((r) => Math.abs(fpCell(type, c, r).v))));
+}
+
+/** Khe giữa hai số sell / buy của ô Bid x Ask, theo cỡ chữ (ATAS ~12 px ở chữ ~14 px). */
+const PAIR_GAP = 0.85;
+
+/** Chỗ đặt hai số của ô Bid x Ask trong cột [`x0`, `x1`]: khe `gap` ở tâm cột, `sellX` là mép PHẢI của số sell, `buyX` là mép TRÁI của số buy.
+ *  Số rộng `ws` / `wb` (px) phải lọt nửa cột (chừa 1px mỗi bên), không thì null (bỏ chữ). */
+export function fpPairLayout(x0: number, x1: number, ws: number, wb: number, gap: number): { sellX: number; buyX: number } | null {
+  const cx = (x0 + x1) / 2;
+  if (Math.max(ws, wb) + gap / 2 > (x1 - x0) / 2 - 1) return null;
+  return { sellX: cx - gap / 2, buyX: cx + gap / 2 };
 }
 
 /** Tổng volume và delta của nến (Info box). */
@@ -66,8 +72,6 @@ export function fpTotals(rows: FpRow[]): { total: number; delta: number } {
 const FADE_MIN = 0.12;
 const FADE_RANGE = 0.58;
 const FIXED_ALPHA = 0.4;
-const IMB_ALPHA = 0.9;
-const IMB_TEXT = "#10131a";
 
 /** Độ đậm nền ô theo kiểu tô màu: fading = FADE_MIN..FADE_MIN+FADE_RANGE theo phần của số lớn nhất, fixed = một mức, none = không nền. */
 export function cellAlpha(mode: FpStyle["color"], share: number): number {
@@ -165,12 +169,6 @@ function drawBar(ctx: CanvasRenderingContext2D, series: ISeriesApi<SeriesType>, 
     ctx.globalAlpha = 1;
   };
   const colorOf = (side: "buy" | "sell") => (side === "buy" ? st.buy : st.sell);
-  const imbOf = (i: number, col: FpCol): { color: string; stack: boolean } | null => {
-    if (!st.imbalance) return null;
-    // Bid x Ask: Buy imbalance ở cột phải, Sell imbalance ở cột trái; các kiểu khác: Buy ở mép phải của cột, Sell ở mép trái
-    if (st.type === "bidask") return col.side === "right" ? (b.buyImb[i] ? { color: st.imbBuy, stack: b.stackBuy[i] } : null) : b.sellImb[i] ? { color: st.imbSell, stack: b.stackSell[i] } : null;
-    return null;
-  };
 
   ctx.textBaseline = "middle";
   b.rows.forEach((r, i) => {
@@ -184,28 +182,38 @@ function drawBar(ctx: CanvasRenderingContext2D, series: ISeriesApi<SeriesType>, 
       const share = maxima[ci] > 0 ? Math.abs(v) / maxima[ci] : 0;
       const w = col.x1 - col.x0;
       const bar = st.mode === "profile" ? w * share : w;
-      const imb = imbOf(i, col);
-      // nền: Profile = thanh dài theo volume từ mép trong (sát nến) ra ngoài; Box = cả ô
-      if (v !== 0 || imb) {
-        const alpha = imb ? IMB_ALPHA : cellAlpha(st.color, share);
-        const color = imb ? imb.color : colorOf(side);
-        if (st.mode === "box" || imb) fillX(col.x0, col.x1, box.top, bottom, color, alpha);
-        else if (col.side === "left") fillX(col.x1 - bar, col.x1, box.top, bottom, color, alpha);
-        else fillX(col.x0, col.x0 + bar, box.top, bottom, color, alpha);
-      }
-      if (imb?.stack) {
-        const edge = col.side === "left" ? col.x0 : col.x1 - 2;
-        fillX(edge, edge + 2, box.top, bottom, imb.color, 1);
+      // nền: Profile = thanh dài theo volume từ mép trái của cột (sát nến); Box = cả ô
+      if (v !== 0) fillX(col.x0, col.x0 + bar, box.top, bottom, colorOf(side), cellAlpha(st.color, share));
+      // Bid x Ask: imbalance tô màu số (không tô ô); chuỗi bậc thang (stacked) là vạch 2px ở mép phải (mua) / mép trái (bán) của ô
+      if (st.type === "bidask" && st.stacked) {
+        if (b.stackBuy[i]) fillX(col.x1 - 2, col.x1, box.top, bottom, st.imbBuy, 1);
+        if (b.stackSell[i]) fillX(col.x0, col.x0 + 2, box.top, bottom, st.imbSell, 1);
       }
       // chữ: cỡ theo chiều cao row, bỏ khi không vừa
       if (v === 0 || h < 7 || w < 14) return;
       const px = Math.max(6, Math.min(st.textSize, Math.floor(h * 0.8)));
       ctx.font = `${Math.round(px * vpr)}px ${FONT}`;
+      if (st.type === "bidask") {
+        // hai số quanh tâm ô, không có chữ "x": sell căn phải sát bên trái khe, buy căn trái từ bên phải khe
+        const gapPx = px * PAIR_GAP;
+        const wide = (s: string) => ctx.measureText(s).width / hpr;
+        const [sell, buy] = fpPair(r.dn, r.up, st.textFormat, (a, c) => fpPairLayout(col.x0, col.x1, wide(a), wide(c), gapPx) !== null);
+        const at = fpPairLayout(col.x0, col.x1, wide(sell), wide(buy), gapPx);
+        if (!at) return;
+        const y = ((box.top + bottom) / 2) * vpr;
+        ctx.textAlign = "right";
+        ctx.fillStyle = b.sellImb[i] ? st.imbSell : st.text;
+        ctx.fillText(sell, at.sellX * hpr, y);
+        ctx.textAlign = "left";
+        ctx.fillStyle = b.buyImb[i] ? st.imbBuy : st.text;
+        ctx.fillText(buy, at.buyX * hpr, y);
+        return;
+      }
       const text = fpText(v, st.textFormat, (s) => ctx.measureText(s).width / hpr <= w - 3);
       if (ctx.measureText(text).width / hpr > w - 2) return;
-      ctx.fillStyle = imb ? IMB_TEXT : st.text;
-      ctx.textAlign = col.side === "left" ? "right" : "left";
-      ctx.fillText(text, (col.side === "left" ? col.x1 - 2 : col.x0 + 2) * hpr, ((box.top + bottom) / 2) * vpr);
+      ctx.fillStyle = st.text;
+      ctx.textAlign = "left";
+      ctx.fillText(text, (col.x0 + 2) * hpr, ((box.top + bottom) / 2) * vpr);
     });
   });
 
