@@ -61,3 +61,38 @@ export function writeLot(accountId: string, symbol: string, lot: number): void {
 /** Lot sẽ dùng cho lệnh nhanh (menu chuột phải): lot đã nhớ của account × symbol, chuẩn hoá theo spec; chưa nhớ thì lot tối thiểu. */
 export const currentLot = (accountId: string | undefined, symbol: string, spec: LotSpec): number =>
   normalizeLot((accountId ? readLot(accountId, symbol) : null) ?? spec.min, spec);
+
+/** Lot sẽ đóng của vị thế `total` lot theo ô đang nhập (thanh kéo ở bảng Modify): chưa nhập hoặc không biết step = đóng hết; còn lại làm tròn theo step, kẹp [min, total]. `spec.max` là `total`. */
+export function closeLot(text: string | null, total: number, spec: LotSpec | null): number {
+  if (text === null || !spec) return total;
+  return normalizeLot(parseFloat(text.replace(",", ".")), spec);
+}
+
+/** Các mốc trên thanh kéo đóng một phần, tính theo LOT của vị thế (spec.max): ít bước (≤ 6) thì mỗi step một mốc; nhiều hơn thì chia theo khoảng "tròn" (1 / 2 / 2.5 / 5 × 10^n lot, là bội của step)
+ *  sao cho còn ≤ 5 mốc, mốc cuối luôn là cả vị thế. Mốc nhỏ hơn lot tối thiểu bị bỏ (không đóng được lượng đó). */
+export function lotMarks(spec: LotSpec): number[] {
+  const dec = lotDecimals(spec.step);
+  const r = (v: number) => Number(v.toFixed(Math.max(dec, 8)));
+  const steps = Math.floor(spec.max / spec.step + 1e-9);
+  const keep = (marks: number[]) => {
+    const out = marks.filter((m) => m >= spec.min - 1e-9);
+    return out.length ? out : [spec.max];
+  };
+  const full = r(spec.max);
+  if (steps <= 6) {
+    const marks = Array.from({ length: steps }, (_, i) => r((i + 1) * spec.step));
+    return keep(marks[marks.length - 1] === full ? marks : [...marks, full]);
+  }
+  for (let e = -8; e <= 8; e++) {
+    for (const k of [1, 2, 2.5, 5]) {
+      const gap = r(k * 10 ** e);
+      const q = gap / spec.step;
+      if (gap < spec.step - 1e-12 || Math.abs(q - Math.round(q)) > 1e-6) continue; // khoảng chia phải là bội của step
+      const n = Math.floor(spec.max / gap + 1e-9);
+      const marks = Array.from({ length: n }, (_, i) => r((i + 1) * gap));
+      if (marks[marks.length - 1] !== full) marks.push(full);
+      if (marks.length <= 5) return keep(marks);
+    }
+  }
+  return [full];
+}

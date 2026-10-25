@@ -16,6 +16,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import EmptyState from "../EmptyState";
 import { EmptyHistoryI, EmptyOrdersI, EmptyPositionsI } from "../icons";
 import { SymbolBadge } from "../SymbolIcon";
+import LotSlider from "./LotSlider";
 
 const TABS: { id: TradeTab; label: string }[] = [
   { id: "positions", label: "Positions" },
@@ -195,37 +196,6 @@ function Positions({ data }: { data: TradeData }) {
         ))}
       </tbody>
     </table>
-  );
-}
-
-/** Thanh kéo đóng một phần theo % của vị thế (như MT5): mốc 20 / 40 / 60 / 80 / 100% là chấm tròn có nhãn %, đường kẻ 1px, đoạn đã chọn tô đỏ, núm tròn. Giá trị ra là lot đã chuẩn hoá theo step.
- *  Input range thật nằm đè lên để kéo / dùng phím. */
-const SLIDER_MARKS = [20, 40, 60, 80, 100];
-function LotSlider({ spec, value, onChange }: { spec: { min: number; max: number; step: number }; value: number; onChange: (lot: number) => void }) {
-  const pct = Math.min(100, Math.max(0, (value / spec.max) * 100));
-  return (
-    <span className="relative mx-1 flex h-5 w-56 items-center">
-      <span className="pointer-events-none absolute inset-x-2 inset-y-0 flex items-center">
-        <span className="absolute inset-x-0 h-px bg-[var(--border)]" />
-        <span className="absolute left-0 h-px bg-[#f23645]" style={{ width: `${pct}%` }} />
-        {SLIDER_MARKS.map((m) => (
-          <span key={m} className="absolute flex -translate-x-1/2 flex-col items-center" style={{ left: `${m}%` }}>
-            <span className={`h-2 w-2 rounded-full ${m <= pct + 1e-6 ? "bg-[#f23645]" : "bg-[var(--muted)]"}`} />
-            <span className="absolute top-3.5 text-[10px] leading-none text-[var(--muted)]">{m}%</span>
-          </span>
-        ))}
-      </span>
-      <input
-        type="range"
-        aria-label="Close percent slider"
-        min={0}
-        max={100}
-        step={0.1}
-        value={pct}
-        onChange={(e) => onChange(normalizeLot((parseFloat(e.target.value) / 100) * spec.max, spec))}
-        className="absolute inset-0 m-0 h-full w-full cursor-pointer appearance-none bg-transparent focus:outline-none [&::-webkit-slider-runnable-track]:h-full [&::-webkit-slider-runnable-track]:bg-transparent [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:mt-0.5 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-[#f23645] [&::-webkit-slider-thumb]:bg-[var(--bg)] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-solid [&::-moz-range-thumb]:border-[#f23645] [&::-moz-range-thumb]:bg-[var(--bg)]"
-      />
-    </span>
   );
 }
 

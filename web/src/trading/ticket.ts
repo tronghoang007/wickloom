@@ -27,6 +27,8 @@ type State = {
   /** Đặt xong: bỏ bản nháp nhưng để bảng mở ở trạng thái chờ. */
   settle: (r: TicketRest) => void;
   close: () => void;
+  /** Bấm biểu tượng Order ở thanh bên phải khi bảng đang mở: bảng Modify (chỉ xem / sửa lệnh đã đặt) thì đóng hẳn như ×, gồm bỏ chọn lệnh trên chart; bản nháp thì chỉ ẩn bảng, giữ bản nháp để mở lại. */
+  hide: () => void;
 };
 
 export const useTicketStore = create<State>()((set) => ({
@@ -71,8 +73,13 @@ export const useTicketStore = create<State>()((set) => ({
   patch: (p) => set((s) => (s.draft ? { draft: { ...s.draft, ...p } } : s)),
   settle: (rest) => set({ draft: null, rest, modifyOwner: null }),
   close: () => {
+    useTradeFocus.getState().set(null); // đóng bảng (×, Esc) cũng bỏ chọn lệnh trên chart: không để lệnh khác bị mờ mà không còn bảng nào
     useRailStore.getState().closeOrder(); // trả thanh về panel trước đó, không đóng cả thanh
     set({ draft: null, rest: null, modifyOwner: null });
+  },
+  hide: () => {
+    if (useTicketStore.getState().modifyOwner !== null) useTicketStore.getState().close(); // chỉ ẩn bảng thì lệnh vẫn được chọn: các lệnh khác mờ và biểu tượng Order còn sáng dù không còn bảng nào
+    useRailStore.getState().setOpen(null);
   },
 }));
 

@@ -34,10 +34,10 @@ export type LineDragHost = {
 const TOL = 6;
 /** Chấm tròn kéo được nằm trên đường giá, cách mép phải vùng vẽ bấy nhiêu px (TradeOverlay vẽ chấm ở đó). */
 export const HANDLE_INSET = 34;
-const CLICK_SLOP = 4; // px: bấm tay thường rung 1-3px, mà 1px trên chart có thể là cả chục tick, nên chưa dời quá ngần này thì vẫn là "bấm", không phải kéo
+const CLICK_SLOP = 4; // px: bấm tay thường rung 1-3px, mà 1px trên chart có thể là cả chục tick, nên chưa dời quá ngần này thì vẫn là "bấm", không phải kéo. Chỉ tính chiều dọc: đường chỉ kéo lên xuống, tay rung ngang bao nhiêu cũng không đổi giá nên không biến cú bấm thành cú kéo (thẻ lệnh chờ bấm lệch ngang vài px thì chỉ focus mà không mở bảng)
 
 export class LineDrag {
-  private drag: { id: string; from: number; price: number; x: number; y: number; moved: boolean; arm?: () => boolean } | null = null;
+  private drag: { id: string; from: number; price: number; y: number; moved: boolean; arm?: () => boolean } | null = null;
   private lock: { handleScroll: unknown; handleScale: unknown } | null = null;
   private hovering = false;
   private hoverId: string | null = null;
@@ -133,7 +133,7 @@ export class LineDrag {
       /* pointer đã biến mất */
     }
     this.lockChart();
-    this.drag = { id, from, price, x: e.clientX, y: e.clientY, moved, arm };
+    this.drag = { id, from, price, y: e.clientY, moved, arm };
     this.h.container.style.cursor = "ns-resize";
   }
 
@@ -153,7 +153,7 @@ export class LineDrag {
   private onMoveEv = (e: PointerEvent) => {
     if (this.drag) {
       this.consume(e);
-      if (!this.drag.moved && Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) < CLICK_SLOP) return;
+      if (!this.drag.moved && Math.abs(e.clientY - this.drag.y) < CLICK_SLOP) return;
       if (!this.drag.moved && this.drag.arm && !this.drag.arm()) {
         this.finish();
         return;

@@ -9,8 +9,10 @@ import { useOrderState } from "@/trading/actions";
 import { parseNum, type Draft } from "@/trading/draft";
 import { draftError } from "@/trading/draftCheck";
 import { cancelOwnerEdits, clearEdit, confirmOwnerEdits, pendingFor, seedEditStop, setEditPrice, useEditBridge } from "@/trading/editBridge";
-import { fmtLot, fmtPnl, fmtPx, orderLabel, positionPnl, sideLabel } from "@/trading/format";
-import { currentLot, fmtLotValue, lotSpec, normalizeLot, stepLot, writeLot } from "@/trading/lot";
+import { filledAs } from "@/trading/filled";
+import { useTradeFocus } from "@/trading/focus";
+import { fmtLot, fmtPnl, fmtPx, orderLabel, pnlClass, positionPnl, sideLabel } from "@/trading/format";
+import { closeLot, currentLot, fmtLotValue, lotSpec, normalizeLot, stepLot, writeLot } from "@/trading/lot";
 import { pendingLabel, resolveOrderType, snapPrice } from "@/trading/orderType";
 import { estimatePnl, pnlSpec, pointsBetween, priceForPnl, type PnlSpec } from "@/trading/pnl";
 import { spreadPips, useQuoteStore } from "@/trading/quote";
@@ -21,6 +23,7 @@ import { useTicketStore, type TicketRest } from "@/trading/ticket";
 import { useEffect, useState } from "react";
 import EmptyState from "../EmptyState";
 import { Close } from "../icons";
+import LotSlider from "./LotSlider";
 import PriceText from "./PriceText";
 import ModeBadge from "./ModeBadge";
 
@@ -44,7 +47,8 @@ export default function OrderTicket() {
 }
 
 /** Bấm chọn một vị thế / lệnh chờ trên chart (không kéo): bảng của lệnh đó. Hiện thông số hiện tại; SL / TP / giá vào vừa kéo trên chart (đang chờ xác nhận) hiện giá mới kèm giá cũ.
- *  Modify = gửi các thay đổi đang chờ, Discard = trả về giá cũ, Delete = huỷ lệnh chờ / đóng vị thế (có hộp thoại xác nhận như dấu × trên thẻ). */
+ *  Modify = gửi các thay đổi đang chờ, Discard = trả về giá cũ, Delete = huỷ lệnh chờ (có hộp thoại xác nhận như dấu × trên thẻ). Lệnh đã khớp (vị thế) thì Delete thành Close, kèm thanh kéo đóng một phần
+ *  như tab Positions; lệnh chờ đang xem mà khớp thì bảng chuyển sang vị thế vừa mở ra. */
 function ModifyPanel({ owner }: { owner: string }) {
   const data = useTradeStore((s) => s.data);
   const byPane = useEditBridge((s) => s.byPane);
@@ -56,12 +60,21 @@ function ModifyPanel({ owner }: { owner: string }) {
   const pos = kind === "position" ? data?.positions.find((p) => p.ticket === ticket) : undefined;
   const ord = kind === "order" ? data?.orders.find((o) => o.ticket === ticket) : undefined;
   const item = pos ?? ord;
+  // lot muốn đóng, gắn với số lot của vị thế lúc nhập: vị thế đổi lot (vừa đóng một phần) thì về mặc định đóng hết
+  const [part, setPart] = useState<{ vol: number; text: string } | null>(null);
   useEffect(() => {
-    // lệnh không còn (đã đóng / huỷ / khớp): bảng về trạng thái chờ
     if (!data || item) return;
+    const filled = filledAs(owner, data);
+    if (filled) {
+      // lệnh chờ vừa khớp: đổi sang vị thế cùng ticket (focus theo) thay vì đóng bảng
+      useTradeFocus.getState().set(filled);
+      useTicketStore.setState((s) => ({ modifyOwner: filled, id: s.id + 1 }));
+      return;
+    }
+    // lệnh không còn (đã đóng / huỷ): bảng về trạng thái chờ
     useTicketStore.setState({ modifyOwner: null });
     useRailStore.getState().closeOrder();
-  }, [data, item]);
+  }, [data, item, owner]);
   if (!item) return <EmptyState className="h-full">Đang tải lệnh…</EmptyState>;
 
   const digits = symbols.find((x) => x.name === item.symbol)?.digits;
@@ -78,6 +91,11 @@ function ModifyPanel({ owner }: { owner: string }) {
   const pnl = pnlSpec(sym, ccy);
   const what = pos ? `${sideLabel(pos.type)} ${fmtLot(pos.volume)}` : `${orderLabel(ord!.type)} ${fmtLot(ord!.volume)}`;
   const profit = pos ? positionPnl(pos) : null;
+  // đóng một phần: cần biết step và vị thế lớn hơn lot tối thiểu (như tab Positions); thiếu thì chỉ có nút Close đóng hết
+  const closeSpec = pos && sym?.volume_min && sym.volume_step && pos.volume > sym.volume_min + 1e-9 ? { min: sym.volume_min, max: pos.volume, step: sym.volume_step } : null;
+  const typed = part && pos && part.vol === pos.volume ? part.text : null;
+  const want = pos ? closeLot(typed, pos.volume, closeSpec) : 0;
+  const partial = pos !== undefined && closeSpec !== null && want < pos.volume - 1e-9;
   const btn = "flex h-11 w-full cursor-pointer items-center justify-center rounded-lg text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55";
   return (
     <div role="dialog" aria-label="Modify order" className="flex min-h-0 flex-1 flex-col text-[var(--fg)]">
@@ -90,15 +108,19 @@ function ModifyPanel({ owner }: { owner: string }) {
             <Close size={20} />
           </button>
         </div>
-        <div className="mb-4 rounded-lg px-3.5 py-3 text-white" style={{ background: buy ? "#2962ff" : "#f23645" }}>
+        <div className={`${profit !== null ? "mb-2" : "mb-4"} rounded-lg px-3.5 py-3 text-white`} style={{ background: buy ? "#2962ff" : "#f23645" }}>
           <div className="text-xs text-white">{pos ? "Vị thế" : "Lệnh chờ"} #{ticket}</div>
           <div className="mt-1 text-[17px] font-semibold leading-none">{what}</div>
-          {profit !== null && (
-            <div className="mt-1.5 text-sm tabular-nums text-white">
-              {fmtPnl(profit)} {ccy}
-            </div>
-          )}
         </div>
+        {/* lãi / lỗ nằm ngoài thẻ màu: chữ xanh / đỏ theo dấu không đọc được trên nền xanh dương hoặc đỏ của thẻ */}
+        {profit !== null && (
+          <div className="mb-4 flex items-baseline justify-between px-0.5 text-[13px]">
+            <span className="text-[var(--muted)]">Unrealized P/L</span>
+            <span className={`font-semibold tabular-nums ${pnlClass(profit)}`} data-testid="modify-pnl">
+              {fmtPnl(profit)} {ccy}
+            </span>
+          </div>
+        )}
         <div className="mb-3">
           <span className="mb-1.5 block text-xs text-[var(--muted)]">Giá vào</span>
           {ord ? (
@@ -128,6 +150,33 @@ function ModifyPanel({ owner }: { owner: string }) {
             onRemove={() => askRemoveStop({ t: pos ? "position" : "order", ticket }, k, item[k], item.symbol, digits ?? 5)}
           />
         ))}
+        {pos && closeSpec && (
+          <div className="mb-3 border-t border-[var(--border)] pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[13px] font-medium">Close</span>
+              <span className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                <span className="w-24">
+                  <input
+                    aria-label="Close lot"
+                    inputMode="decimal"
+                    className={`${cellField} text-center`}
+                    value={typed ?? fmtLotValue(pos.volume, closeSpec)}
+                    onChange={(e) => setPart({ vol: pos.volume, text: e.target.value })}
+                    onBlur={() => typed !== null && setPart({ vol: pos.volume, text: fmtLotValue(want, closeSpec) })}
+                    onKeyDown={(e) => {
+                      e.stopPropagation(); // phím trong ô nhập không phải phím tắt của chart
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                  />
+                </span>
+                / {fmtLot(pos.volume)} lot
+              </span>
+            </div>
+            <div className="mb-5 flex">
+              <LotSlider className="flex-1" spec={closeSpec} value={want} onChange={(lot) => setPart({ vol: pos.volume, text: fmtLotValue(lot, closeSpec) })} />
+            </div>
+          </div>
+        )}
       </div>
       <div className="shrink-0 space-y-2 border-t border-[var(--border)] px-4 pb-3 pt-3">
         <button type="button" disabled={!pending || busy} onClick={() => confirmOwnerEdits(owner)} className={`${btn} bg-[var(--accent)] text-white hover:brightness-110`}>
@@ -137,8 +186,8 @@ function ModifyPanel({ owner }: { owner: string }) {
           <button type="button" disabled={!pending} onClick={() => cancelOwnerEdits(owner)} className={`${btn} border border-[var(--border)] hover:bg-[var(--hover)]`}>
             Discard
           </button>
-          <button type="button" disabled={busy} onClick={() => (pos ? askClosePosition(pos) : askCancelOrder(ord!))} className={`${btn} border border-[#f23645] text-[#f23645] hover:bg-[#f23645]/10`}>
-            {pos ? "Close" : "Delete"}
+          <button type="button" disabled={busy} onClick={() => (pos ? askClosePosition(pos, partial ? want : 0) : askCancelOrder(ord!))} className={`${btn} border border-[#f23645] text-[#f23645] hover:bg-[#f23645]/10`}>
+            {pos ? (partial ? `Close ${fmtLotValue(want, closeSpec!)} lot` : "Close") : "Delete"}
           </button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SymbolInfo } from "@/lib/api";
-import { fmtLotValue, lotDecimals, lotSpec, normalizeLot, readLot, stepLot, writeLot, type LotSpec } from "./lot";
+import { closeLot, fmtLotValue, lotDecimals, lotMarks, lotSpec, normalizeLot, readLot, stepLot, writeLot, type LotSpec } from "./lot";
 
 const S: LotSpec = { min: 0.01, max: 100, step: 0.01 };
 const sym = (o: Partial<SymbolInfo> = {}) => ({ name: "XAUUSDm", digits: 3, tick_size: 0.001, type: "metal", volume_min: 0.01, volume_max: 100, volume_step: 0.01, ...o }) as SymbolInfo;
@@ -93,5 +93,42 @@ describe("readLot / writeLot", () => {
   it("giá trị không phải số bị bỏ", () => {
     store["wickloom-lots"] = JSON.stringify({ "S:1|X": "abc" });
     expect(readLot("S:1", "X")).toBeNull();
+  });
+});
+
+describe("closeLot (lot sẽ đóng ở bảng Modify)", () => {
+  const spec: LotSpec = { min: 0.01, max: 1, step: 0.01 }; // max = lot của vị thế
+  it("chưa nhập hoặc không biết step → đóng hết", () => {
+    expect(closeLot(null, 1, spec)).toBe(1);
+    expect(closeLot("0.5", 1, null)).toBe(1);
+  });
+  it("làm tròn theo step, nhận dấu phẩy, kẹp trong [min, lot của vị thế]", () => {
+    expect(closeLot("0,257", 1, spec)).toBe(0.26);
+    expect(closeLot("5", 1, spec)).toBe(1);
+    expect(closeLot("0", 1, spec)).toBe(0.01);
+    expect(closeLot("abc", 1, spec)).toBe(0.01);
+  });
+});
+
+describe("lotMarks (mốc thanh kéo đóng một phần theo lot)", () => {
+  const spec = (max: number, step = 0.01, min = 0.01): LotSpec => ({ min, max, step });
+  it("vị thế ít step: mỗi step một mốc, mốc cuối là cả vị thế", () => {
+    expect(lotMarks(spec(0.05))).toEqual([0.01, 0.02, 0.03, 0.04, 0.05]);
+    expect(lotMarks(spec(0.06))).toEqual([0.01, 0.02, 0.03, 0.04, 0.05, 0.06]);
+    expect(lotMarks(spec(3, 1, 1))).toEqual([1, 2, 3]);
+  });
+  it("nhiều step: chia theo khoảng tròn, tối đa 5 mốc, cuối cùng là cả vị thế", () => {
+    expect(lotMarks(spec(1))).toEqual([0.2, 0.4, 0.6, 0.8, 1]);
+    expect(lotMarks(spec(0.5))).toEqual([0.1, 0.2, 0.3, 0.4, 0.5]);
+    expect(lotMarks(spec(0.37))).toEqual([0.1, 0.2, 0.3, 0.37]);
+    expect(lotMarks(spec(0.07))).toEqual([0.02, 0.04, 0.06, 0.07]);
+    expect(lotMarks(spec(2.5))).toEqual([0.5, 1, 1.5, 2, 2.5]);
+    expect(lotMarks(spec(10, 0.01))).toEqual([2, 4, 6, 8, 10]);
+  });
+  it("khoảng chia luôn là bội của step", () => {
+    expect(lotMarks(spec(0.9, 0.1, 0.1))).toEqual([0.2, 0.4, 0.6, 0.8, 0.9]);
+  });
+  it("bỏ mốc nhỏ hơn lot tối thiểu", () => {
+    expect(lotMarks(spec(0.6, 0.1, 0.3))).toEqual([0.3, 0.4, 0.5, 0.6]);
   });
 });

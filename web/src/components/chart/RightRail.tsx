@@ -44,7 +44,7 @@ export default function RightRail() {
       )}
       <div className="flex w-12 shrink-0 flex-col items-center gap-0.5 border-l border-[var(--border)] py-2">
         {tabs.map((t) => (
-          <button key={t.id} className={cls(open === t.id)} title={t.label} onClick={() => setOpen(open === t.id ? null : t.id)}>
+          <button key={t.id} className={cls(open === t.id)} title={t.label} onClick={() => (open !== t.id ? setOpen(t.id) : t.id === "order" ? useTicketStore.getState().hide() : setOpen(null))}>
             {t.icon}
           </button>
         ))}
