@@ -98,7 +98,7 @@ export type DrawPane = {
   selectedId: string | null;
   settingsOpen: boolean;
   settingsTab: SettingsTab | null; // tab mở sẵn khi vào Settings (double-click hình có tab Text -> Text); null = tab đầu tiên
-  editing: { id: string; isNew: boolean; cell?: [number, number] } | null; // đang sửa text inline trên chart (cell: ô của Table)
+  editing: { id: string; isNew: boolean; cell?: [number, number]; label?: boolean } | null; // đang sửa text inline trên chart (cell: ô của Table; label: gõ ngay trên nhãn "+ Add text" của đường / hộp)
   api: DrawingManager | null;
 };
 

@@ -47,7 +47,8 @@ type Mode =
   // pressed: đang giữ chuột vẽ tay. downAt: chỗ nhấn điểm đầu, nhả xa chỗ đó = đặt điểm 2 (nhấn-kéo-thả)
   | { k: "drafting"; d: Drawing; placed: number; pressed: boolean; downAt: Pt | null }
   | { k: "dragPoint"; id: string; index: number; before: string; moved: boolean }
-  | { k: "dragBody"; id: string; start: Pt; orig: Anchor[]; before: string; moved: boolean; a0?: Pt }; // a0: vị trí (tỉ lệ khung) của hình đang ghim
+  // a0: vị trí (tỉ lệ khung) của hình đang ghim; hint: nhấn trúng nhãn "+ Add text" (nhả không kéo = mở ô gõ chữ)
+  | { k: "dragBody"; id: string; start: Pt; orig: Anchor[]; before: string; moved: boolean; a0?: Pt; hint?: boolean };
 
 // Khung nhìn hiện tại; key đổi khi cuộn/zoom/đổi trục giá/có nến mới.
 type View = { w: number; h: number; bars: Bar[]; step: number; key: string };
@@ -486,6 +487,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       hovered: d.id === this.hoveredId,
       selected: d.id === this.st.selectedId,
       dragging: this.dragging(d),
+      editing: this.st.editing?.id === d.id,
       step,
       barsBetween: (t0, t1) => barsBetween(bars, step, t0, t1),
       X: (t) => this.timeToX(t),
@@ -507,7 +509,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   // Shape của drawing đã lưu chỉ build lại khi drawing / khung nhìn / hover / chọn đổi.
   // Trước đây mỗi frame và mỗi lần di chuột đều build lại tất cả (VP, VWAP lặp toàn bộ nến).
   private built(d: Drawing, v: View): Built | null {
-    const key = `${v.key}|${d.id === this.hoveredId}|${d.id === this.st.selectedId}|${this.dragging(d)}`;
+    const key = `${v.key}|${d.id === this.hoveredId}|${d.id === this.st.selectedId}|${this.dragging(d)}|${this.st.editing?.id === d.id}`;
     const hit = this.cache.get(d);
     if (hit?.key === key) return hit;
     const c = this.ctx(d, v);
@@ -654,6 +656,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
 
     if (st.lockAll) return;
     const found = this.hitAt(p);
+    const wasSelected = found !== null && found.d.id === st.selectedId; // nhãn "+ Add text" chỉ bấm được khi hình đã chọn
     this.select(found?.d.id ?? null);
     if (found && !found.d.locked) {
       this.consume(e);
@@ -663,9 +666,15 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       const pin = this.pinned(d);
       this.mode = hit.kind === "point" && !pin
         ? { k: "dragPoint", id: d.id, index: hit.index, before, moved: false }
-        : { k: "dragBody", id: d.id, start: p, orig: d.points.map((q) => ({ ...q })), before, moved: false, a0: pin ?? undefined };
+        : { k: "dragBody", id: d.id, start: p, orig: d.points.map((q) => ({ ...q })), before, moved: false, a0: pin ?? undefined, hint: wasSelected && this.onHint(d, p) };
     }
   };
+
+  // Điểm p có nằm trên nhãn gợi ý "+ Add text" của hình d không
+  private onHint(d: Drawing, p: Pt) {
+    const b = this.built(d, this.view());
+    return Boolean(b?.shapes.some((s) => s.k === "text" && s.hint && hitShapes([s], p)));
+  }
 
   // Click khi đang cầm tool: điểm đầu tạo draft, các điểm sau đặt tiếp tới khi đủ
   private place(tool: DrawingType, p: Pt, e: Mods) {
@@ -860,7 +869,11 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     }
     if (m.k !== "dragPoint" && m.k !== "dragBody") return;
     this.mode = { k: "idle" };
-    if (!m.moved) return; // chỉ click chọn: không undo, không lưu
+    if (!m.moved) {
+      // chỉ click chọn: không undo, không lưu; click đúng nhãn "+ Add text" thì gõ chữ ngay tại đó
+      if (m.k === "dragBody" && m.hint) this.startEdit(m.id, false, undefined, true);
+      return;
+    }
     const d = this.drawings.find((x) => x.id === m.id);
     if (d) this.prefetchProfileBars(d);
     this.pushUndo(m.before);
@@ -1037,16 +1050,21 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   }
 
   // --- sửa text inline ---
-  startEdit(id: string, isNew: boolean, cell?: [number, number]) {
+  startEdit(id: string, isNew: boolean, cell?: [number, number], label?: boolean) {
     this.select(id);
-    this.setSt({ editing: { id, isNew, cell } });
+    this.setSt({ editing: { id, isNew, cell, label } });
   }
 
   // Góc trên-trái ô sửa text (tọa độ chart): điểm mang text của hình; Table: giữa cạnh trái của ô
-  textAnchor(id: string): Pt | null {
+  // Gõ ngay trên nhãn "+ Add text" (label): chữ nằm đúng chỗ nhãn, xoay theo đường (angle), điểm trả về là tâm chữ
+  textAnchor(id: string): (Pt & { angle?: number }) | null {
     const d = this.drawings.find((x) => x.id === id);
     const b = d && this.built(d, this.view());
     if (!d || !b) return null;
+    if (this.st.editing?.label) {
+      const hint = this.shapes(d, { ...b.c, hovered: true, selected: true, dragging: false, editing: false }).find((s) => s.k === "text" && s.hint);
+      return hint?.k === "text" ? { x: hint.at.x, y: hint.at.y + this.mainTop(), angle: hint.angle } : null;
+    }
     const cell = this.st.editing?.cell;
     if (cell) {
       const rh = tableRowH(d), o = b.c.p[0];
@@ -1082,7 +1100,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       this.commit();
       return;
     }
-    if (value === d.text) return;
+    if (value === (d.text ?? "")) return;
     if (!ed.isNew) this.pushUndo(); // hình mới: gộp vào bước undo lúc tạo
     this.put({ ...d, text: value });
     this.commit();

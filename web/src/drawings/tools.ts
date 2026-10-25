@@ -17,6 +17,7 @@ export type Ctx = {
   hovered: boolean;
   selected: boolean;
   dragging?: boolean; // đang vẽ / đang kéo hình này (Volume profile chỉ hiện vạch dọc, thả ra mới tính)
+  editing?: boolean; // đang gõ chữ trực tiếp trên hình này (ô gõ thay chỗ nhãn gợi ý "+ Add text")
   step: number; // giây mỗi bar
   barsBetween: (t0: number, t1: number) => number; // số nến theo chỉ số nến, bỏ qua nghỉ phiên
   X: (t: number) => number | null;
@@ -94,6 +95,7 @@ export type TextSpec = {
   bg?: "main" | { def: boolean; color: string }; // hàng Background: "main" = màu chính d.color (Callout, Comment), object = ô bật + màu riêng
   border?: { def: boolean; color: string; always?: boolean }; // hàng Border (always: chỉ ô màu, "" = cùng màu nền)
   wrap?: boolean; // ô Text wrap (ngắt dòng ở 200px)
+  hint?: boolean; // hình đang chọn + chuột ở trên + chưa có chữ: hiện "+ Add text" mờ đúng chỗ chữ sẽ nằm, bấm vào để gõ (TV)
 };
 
 const EXTEND: [string, string][] = [["none", "Don't extend"], ["left", "Extend left"], ["right", "Extend right"], ["both", "Extend both"]];
@@ -118,14 +120,26 @@ export function fontSizeOf(d: Drawing): number {
   return d.type === "text" ? 12 + d.width * 2 : (FONT_DEFAULT[d.type] ?? 14); // Text cũ lưu cỡ trong độ dày nét
 }
 
+// Màu chữ: màu riêng nếu có, không thì màu mặc định của tool, không thì màu đường
+export const textColorOf = (d: Drawing): string => d.textColor ?? SPEC[d.type]?.text?.color ?? d.color;
+
 // Chữ của tab Text: cỡ, đậm, nghiêng, màu (mặc định màu đường)
 function textStyle(c: Ctx) {
   return {
     size: Number(c.d.opts?.fontSize) || (c.d.type === "text" ? 12 + c.d.width * 2 : Number(optOf(c.d, "fontSize")) || 14), // Text cũ lưu cỡ trong độ dày nét
     bold: Boolean(optOf(c.d, "bold")),
     italic: Boolean(optOf(c.d, "italic")),
-    color: c.d.textColor ?? SPEC[c.d.type]?.text?.color ?? c.d.color,
+    color: textColorOf(c.d),
   };
+}
+
+// Chữ của hình: chữ đã gõ, hoặc (chưa có chữ) nhãn gợi ý "+ Add text" mờ 50% như TV khi hình đang chọn và chuột ở trên.
+// Đang gõ trên hình này thì ô gõ đã thế chỗ nên không vẽ nhãn.
+const ADD_TEXT = "+ Add text";
+function labelOf(c: Ctx): { text: string; extra: Record<string, unknown> } | null {
+  if (c.d.text) return { text: c.d.text, extra: {} };
+  const on = SPEC[c.d.type]?.text?.hint && c.selected && c.hovered && !c.dragging && !c.editing && !c.d.locked;
+  return on ? { text: ADD_TEXT, extra: { alpha: 0.5, hint: true } } : null;
 }
 
 // Nền / viền riêng của hộp chữ (tab Text của Text, Pin): ô bật + màu
@@ -142,28 +156,30 @@ const wrapIf = (c: Ctx, text: string, st: { size: number; bold: boolean; italic:
 // Như TV: chữ của trend line chạy dọc theo đường (xoay theo góc), căn trái/giữa/phải theo đoạn
 // đang thấy; Top/Bottom = phía trên/dưới đường.
 function lineText(c: Ctx, a: Pt, b: Pt): Shape[] {
-  if (!c.d.text) return [];
+  const label = labelOf(c);
+  if (!label) return [];
   const st = textStyle(c);
   const v = optOf(c.d, "vAlign"), h = optOf(c.d, "hAlign");
   const [l, r] = a.x <= b.x ? [a, b] : [b, a];
   const ang = Math.atan2(r.y - l.y, r.x - l.x);
   const up = { x: Math.sin(ang), y: -Math.cos(ang) };
-  const gap = (c.d.text.split("\n").length * st.size * 1.3) / 2 + 4;
+  const gap = (label.text.split("\n").length * st.size * 1.3) / 2 + 4;
   const base = h === "left" ? l : h === "right" ? r : mid(l, r);
   const at = v === "top" ? add(base, mul(up, gap)) : v === "bottom" ? sub(base, mul(up, gap)) : base;
-  return [txt(at, c.d.text, { ...st, align: h === "left" ? "left" : h === "right" ? "right" : "center", angle: ang || undefined })];
+  return [txt(at, label.text, { ...st, align: h === "left" ? "left" : h === "right" ? "right" : "center", angle: ang || undefined, ...label.extra })];
 }
 
 // Chữ trong hộp (rectangle): căn theo 3×3 vị trí bên trong
 function boxText(c: Ctx, x0: number, y0: number, x1: number, y1: number): Shape[] {
-  if (!c.d.text) return [];
+  const label = labelOf(c);
+  if (!label) return [];
   const st = textStyle(c);
   const v = optOf(c.d, "vAlign"), h = optOf(c.d, "hAlign");
   const [top, bot] = [Math.min(y0, y1), Math.max(y0, y1)];
-  const half = (c.d.text.split("\n").length * st.size * 1.3) / 2;
+  const half = (label.text.split("\n").length * st.size * 1.3) / 2;
   const x = h === "left" ? x0 + 6 : h === "right" ? x1 - 6 : (x0 + x1) / 2;
   const y = v === "top" ? top + half + 4 : v === "bottom" ? bot - half - 4 : (top + bot) / 2;
-  return [txt({ x, y }, c.d.text, { ...st, align: h === "left" ? "left" : h === "right" ? "right" : "center" })];
+  return [txt({ x, y }, label.text, { ...st, align: h === "left" ? "left" : h === "right" ? "right" : "center", ...label.extra })];
 }
 
 // "Extend left/right" theo màn hình (TV): đầu trái là điểm có x nhỏ hơn
@@ -323,9 +339,9 @@ const bgOf = (c: Ctx) => String(optOf(c.d, "backgroundColor") || c.d.color);
 // Hình kín có nền riêng + viền: nền không viền (màu nền) rồi viền (màu đường)
 // Chữ nằm giữa hình (Circle, Ellipse của TV): màu chữ mặc định = màu đường
 const centerText = (c: Ctx, at: Pt): Shape[] => {
-  if (!c.d.text) return [];
-  const st = textStyle(c);
-  return [txt(at, c.d.text, { ...st, align: "center" })];
+  const label = labelOf(c);
+  if (!label) return [];
+  return [txt(at, label.text, { ...textStyle(c), align: "center", ...label.extra })];
 };
 const filledShape = (c: Ctx, pts: Pt[], alpha: number, open = false): Shape[] => [
   ...(optOf(c.d, "background") === false ? [] : [poly(pts, { closed: true, fill: alpha, noStroke: true, color: bgOf(c) })]),
@@ -992,7 +1008,7 @@ function lineOptions(extend: Ext, info: boolean, rightEnd = "normal"): ToolOptio
   ];
 }
 
-const LINE_TEXT: TextSpec = { kind: "line", size: 14, v: "top", h: "center" };
+const LINE_TEXT: TextSpec = { kind: "line", size: 14, v: "top", h: "center", hint: true };
 
 // Nội dung Stats theo các mục đã bật, như TV (mỗi nhóm 1 dòng):
 // "30.000 (0.73%), 3,000.0" · "16 bars (4h), distance: 421 px" · "33.26°"
@@ -1250,7 +1266,7 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     id: "hline", label: "Horizontal line", n: 1, axes: "price", options: [{ key: "showPrice", label: "Price label", def: true }],
-    text: { kind: "line", size: 12, v: "top", h: "center" },
+    text: { kind: "line", size: 12, v: "top", h: "center", hint: true },
     build: (c) => [seg({ x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y }), ...priceLabel(c), ...lineText(c, { x: 0, y: c.p[0].y }, { x: c.w, y: c.p[0].y })],
     handles: (c) => [{ x: c.w / 2, y: c.p[0].y }],
   },
@@ -1707,7 +1723,7 @@ export const TOOLS: ToolSpec[] = [
       { key: "background", label: "Background", def: true },
       { key: "backgroundColor", label: "Background color", def: "", color: true },
     ],
-    text: { kind: "box", size: 14, v: "middle", h: "center" },
+    text: { kind: "box", size: 14, v: "middle", h: "center", hint: true },
     handles: rectHandles,
     moveHandle: moveRectHandle,
   },
@@ -1722,11 +1738,11 @@ export const TOOLS: ToolSpec[] = [
   },
   { id: "path", label: "Path", n: 0, build: (c) => (c.p.length > 1 ? [poly(c.p), head(c.p[c.p.length - 2], c.p[c.p.length - 1], 10 + c.d.width * 2)] : []) },
   {
-    id: "circle", label: "Circle", n: 2, style: { color: "#ff9800" }, options: [BG, BGC], text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true },
+    id: "circle", label: "Circle", n: 2, style: { color: "#ff9800" }, options: [BG, BGC], text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true, hint: true },
     build: (c) => [...filledShape(c, circle(c.p[0], dist(c.p[0], c.p[1])), 0.2), ...centerText(c, c.p[0])],
   },
   {
-    id: "ellipse", label: "Ellipse", n: 2, shift: "square", options: [BG, BGC], text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true },
+    id: "ellipse", label: "Ellipse", n: 2, shift: "square", options: [BG, BGC], text: { kind: "box", size: 14, v: "middle", h: "center", fixed: true, hint: true },
     build: (c) => {
       const m = mid(c.p[0], c.p[1]), rx = Math.abs(c.p[1].x - c.p[0].x) / 2, ry = Math.abs(c.p[1].y - c.p[0].y) / 2;
       return [...filledShape(c, circle(m, 1).map((q) => ({ x: m.x + (q.x - m.x) * rx, y: m.y + (q.y - m.y) * ry })), 0.15), ...centerText(c, m)];

@@ -1307,4 +1307,44 @@ describe("tab Text của từng tool (đo trên TV 2026-10-25)", () => {
     expect(t).toMatchObject({ size: 16, bold: true, color: "#ffffff" });
     expect(texts(SPEC.pricerange.build(mkText("pricerange", 2)))[0].size).toBe(12);
   });
+
+  it('nhãn gợi ý "+ Add text": hiện mờ 50% khi hình đang chọn + chuột ở trên + chưa có chữ (đo trên TV 2026-10-25)', () => {
+    // TV: trend line, ray, extended, info line, hline, rectangle, circle, ellipse; channel / hray / crossline không có
+    const withHint = [["trendline", 2], ["ray", 2], ["extended", 2], ["infoline", 2], ["hline", 1], ["rect", 2], ["circle", 2], ["ellipse", 2]] as const;
+    for (const [type, n] of withHint) {
+      const h = texts(SPEC[type].build(mkText(type, n))).find((q) => q.hint); // info line còn có chữ Stats
+      expect(h, type).toMatchObject({ text: "+ Add text", alpha: 0.5, hint: true });
+    }
+    for (const [type, n] of [["channel", 3], ["hray", 1], ["crossline", 1], ["flat", 3]] as const) expect(texts(SPEC[type].build(mkText(type, n))), type).toHaveLength(0);
+  });
+
+  it("nhãn gợi ý nằm đúng chỗ chữ sẽ nằm: giữa đoạn (xoay theo đường), giữa hộp, giữa hình tròn", () => {
+    const line = texts(SPEC.trendline.build(mkText("trendline", 2)))[0];
+    expect(line.angle).toBeDefined();
+    expect(line.align).toBe("center");
+    const mid = { x: 150, y: 1000 - 12 * 10 };
+    expect(Math.hypot(line.at.x - mid.x, line.at.y - mid.y)).toBeLessThan(20); // sát điểm giữa, lệch lên phía trên đường
+    expect(line.at.y).toBeLessThan(mid.y + 0.001);
+    const rect = texts(SPEC.rect.build(mkText("rect", 2)))[0];
+    expect(rect.at).toEqual({ x: 150, y: (900 + 860) / 2 });
+    expect(texts(SPEC.circle.build(mkText("circle", 2)))[0].at).toEqual({ x: 100, y: 900 });
+  });
+
+  it("nhãn gợi ý theo kiểu chữ của tab Text (màu, cỡ); chữ thật thay nhãn và không mờ", () => {
+    const h = texts(SPEC.rect.build(mkText("rect", 2, undefined, { fontSize: 20, bold: true })))[0];
+    expect(h).toMatchObject({ size: 20, bold: true, color: "#ff9800", hint: true });
+    const real = texts(SPEC.rect.build(mkText("rect", 2, "Hello")))[0];
+    expect(real.text).toBe("Hello");
+    expect([real.alpha, real.hint]).toEqual([undefined, undefined]);
+  });
+
+  it("không có nhãn gợi ý khi chưa chọn / chưa hover / đang kéo / đang gõ / bị khoá", () => {
+    for (const patch of [{ selected: false }, { hovered: false }, { dragging: true }, { editing: true }]) {
+      const c = { ...mkText("trendline", 2), ...patch };
+      expect(texts(SPEC.trendline.build(c)), JSON.stringify(patch)).toHaveLength(0);
+    }
+    const locked = mkText("trendline", 2);
+    locked.d.locked = true;
+    expect(texts(SPEC.trendline.build(locked))).toHaveLength(0);
+  });
 });

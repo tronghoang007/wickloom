@@ -30,6 +30,8 @@ export type Shape =
       italic?: boolean;
       angle?: number; // radian, xoay quanh at (chữ chạy dọc theo trend line như TV)
       radius?: number; // bo góc ô nền (mặc định 4; Comment của TV bo tròn hẳn)
+      alpha?: number; // độ trong suốt của chữ
+      hint?: boolean; // nhãn gợi ý "+ Add text": bấm vào đó để gõ chữ (hit-test nhận, nhưng không phải chữ thật)
     };
 
 const HIT = 6;
@@ -164,6 +166,7 @@ export function drawShapes(ctx: CanvasRenderingContext2D, shapes: Shape[], d: Dr
       }
       const b = textBox(t);
       ctx.font = b.font;
+      if (s.alpha !== undefined) ctx.globalAlpha = s.alpha;
       if (t.bg) {
         ctx.fillStyle = t.bg;
         ctx.beginPath();
