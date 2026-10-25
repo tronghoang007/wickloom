@@ -103,7 +103,10 @@ def _handle_ticks_hist(body: TicksHistIn) -> None:
     if rows:
         state.bars.upsert(body.symbol, tickdelta.TICK_DELTA_TF, rows)
         state.bars.put_tickvp(body.symbol, rows[0]["t"], rows[-1]["t"], [(m, p, u, d) for (m, p), (u, d) in hist.items()])
-    if body.done:  # lịch sử tick tới giờ hiện tại làm gốc cho delta realtime của symbol này (nếu đang chờ gốc)
+        state.tick_gap.note(body.symbol, rows)
+    if body.done:
+        state.tick_gap.done(body.symbol)  # đoạn tick của khoảng đứt xong: xin đoạn cũ hơn nếu chưa phủ hết
+        # lịch sử tick tới giờ hiện tại làm gốc cho delta realtime của symbol này (nếu đang chờ gốc)
         upd = state.tick_live.seed(body.symbol)
         if upd:
             _publish_delta(body.symbol, upd)

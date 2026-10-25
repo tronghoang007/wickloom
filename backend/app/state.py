@@ -64,22 +64,14 @@ def _on_gap(symbol: str, gap_seconds: int) -> None:
 
 # Lịch sử tick (tf "TD") của khoảng đứt: EA tính từng đoạn TICK_GAP_CHUNK phút (tải / gom tick nặng, như web khi lấp đầu dữ liệu), tối đa TICK_GAP_MAX phút gần nhất.
 # Máy ngủ / EA mất kết nối chỉ làm đứt luồng tick chứ MT5 vẫn lấy lại được tick của broker, không bù thì CVD / Big Trades / profile tick có lỗ vĩnh viễn ở đó.
+# Mỗi lần chỉ xin một đoạn, đoạn kế xin khi EA gửi xong (xem tickdelta.GapFill).
 TICK_GAP_CHUNK = 360
 TICK_GAP_MAX = 1440
 
 
 def _backfill_tick_gap(symbol: str, gap_seconds: int, now: float) -> None:
-    """Xin EA tick của khoảng đứt `gap_seconds` giây (cộng 3 phút dư), mới → cũ; chặn gửi lặp cùng symbol trong 30s."""
-    key = (symbol, tickdelta.TICK_DELTA_TF)
-    if now - _gap_seeding.get(key, 0) < 30:
-        return
-    _gap_seeding[key] = now
-    minutes, before = min(TICK_GAP_MAX, gap_seconds // 60 + 3), int(now)
-    while minutes > 0:
-        n = min(TICK_GAP_CHUNK, minutes)
-        request_backfill(symbol, tickdelta.TICK_DELTA_TF, n, before=before)
-        minutes -= n
-        before -= n * 60
+    """Xin EA tick của khoảng đứt `gap_seconds` giây (cộng 3 phút dư), đoạn mới nhất trước; đứt ngắn hơn tickdelta.GAP_MIN thì không (gốc của `tick_live` đã phủ)."""
+    tick_gap.start(symbol, gap_seconds, now)
 
 
 aggregator = Aggregator(bars.last, _on_update, _on_close, _on_unseeded, _on_gap)
@@ -171,6 +163,9 @@ def request_catchup(symbol: str, tf: str) -> None:
 
 # Delta theo tick realtime (CVD / Big Trades): xin EA 2 phút tick gần nhất làm gốc cho phút đang chạy
 tick_live = tickdelta.Live(lambda symbol: request_backfill(symbol, tickdelta.TICK_DELTA_TF, 2, before=int(time.time())))
+tick_gap = tickdelta.GapFill(
+    lambda symbol, minutes, before: request_backfill(symbol, tickdelta.TICK_DELTA_TF, minutes, before=before), TICK_GAP_CHUNK, TICK_GAP_MAX // TICK_GAP_CHUNK
+)
 
 
 def check_broker_switch(company: str, server: str = "") -> bool:
@@ -208,6 +203,7 @@ def resync_after_broker_switch() -> Optional[Path]:
     aggregator.cur.clear()
     aggregator.last_tick.clear()
     tick_live.clear()
+    tick_gap.clear()
     pending_backfill.clear()  # lệnh neo theo dữ liệu của server cũ
     hub.broadcast({"type": "reset", "reason": "broker"})
     return archive_path

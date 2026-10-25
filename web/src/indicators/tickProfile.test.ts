@@ -229,6 +229,52 @@ describe("phút đang chạy (realtime)", () => {
   });
 });
 
+describe("liveHist khi đang dùng tạm bản của profile khác", () => {
+  const l3 = { lo: 100, hi: 103, size: 1, N: 3 };
+  const mkFeed = () => new TickProfileFeed(async () => ({ up: [1, 0, 0], dn: [0, 0, 1] }), () => {});
+  const settle = async () => { await Promise.resolve(); await Promise.resolve(); };
+  const cover = [td(0), td(60), td(120), td(180)];
+
+  it("heldUpTo của khoá chưa nạp là mốc DB của bản mượn; nạp xong thì là mốc của chính nó", async () => {
+    const feed = mkFeed();
+    feed.get("S", 0, 600, l3, "a", 120);
+    await settle();
+    expect(feed.heldUpTo("S", 0, 700, l3)).toBe(120); // khoá t1 = 700 chưa có dữ liệu, mượn bản t1 = 600
+    expect(feed.heldUpTo("S", 900, 1000, l3)).toBeUndefined(); // không có bản nào gần giống
+    feed.get("S", 0, 700, l3, "a", 180);
+    await settle();
+    expect(feed.heldUpTo("S", 0, 700, l3)).toBe(180);
+  });
+
+  it("phút live cộng theo mốc DB của bản mượn: phút nằm giữa hai mốc không mất", async () => {
+    const feed = mkFeed();
+    const early: LiveMinute[] = [{ t: 120, cells: [[101.5, 0, 4]] }];
+    liveHist(feed, "S", cover, early, 0, 600, l3); // bản đầu đọc DB tới 120
+    await settle();
+    // phút 120 đã chốt, phút 180 đang chạy; khoá mới (t1 khác) chưa nạp xong: cut mới = 180 nhưng bản mượn mới đọc tới 120
+    const lives: LiveMinute[] = [{ t: 120, cells: [[101.5, 0, 4]] }, { t: 180, cells: [[100.2, 2, 0]] }];
+    expect(liveHist(feed, "S", cover, lives, 0, 700, l3)).toEqual({ up: [3, 0, 0], dn: [0, 4, 1] });
+  });
+
+  it("phút đang chạy đã nằm trong bản mượn (đọc tới t1) thì không cộng hai lần", async () => {
+    const feed = mkFeed();
+    liveHist(feed, "S", cover, [], 0, 600, l3); // không có phút live: đọc hết t1 = 600
+    await settle();
+    const lives: LiveMinute[] = [{ t: 180, cells: [[100.2, 2, 0]] }];
+    // khoá mới có phút live 180 (cut = 180) nhưng bản mượn đã đọc tới 600, gồm cả phút 180
+    expect(liveHist(feed, "S", cover, lives, 0, 700, l3)).toEqual({ up: [1, 0, 0], dn: [0, 0, 1] });
+  });
+
+  it("chia lại bản mượn một lần cho mỗi bản nguồn, không chia lại mỗi lần vẽ", async () => {
+    const feed = mkFeed();
+    feed.get("S", 0, 600, { lo: 100, hi: 103, size: 1, N: 3 }, "a");
+    await settle();
+    const taller = { lo: 100, hi: 104, size: 1, N: 4 };
+    const a = feed.get("S", 0, 700, taller, "a");
+    expect(feed.get("S", 0, 700, taller, "a")).toBe(a);
+  });
+});
+
 describe("rebin / overlapRatio", () => {
   const sum = (h: TickHist) => [h.up.reduce((a, b) => a + b, 0), h.dn.reduce((a, b) => a + b, 0)];
 

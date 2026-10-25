@@ -18,7 +18,7 @@ type Entry<T> = { sig: string; data: T | null; busy: boolean; retryAt: number; u
 const MAX_ACTIVE = 2; // số yêu cầu backend chạy cùng lúc
 const MAX_ENTRIES = 64; // kết quả giữ trong bộ nhớ (kéo chart với Visible Range liên tục tạo khoá mới)
 const RETRY_MS = 10_000;
-const NEAR = 0.8; // histogram của profile khác dùng tạm được khi khoảng thời gian trùng từng đó (xem `TickProfileFeed.nearby`)
+const NEAR = 0.8; // histogram của profile khác dùng tạm được khi khoảng thời gian trùng từng đó (xem `TickProfileFeed.borrow`)
 const HEAD_SLACK = 300; // giây: nến delta đầu tiên muộn hơn đầu profile quá chừng này là chưa nạp tới đầu (giống LowerFeed: 5 phút)
 
 /** Dữ liệu tick đã nạp (nến delta "TD", tăng dần) phủ tới đầu `t0` chưa. */
@@ -70,16 +70,16 @@ class SigFeed<T> {
     return !!e && e.retryAt > this.now();
   }
 
-  /** Entry khác `skip` (đã nạp xong, có `meta`) có điểm `score(meta)` cao nhất và >= `min`; điểm bằng nhau lấy entry dùng gần đây hơn. */
-  nearest<M>(skip: string, score: (meta: M) => number, min: number): { data: T; meta: M } | null {
-    let best: { data: T; meta: M } | null = null;
+  /** Entry khác `skip` (đã nạp xong, có `meta`) có điểm `score(meta)` cao nhất và >= `min`; điểm bằng nhau lấy entry dùng gần đây hơn. `upTo` = bản đó đọc DB tới đâu. */
+  nearest<M>(skip: string, score: (meta: M) => number, min: number): { data: T; meta: M; upTo: number } | null {
+    let best: { data: T; meta: M; upTo: number } | null = null;
     let top = min;
     for (const [k, e] of this.cache) {
       if (k === skip || !e.data || e.meta === undefined) continue;
       const v = score(e.meta as M);
       if (v >= top) {
         top = v;
-        best = { data: e.data, meta: e.meta as M };
+        best = { data: e.data, meta: e.meta as M, upTo: e.upTo };
       }
     }
     return best;
@@ -154,12 +154,13 @@ export function rebin(h: TickHist, from: Layout, to: Layout): TickHist {
 
 export class TickProfileFeed {
   private feed: SigFeed<TickHist>;
+  private borrowed = new Map<string, { src: TickHist; out: TickHist; upTo: number }>(); // bản mượn (đã chia lại theo row của khoá) theo khoá: build lại liên tục trong lúc chờ không phải chia lại
 
   constructor(private fetch: Fetch, onChange: () => void, now: () => number = Date.now) {
     this.feed = new SigFeed(onChange, now);
   }
 
-  /** Histogram đã nạp của profile [t0, t1) chia theo `lay`; chưa có thì nạp ngầm rồi gọi `onChange`, trong lúc chờ trả bản của profile gần giống (xem `nearby`) hoặc null. `sig` đổi (dữ liệu đổi) thì nạp lại nhưng vẫn trả bản cũ trong lúc chờ.
+  /** Histogram đã nạp của profile [t0, t1) chia theo `lay`; chưa có thì nạp ngầm rồi gọi `onChange`, trong lúc chờ trả bản của profile gần giống (xem `borrow`) hoặc null. `sig` đổi (dữ liệu đổi) thì nạp lại nhưng vẫn trả bản cũ trong lúc chờ.
    *  `upTo` (< t1): chỉ đọc DB tới đó (phần còn lại là phút đang chạy, xem `liveCut`). */
   get(symbol: string, t0: number, t1: number, lay: Layout, sig: string, upTo = t1): TickHist | null {
     const key = this.key(symbol, t0, t1, lay);
@@ -167,26 +168,44 @@ export class TickProfileFeed {
       const h = await this.fetch(symbol, t0, upTo, lay);
       return h && h.up.length === lay.N && h.dn.length === lay.N ? h : null;
     }, upTo, { symbol, t0, t1, lay } satisfies Win);
-    return h ?? this.nearby(key, symbol, t0, t1, lay);
+    if (h) {
+      this.borrowed.delete(key);
+      return h;
+    }
+    return this.borrow(key, symbol, t0, t1, lay)?.out ?? null;
   }
 
   /** Chưa có bản của khoá này (phiên dài thêm một nến, thêm đỉnh / đáy làm đổi row, kéo / zoom Visible Range): thay vì để profile rơi về nến cho tới khi backend trả,
-   *  dùng tạm histogram đã nạp của một profile cùng symbol phủ gần như cùng khoảng thời gian (chia lại sang row mới). Lần nạp trước đó lỗi thì không dùng. */
-  private nearby(key: string, symbol: string, t0: number, t1: number, lay: Layout): TickHist | null {
+   *  dùng tạm histogram đã nạp của một profile cùng symbol phủ gần như cùng khoảng thời gian (chia lại sang row mới), cùng mốc DB `upTo` của chính bản đó. Lần nạp trước đó lỗi thì không dùng. */
+  private borrow(key: string, symbol: string, t0: number, t1: number, lay: Layout): { out: TickHist; upTo: number } | null {
     if (this.feed.failed(key)) return null;
     const near = this.feed.nearest<Win>(key, (w) => (w.symbol === symbol ? overlapRatio(w.t0, w.t1, t0, t1) : 0), NEAR);
-    return near && rebin(near.data, near.meta.lay, lay);
+    if (!near) {
+      this.borrowed.delete(key);
+      return null;
+    }
+    let b = this.borrowed.get(key);
+    if (!b || b.src !== near.data) {
+      b = { src: near.data, out: rebin(near.data, near.meta.lay, lay), upTo: near.upTo };
+      this.borrowed.delete(key);
+      this.borrowed.set(key, b);
+      if (this.borrowed.size > MAX_ENTRIES) this.borrowed.delete(this.borrowed.keys().next().value as string);
+    }
+    return b;
   }
 
-  /** Bản đang giữ của `get` cùng đối số đọc DB tới đâu. */
+  /** Bản đang giữ của `get` cùng đối số đọc DB tới đâu; chưa có bản của khoá này mà đang dùng tạm bản của profile khác thì là mốc của bản mượn
+   *  (phút live cộng theo mốc đó: tính theo mốc khoá mới thì phút nằm giữa hai mốc mất, hoặc phút đang chạy đã nằm trong DB bị cộng hai lần). */
   heldUpTo(symbol: string, t0: number, t1: number, lay: Layout): number | undefined {
-    return this.feed.heldUpTo(this.key(symbol, t0, t1, lay));
+    const key = this.key(symbol, t0, t1, lay);
+    return this.feed.heldUpTo(key) ?? this.borrow(key, symbol, t0, t1, lay)?.upTo;
   }
 
   private key = (symbol: string, t0: number, t1: number, lay: Layout) => `${symbol}|${t0}|${t1}|${lay.lo}|${lay.size}|${lay.N}`;
 
   clear() {
     this.feed.clear();
+    this.borrowed.clear();
   }
 }
 

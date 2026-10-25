@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/api";
 import { textBox, type Shape } from "./shapes";
-import { computeProfile, defaultOpts, encodeFibLevels, fibLevelsOf, fibPrice, floatBar, fmtVol, fontSizeOf, gannGrid, hasTextTab, POS_DEFAULTS, posConstrain, positionStats, profileRange, profileSource, regression, settingsTabs, SPEC, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
+import { barOpen, computeProfile, defaultOpts, encodeFibLevels, fibLevelsOf, fibPrice, floatBar, fmtVol, fontSizeOf, gannGrid, hasTextTab, POS_DEFAULTS, posConstrain, positionStats, profileRange, profileSource, profileSpan, regression, settingsTabs, SPEC, snapTo, tableCellAt, tableCells, VP_DEFAULTS, volumeIn, type Ctx } from "./tools";
 import type { TickSource } from "@/volumeProfile/compute";
+import { timeToLogical } from "./coords";
 import type { Anchor } from "./types";
 
 const T = 1_000_000;
@@ -420,17 +421,46 @@ describe("volume profile vẽ dạng thanh", () => {
         return { ...c, bars: coarse, step: 10, d: { ...c.d, points: [{ time: 5, price: 0 }, { time: 25, price: 100 }], opts: { rows: 10, agg: "ticks" } } };
       };
 
-      it("vùng giá chia row gồm cả nến chứa neo, không thì tick của nó bị dồn vào row biên", () => {
-        let lay: { lo: number; hi: number } | null = null;
-        const ticks: TickSource = { covered: () => true, hist: (_t0, _t1, l) => ((lay = l), null) };
+      it("khoảng tick và vùng giá chia row cùng là các nến chứa hai neo (như TV tính theo cả nến), không lệch nhau", () => {
+        let asked: { t0: number; t1: number; lay: { lo: number; hi: number } } | null = null;
+        const ticks: TickSource = { covered: () => true, hist: (t0, t1, lay) => ((asked = { t0, t1, lay }), null) };
         SPEC.frvp.build({ ...mid(), ticks });
-        expect(lay).toMatchObject({ lo: 0, hi: 100 });
+        // neo 5 -> mở nến 0; neo 25 -> mở nến 20, hết nến đó là 30
+        expect(asked).toMatchObject({ t0: 0, t1: 30, lay: { lo: 0, hi: 100 } });
       });
 
-      it("profileRange (handle, nhãn trục giá) cũng gồm nến chứa neo", () => {
+      it("profileRange (handle, nhãn trục giá) cũng theo các nến chứa neo", () => {
         expect(profileRange(mid())).toEqual({ hi: 100, lo: 0 });
       });
+
+      it("profileSpan kéo neo về giờ mở nến, AVP cũng vậy; không truyền snap thì giữ nguyên", () => {
+        const c = mid();
+        expect(profileSpan(c.d, 20, snapTo(coarse, 10))).toEqual({ t0: 0, t1: 20 });
+        expect(profileSpan(c.d, 20)).toEqual({ t0: 5, t1: 25 });
+        expect(profileSpan({ ...c.d, type: "avp", points: [{ time: 17, price: 0 }] }, 20, snapTo(coarse, 10))).toEqual({ t0: 10, t1: 20 });
+      });
+
+      it("barOpen: nến cuối cùng mở không muộn hơn t; ngoài dải nến thì giữ nguyên", () => {
+        expect([0, 5, 9, 10, 29].map((t) => barOpen(coarse, 10, t))).toEqual([0, 0, 0, 10, 20]);
+        expect(barOpen(coarse, 10, -3)).toBe(-3);
+        expect(barOpen(coarse, 10, 30)).toBe(30); // sau nến cuối
+        expect(barOpen([], 10, 7)).toBe(7);
+      });
     });
+  });
+
+  it("neo ở nến sát khe (cuối tuần): hộp vẫn rộng nửa nến mỗi bên, không co vào tâm nến", () => {
+    // trục nến chia đều theo chỉ số: nến 20 và nến 1000 liền nhau (logical 2 và 3), cách 10px; X(30) rơi vào khe nên nội suy ra gần như bằng X(20)
+    const gapBars: Bar[] = [0, 10, 20, 1000, 1010].map((t) => ({ t, o: 1, h: 10, l: 0, c: 5, v: 1 }));
+    const c = ctx("frvp", 10);
+    const shapes = SPEC.frvp.build({
+      ...c, bars: gapBars, step: 10, X: (t) => timeToLogical(gapBars, 10, t)! * 10,
+      d: { ...c.d, points: [{ time: 20, price: 0 }, { time: 1000, price: 10 }], opts: { rows: 10, agg: "time" } },
+    });
+    const box = shapes.find((s): s is Extract<Shape, { k: "poly" }> => s.k === "poly" && s.color === VP_DEFAULTS.box)!;
+    const xs = box.pts.map((q) => q.x);
+    expect(Math.min(...xs)).toBeCloseTo(20 - 5, 9); // X(20) = 20, trừ nửa nến (5px)
+    expect(Math.max(...xs)).toBeCloseTo(30 + 5, 9); // X(1000) = 30, cộng nửa nến
   });
 
   it("row thấp hơn 3px thì để liền, không chừa khe", () => {

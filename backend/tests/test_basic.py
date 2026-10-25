@@ -8,7 +8,7 @@ os.environ["TV_DATA_DIR"] = tempfile.mkdtemp()
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import state, tcp_server  # noqa: E402
+from app import state, tcp_server, tickdelta  # noqa: E402
 from app.aggregator import bar_open  # noqa: E402
 from app.config import EA_TOKEN, is_stale  # noqa: E402
 from app.main import app  # noqa: E402
@@ -231,30 +231,94 @@ def test_tick_gap_requests_backfill_sized_to_the_gap_and_not_repeatedly():
     state.aggregator.tfs.pop("GAPSYM", None)
 
 
-def test_tick_gap_also_requests_tick_history_for_the_gap_in_chunks_newest_first():
+def _td_cmds(symbol):
+    return [c for c in state.pending_backfill if c["symbol"] == symbol and c["tf"] == "TD"]
+
+
+def test_tick_gap_requests_one_chunk_of_tick_history_and_not_repeatedly():
     state.pending_backfill.clear()
     state._gap_seeding.clear()
+    state.tick_gap.clear()
     state.aggregator.tfs["GAPTD"] = {"M1"}
     before = int(time.time())
     state._on_gap("GAPTD", 900)  # đứt 15 phút (máy ngủ): xin đúng 15 + 3 phút tick
-    td = [c for c in state.pending_backfill if c["symbol"] == "GAPTD" and c["tf"] == "TD"]
+    td = _td_cmds("GAPTD")
     assert [c["count"] for c in td] == [18]
     assert before <= td[0]["before"] <= int(time.time())
     state._on_gap("GAPTD", 900)  # tick kế tiếp ngay sau đó: không xin lại
-    assert len([c for c in state.pending_backfill if c["symbol"] == "GAPTD" and c["tf"] == "TD"]) == 1
+    assert len(_td_cmds("GAPTD")) == 1
     state._gap_seeding.clear()
+    state.tick_gap.clear()
     state.pending_backfill.clear()
-    state._on_gap("GAPTD", 10 * 3600)  # đứt 10 giờ: 600 + 3 phút chia hai đoạn, đoạn mới nhất trước
-    td = [c for c in state.pending_backfill if c["symbol"] == "GAPTD" and c["tf"] == "TD"]
-    assert [c["count"] for c in td] == [state.TICK_GAP_CHUNK, 603 - state.TICK_GAP_CHUNK]
-    assert td[0]["before"] - td[1]["before"] == state.TICK_GAP_CHUNK * 60  # đoạn sau lùi đúng một đoạn
+    state._on_gap("GAPTD", 60)  # đứt ngắn hơn gốc 2 phút của delta realtime: không xin tick
+    assert _td_cmds("GAPTD") == []
+    state.pending_backfill.clear()
+    state.tick_gap.clear()
+    state.aggregator.tfs.pop("GAPTD", None)
+
+
+def test_tick_gap_next_chunk_is_requested_only_after_the_previous_one_arrives_and_reaches_back_from_its_oldest_row():
+    state.pending_backfill.clear()
     state._gap_seeding.clear()
-    state.pending_backfill.clear()
-    state._on_gap("GAPTD", 10 * 86400)  # đứt qua cuối tuần: trần TICK_GAP_MAX phút
-    td = [c for c in state.pending_backfill if c["symbol"] == "GAPTD" and c["tf"] == "TD"]
-    assert sum(c["count"] for c in td) == state.TICK_GAP_MAX
+    state.tick_gap.clear()
+    state.aggregator.tfs["GAPTD"] = {"M1"}
+    state._on_gap("GAPTD", 10 * 3600)  # đứt 10 giờ: 603 phút, đoạn đầu chỉ TICK_GAP_CHUNK phút
+    td = _td_cmds("GAPTD")
+    assert [c["count"] for c in td] == [state.TICK_GAP_CHUNK]
+    job = state.tick_gap.jobs["GAPTD"]
+    oldest = (td[0]["before"] // 60) * 60 - (state.TICK_GAP_CHUNK - 1) * 60  # EA gửi đủ đoạn đầu
+    state.tick_gap.done("GAPTD")  # done của yêu cầu khác (chưa có dòng nào của đoạn này): không xin thêm
+    assert len(_td_cmds("GAPTD")) == 1
+    state.tick_gap.note("GAPTD", [{"t": oldest}, {"t": oldest + 60}, {"t": td[0]["before"] - 30}])  # dòng gần đây (gốc realtime) không tính
+    state.tick_gap.done("GAPTD")
+    td = _td_cmds("GAPTD")
+    assert len(td) == 2
+    assert td[1]["before"] == oldest - 1  # lùi từ dòng cũ nhất vừa nhận, không từ đồng hồ
+    assert td[1]["count"] == (oldest - job["until"]) // 60 + 3
+    state.tick_gap.done("GAPTD")  # done lặp mà chưa có dòng cũ hơn: không xin lại
+    assert len(_td_cmds("GAPTD")) == 2
+    state.tick_gap.note("GAPTD", [{"t": int(job["until"]) - 120}])  # đoạn thứ hai phủ tới trước lúc đứt
+    state.tick_gap.done("GAPTD")
+    assert len(_td_cmds("GAPTD")) == 2 and "GAPTD" not in state.tick_gap.jobs
     state.pending_backfill.clear()
     state.aggregator.tfs.pop("GAPTD", None)
+
+
+def test_tick_gap_over_a_closed_market_costs_a_single_chunk():
+    state.pending_backfill.clear()
+    state._gap_seeding.clear()
+    state.tick_gap.clear()
+    state.aggregator.tfs["GAPTD"] = {"M1"}
+    state._on_gap("GAPTD", 10 * 86400)  # đứt qua cuối tuần
+    td = _td_cmds("GAPTD")
+    assert [c["count"] for c in td] == [state.TICK_GAP_CHUNK]
+    job = state.tick_gap.jobs["GAPTD"]
+    state.tick_gap.note("GAPTD", [{"t": int(job["until"]) - 3600}, {"t": int(job["until"]) - 3540}])  # EA đếm theo nến M1 nên đoạn đầu đã nhảy qua chỗ đóng cửa tới trước lúc đứt
+    state.tick_gap.done("GAPTD")
+    assert len(_td_cmds("GAPTD")) == 1 and "GAPTD" not in state.tick_gap.jobs
+    state.pending_backfill.clear()
+    state.aggregator.tfs.pop("GAPTD", None)
+
+
+def test_tick_gap_stops_at_max_chunks_and_expires():
+    asked = []
+    clock = {"now": 1000.0}
+    fill = tickdelta.GapFill(lambda s, n, b: asked.append((n, b)), chunk=10, max_chunks=3, clock=lambda: clock["now"])
+    fill.start("S", 100 * 60, 1000.0)  # đứt 100 phút, đoạn 10 phút
+    assert [a[0] for a in asked] == [10]
+    for i in range(1, 6):
+        fill.note("S", [{"t": 1000 - 3600 - i * 600}])  # mỗi đoạn lùi thêm nhưng chưa phủ hết
+        fill.done("S")
+    assert len(asked) == 3  # trần max_chunks
+    fill.start("S", 100 * 60, 1010.0)  # báo lặp trong 30s: bỏ qua
+    assert len(asked) == 3
+    fill2 = tickdelta.GapFill(lambda s, n, b: asked.append((n, b)), chunk=10, max_chunks=3, clock=lambda: clock["now"])
+    fill2.start("S", 100 * 60, 1000.0)
+    clock["now"] += tickdelta.GAP_TTL + 1
+    fill2.note("S", [{"t": 100}])
+    n = len(asked)
+    fill2.done("S")  # quá hạn: bỏ job
+    assert len(asked) == n and "S" not in fill2.jobs
 
 
 def test_catchup_refreshes_last_bars_even_when_cache_is_not_stale():

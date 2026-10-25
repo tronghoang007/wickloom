@@ -1,5 +1,5 @@
-import { TF_SECONDS, fetchBars, fetchTickProfile, triggerBackfillAt, type Bar } from "@/lib/api";
-import { LowerFeed, TICK_DEPTH, TICK_TF } from "@/indicators/lower";
+import { TF_SECONDS, fetchBars, fetchTickProfile, type Bar } from "@/lib/api";
+import { LowerFeed, TICK_DEPTH, TICK_TF, eaBackfill } from "@/indicators/lower";
 import { TickProfileFeed, appendLive, coversFrom, liveHist, type LiveMinute } from "@/indicators/tickProfile";
 import type { TickSource } from "@/volumeProfile/compute";
 import { DrawingDoc, acquireDoc, releaseDoc, type DocView } from "./doc";
@@ -23,7 +23,7 @@ import { isActivePane, useLayoutStore } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
 import { visibleOn } from "./visibility";
-import { DEFAULT_COLOR, defaultOpts, GROUPS, hasTextTab, profileSpan, SPEC, TABLE_COL_W, tableCellAt, tableCells, tableRowH, VP_BY, type Ctx, type OneClickView } from "./tools";
+import { DEFAULT_COLOR, defaultOpts, GROUPS, hasTextTab, profileSpan, SPEC, snapTo, TABLE_COL_W, tableCellAt, tableCells, tableRowH, VP_BY, type Ctx, type OneClickView } from "./tools";
 import type { Anchor, Drawing, DrawingType } from "./types";
 
 type Opts = {
@@ -81,10 +81,11 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private profileBars = new Map<string, { bars: Bar[]; step: number }>(); // nến khung nhỏ của VP + giây mỗi nến
   private profileKeys = new Map<string, string>();
   private profileFailed = new Map<string, { key: string; at: number }>(); // lần tải nến khung nhỏ lỗi gần nhất của từng hình
+  private fineNeeded = new Set<string>(); // id FRVP / AVP 1 tick mà lần dựng gần nhất phải rơi về nến (tick chưa nạp xong / chưa phủ tới đầu): lúc đó mới cần nến khung nhỏ
   private profileVer = 0; // đổi khi dữ liệu của VP đổi (nến khung nhỏ, tick): chỉ FRVP / AVP dựng lại, hình khác giữ shape cũ
   // "1 tick" của FRVP / AVP: nến delta tick (EA gửi lịch sử tick, chỉ để biết phút nào đã có tick) và histogram giá gom theo row, dùng chung cách với indicator
   private tickCover = new LowerFeed((symbol, tf, from, to, limit) => fetchBars(symbol, tf, to, limit, from), () => this.tickChanged(), {
-    backfill: async (symbol, tf, count, before) => (await triggerBackfillAt(symbol, tf, count, before)).ok,
+    backfill: eaBackfill,
   });
   private tickProfiles = new TickProfileFeed((symbol, from, to, lay) => fetchTickProfile(symbol, from, to, lay.lo, lay.size, lay.N), () => this.tickChanged());
   private liveMinute = new Map<string, LiveMinute[]>(); // symbol -> vài phút tick gần nhất, cuối là phút đang chạy (backend đẩy sau mỗi lô tick)
@@ -1226,6 +1227,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.profileBars.clear();
     this.profileKeys.clear();
     this.profileFailed.clear();
+    this.fineNeeded.clear();
     this.profileVer++;
     this.setSt({ drawings: [], selectedId: null });
     this.refresh();
@@ -1248,12 +1250,14 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
 
   /** Có FRVP / AVP 1 tick đang hiện mà khoảng profile gồm phút của một nến delta trong `minutes`. */
   private tickProfileAt(minutes: Bar[]): boolean {
-    const lastT = this.o.getBars().at(-1)?.t;
+    const bars = this.o.getBars();
+    const lastT = bars.at(-1)?.t;
     if (lastT === undefined) return false;
     const step = this.step();
+    const snap = snapTo(bars, step);
     return this.drawings.some((d) => {
       if ((d.type !== "frvp" && d.type !== "avp") || ({ ...VP_BY[d.type], ...d.opts }).agg !== "ticks" || !this.shown(d)) return false;
-      const span = profileSpan(d, lastT);
+      const span = profileSpan(d, lastT, snap);
       return !!span && minutes.some((b) => b.t >= span.t0 && b.t < span.t1 + step);
     });
   }
@@ -1263,14 +1267,38 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     if ((d.type !== "frvp" && d.type !== "avp") || !this.symbol || this.dragging(d)) return undefined;
     if (({ ...VP_BY[d.type], ...d.opts }).agg !== "ticks") return undefined;
     const last = bars[bars.length - 1];
-    const span = last && profileSpan(d, last.t);
+    const span = last && profileSpan(d, last.t, snapTo(bars, step));
     if (!last || !span || last.t + step - span.t0 > TICK_DEPTH) return undefined;
     const symbol = this.symbol;
-    const cover = this.tickCover.get(symbol, { tfs: [TICK_TF], from: span.t0 }, last.t + step);
+    const cover = this.tickCover.get(symbol, { tfs: [TICK_TF], from: span.t0 }, span.t1 + step); // tới hết khoảng của profile (không tới hiện tại: FRVP đóng từ lâu không cần tick mới)
     return {
-      covered: (t0) => coversFrom(cover, t0),
-      hist: (t0, t1, lay) => liveHist(this.tickProfiles, symbol, cover, this.liveMinute.get(symbol) ?? [], t0, t1, lay),
+      covered: (t0) => {
+        const ok = coversFrom(cover, t0);
+        this.markFine(d, !ok);
+        return ok;
+      },
+      hist: (t0, t1, lay) => {
+        const h = liveHist(this.tickProfiles, symbol, cover, this.liveMinute.get(symbol) ?? [], t0, t1, lay);
+        this.markFine(d, !h);
+        return h;
+      },
     };
+  }
+
+  /** Profile 1 tick của `d` có đang phải dùng nến khung nhỏ thay tick không (gọi lúc dựng hình). Cần thì nạp nến ngay (sau lần dựng này). */
+  private markFine(d: Drawing, need: boolean) {
+    if (need === this.fineNeeded.has(d.id)) return;
+    if (need) {
+      this.fineNeeded.add(d.id);
+      queueMicrotask(() => this.prefetchProfileBars(d));
+    } else this.fineNeeded.delete(d.id);
+  }
+
+  /** Nến khung nhỏ có cần cho `d` không: Time thì luôn; 1 tick thì chỉ khi tick không dùng được (ngoài độ sâu tick, hoặc lần dựng gần nhất phải rơi về nến). */
+  private needsFine(d: Drawing, lastT: number): boolean {
+    if (({ ...VP_BY[d.type], ...d.opts }).agg !== "ticks") return true;
+    const span = profileSpan(d, lastT, snapTo(this.o.getBars(), this.step()));
+    return !span || lastT + this.step() - span.t0 > TICK_DEPTH || this.fineNeeded.has(d.id);
   }
 
   private setProfileBars(id: string, bars: Bar[] | undefined, step = 0) {
@@ -1285,8 +1313,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     const symbol = this.symbol;
     const bars = this.o.getBars();
     const chartStep = this.step();
-    const span = profileSpan(d, bars[bars.length - 1]?.t ?? 0);
-    if (!span) return;
+    const span = profileSpan(d, bars[bars.length - 1]?.t ?? 0, snapTo(bars, chartStep));
+    if (!span || !this.needsFine(d, bars[bars.length - 1]?.t ?? 0)) return;
     const to = span.t1 + chartStep - 1; // gồm cả các nến khung nhỏ nằm trong nến cuối
     const base = `${symbol}|${chartStep}|${span.t0}`;
     const key = `${base}|${to}`;
@@ -1330,6 +1358,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.profileBars.clear();
     this.profileKeys.clear();
     this.profileFailed.clear();
+    this.fineNeeded.clear();
     this.profileVer++;
     this.mode = { k: "idle" };
     this.unlockChart();

@@ -1,5 +1,5 @@
 import type { Bar } from "@/lib/api";
-import { computeProfile, computeTickProfile, type TickSource } from "@/volumeProfile/compute";
+import { computeProfile, computeTickProfile, profileLevels, type LineKind, type TickSource } from "@/volumeProfile/compute";
 import { textBox, wrapText, type Ext, type Pt, type Shape } from "./shapes";
 import type { Anchor, Drawing } from "./types";
 
@@ -541,17 +541,41 @@ export function profileSource(c: Ctx, from: number, to: number): Bar[] {
   ];
 }
 
-// Khoảng thời gian (mở nến đầu → mở nến cuối) mà profile gom volume; AVP và FRVP có Extend Right chạy tới nến mới nhất
-export function profileSpan(d: Drawing, lastT: number): { t0: number; t1: number } | null {
-  if (d.type === "avp") return d.points.length >= 1 ? { t0: d.points[0].time, t1: Math.max(d.points[0].time, lastT) } : null;
+/** Giờ mở của nến chứa `t` (`bars` tăng dần, mỗi nến dài `step`); `t` ngoài dải nến thì giữ nguyên. */
+export function barOpen(bars: Bar[], step: number, t: number): number {
+  const n = bars.length;
+  if (n === 0 || t < bars[0].t || t >= bars[n - 1].t + step) return t;
+  let lo = 0, hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (bars[mid].t <= t) lo = mid; else hi = mid - 1;
+  }
+  return bars[lo].t;
+}
+
+/** Hàm kéo một thời điểm về giờ mở nến chứa nó trên `bars` hiện tại (cho `profileSpan`). */
+export const snapTo = (bars: Bar[], step: number) => (t: number) => barOpen(bars, step, t);
+
+// Khoảng thời gian (mở nến đầu → mở nến cuối) mà profile gom volume; AVP và FRVP có Extend Right chạy tới nến mới nhất.
+// `snap`: neo vẽ ở khung nhỏ nằm giữa nến khi xem ở khung lớn hơn: như TV, profile tính theo cả nến (kéo neo về giờ mở nến chứa nó), nên vùng giá chia row và khoảng tick cùng một khoảng.
+export function profileSpan(d: Drawing, lastT: number, snap: (t: number) => number = (t) => t): { t0: number; t1: number } | null {
+  if (d.type === "avp") {
+    if (d.points.length < 1) return null;
+    const t0 = snap(d.points[0].time);
+    return { t0, t1: Math.max(t0, lastT) };
+  }
   if (d.type !== "frvp" || d.points.length < 2) return null;
-  const t0 = Math.min(d.points[0].time, d.points[1].time), t1 = Math.max(d.points[0].time, d.points[1].time);
+  const t0 = snap(Math.min(d.points[0].time, d.points[1].time)), t1 = snap(Math.max(d.points[0].time, d.points[1].time));
   return { t0, t1: d.opts?.extend ? Math.max(t1, lastT) : t1 };
 }
 
-/** Bề ngang một nến (px) quanh thời điểm `t`: profile như TV tính từ mép trái nến đầu tới mép phải nến cuối (không phải từ tâm nến). */
-function barWidth(c: Ctx, t: number): number {
-  const a = c.X(t), b = c.X(t + c.step);
+/** Bề ngang một nến (px): profile như TV tính từ mép trái nến đầu tới mép phải nến cuối (không phải từ tâm nến).
+ *  Đo giữa hai nến kề nhau (trục nến chia đều theo chỉ số nên nến nào cũng bằng nhau), không đo `X(t + step) - X(t)`:
+ *  nến sát khe (cuối tuần, nghỉ phiên) có `t + step` rơi vào khe và nội suy ra gần 0, làm hộp co vào tâm nến. */
+function barWidth(c: Ctx): number {
+  const n = c.bars.length;
+  const [t0, t1] = n >= 2 ? [c.bars[n - 2].t, c.bars[n - 1].t] : [c.bars[0]?.t ?? 0, (c.bars[0]?.t ?? 0) + c.step];
+  const a = c.X(t0), b = c.X(t1);
   return a === null || b === null ? 0 : Math.abs(b - a);
 }
 
@@ -561,7 +585,7 @@ const barsIn = (c: Ctx, t0: number, t1: number) => c.bars.filter((b) => b.t + c.
 /** Giá cao nhất / thấp nhất của các nến mà profile gom (cả phần Extend Right): hai đầu dọc của hộp, nơi TV đặt handle và nhãn trục giá. */
 export function profileRange(c: Ctx): { hi: number; lo: number } | null {
   const lastT = c.bars[c.bars.length - 1]?.t ?? 0;
-  const span = profileSpan(c.d, lastT);
+  const span = profileSpan(c.d, lastT, snapTo(c.bars, c.step));
   if (!span) return null;
   let hi = -Infinity, lo = Infinity;
   for (const b of barsIn(c, span.t0, span.t1 + c.step)) {
@@ -595,6 +619,8 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
   }
   const o = { ...(VP_BY[c.d.type] ?? VP_DEFAULTS), ...c.d.opts } as typeof VP_DEFAULTS;
   const tick = c.tickSize > 0 ? c.tickSize : 10 ** -c.digits;
+  t0 = barOpen(c.bars, c.step, t0); // neo giữa nến (đổi sang khung lớn hơn): tính theo cả nến như TV
+  if (!anchored) t1 = barOpen(c.bars, c.step, t1);
   // Extend Right (và AVP): profile gom volume tới nến mới nhất
   const lastT = c.bars[c.bars.length - 1]?.t ?? t1;
   const toLast = anchored || o.extend;
@@ -604,13 +630,13 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
     (o.agg === "ticks" && c.ticks ? computeTickProfile(c.ticks, barsIn(c, t0, end), t0, end, tick, o.rows, o.va, o.layout) : null) ??
     computeProfile(profileSource(c, t0, end), tick, o.rows, o.va, o.layout);
   if (!vp) return [];
-  const { lo, hi, size, N, up, dn, total, mv, poc, vl, vh } = vp;
+  const { lo, hi, size, N, up, dn, total, mv, vl, vh } = vp;
 
   // Hộp từ mép trái nến đầu tới mép phải nến cuối của khoảng neo; Extend Right / AVP kéo vạch POC / VAH / VAL và hộp tới mép phải của nến mới nhất
   // (không tới mép chart). Bề rộng histogram (% of the box) tính theo hộp của khoảng neo, không theo phần kéo dài.
   const xa = c.X(t0), xb = c.X(t1), xl = c.X(Math.max(t1, lastT));
   if (xa === null || xb === null || xl === null) return [];
-  const half = barWidth(c, t0) / 2;
+  const half = barWidth(c) / 2;
   const left = Math.min(xa, xb) - half, right = Math.max(xa, xb) + half;
   const xEnd = toLast ? Math.max(right, xl + half) : right;
   const histW = Math.max(20, ((anchored ? xEnd - left : right - left) * o.width) / 100);
@@ -676,9 +702,10 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
     out.push(seg({ x: left, y }, { x: xEnd, y }, { color, w: 1, ...extra }));
   };
   const dashOf = (v: number) => (v === 1 || v === 2 ? v : 0) as 0 | 1 | 2;
-  if (o.showVah) line(Math.min(hi, lo + size * (vh + 1)), o.vahColor, { dash: dashOf(o.vahDash) });
-  if (o.showVal) line(lo + size * vl, o.valColor, { dash: dashOf(o.valDash) });
-  if (o.showPoc) line((lo + size * poc + Math.min(hi, lo + size * (poc + 1))) / 2, o.pocColor, { dash: dashOf(o.pocDash) });
+  const level = Object.fromEntries(profileLevels(vp).map((l) => [l.kind, l.price])) as Record<LineKind, number>;
+  if (o.showVah) line(level.vah, o.vahColor, { dash: dashOf(o.vahDash) });
+  if (o.showVal) line(level.val, o.valColor, { dash: dashOf(o.valDash) });
+  if (o.showPoc) line(level.poc, o.pocColor, { dash: dashOf(o.pocDash) });
   // Khi chọn: nhãn trục giá ở hai đầu hộp (xanh dương) và dải sáng giữa chúng, như TV
   if (c.selected && yTop !== null && yBot !== null) {
     out.push({ k: "axis", y: yTop, text: c.fp(hi), bg: "#2962ff", color: "#ffffff", band: true }, { k: "axis", y: yBot, text: c.fp(lo), bg: "#2962ff", color: "#ffffff", band: true });

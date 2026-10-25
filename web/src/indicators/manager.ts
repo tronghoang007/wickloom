@@ -1,4 +1,4 @@
-import { TF_SECONDS, fetchBars, fetchBrokerOffset, fetchTickBig, fetchTickFp, fetchTickProfile, triggerBackfillAt, type Bar } from "@/lib/api";
+import { TF_SECONDS, fetchBars, fetchBrokerOffset, fetchTickBig, fetchTickFp, fetchTickProfile, type Bar } from "@/lib/api";
 import type { IChartApi, IPaneApi, IPriceLine, ISeriesApi, SeriesType, Time, UTCTimestamp } from "lightweight-charts";
 import { byId } from "./catalog";
 import { mergeCandleColors, planCandleColors } from "./candleColors";
@@ -7,7 +7,7 @@ import { planUpdate, type Snap } from "./diff";
 import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
 import { instanceShown, plotColor, resolveInputs, showsPriceLabel, type IndicatorInstance } from "./instance";
 import { clampSlot, effectiveScale, otherPaneKeys, paneIndices, paneKeyOf } from "./layout";
-import { LowerFeed, TICK_TF } from "./lower";
+import { LowerFeed, TICK_TF, eaBackfill } from "./lower";
 import { trimFootprints, trimObjects, trimProfiles } from "./objects";
 import { FillPrimitive, type FillEdge } from "./render/fill";
 import { FootprintPrimitive } from "./render/footprint";
@@ -91,7 +91,7 @@ export class IndicatorManager {
   );
 
   private lower = new LowerFeed((symbol, tf, from, to, limit) => fetchBars(symbol, tf, to, limit, from), () => this.schedule(), {
-    backfill: async (symbol, tf, count, before) => (await triggerBackfillAt(symbol, tf, count, before)).ok,
+    backfill: eaBackfill,
   });
   private tickProfiles = new TickProfileFeed((symbol, from, to, lay) => fetchTickProfile(symbol, from, to, lay.lo, lay.size, lay.N), () => this.schedule());
   private tickBig = new TickBigFeed(fetchTickBig, () => this.schedule());

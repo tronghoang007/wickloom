@@ -1,4 +1,4 @@
-import { TF_SECONDS, type Bar } from "@/lib/api";
+import { TF_SECONDS, triggerBackfillAt, type Bar } from "@/lib/api";
 import { headGap, holeGaps, spliceRange, type Gap } from "./lowerGaps";
 
 // Nến khung nhỏ cho indicator chia volume trong nến chart (CVD, Session / Visible Range Volume Profile).
@@ -26,8 +26,11 @@ export const stepOf = (tf: string): number => (tf === TICK_TF ? 60 : TF_SECONDS[
 /** Một indicator cần nến khung nhỏ nào: các khung ứng viên (mịn → thô, mọi khung nhỏ hơn khung chart) phủ từ `from` (UTC giây). */
 export type LowerNeed = { tfs: string[]; from: number };
 
+/** Nến M1 có đổi giá trong phút (h > l): phút đó chắc chắn có tick đổi giá nên phải có nến TD; nến phẳng thì có thể chỉ toàn tick cùng giá (EA không gửi). */
+const priceMoved = (o: Bar) => o.h > o.l;
+
 /** Khung chỉ để biết nơi nào của khung mịn nhất thiếu thật (có nến khung này mà khung mịn không có): không ghép vào kết quả. Chỉ cần khi `need.tfs` có đúng một khung:
- *  delta tick TD không có khung thô hơn nào cùng loại, nên dùng M1 (phút nào có nến M1 thì có tick; thị trường nghỉ thì M1 cũng không có nến). */
+ *  delta tick TD không có khung thô hơn nào cùng loại, nên dùng M1 (phút nào có nến M1 mà giá có đổi thì có tick đổi giá; thị trường nghỉ thì M1 cũng không có nến). */
 const oracleOf = (need: LowerNeed): string | undefined => (need.tfs.length === 1 && need.tfs[0] === TICK_TF ? "M1" : undefined);
 
 export type LowerSource = { tf: string; step: number; bars: Bar[] };
@@ -35,6 +38,7 @@ export type LowerSource = { tf: string; step: number; bars: Bar[] };
 const PAGE = 50_000; // giới hạn của /bars
 const MAX_PAGES = 10;
 const TAIL_MS = 15_000; // làm mới phần đuôi (nến khung nhỏ mới) mỗi 15 giây
+const TAIL_REACH_MS = 10 * 60_000; // chỉ làm mới đuôi khi khoảng đang xem chạm tới hiện tại; khoảng đã qua hơn chừng này (FRVP đóng từ lâu) không có nến mới, khỏi nhờ EA tính lại tick của quá khứ mỗi 15 giây
 const RETRY_MS = 10_000;
 // Xin EA nạp thêm (backfill) chỗ DB còn thiếu. EA nạp đồng bộ trong OnTimer (tick tạm dừng) nên mỗi lần chỉ xin tối đa một chunk của EA
 // (BackfillChunk = 5000) và nối nhiều lần; backend không báo EA nạp xong nên hỏi lại /bars cho tới khi có nến mới.
@@ -106,6 +110,14 @@ export function withinBudget(tfs: string[], from: number, to: number, limit: num
 type FetchRange = (symbol: string, tf: string, from: number, to: number, limit: number) => Promise<Bar[]>;
 /** Xin EA nạp `count` nến `tf` lùi từ mốc `before` (UTC giây); false nếu backend từ chối. */
 export type Backfill = (symbol: string, tf: string, count: number, before: number) => Promise<boolean>;
+/** Xin EA qua backend. Mọi LowerFeed của app dùng chung hàm này (mỗi chart có IndicatorManager và DrawingManager, mỗi bên một feed): các feed chung một `Backfill` thì xin EA lần lượt
+ *  và feed đến sau dùng luôn dữ liệu feed trước vừa lấp (xem `rooms`), cùng một lỗ không bị xin EA nhiều lần (EA nạp đồng bộ trong OnTimer, tick tạm dừng). */
+export const eaBackfill: Backfill = async (symbol, tf, count, before) => (await triggerBackfillAt(symbol, tf, count, before)).ok;
+
+type Room = { lock: Promise<void>; filled: Map<string, number> };
+const rooms = new WeakMap<Backfill, Room>(); // theo hàm backfill: feed dùng chung hàm thì chung phòng, test tự tạo hàm riêng nên không lẫn nhau
+const FILLED_TTL_MS = 5 * 60_000; // chỗ vừa được feed khác lấp xong: coi là đã có trong DB chừng này
+const FILLED_MAX = 200;
 type Opts = { now?: () => number; pageSize?: number; backfill?: Backfill; sleep?: (ms: number) => Promise<void>; chunk?: number; tickChunk?: number };
 type Entry = {
   bars: Bar[]; lo: number; hi: number; busy: boolean; retryAt: number; tailAt: number;
@@ -177,7 +189,7 @@ export class LowerFeed {
     const entry = e;
     const first = entry.lo === Infinity;
     const wantOlder = first || from < entry.lo;
-    const wantNewer = !first && (to > entry.hi || this.now() - entry.tailAt >= TAIL_MS);
+    const wantNewer = !first && (to > entry.hi || (this.now() - entry.tailAt >= TAIL_MS && to * 1000 + TAIL_REACH_MS > this.now()));
     if (!wantOlder && !wantNewer) return;
     entry.busy = true;
     const job = wantOlder
@@ -231,7 +243,7 @@ export class LowerFeed {
         if (i > 0) return null;
         const ref = entries.length > 1 ? { tf: need.tfs[1], entry: entries[1] } : oracle; // khung thô hơn kế tiếp; không có thì khung chuẩn (đã đọc xong)
         if (!ref) return null;
-        const gap = this.holes(e, stepOf(tf), need.from, ref.entry, stepOf(ref.tf), tf === TICK_TF ? TICK_MIN_HOLE : 1).find((g) => status(e, g) === "ready");
+        const gap = this.holes(e, stepOf(tf), need.from, ref.entry, stepOf(ref.tf), tf === TICK_TF ? TICK_MIN_HOLE : 1, tf === TICK_TF ? priceMoved : undefined).find((g) => status(e, g) === "ready");
         return gap ? { tf, entry: e, gap } : null;
       }
       const s = status(e, head);
@@ -241,10 +253,10 @@ export class LowerFeed {
     return null;
   }
 
-  private holes(e: Entry, step: number, from: number, oracle: Entry, oracleStep: number, minSteps: number): Gap[] {
+  private holes(e: Entry, step: number, from: number, oracle: Entry, oracleStep: number, minSteps: number, real?: (o: Bar) => boolean): Gap[] {
     const edge = (b: Bar[]) => `${b.length}:${b[0]?.t}:${b[b.length - 1]?.t}`;
     const sig = `${edge(e.bars)}|${edge(oracle.bars)}|${from}`;
-    if (e.holes?.sig !== sig) e.holes = { sig, gaps: holeGaps(e.bars, step, from, oracle.bars, oracleStep, minSteps) };
+    if (e.holes?.sig !== sig) e.holes = { sig, gaps: holeGaps(e.bars, step, from, oracle.bars, oracleStep, minSteps, real) };
     return e.holes.gaps;
   }
 
@@ -254,18 +266,32 @@ export class LowerFeed {
     e.busy = true;
     e.tries.set(gap.key, (e.tries.get(gap.key) ?? 0) + 1);
     let got: Bar[] = [];
+    let room = rooms.get(this.backfill!);
+    if (!room) rooms.set(this.backfill!, (room = { lock: Promise.resolve(), filled: new Map() }));
+    const prev = room.lock;
+    let release = () => {};
+    room.lock = new Promise<void>((r) => (release = r));
+    await prev; // feed khác đang xin EA: đợi nó xong
     try {
+      const id = `${symbol}|${tf}|${gap.from}|${gap.to}`;
+      const at = room.filled.get(id);
+      const fresh = at !== undefined && this.now() - at < FILLED_TTL_MS; // feed khác vừa lấp đúng chỗ này: dữ liệu đã nằm trong DB, chỉ cần đọc
       const count = Math.min(gap.bars + (gap.kind === "head" ? HEAD_MARGIN : HOLE_MARGIN), tf === TICK_TF ? this.tickChunk : this.chunk);
-      if (!(await this.backfill!(symbol, tf, count, gap.before))) throw new Error("backfill refused");
+      if (!fresh && !(await this.backfill!(symbol, tf, count, gap.before))) throw new Error("backfill refused");
       const polls = tf === TICK_TF ? TICK_POLLS : MAX_POLLS;
       for (let i = 0; i < polls && got.length === 0; i++) {
-        await this.sleep(POLL_MS);
+        if (!fresh || i > 0) await this.sleep(POLL_MS);
         got = await this.fetch(symbol, tf, gap.from, gap.to, Math.min(count + 100, this.pageSize));
       }
-      if (got.length > 0) e.bars = spliceRange(e.bars, gap.from, gap.to, got);
-      else e.readyAt = this.now() + WAIT_MS;
+      if (got.length > 0) {
+        e.bars = spliceRange(e.bars, gap.from, gap.to, got);
+        if (room.filled.size >= FILLED_MAX) room.filled.clear();
+        room.filled.set(id, this.now());
+      } else e.readyAt = this.now() + WAIT_MS;
     } catch {
       e.readyAt = this.now() + RETRY_MS;
+    } finally {
+      release();
     }
     e.busy = false;
     this.filling = false;

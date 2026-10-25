@@ -218,3 +218,70 @@ class Live:
         if not fresh and not closed and not started:
             return None
         return Update(closed, acc.row(), acc.cells)
+
+
+# --- lấp lịch sử tick của khoảng đứt ----------------------------------------------------------------------------------------------------------------------
+
+GAP_MIN = 120  # giây: luồng tick đứt ngắn hơn thì gốc 2 phút của `Live` đã phủ, khỏi xin thêm
+GAP_MARGIN = 180  # giây dư trước lúc luồng tick đứt
+GAP_TTL = 600  # giây: quá lâu mà EA không trả đoạn tiếp theo thì bỏ
+
+
+class GapFill:
+    """Lấp tick (tf "TD") của khoảng luồng tick bị đứt (máy ngủ, EA mất kết nối: MT5 vẫn có tick của broker). EA nạp đồng bộ trong OnTimer nên tick tạm dừng suốt lúc đó:
+    chỉ xin MỘT đoạn `chunk` phút một lần. Đoạn đầu lùi từ hiện tại; EA gửi xong (`done`) thì đoạn kế lùi từ dòng cũ nhất vừa nhận (`before` = ngay trước nó) và dừng khi đã phủ tới trước lúc đứt,
+    nên khoảng đứt qua cuối tuần / giờ nghỉ (EA đếm theo nến M1, nhảy qua chỗ đóng cửa) chỉ tốn một đoạn thay vì nhiều đoạn trùng cửa sổ. Tối đa `max_chunks` đoạn.
+    `ask(symbol, minutes, before)` xin EA; người gọi báo `note` (các dòng TD vừa nhận) và `done` (yêu cầu tick hoàn tất)."""
+
+    def __init__(self, ask: Callable[[str, int, int], None], chunk: int = 360, max_chunks: int = 4, clock: Callable[[], float] = time.time) -> None:
+        self.ask, self.chunk, self.max_chunks, self.clock = ask, chunk, max_chunks, clock
+        self.jobs: Dict[str, Dict[str, Any]] = {}
+        self.started: Dict[str, float] = {}  # symbol -> lúc bắt đầu lần lấp gần nhất (job xong thì xoá khỏi `jobs`, báo lặp vẫn phải bỏ qua)
+
+    def start(self, symbol: str, gap_seconds: int, now: float) -> None:
+        """Luồng tick của `symbol` vừa đứt `gap_seconds` giây rồi nối lại lúc `now`. Báo lặp trong 30s thì bỏ qua."""
+        if gap_seconds < GAP_MIN:
+            return
+        if now - self.started.get(symbol, -1e18) < 30:
+            return
+        self.started[symbol] = now
+        self.jobs[symbol] = {
+            "at": now,
+            "until": now - gap_seconds - GAP_MARGIN,  # dòng TD cũ hơn mốc này là đã phủ hết khoảng đứt
+            "cutoff": now - 180,  # chỉ dòng cũ hơn mốc này tính là của đoạn đã xin (dòng gần đây là gốc 2 phút của `Live`)
+            "left": self.max_chunks - 1,
+            "oldest": None,  # phút TD cũ nhất nhận được từ đầu
+            "sent": None,  # `oldest` lúc xin đoạn gần nhất
+        }
+        self.ask(symbol, min(self.chunk, gap_seconds // 60 + 3), int(now))
+
+    def note(self, symbol: str, rows: List[Row]) -> None:
+        """Các dòng TD vừa nhận cho `symbol` (tăng dần theo t)."""
+        job = self.jobs.get(symbol)
+        if job is None:
+            return
+        old = [r["t"] for r in rows if r["t"] < job["cutoff"]]
+        if old:
+            job["oldest"] = min(old) if job["oldest"] is None else min(job["oldest"], min(old))
+
+    def done(self, symbol: str) -> None:
+        """EA gửi xong một yêu cầu tick của `symbol`: có dòng cũ hơn đoạn trước và chưa phủ tới trước lúc đứt thì xin đoạn kế."""
+        job = self.jobs.get(symbol)
+        if job is None:
+            return
+        if self.clock() - job["at"] > GAP_TTL:
+            del self.jobs[symbol]
+            return
+        oldest, sent = job["oldest"], job["sent"]
+        if oldest is None or (sent is not None and oldest >= sent):
+            return  # chưa có dòng nào của đoạn vừa xin (đây là `done` của yêu cầu khác, hoặc EA không có tick ở đó)
+        if oldest <= job["until"] or job["left"] <= 0:
+            del self.jobs[symbol]
+            return
+        job["left"] -= 1
+        job["sent"] = oldest
+        self.ask(symbol, min(self.chunk, int(oldest - job["until"]) // 60 + 3), oldest - 1)
+
+    def clear(self) -> None:
+        self.jobs.clear()
+        self.started.clear()

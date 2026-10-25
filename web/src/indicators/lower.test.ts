@@ -154,6 +154,28 @@ describe("LowerFeed", () => {
     expect(bars[4]).toMatchObject({ c: 99, v: 50 });
   });
 
+  it("khoảng đã qua từ lâu (FRVP đã đóng): không làm mới đuôi mỗi 15 giây, nhưng khoảng chạm tới hiện tại thì có", async () => {
+    let now = 1_700_000_000_000; // ms: [0, 300) giây cách xa hiện tại
+    const db = fakeDb({ M1: run("M1", 0, 5) });
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => now });
+    feed.get("X", { tfs: ["M1"], from: 0 }, 300);
+    await flush();
+    now += 16_000;
+    feed.get("X", { tfs: ["M1"], from: 0 }, 300);
+    await flush();
+    expect(db.calls).toHaveLength(1);
+
+    const live = new LowerFeed(db.fetch, () => {}, { now: () => now });
+    const to = Math.ceil(now / 1000) + 60; // nến cuối đang chạy
+    live.get("Y", { tfs: ["M1"], from: 0 }, to);
+    await flush();
+    const before = db.calls.length;
+    now += 16_000;
+    live.get("Y", { tfs: ["M1"], from: 0 }, to);
+    await flush();
+    expect(db.calls.length).toBe(before + 1);
+  });
+
   it("lỗi mạng: thử lại sau 10 giây, không ném", async () => {
     let now = 0;
     let fail = true;
@@ -233,6 +255,54 @@ describe("LowerFeed xin EA nạp thêm", () => {
     expect(out[0].t).toBe(0);
     expect(out).toHaveLength(60); // 0..3540: 50 nến nạp thêm + 10 đã có
     expect(ea.calls).toHaveLength(1);
+  });
+
+  it("hai feed dùng chung hàm backfill: cùng một chỗ thiếu chỉ xin EA một lần, feed sau đọc luôn dữ liệu feed trước vừa lấp", async () => {
+    const db = fakeDb({ M1: run("M1", 3000, 10) });
+    const ea = fakeEa(db, { M1: run("M1", 0, 100) });
+    const clock = { now: 0 };
+    const mkFeed = () => new LowerFeed(db.fetch, vi.fn(), { now: () => clock.now, backfill: ea.backfill, sleep });
+    const a = mkFeed();
+    const b = mkFeed();
+    const need = { tfs: ["M1"], from: 0 };
+    a.get("X", need, 4000);
+    b.get("X", need, 4000);
+    await flush(); // cả hai đọc DB khi còn thiếu đầu
+    const outA = await drive(a, clock, need, 4000, ea.calls);
+    const outB = await drive(b, clock, need, 4000, ea.calls);
+    expect(outA).toHaveLength(60);
+    expect(outB).toHaveLength(60);
+    expect(ea.calls).toHaveLength(1);
+  });
+
+  it("hai feed xin cùng lúc: xin EA lần lượt, không chồng nhau", async () => {
+    const db = fakeDb({ M1: run("M1", 3000, 10) });
+    const log: string[] = [];
+    let active = 0;
+    let overlap = false;
+    const backfill = async (_s: string, tf: string, count: number, before: number) => {
+      active++;
+      overlap ||= active > 1;
+      log.push(`${tf}:${before}`);
+      await flush();
+      db.data[tf] = run("M1", 0, 100).filter((b) => b.t <= before).slice(-count).concat((db.data[tf] ?? []).filter((b) => b.t > before - 1));
+      db.data[tf] = [...new Map(db.data[tf].map((b) => [b.t, b])).values()].sort((x, y) => x.t - y.t);
+      active--;
+      return true;
+    };
+    const clock = { now: 0 };
+    const feeds = [0, 1].map(() => new LowerFeed(db.fetch, vi.fn(), { now: () => clock.now, backfill, sleep }));
+    const need = { tfs: ["M1"], from: 0 };
+    feeds.forEach((f) => f.get("X", need, 4000));
+    await flush();
+    feeds.forEach((f) => f.get("X", need, 4000)); // cả hai cùng thấy thiếu đầu và cùng xin
+    for (let i = 0; i < 6; i++) {
+      await flush();
+      clock.now += 31_000;
+      feeds.forEach((f) => f.get("X", need, 4000));
+    }
+    expect(overlap).toBe(false);
+    expect(log).toEqual(["M1:3000"]); // feed thứ hai dùng luôn kết quả của feed thứ nhất
   });
 
   it("thiếu nhiều hơn một chunk: nối nhiều lần xin cho tới khi đủ", async () => {
@@ -363,9 +433,10 @@ describe("LowerFeed xin EA nạp thêm", () => {
     const holeCalls = (ea: { calls: { tf: string; count: number; before: number }[] }) => ea.calls.filter((c) => c.tf === "TD" && c.count !== 3); // count 3 = làm mới đuôi
     const all = run("M1", 0, 40); // phút 0..39
     const tdWith = (...missing: [number, number][]) => all.filter((b, i) => !missing.some(([a, z]) => i >= a && i < z)); // bỏ các đoạn phút [a, z)
+    const moving = (bs: Bar[]) => bs.map((b) => ({ ...b, h: b.c + 1 })); // nến M1 có đổi giá trong phút: chỉ loại nến này mới chứng tỏ TD thiếu thật
 
     it("thị trường mở (M1 có nến trong chỗ trống) mà TD thiếu: xin EA đúng khoảng thiếu rồi lấp", async () => {
-      const { ea, clock, feed } = mk({ TD: tdWith([10, 30]), M1: all }, { TD: all });
+      const { ea, clock, feed } = mk({ TD: tdWith([10, 30]), M1: moving(all) }, { TD: all });
       const out = await drive(feed, clock, need, 2400, ea.calls);
       expect(holeCalls(ea)[0]).toEqual({ tf: "TD", count: 30, before: 1800 }); // 20 phút thiếu + 10 dư, neo ở phút đầu tiên sau lỗ
       expect(out.map((b) => b.t)).toEqual(all.map((b) => b.t)); // lấp kín, M1 không lẫn vào kết quả
@@ -373,7 +444,7 @@ describe("LowerFeed xin EA nạp thêm", () => {
     });
 
     it("lỗ nhiều: lấp từ mới tới cũ, mỗi lỗ một lần xin", async () => {
-      const { ea, clock, feed } = mk({ TD: tdWith([5, 12], [20, 28]), M1: all }, { TD: all });
+      const { ea, clock, feed } = mk({ TD: tdWith([5, 12], [20, 28]), M1: moving(all) }, { TD: all });
       const out = await drive(feed, clock, need, 2400, ea.calls);
       expect(holeCalls(ea).map((c) => c.before)).toEqual([28 * 60, 12 * 60]);
       expect(out).toHaveLength(40);
@@ -381,25 +452,35 @@ describe("LowerFeed xin EA nạp thêm", () => {
 
     it("thị trường nghỉ (M1 cũng không có nến trong chỗ trống): không xin", async () => {
       const m1 = tdWith([10, 30]);
-      const { ea, clock, feed } = mk({ TD: tdWith([10, 30]), M1: m1 }, { TD: all });
+      const { ea, clock, feed } = mk({ TD: tdWith([10, 30]), M1: moving(m1) }, { TD: all });
       await drive(feed, clock, need, 2400, ea.calls);
       expect(holeCalls(ea)).toEqual([]);
     });
 
+    it("nến M1 trong chỗ trống phẳng (phút chỉ có tick cùng giá, EA không gửi gì): không xin; có biến động giá mới xin", async () => {
+      const flat = mk({ TD: tdWith([10, 30]), M1: all }, { TD: all });
+      await drive(flat.feed, flat.clock, need, 2400, flat.ea.calls);
+      expect(holeCalls(flat.ea)).toEqual([]);
+      // chỉ một phút trong chỗ trống có biến động giá cũng đủ chứng tỏ TD thiếu thật
+      const part = mk({ TD: tdWith([10, 30]), M1: all.map((b, i) => (i === 20 ? { ...b, h: b.c + 1 } : b)) }, { TD: all });
+      await drive(part.feed, part.clock, need, 2400, part.ea.calls);
+      expect(holeCalls(part.ea)).toHaveLength(1);
+    });
+
     it("lỗ dưới 3 phút (phút chỉ có tick cùng giá không có nến TD): không xin", async () => {
-      const { ea, clock, feed } = mk({ TD: tdWith([10, 12], [20, 23]), M1: all }, { TD: all });
+      const { ea, clock, feed } = mk({ TD: tdWith([10, 12], [20, 23]), M1: moving(all) }, { TD: all });
       await drive(feed, clock, need, 2400, ea.calls);
       expect(holeCalls(ea).map((c) => c.before)).toEqual([23 * 60]); // lỗ 3 phút thì xin, lỗ 2 phút thì không
     });
 
     it("broker không có tick ở đó: thử đúng hai lần rồi thôi", async () => {
-      const { ea, clock, feed } = mk({ TD: tdWith([10, 30]), M1: all }, { TD: tdWith([10, 30]) });
+      const { ea, clock, feed } = mk({ TD: tdWith([10, 30]), M1: moving(all) }, { TD: tdWith([10, 30]) });
       await drive(feed, clock, need, 2400, ea.calls);
       expect(holeCalls(ea)).toHaveLength(2);
     });
 
     it("không cấu hình backfill: không đọc M1 chuẩn", async () => {
-      const db = fakeDb({ TD: tdWith([10, 30]), M1: all });
+      const db = fakeDb({ TD: tdWith([10, 30]), M1: moving(all) });
       const feed = new LowerFeed(db.fetch, () => {}, { now: () => 0 });
       for (let i = 0; i < 3; i++) {
         feed.get("X", need, 2400);
@@ -409,7 +490,7 @@ describe("LowerFeed xin EA nạp thêm", () => {
     });
 
     it("khung thường (một khung M1) không có khung chuẩn: lỗ không được lấp như trước", async () => {
-      const { ea, clock, feed } = mk({ M1: all.filter((_, i) => i < 10 || i >= 30) }, { M1: all });
+      const { ea, clock, feed } = mk({ M1: all.filter((_, i) => i < 10 || i >= 30) }, { M1: moving(all) });
       await drive(feed, clock, { tfs: ["M1"], from: 0 }, 2400, ea.calls);
       expect(ea.calls).toEqual([]);
     });

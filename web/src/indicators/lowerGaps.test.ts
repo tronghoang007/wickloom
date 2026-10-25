@@ -57,6 +57,26 @@ describe("holeGaps", () => {
   });
 });
 
+describe("holeGaps: real (nến chuẩn nào được tính)", () => {
+  const tick = run(0, 2, 60).concat(run(600, 2, 60)); // thiếu 120..540
+  const flat = run(0, 12, 60);
+  const moved = (t: number): Bar => ({ t, o: 1, h: 2, l: 1, c: 2, v: 1 });
+  const priceMoved = (o: Bar) => o.h > o.l;
+
+  it("không truyền real: nến chuẩn nào trong chỗ trống cũng tính", () => {
+    expect(holeGaps(tick, 60, 0, flat, 60)).toHaveLength(1);
+  });
+  it("real: toàn nến chuẩn phẳng thì không phải lỗ, chỉ cần một nến có biến động giá là lỗ", () => {
+    expect(holeGaps(tick, 60, 0, flat, 60, 1, priceMoved)).toEqual([]);
+    const some = flat.map((b) => (b.t === 300 ? moved(b.t) : b));
+    expect(holeGaps(tick, 60, 0, some, 60, 1, priceMoved).map((g) => g.key)).toEqual(["hole:600"]);
+  });
+  it("real: nến có biến động nhưng nằm ngoài chỗ trống không tính", () => {
+    const outside = flat.map((b) => (b.t === 0 ? moved(b.t) : b));
+    expect(holeGaps(tick, 60, 0, outside, 60, 1, priceMoved)).toEqual([]);
+  });
+});
+
 describe("spliceRange", () => {
   it("thay đoạn [from, to)", () => {
     const bars = [0, 60, 120, 600, 660].map((t) => bar(t));
