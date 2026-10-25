@@ -23,6 +23,7 @@ import { useQuoteStore } from "@/trading/quote";
 import { parseNum } from "@/trading/draft";
 import { useTicketStore } from "@/trading/ticket";
 import { useReplaySim } from "@/trading/replaySim";
+import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
@@ -1305,23 +1306,18 @@ export default function Chart({ paneId }: { paneId: string }) {
 
   // data + realtime
   const prevKeyRef = useRef<{ symbol: string; tf: string } | null>(null);
-  // Góc nhìn cần giữ qua lần đổi timeframe tới (thời gian ở giữa, thời gian mép phải, số nến); còn đó tới khi áp xong lên TF mới
-  const keepViewRef = useRef<{ t: number; tRight: number; span: number } | null>(null);
+  // Góc nhìn cần giữ qua lần đổi timeframe tới (xem keepView.ts); còn đó tới khi áp xong lên TF mới
+  const keepViewRef = useRef<KeptView | null>(null);
   useEffect(() => {
-    // Chỉ đổi timeframe (cùng symbol) khi đang xem đoạn lịch sử (không chạm nến mới nhất): giữ đúng mốc thời gian
-    // đang xem ở giữa màn hình và số nến hiển thị, như TradingView, thay vì văng về nến mới nhất.
+    // Đổi timeframe (cùng symbol) giữ góc nhìn như TradingView: cùng số nến hiển thị và cùng số nến cách nến mới nhất
+    // (không giữ mốc thời gian). Đang xem lịch sử thì không văng về nến mới nhất; đang ở nến mới nhất thì giữ zoom.
     const prev = prevKeyRef.current;
     prevKeyRef.current = { symbol, tf };
     if (!prev || prev.symbol !== symbol) keepViewRef.current = null;
     else if (prev.tf !== tf && barsRef.current.length > 0) {
       // (chưa có nến = lần đổi trước còn đang tải: giữ góc nhìn đang chờ)
-      keepViewRef.current = null;
       const oldRange = chartRef.current?.timeScale().getVisibleLogicalRange();
-      if (oldRange && oldRange.to < barsRef.current.length - 1) {
-        const t = timeAt(barsRef.current, TF_SECONDS[prev.tf], (oldRange.from + oldRange.to) / 2);
-        const tRight = timeAt(barsRef.current, TF_SECONDS[prev.tf], oldRange.to);
-        if (t !== null && tRight !== null) keepViewRef.current = { t, tRight, span: oldRange.to - oldRange.from };
-      }
+      keepViewRef.current = oldRange ? captureView(oldRange, barsRef.current.length) : null;
     }
     let alive = true;
     let ws: WebSocket | null = null;
@@ -1355,13 +1351,10 @@ export default function Chart({ paneId }: { paneId: string }) {
         applyVisible(buildVisible(cursorRef.current));
         return;
       }
-      const tfs = TF_SECONDS[tf];
       const kv = keepViewRef.current;
-      // Giữ mốc giữa nhưng không lố qua mép phải cũ: TF lớn hơn phủ nhiều thời gian hơn 1 số nến, lố qua sẽ trồi tới nến mới nhất
-      const toT = kv && Math.min(kv.t + (kv.span * tfs) / 2, kv.tRight);
-      if (kv && toT !== null && bars.length && bars[0].t > toT - kv.span * tfs) {
-        // đoạn đang xem cũ hơn 500 nến mới nhất của TF này: tải liền một mạch từ đó tới nến mới nhất (chừa 50 nến bên trái)
-        const wide = await fetchBars(symbol, tf, undefined, 50000, Math.floor(toT - (kv.span + 50) * tfs));
+      if (kv && bars.length && barsNeeded(kv) > bars.length) {
+        // đoạn đang xem cũ hơn 500 nến mới nhất của TF này: tải liền một mạch đủ nến mới nhất để phủ tới đó (chừa 50 nến bên trái)
+        const wide = await fetchBars(symbol, tf, undefined, Math.min(50000, barsNeeded(kv)));
         if (!alive) return;
         if (wide.length > bars.length && wide.length < 50000 && !hasHole(wide, tf)) bars = wide;
       }
@@ -1383,13 +1376,11 @@ export default function Chart({ paneId }: { paneId: string }) {
       chartRef.current?.priceScale("right", mainIndex()).setAutoScale(true);
       if (bars.length) {
         if (chartRef.current) {
-          const mid = kv ? indexAt(bars, tfs, kv.t) : null;
-          const right = kv ? indexAt(bars, tfs, kv.tRight) : null;
-          const to = kv && mid !== null && right !== null ? Math.min(mid + kv.span / 2, right) : null;
-          // mốc đang xem cũ hơn dữ liệu đã tải của TF mới (vd lịch sử 1m chưa nạp): vẫn đặt góc nhìn ở đó, cuộn-lùi tự xin
+          const view = kv ? restoreView(kv, bars.length) : null;
+          // góc nhìn cũ hơn dữ liệu đã tải của TF mới (vd lịch sử 1m chưa nạp): vẫn đặt ở đó, cuộn-lùi tự xin
           // EA nạp thêm (mỗi lần dịch góc nhìn theo số nến nạp được); quá xa (> MAX_BLANK_BARS nến) thì về góc nhìn mặc định
-          const kept = kv && to !== null && to > -MAX_BLANK_BARS && to - kv.span < bars.length - 1;
-          chartRef.current.timeScale().setVisibleLogicalRange(kept && kv && to !== null ? { from: to - kv.span, to } : defaultRange(chartRef.current, bars.length));
+          const kept = view !== null && view.to > -MAX_BLANK_BARS && view.from < bars.length - 1;
+          chartRef.current.timeScale().setVisibleLogicalRange(kept ? view : defaultRange(chartRef.current, bars.length));
         }
         keepViewRef.current = null;
       } else {
