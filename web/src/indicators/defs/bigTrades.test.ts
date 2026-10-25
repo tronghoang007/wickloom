@@ -5,7 +5,7 @@ import { computeExtras } from "../engine";
 import { newInstance } from "../instance";
 import { TICK_DEPTH } from "../lower";
 import type { TickSource } from "../schema";
-import { BIG_POOL, bigTrades, bubbleFrom, bubbleSize, bubbleX, lighten, niceStep, rowSize, sizeFractions, topInRange } from "./bigTrades";
+import { BIG_POOL, bigTrades, bubbleFrom, bubbleSize, bubbleX, lighten, niceStep, rowSize, sizeFractions, topInRange, visibleCap } from "./bigTrades";
 
 const M5 = 300;
 const bar = (t: number): Bar => ({ t, o: 100, h: 101, l: 99, c: 100, v: 1 });
@@ -32,6 +32,21 @@ describe("sizeFractions", () => {
   it("cùng volume → ở giữa; dev = 0 → theo diện tích giữa lo và hi", () => {
     expect(sizeFractions([7, 7], 0, 0, 2)).toEqual([0.5, 0.5]);
     expect(sizeFractions([5, 25], 5, 25, 0)).toEqual([0, 1]);
+  });
+  it("thang theo `ref`: cùng volume thì cùng cỡ dù tập đang hiện khác nhau", () => {
+    const ref = [1, 5, 9];
+    expect(sizeFractions([9], 0, 0, 2, ref)).toEqual([sizeFractions(ref, 0, 0, 2)[2]]);
+    expect(sizeFractions([9, 8, 7], 0, 0, 2, ref)[0]).toBe(sizeFractions(ref, 0, 0, 2)[2]);
+  });
+});
+
+describe("visibleCap", () => {
+  it("nhìn đủ rộng thì đúng Maximum bubbles; zoom gần thì ít đi theo số nến, tối thiểu 1", () => {
+    expect(visibleCap(100, 288)).toBe(100);
+    expect(visibleCap(100, 200)).toBe(100);
+    expect(visibleCap(100, 55)).toBe(28);
+    expect(visibleCap(100, 1)).toBe(1);
+    expect(visibleCap(10, 400)).toBe(10); // không vượt Maximum bubbles
   });
 });
 
@@ -150,21 +165,37 @@ describe("Big Trades", () => {
     const { ticks, calls } = source(pool, () => exact);
     const b = run(ticks, { count: 10, text: true }, 0, {}, { from: 11, to: 15 }).bubbles!;
     expect(calls).toHaveLength(2);
-    expect(calls[1].slice(0, 4)).toEqual([bars[11].t, bars[15].t + M5, 1, 10]);
+    expect(calls[1].slice(0, 4)).toEqual([bars[11].t, bars[15].t + M5, 1, 3]); // 5 nến nhìn thấy -> tối đa 3 bubble (visibleCap), không phải 10
     expect(b.map((x) => x.text)).toEqual(["40", "3", "2"]);
   });
 
   it("đang chờ kết quả hỏi riêng vùng nhìn thì vẫn hiện bubble lấy từ pool (không nhấp nháy)", () => {
-    const pool = Array.from({ length: BIG_POOL }, (_, i) => cell(bars[i % 20].t, 100 + i, 50, 0));
-    const b = run(source(pool, () => null).ticks, { count: 5000, text: true }, 0, {}, { from: 11, to: 15 }).bubbles!;
-    expect(b.length).toBe(pool.filter((k) => k.t >= bars[11].t && k.t < bars[15].t + M5).length);
+    const pool = Array.from({ length: BIG_POOL }, (_, i) => cell(bars[i % 10].t, 100 + i, 50, 0));
+    pool.push(cell(bars[12].t, 100, 40, 0));
+    const b = run(source(pool, () => null).ticks, { count: 10, text: true }, 0, {}, { from: 11, to: 15 }).bubbles!;
+    expect(b.map((x) => x.text)).toEqual(["40"]);
   });
 
-  it("topInRange: volume giảm dần, bằng nhau thì phút mới hơn trước, [from, to) bỏ ô ngoài khoảng", () => {
-    const cells = [cell(10, 1, 5, 0), cell(20, 1, 5, 0), cell(30, 1, 9, 0), cell(40, 1, 99, 0)];
-    expect(topInRange(cells, 10, 40, 2).map((k) => k.t)).toEqual([30, 20]);
-    expect(topInRange(cells, 0, 100, 10).map((k) => k.t)).toEqual([40, 30, 20, 10]);
-    expect(topInRange(cells, 50, 60, 3)).toEqual([]);
+  it("zoom gần: ít bubble hơn, không kéo ô nhỏ vào cho đủ Maximum bubbles", () => {
+    const cells = Array.from({ length: 20 }, (_, i) => cell(bars[i].t, 100, 100 - i, 0));
+    const view = (range?: { from: number; to: number }) => run(source(cells).ticks, { count: 20, text: true }, 0, {}, range).bubbles!.map((b) => b.text);
+    expect(view()).toHaveLength(10); // cả 20 nến: tối đa ceil(20 / 2) = 10 (ít hơn Maximum bubbles = 20)
+    expect(view({ from: 10, to: 13 })).toEqual(["90", "89"]); // 4 nến nhìn thấy: 2 bubble
+  });
+
+  it("cỡ và độ đậm không đổi khi zoom / kéo: tính theo các ô lớn nhất của đoạn cuối chart, không theo riêng vùng nhìn", () => {
+    const cells = [cell(bars[1].t, 100, 90, 0), cell(bars[2].t, 100, 80, 0), cell(bars[3].t, 100, 70, 0), cell(bars[12].t, 100, 9, 0), cell(bars[13].t, 100, 8, 0), cell(bars[14].t, 100, 7, 0)];
+    const view = (range?: { from: number; to: number }) => run(source(cells).ticks, { count: 4, text: true }, 0, {}, range).bubbles!.find((b) => b.text === "9")!;
+    const wide = view(), zoomed = view({ from: 10, to: 19 }); // vùng nhìn 10 nến chỉ có 9 / 8 / 7: theo thang riêng thì "9" sẽ thành bubble lớn nhất
+    expect(zoomed.r).toBe(wide.r);
+    expect(zoomed.bg).toBe(wide.bg);
+    expect(view({ from: 0, to: 19 }).r).toBe(wide.r);
+  });
+
+  it("thang cỡ là đoạn cuối chart (count / 0,5 nến): ô lớn ở rất xa không ép bubble gần đây về cỡ nhỏ nhất", () => {
+    const cells = [cell(bars[0].t, 100, 1000, 0), cell(bars[18].t, 100, 9, 0), cell(bars[19].t, 100, 7, 0)];
+    const nine = (inputs: Record<string, number>) => run(source(cells).ticks, { text: true, ...inputs }).bubbles!.find((b) => b.text === "9")!;
+    expect(nine({ count: 5 }).r).toBeGreaterThan(nine({ count: 100 }).r); // count 5: thang chỉ gồm 10 nến cuối (9, 7); count 100: cả chart, có ô 1000
   });
 
   it("Maximum volume chỉ có tác dụng khi Standard deviation = 0 (ô xám đi khi > 0)", () => {

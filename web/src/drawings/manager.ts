@@ -50,9 +50,10 @@ type Mode =
   // a0: vị trí (tỉ lệ khung) của hình đang ghim; hint: nhấn trúng nhãn "+ Add text" (nhả không kéo = mở ô gõ chữ)
   | { k: "dragBody"; id: string; start: Pt; orig: Anchor[]; before: string; moved: boolean; a0?: Pt; hint?: boolean };
 
-// Khung nhìn hiện tại; key đổi khi cuộn/zoom/đổi trục giá/có nến mới.
-type View = { w: number; h: number; bars: Bar[]; step: number; key: string };
-type Built = { key: string; c: Ctx; shapes: Shape[] };
+// Khung nhìn hiện tại; key đổi khi cuộn/zoom/đổi trục giá/có nến mới. `lastKey` = giá cao / thấp / đóng của nến cuối (đổi theo từng tick giá): chỉ hình có đọc `c.bars` mới phụ thuộc.
+type View = { w: number; h: number; bars: Bar[]; step: number; key: string; lastKey: string };
+// usesBars: lần dựng này có đọc `c.bars` không (không đọc thì tick giá mới không làm hình đổi, khỏi dựng lại)
+type Built = { key: string; c: Ctx; shapes: Shape[]; usesBars: boolean };
 
 type Mods = { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean };
 
@@ -453,9 +454,9 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     // Giá ở 3 điểm trên trục: bắt được cả cuộn/zoom giá lẫn đổi linear <-> log
     const key = [
       w, h, r?.from, r?.to, s?.coordinateToPrice(0), s?.coordinateToPrice(h / 2), s?.coordinateToPrice(h),
-      bars.length, bars[0]?.t, last?.t, last?.h, last?.l, last?.c, step, this.o.getDigits(), this.o.getTickSize(),
+      bars.length, bars[0]?.t, last?.t, step, this.o.getDigits(), this.o.getTickSize(),
     ].join("|");
-    return { w, h, bars, step, key };
+    return { w, h, bars, step, key, lastKey: `${last?.h}|${last?.l}|${last?.c}` };
   }
 
   private ctx(d: Drawing, v: View, pad = false): Ctx | null {
@@ -512,13 +513,20 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
 
   // Shape của drawing đã lưu chỉ build lại khi drawing / khung nhìn / hover / chọn đổi.
   // Trước đây mỗi frame và mỗi lần di chuột đều build lại tất cả (VP, VWAP lặp toàn bộ nến).
+  // Hình không đọc `c.bars` (đường, fib, kênh...) không đổi theo tick giá của nến cuối nên khoá của nó bỏ `v.lastKey`; hình đọc (VP, VWAP, đo volume...) thì giữ.
+  // Biết hình có đọc không nhờ getter `bars` trên Ctx lúc dựng (không phải danh sách tay: tool mới tự đúng); lần đầu chưa biết thì tính là có.
   private built(d: Drawing, v: View): Built | null {
-    const key = `${v.key}|${d.id === this.hoveredId}|${d.id === this.st.selectedId}|${this.dragging(d)}|${this.st.editing?.id === d.id}|${isProfile(d) ? this.profileVer : ""}`;
+    const keyOf = (usesBars: boolean) =>
+      `${v.key}|${usesBars ? v.lastKey : ""}|${d.id === this.hoveredId}|${d.id === this.st.selectedId}|${this.dragging(d)}|${this.st.editing?.id === d.id}|${isProfile(d) ? this.profileVer : ""}`;
     const hit = this.cache.get(d);
-    if (hit?.key === key) return hit;
+    if (hit && hit.key === keyOf(hit.usesBars)) return hit;
     const c = this.ctx(d, v);
     if (!c) return null;
-    const b = { key, c, shapes: this.shapes(d, c) };
+    let usesBars = false;
+    Object.defineProperty(c, "bars", { get: () => ((usesBars = true), v.bars), enumerable: true, configurable: true });
+    const shapes = this.shapes(d, c);
+    Object.defineProperty(c, "bars", { value: v.bars, writable: true, enumerable: true, configurable: true }); // build xong: Built.c về lại thuộc tính thường
+    const b = { key: keyOf(usesBars), c, shapes, usesBars };
     this.cache.set(d, b);
     return b;
   }

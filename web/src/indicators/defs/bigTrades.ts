@@ -21,7 +21,10 @@ const INPUTS: InputDef[] = [
     key: "min", label: "Minimum volume", type: "int", default: 0, min: 0, group: "Filter",
     tooltip: "Smallest number of ticks at one price within one minute that gets a bubble. 0 = automatic: only the biggest bubbles of the visible range are shown (see Maximum bubbles).",
   },
-  { key: "count", label: "Maximum bubbles", type: "int", default: 100, min: 1, max: 3000, group: "Filter", tooltip: "Keeps only this many of the biggest bubbles of the visible range, so every part of the chart gets its own biggest bubbles when you scroll or zoom." },
+  {
+    key: "count", label: "Maximum bubbles", type: "int", default: 100, min: 1, max: 3000, group: "Filter",
+    tooltip: "Keeps only this many of the biggest bubbles of the visible range, so every part of the chart gets its own biggest bubbles when you scroll. When you zoom in there are fewer (about one per two candles), so zooming does not bring in small bubbles.",
+  },
   {
     key: "max", label: "Maximum volume", type: "int", default: 0, min: 0, group: "Filter",
     tooltip: "Volume drawn with the biggest bubble size; bigger volumes are not drawn any bigger. 0 = the biggest volume shown. Used only when Standard deviation is 0.",
@@ -57,6 +60,10 @@ const compact = (v: number): string => (v >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` :
 /** Số ô lớn nhất đọc về cho cả khoảng đã nạp (bằng giới hạn của /tickbig): `count` bubble của vùng đang nhìn được chọn từ đây nên kéo / zoom không phải hỏi lại backend. */
 export const BIG_POOL = 5000;
 
+/** Số bubble tối đa cho `visibleBars` nến đang nhìn: `count` khi nhìn từ `1 / BUBBLES_PER_BAR` × `count` nến trở lên, zoom gần hơn thì ít đi theo số nến (không thì `count` bubble dồn vào vài nến, kéo cả ô nhỏ vào). */
+export const BUBBLES_PER_BAR = 0.5;
+export const visibleCap = (count: number, visibleBars: number): number => Math.max(1, Math.min(count, Math.ceil(visibleBars * BUBBLES_PER_BAR)));
+
 /** `count` ô lớn nhất (volume giảm dần, bằng nhau thì phút mới hơn trước) trong số các ô có phút nằm trong [from, to). */
 export function topInRange(cells: TickCell[], from: number, to: number, count: number): TickCell[] {
   return cells.filter((k) => k.t >= from && k.t < to).sort((a, b) => b.up + b.dn - (a.up + a.dn) || b.t - a.t).slice(0, count);
@@ -89,12 +96,12 @@ export function bubbleSize(v: number, lo: number, hi: number, minSize: number, m
   return minSize + (maxSize - minSize) * areaFrac(v, lo, hi);
 }
 
-/** Phần (0..1) giữa cỡ nhỏ nhất và lớn nhất của từng bubble. `dev` > 0: theo độ lệch chuẩn của volume các bubble đang hiện (trung bình = giữa, ±`dev` độ lệch chuẩn = hai đầu) để vài bubble khổng lồ không ép mọi bubble khác về cỡ nhỏ nhất;
- *  `dev` = 0: theo diện tích giữa `lo` và `hi`. Mọi bubble cùng volume thì cùng ở giữa. */
-export function sizeFractions(vols: number[], lo: number, hi: number, dev: number): number[] {
+/** Phần (0..1) giữa cỡ nhỏ nhất và lớn nhất của từng bubble. `dev` > 0: theo độ lệch chuẩn của volume `ref` (trung bình = giữa, ±`dev` độ lệch chuẩn = hai đầu) để vài bubble khổng lồ không ép mọi bubble khác về cỡ nhỏ nhất;
+ *  `dev` = 0: theo diện tích giữa `lo` và `hi`. Mọi bubble cùng volume thì cùng ở giữa. `ref` là tập volume làm thang (mặc định chính `vols`): thang cố định thì zoom / kéo không đổi cỡ của một bubble. */
+export function sizeFractions(vols: number[], lo: number, hi: number, dev: number, ref: number[] = vols): number[] {
   if (dev <= 0) return vols.map((v) => areaFrac(v, lo, hi));
-  const mean = vols.reduce((a, b) => a + b, 0) / vols.length;
-  const sd = Math.sqrt(vols.reduce((a, b) => a + (b - mean) ** 2, 0) / vols.length);
+  const mean = ref.reduce((a, b) => a + b, 0) / ref.length;
+  const sd = Math.sqrt(ref.reduce((a, b) => a + (b - mean) ** 2, 0) / ref.length);
   return vols.map((v) => (sd > 0 ? Math.min(1, Math.max(0, 0.5 + (v - mean) / (2 * dev * sd))) : 0.5));
 }
 
@@ -106,20 +113,22 @@ export function bubbleX(times: number[], t: number, step: number): number {
   return start === undefined ? i : i - 0.5 + Math.min(1, Math.max(0, (t + 30 - start) / step));
 }
 
-/** Bubble của các ô tick `cells`: x = vị trí của phút của ô trong nến chứa nó (`times` tăng dần, `step` giây một nến), y = giá. Bubble lớn vẽ trước để bubble nhỏ cùng chỗ nằm trên. */
-export function bubblesOf(cells: TickCell[], times: number[], step: number, c: Ctx): ObjBubble[] {
+/** Bubble của các ô tick `cells`: x = vị trí của phút của ô trong nến chứa nó (`times` tăng dần, `step` giây một nến), y = giá. Bubble lớn vẽ trước để bubble nhỏ cùng chỗ nằm trên.
+ *  Cỡ và độ đậm tính theo `ref` (các ô lớn nhất của đoạn cuối chart, mặc định chính `cells`) chứ không theo riêng các ô đang nhìn, nên zoom / kéo chart không làm đổi cỡ một bubble. */
+export function bubblesOf(cells: TickCell[], times: number[], step: number, c: Ctx, ref: TickCell[] = cells): ObjBubble[] {
   if (cells.length === 0 || times.length === 0) return [];
   const { inputs, items } = c;
   const vols = cells.map((k) => k.up + k.dn);
-  const lo = num(inputs, "min") > 0 ? num(inputs, "min") : Math.min(...vols);
-  const hi = num(inputs, "max") > 0 ? num(inputs, "max") : Math.max(...vols);
+  const refVols = ref.length > 0 ? ref.map((k) => k.up + k.dn) : vols;
+  const lo = num(inputs, "min") > 0 ? num(inputs, "min") : Math.min(...refVols);
+  const hi = num(inputs, "max") > 0 ? num(inputs, "max") : Math.max(...refVols);
   const minSize = num(inputs, "minSize");
   const maxSize = Math.max(minSize, num(inputs, "maxSize"));
   const opMin = num(inputs, "opacityMin") / 100;
   const opMax = Math.max(opMin, num(inputs, "opacityMax") / 100);
   const hollow = !!inputs.hollow;
   const text = !!inputs.text;
-  const fr = sizeFractions(vols, lo, hi, num(inputs, "dev"));
+  const fr = sizeFractions(vols, lo, hi, num(inputs, "dev"), refVols);
   return cells
     .map((k, i): ObjBubble => {
       const color = k.up >= k.dn ? items.buy.color : items.sell.color;
@@ -160,9 +169,13 @@ export const bigTrades: IndicatorDef = {
     const v0 = Math.max(t0, bars[Math.max(c.cut, c.range?.from ?? c.cut)].t);
     const v1 = bars[Math.min(bars.length - 1, c.range?.to ?? bars.length - 1)].t + step;
     if (v1 <= v0) return empty;
-    let cells = topInRange(pool, v0, v1, count);
+    // zoom gần thì ít bubble hơn (visibleCap); cỡ tính theo ô lớn nhất của cả chart nên không đổi theo vùng nhìn
+    const cap = visibleCap(count, Math.min(bars.length - 1, c.range?.to ?? bars.length - 1) - Math.max(c.cut, c.range?.from ?? c.cut) + 1);
+    let cells = topInRange(pool, v0, v1, cap);
     // Pool đã đầy mà vùng nhìn hẹp (zoom sâu) chỉ có ít ô trong pool: các ô nhỏ hơn ô bé nhất của pool bị cắt, nên hỏi riêng vùng này; chờ kết quả thì vẫn hiện phần lấy từ pool
-    if (cells.length < count && pool.length >= BIG_POOL) cells = c.ticks.big(v0, v1, min, count, size) ?? cells;
-    return { ...empty, bubbles: bubblesOf(cells, bars.map((b) => b.t), step, c) };
+    if (cells.length < cap && pool.length >= BIG_POOL) cells = c.ticks.big(v0, v1, min, cap, size) ?? cells;
+    // thang cỡ: `count` ô lớn nhất của đoạn cuối chart (cỡ một màn hình mặc định, `count / BUBBLES_PER_BAR` nến), cố định khi zoom / kéo; lấy cả 14 ngày thì ngày dữ dội nhất ép mọi bubble ngày thường về cỡ nhỏ nhất
+    const refFrom = Math.max(t0, bars[Math.max(c.cut, bars.length - Math.ceil(count / BUBBLES_PER_BAR))].t);
+    return { ...empty, bubbles: bubblesOf(cells, bars.map((b) => b.t), step, c, topInRange(pool, refFrom, bars[bars.length - 1].t + step, count)) };
   },
 };
