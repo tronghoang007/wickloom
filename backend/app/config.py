@@ -3,6 +3,27 @@ import time
 from pathlib import Path
 from typing import Optional
 
+
+def load_env_file(path: Path) -> None:
+    """Đọc KEY=VALUE từ `backend/.env` (đã nằm trong .gitignore) cho bí mật như token bot. Biến môi trường thật luôn thắng file."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.removeprefix("export ").partition("=")
+        key, val = key.strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+            val = val[1:-1]
+        if key:
+            os.environ.setdefault(key, val)
+
+
+load_env_file(Path(__file__).resolve().parent.parent / ".env")
+
 DATA_DIR = Path(os.environ.get("TV_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 EA_TOKEN = os.environ.get("TV_TOKEN", "dev-token")
 BARS_DIR = DATA_DIR / "bars"  # cache parquet cũ (trước khi chuyển sang SQLite) - dời đi khi đổi broker
