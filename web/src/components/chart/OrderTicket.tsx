@@ -47,7 +47,7 @@ export default function OrderTicket() {
 }
 
 /** Bấm chọn một vị thế / lệnh chờ trên chart (không kéo): bảng của lệnh đó. Hiện thông số hiện tại; SL / TP / giá vào vừa kéo trên chart (đang chờ xác nhận) hiện giá mới kèm giá cũ.
- *  Modify = gửi các thay đổi đang chờ, Discard = trả về giá cũ, Delete = huỷ lệnh chờ (có hộp thoại xác nhận như dấu × trên thẻ). Lệnh đã khớp (vị thế) thì Delete thành Close, kèm thanh kéo đóng một phần
+ *  Confirm = gửi các thay đổi đang chờ (như nút Confirm trên thẻ chart), Discard = trả về giá cũ, Delete = huỷ lệnh chờ (có hộp thoại xác nhận như dấu × trên thẻ). Lệnh đã khớp (vị thế) thì Delete thành Close, kèm thanh kéo đóng một phần
  *  như tab Positions; lệnh chờ đang xem mà khớp thì bảng chuyển sang vị thế vừa mở ra. */
 function ModifyPanel({ owner }: { owner: string }) {
   const data = useTradeStore((s) => s.data);
@@ -180,7 +180,7 @@ function ModifyPanel({ owner }: { owner: string }) {
       </div>
       <div className="shrink-0 space-y-2 border-t border-[var(--border)] px-4 pb-3 pt-3">
         <button type="button" disabled={!pending || busy} onClick={() => confirmOwnerEdits(owner)} className={`${btn} bg-[var(--accent)] text-white hover:brightness-110`}>
-          Modify
+          Confirm
         </button>
         <div className="grid grid-cols-2 gap-2">
           <button type="button" disabled={!pending} onClick={() => cancelOwnerEdits(owner)} className={`${btn} border border-[var(--border)] hover:bg-[var(--hover)]`}>
