@@ -1,6 +1,7 @@
-import type { Alert, AlertChannels, AlertCond, AlertInput, AlertTrigger, ChannelsInfo, DeliveryResults } from "@/lib/alertsApi";
+import type { Alert, AlertChannels, AlertCond, AlertDrawing, AlertInput, AlertTrigger, ChannelsInfo, DeliveryResults } from "@/lib/alertsApi";
 import { TF_SECONDS } from "@/lib/api";
 import { parseNum } from "@/trading/draft";
+import { defaultCondFor, spanText } from "./drawingSpec";
 
 // Phần thuần của alert (không React, không mạng): nhãn, form <-> API, kiểm tra nhập, mô tả.
 
@@ -10,6 +11,11 @@ export const COND_OPTIONS: { value: AlertCond; label: string }[] = [
   { value: "cross_down", label: "Crossing down" },
   { value: "gt", label: "Greater than" },
   { value: "lt", label: "Less than" },
+  // chỉ cho dải giá của kênh / hình chữ nhật
+  { value: "enter", label: "Entering" },
+  { value: "exit", label: "Exiting" },
+  { value: "inside", label: "Inside" },
+  { value: "outside", label: "Outside" },
 ];
 export const TRIGGER_OPTIONS: { value: AlertTrigger; label: string }[] = [
   { value: "once", label: "Only once" },
@@ -45,10 +51,11 @@ export const triggerLabel = (t: AlertTrigger) => TRIGGER_OPTIONS.find((o) => o.v
 export const fmtLevel = (v: number, digits = 2) => v.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: Math.max(digits, 0) });
 
 /** "XAUUSDm Crossing 4,000.50" - cùng chữ với tin Telegram / MT5 của backend. */
-export const describe = (a: { symbol: string; cond: AlertCond; level: number }, digits = 5) => `${a.symbol} ${condLabel(a.cond)} ${fmtLevel(a.level, digits)}`;
+export const describe = (a: { symbol: string; cond: AlertCond; level: number; drawing?: { label: string } | null }, digits = 5) =>
+  `${a.symbol} ${condLabel(a.cond)} ${a.drawing ? a.drawing.label : fmtLevel(a.level, digits)}`;
 
 /** Chữ trên nhãn đường alert ở chart. */
-export const lineTitle = (a: Pick<Alert, "name" | "state" | "cond" | "level">) => (a.name ? a.name : condLabel(a.cond)) + (a.state === "paused" ? " (paused)" : "");
+export const lineTitle = (a: Pick<Alert, "name" | "state" | "cond">) => (a.name ? a.name : condLabel(a.cond)) + (a.state === "paused" ? " (paused)" : "");
 
 export type AlertForm = {
   symbol: string;
@@ -61,20 +68,22 @@ export type AlertForm = {
   name: string;
   message: string;
   channels: AlertChannels;
+  drawing: AlertDrawing | null; // alert đi theo một hình vẽ: giá do hình quyết định, `level` chỉ là giá hiện tại của hình (hiển thị)
 };
 
-export function defaultForm(symbol: string, price: number | null, tf: string, channels: AlertChannels, digits = 5): AlertForm {
+export function defaultForm(symbol: string, price: number | null, tf: string, channels: AlertChannels, digits = 5, drawing: AlertDrawing | null = null): AlertForm {
   return {
     symbol,
-    cond: "cross",
+    cond: defaultCondFor(drawing),
     level: price === null ? "" : String(Number(price.toFixed(digits))),
     trigger: "once",
-    tf: ALERT_TFS.includes(tf) ? tf : "M1",
+    tf: drawing || ALERT_TFS.includes(tf) ? tf : "M1", // hình vẽ đánh giá trên đúng khung của chart tạo ra nó
     expiry: "none",
     expiresAt: "",
     name: "",
     message: "",
     channels: { ...channels },
+    drawing,
   };
 }
 
@@ -96,6 +105,7 @@ export function formFromAlert(a: Alert): AlertForm {
     name: a.name,
     message: a.message,
     channels: { ...a.channels },
+    drawing: a.drawing,
   };
 }
 
@@ -109,7 +119,7 @@ export function expiryOf(f: Pick<AlertForm, "expiry" | "expiresAt">, now: number
   return Math.floor(now) + parseInt(f.expiry, 10) * 86400;
 }
 
-export type FormCheck = { input: AlertInput | null; errors: Partial<Record<"symbol" | "level" | "name" | "message" | "expiry" | "channels", string>> };
+export type FormCheck = { input: AlertInput | null; errors: Partial<Record<"symbol" | "level" | "name" | "message" | "expiry" | "channels" | "drawing", string>> };
 
 /** Kiểm tra form trước khi gửi (backend vẫn kiểm lại). `known` = danh sách symbol của MT5 (rỗng = chưa tải, không chặn); `channelsInfo` null = chưa biết. */
 export function checkForm(f: AlertForm, now: number, known: string[], channelsInfo: ChannelsInfo | null): FormCheck {
@@ -117,8 +127,11 @@ export function checkForm(f: AlertForm, now: number, known: string[], channelsIn
   const symbol = f.symbol.trim();
   if (!symbol) errors.symbol = "Chọn symbol";
   else if (known.length > 0 && !known.includes(symbol)) errors.symbol = `${symbol} không có trên MT5`;
-  const level = parseNum(f.level);
-  if (!f.level.trim() || !Number.isFinite(level)) errors.level = "Nhập giá";
+  let level = parseNum(f.level);
+  if (f.drawing) {
+    if (!Number.isFinite(level)) level = 0; // mức do hình quyết định; backend chỉ cần một số hữu hạn để hiển thị
+    if (!ALERT_TFS.includes(f.tf)) errors.drawing = `Hình vẽ trên khung ${f.tf} chưa tạo được alert`;
+  } else if (!f.level.trim() || !Number.isFinite(level)) errors.level = "Nhập giá";
   else if (Math.abs(level) >= 1e12) errors.level = "Giá quá lớn";
   if (f.name.trim().length > MAX_NAME) errors.name = `Tên tối đa ${MAX_NAME} ký tự`;
   if (f.message.trim().length > MAX_MESSAGE) errors.message = `Nội dung tối đa ${MAX_MESSAGE} ký tự`;
@@ -129,7 +142,7 @@ export function checkForm(f: AlertForm, now: number, known: string[], channelsIn
   if (Object.keys(errors).length > 0) return { input: null, errors };
   return {
     errors,
-    input: { symbol, cond: f.cond, level, trigger: f.trigger, tf: f.tf, expires_at: exp, name: f.name.trim(), message: f.message.trim(), channels: f.channels },
+    input: { symbol, cond: f.cond, level, trigger: f.trigger, tf: f.tf, expires_at: exp, name: f.name.trim(), message: f.message.trim(), channels: f.channels, ...(f.drawing ? { drawing: f.drawing } : {}) },
   };
 }
 
@@ -153,10 +166,11 @@ export function sortAlerts(list: Alert[]): Alert[] {
 }
 
 /** Giá của alert để vẽ đường trên chart của `symbol`: chỉ alert đang chạy / tạm dừng của symbol đó. */
-export const lineAlerts = (alerts: Alert[], symbol: string) => alerts.filter((a) => a.symbol === symbol && (a.state === "active" || a.state === "paused"));
+export const lineAlerts = (alerts: Alert[], symbol: string) => alerts.filter((a) => a.symbol === symbol && !a.drawing && (a.state === "active" || a.state === "paused"));
 
-/** Tiêu đề + nội dung của toast / thông báo trình duyệt khi alert nổ. */
-export function fireNotice(a: Pick<Alert, "name" | "symbol" | "cond" | "level" | "message">, price: number, digits: number): { title: string; text: string } {
-  const text = `${describe(a, digits)} (price ${fmtLevel(price, digits)})`;
+/** Tiêu đề + nội dung của toast / thông báo trình duyệt khi alert nổ. `now` = mức / dải giá của hình lúc nổ (alert trên hình vẽ). */
+export function fireNotice(a: Pick<Alert, "name" | "symbol" | "cond" | "level" | "message" | "drawing"> & { now?: [number, number] }, price: number, digits: number): { title: string; text: string } {
+  const where = a.drawing && a.now ? ` (${spanText(a.now[0], a.now[1], (v) => fmtLevel(v, digits))})` : "";
+  const text = `${describe(a, digits)}${where} (price ${fmtLevel(price, digits)})`;
   return { title: a.name || a.symbol, text: a.message ? `${text} — ${a.message}` : text };
 }

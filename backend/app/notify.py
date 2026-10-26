@@ -23,7 +23,8 @@ MT5_MIN_EA = (2, 19)  # EA hiểu lệnh `notify`
 LINK_TTL = 600  # mã liên kết Telegram hết hạn sau 10 phút
 
 NOT_CONFIGURED = "chưa cấu hình bot Telegram (WICKLOOM_TG_BOT_TOKEN)"
-COND_TEXT = {"cross": "Crossing", "cross_up": "Crossing Up", "cross_down": "Crossing Down", "gt": "Greater Than", "lt": "Less Than"}
+COND_TEXT = {"cross": "Crossing", "cross_up": "Crossing Up", "cross_down": "Crossing Down", "gt": "Greater Than", "lt": "Less Than",
+             "enter": "Entering", "exit": "Exiting", "inside": "Inside", "outside": "Outside"}
 
 
 def fmt_price(p: float) -> str:
@@ -43,7 +44,14 @@ class Fired:
 
 
 def condition_text(a: Dict[str, Any]) -> str:
-    return f"{a['symbol']} {COND_TEXT.get(a['cond'], a['cond'])} {fmt_price(a['level'])}"
+    """"XAUUSDm Crossing 4000"; alert trên hình vẽ: "XAUUSDm Crossing Up Trend Line (4001.2)" hoặc "... Rectangle (4000–4010)" (mức / dải của hình lúc nổ)."""
+    cond = COND_TEXT.get(a["cond"], a["cond"])
+    d = a.get("drawing")
+    if not d:
+        return f"{a['symbol']} {cond} {fmt_price(a['level'])}"
+    now = a.get("now") or [a["level"], a["level"]]
+    span = fmt_price(now[0]) if now[0] == now[1] else f"{fmt_price(now[0])}–{fmt_price(now[1])}"
+    return f"{a['symbol']} {cond} {d.get('label') or d.get('type')} ({span})"
 
 
 def telegram_text(f: Fired) -> str:

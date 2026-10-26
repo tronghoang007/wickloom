@@ -9,6 +9,7 @@ export type ConfirmRequest = {
   confirmLabel: string;
   cancelLabel?: string; // mặc định "Huỷ"; vd "Giữ lệnh" khi hỏi có huỷ lệnh không
   danger?: boolean;
+  onCancel?: () => unknown; // Huỷ / X / Esc / bấm nền (không chạy khi đã xác nhận)
   onConfirm: () => unknown; // có thể trả Promise: hộp thoại đợi xong mới đóng
 };
 

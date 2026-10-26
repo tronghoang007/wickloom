@@ -80,6 +80,7 @@ function AlertRow({ a }: { a: Alert }) {
           <span style={{ color: STATE_COLOR[a.state] }}>{STATE_NAME[a.state]}</span>
           {a.fire_count > 0 && <span>{a.state === "triggered" ? `fired ${when(a.fired_at ?? 0)}` : `${a.fire_count}× · last ${when(a.fired_at ?? 0)}`}</span>}
           {a.expires_at !== null && live && <span>expires {when(a.expires_at)}</span>}
+          {a.drawing && a.drawing.id === null && <span title="Hình vẽ đã bị xoá; alert chạy tiếp với toạ độ cuối">drawing deleted</span>}
           <span className="flex gap-1" title={(Object.keys(a.channels) as ChannelKind[]).filter((k) => a.channels[k]).map((k) => CHANNEL_NAME[k]).join(", ")}>
             {(Object.keys(CH_LETTER) as ChannelKind[]).filter((k) => a.channels[k]).map((k) => (
               <span key={k} className="rounded border border-[var(--border)] px-1 text-[10px] leading-4">
@@ -106,15 +107,16 @@ function AlertRow({ a }: { a: Alert }) {
 
 function LogRow({ r }: { r: AlertLogRow }) {
   const bad = failedChannels(r.results);
+  const what = describe({ ...r, drawing: r.label ? { label: r.label } : null }, digitsOf(r.symbol));
   const keys = Object.keys(r.results) as ChannelKind[];
   return (
     <div className="border-b border-[var(--border)] px-3 py-2.5 text-sm" data-testid="alert-log-row">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 truncate font-medium">{r.name || describe(r, digitsOf(r.symbol))}</span>
+        <span className="min-w-0 truncate font-medium">{r.name || what}</span>
         <span className="shrink-0 text-[12px] tabular-nums text-[var(--muted)]">{when(r.time)}</span>
       </div>
       <div className="truncate text-[12px] text-[var(--muted)]">
-        {r.name ? `${describe(r, digitsOf(r.symbol))} · ` : ""}price {r.price}
+        {r.name ? `${what} · ` : ""}price {r.price}
         {r.message ? ` — ${r.message}` : ""}
       </div>
       {keys.length > 0 && (

@@ -13,6 +13,13 @@ import type { Drawing } from "./types";
 
 export { DEFAULT_LAYOUT_ID };
 
+/** Nghe mọi thay đổi hình vẽ của mọi doc (sau khi sửa / xoá / undo ở bất kỳ chart nào): alert đi theo hình dùng để giữ bản sao toạ độ cho khớp. Trả hàm huỷ đăng ký. */
+const changeListeners = new Set<(doc: DrawingDoc) => void>();
+export function onDocChanged(fn: (doc: DrawingDoc) => void): () => void {
+  changeListeners.add(fn);
+  return () => void changeListeners.delete(fn);
+}
+
 export interface DocView {
   /** Hình đổi do view khác (sửa/xoá/undo). */
   docChanged(): void;
@@ -51,10 +58,16 @@ export class DrawingDoc {
     if (this.sync && this.symbol) this.sync.open(this.symbol);
   }
 
+  /** Đã nạp xong hình trên server (hoặc server trả dữ liệu chỉ đọc). Chưa nạp xong thì danh sách hình chưa đủ: không được kết luận "hình đã bị xoá". */
+  get ready(): boolean {
+    return this.sync?.state === "ready" || this.sync?.state === "readonly";
+  }
+
   /** Một view vừa sửa: lên lịch lưu và báo các view khác. */
   changed(origin: DocView | null) {
     this.sync?.schedule();
     for (const v of [...this.views]) if (v !== origin) v.docChanged();
+    for (const fn of [...changeListeners]) fn(this);
   }
 
   /** Lưu ngay và đợi server trả lời. */

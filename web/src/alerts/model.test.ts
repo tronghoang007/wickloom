@@ -6,7 +6,7 @@ const NOW = 1_800_000_000;
 const CH = { web: true, telegram: false, mt5: false };
 const base = (): AlertForm => ({ ...defaultForm("XAUUSDm", 4000.5, "M5", CH, 2), level: "4000.5" });
 const alert = (o: Partial<Alert> = {}): Alert => ({
-  id: "a", symbol: "XAUUSDm", cond: "cross", level: 4000.5, trigger: "once", tf: "M1", expires_at: null, name: "", message: "", channels: CH, state: "active", created_at: NOW, fired_at: null, fire_count: 0, ...o,
+  id: "a", symbol: "XAUUSDm", cond: "cross", level: 4000.5, trigger: "once", tf: "M1", expires_at: null, name: "", message: "", channels: CH, state: "active", created_at: NOW, fired_at: null, fire_count: 0, drawing: null, ...o,
 });
 const tg = (linked: boolean): ChannelsInfo => ({ telegram: { configured: true, linked, name: null }, mt5: { online: false, version: null, supports: false, push_enabled: null } });
 

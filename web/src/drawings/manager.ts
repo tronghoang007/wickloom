@@ -1201,6 +1201,11 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.restore(s);
   }
 
+  /** Nến, khung, thang giá của chart này và layout chứa hình: để tạo alert gắn với hình vẽ (alerts/drawingSpec.ts). */
+  alertSource(): { bars: Bar[]; tf: string; log: boolean; layout: string; symbol: string } {
+    return { bars: this.o.getBars(), tf: this.o.getTf(), log: this.o.pane.chart.getState().scaleMode === "log", layout: this.doc.layoutId, symbol: this.doc.symbol ?? "" };
+  }
+
   // --- lưu trữ ---
   private commit() {
     this.setSt({ drawings: [...this.drawings] });

@@ -1,6 +1,6 @@
 # Alert đa kênh: trình duyệt + Telegram + MT5 mobile
 
-Ngày lập: 2026-10-25. Trạng thái (2026-10-26): **Phase 0 + Phase 1 đã code và kiểm tra** (chưa commit); Phase 2 (alert trên drawing) và Phase 3 chưa làm. Xem mục 11.
+Ngày lập: 2026-10-25. Trạng thái (2026-10-26): **Phase 0 + Phase 1 đã commit (9583380); Phase 2 (alert trên hình vẽ) đã code, test và thử trên UI thật, chưa commit**; Phase 3 chưa làm. Xem mục 11 và 12.
 
 ## 1. Hiện trạng
 
@@ -198,5 +198,29 @@ Mọi endpoint cần phiên đăng nhập, khoá theo `user_id` như `me.py`; PO
 
 **Chưa làm**
 
-- Phase 2: nút chuông ở menu indicator / drawing / StylePanel vẫn `disabled`.
+- Nút chuông ở menu indicator (alert theo indicator, Phase 3) vẫn `disabled`.
 - Phase 3 (báo trước tin kinh tế, SL/TP chạm, bù lần chạm lúc backend tắt, alert theo indicator).
+
+## 12. Phase 2: alert trên hình vẽ (2026-10-26)
+
+**Hỗ trợ:** trendline, ray, extended line, info line, horizontal line, horizontal ray, parallel channel, rectangle. Vào từ nút chuông trên thanh style của hình và mục "Add / Edit alert on ..." trong menu chuột phải của hình. Bấm chuông của hình đã có alert thì sửa alert (chuông sáng xanh).
+
+**Công thức giá (rủi ro đã nêu ở mục 6):** chart dựng hình theo chỉ số nến (`timeToLogical`), nên đường thẳng trong không gian (chỉ số nến, giá), hoặc (chỉ số nến, ln giá) khi chart ở thang log. Giá của đường = giá ở chỉ số của nến đang chạy. Nội suy theo thời gian sẽ lệch qua mỗi kỳ nghỉ (đã thử với đường vắt qua cuối tuần: Sat 00:30 -> Mon 05:45).
+- `backend/app/geometry.py`: hình học thuần (`geometry`, `hit_band`) + `BarStore.logical` lặp lại `timeToLogical` bằng SQL trên nến của backend (nến đang chạy chưa có trong DB được coi như nến ảo đặt ngay sau nến cuối, như web). Có test đối chiếu với bản port nguyên văn `timeToLogical` trên chuỗi nến ngẫu nhiên có lỗ, và test phá cố ý để chắc test bắt được lỗi.
+- `web/src/alerts/drawingSpec.ts` là bản port của `geometry` để dialog cho xem mức hiện tại; backend và web ra cùng 4001,21 trên cùng đường (thử thật).
+- Mức chỉ đổi khi sang nến mới nên engine tính lại mỗi nến (vài truy vấn SQL), không phải mỗi tick; tick đầu và lần đóng nến đầu chỉ làm mốc.
+
+**Điều kiện:** đường: cross / cross_up / cross_down / gt / lt (đường dịch qua giá đứng yên cũng là một lần cắt, như trên chart). Kênh và hình chữ nhật (dải [lo, hi]): Entering, Exiting, Crossing (đổi phía, kể cả nhảy qua cả dải), Inside, Outside (hai cái cuối là trạng thái: nổ ngay nếu đang thoả). Đủ 4 kiểu nổ (once / per bar / per bar close / every time).
+
+**Quy tắc cần biết**
+- Alert **đánh giá trên khung (TF) và thang giá (thường / log) của chart lúc tạo**, lưu cùng alert; sửa hình ở khung khác không đổi hai thứ này. MN1 chưa hỗ trợ.
+- Đoạn thẳng không Extend right: hết hiệu lực (`expired`) khi nến hiện tại qua điểm neo cuối. Đã kết thúc ở quá khứ lúc tạo thì web từ chối và chỉ cách bật Extend right / dùng Ray. Điểm bắt đầu ở tương lai: alert chờ.
+- Backend giữ **bản sao toạ độ** (cột `drawing` JSON, không đọc layout). `DrawingDoc.changed` (mọi sửa / kéo / xoá / undo ở mọi chart) -> `alerts/drawingLinks.ts` gửi bản sao mới (PATCH, gộp 600 ms) khi toạ độ hoặc Extend đổi; màu / độ dày không ảnh hưởng. Chỉ doc đã nạp xong, cùng symbol **và cùng layout** mới được coi là "hình đã bị xoá" (alert ở layout khác không bị hỏi nhầm).
+- Hình bị xoá: hộp "Delete alert too?" - Delete alert hoặc Keep alert (Huỷ / Esc / X cũng là giữ): giữ thì tháo liên kết (`drawing.id = null`), alert chạy tiếp với toạ độ cuối, panel ghi "drawing deleted".
+- Alert trên hình không vẽ đường ngang cam (hình chính là đường); log / thông báo ghi tên hình và mức / dải lúc nổ ("XAUUSDm Exiting Rectangle (3,996.69-4,005.07)").
+- EA reconnect và lúc tạo alert: backend xin nạp nến của (symbol, tf) của alert hình vẽ để đếm chỉ số nến đủ; `aggregator.watch` dựng nến TF đó dù không chart nào mở.
+- DB cũ (Phase 1) tự thêm cột `drawing` (alerts) và `label` (alert_log) khi khởi động; đã thử trên bản copy DB Phase 1.
+
+**Kiểm tra:** 41 test backend mới (`tests/test_drawing_alerts.py`) + 18 test web (`drawingSpec`, `drawingLinks`); cả bộ backend 235, web 1243, `tsc`, lint, `next build` sạch. Thử UI thật (scratch backend + EA giả): vẽ trendline qua cuối tuần, tạo alert từ chuông, nổ đúng mức, kéo điểm neo -> bản sao đổi, xoá hình -> Keep alert -> alert vẫn nổ; hình chữ nhật Exiting.
+
+**Chưa làm:** bell trên indicator (Phase 3); các loại hình khác (fib, pitchfork, ...); chấm / chuông vẽ ngay trên hình để thấy hình nào có alert (hiện chỉ chuông sáng xanh ở thanh style và dòng trong panel); alert trên hình đang ở khung MN1.

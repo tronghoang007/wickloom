@@ -174,7 +174,7 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
             await _write(writer, cmd)
 
         queued = {(c["symbol"], c["tf"]) for c in pending}
-        for sym, tf in state.hub.subscribed_pairs():
+        for sym, tf in sorted(state.hub.subscribed_pairs() | alerts.engine.bar_pairs()):  # alert trên hình vẽ cũng cần nến đủ dù không chart nào mở
             if (sym, tf) not in queued:  # đã có lệnh xếp hàng lúc EA offline vừa gửi ở trên
                 state.request_catchup(sym, tf)
 

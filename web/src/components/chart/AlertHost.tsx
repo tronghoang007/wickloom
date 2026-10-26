@@ -1,6 +1,7 @@
 "use client";
 
 import { fireNotice, failedChannels, CHANNEL_NAME } from "@/alerts/model";
+import { startDrawingLinks } from "@/alerts/drawingLinks";
 import { handleFeedMessage, type FeedEffects } from "@/alerts/feed";
 import { playAlertSound, unlockAudio } from "@/alerts/sound";
 import { digitsOf, openCreateAlert, useAlertPrefs, useAlertStore } from "@/alerts/store";
@@ -84,6 +85,7 @@ export default function AlertHost() {
     let wait = RETRY_MIN;
     let dead = false;
     void useAlertStore.getState().refresh();
+    const stopLinks = startDrawingLinks(); // alert theo hình vẽ bám theo hình khi hình bị kéo / xoá
     const connect = () => {
       if (dead) return;
       ws = new WebSocket(WS_URL);
@@ -109,6 +111,7 @@ export default function AlertHost() {
       dead = true;
       clearTimeout(timer);
       ws?.close();
+      stopLinks();
     };
   }, [status, userId]);
 

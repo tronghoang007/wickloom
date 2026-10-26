@@ -1,3 +1,5 @@
+import { supportsAlert } from "@/alerts/drawingSpec";
+import { alertOfDrawing, openDrawingAlert, useAlertStore } from "@/alerts/store";
 import type { DrawingManager } from "@/drawings/manager";
 import { useDrawingStore } from "@/drawings/store";
 import { SPEC } from "@/drawings/tools";
@@ -38,8 +40,13 @@ export function drawingMenuItems(api: DrawingManager, d: Drawing, tf: string, mo
   const hide: MenuItem = { label: "Hide", onSelect: () => api.update({ hidden: true }) };
 
   if (more) return [order, visibility, "sep", clone, copy, "sep", hide];
+  const name = SPEC[d.type]?.label ?? d.type;
+  const linked = alertOfDrawing(useAlertStore.getState().alerts, d, api.alertSource().layout);
+  const alert: MenuItem = supportsAlert(d.type)
+    ? { label: `${linked ? "Edit" : "Add"} alert on ${name}…`, icon: <AlertI />, onSelect: () => void openDrawingAlert(api, d) }
+    : { label: `Add alert on ${name}…`, icon: <AlertI />, disabled: true };
   return [
-    { label: `Add alert on ${SPEC[d.type]?.label ?? d.type}…`, icon: <AlertI />, disabled: true },
+    alert,
     "sep",
     order,
     visibility,

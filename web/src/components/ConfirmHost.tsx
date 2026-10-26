@@ -18,6 +18,10 @@ export default function ConfirmHost() {
   }, [request]);
 
   if (!request) return null;
+  const dismiss = () => {
+    void request.onCancel?.();
+    close();
+  };
   const run = async () => {
     if (busy) return;
     setBusy(true);
@@ -32,13 +36,13 @@ export default function ConfirmHost() {
   return (
     <div
       className="fixed inset-0 z-[75] flex items-center justify-center bg-black/50"
-      onMouseDown={(e) => e.target === e.currentTarget && !busy && close()}
-      onKeyDown={(e) => e.key === "Escape" && !busy && close()}
+      onMouseDown={(e) => e.target === e.currentTarget && !busy && dismiss()}
+      onKeyDown={(e) => e.key === "Escape" && !busy && dismiss()}
     >
       <div role="alertdialog" aria-label={request.title} className="w-[400px] max-w-[94vw] rounded-2xl popup p-5">
         <div className="mb-3 flex items-center justify-between">
           <span className="text-lg font-semibold">{request.title}</span>
-          <button type="button" className="rounded p-1 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={close} aria-label="Close">
+          <button type="button" className="rounded p-1 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={dismiss} aria-label="Close">
             <Close size={22} />
           </button>
         </div>
@@ -54,7 +58,7 @@ export default function ConfirmHost() {
           </div>
         )}
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className="h-9 rounded border border-[var(--border)] px-4 text-sm hover:bg-[var(--hover)]" onClick={close} disabled={busy}>
+          <button type="button" className="h-9 rounded border border-[var(--border)] px-4 text-sm hover:bg-[var(--hover)]" onClick={dismiss} disabled={busy}>
             {request.cancelLabel ?? "Huỷ"}
           </button>
           <button

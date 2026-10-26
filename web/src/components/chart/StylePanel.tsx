@@ -1,5 +1,7 @@
 "use client";
 
+import { supportsAlert } from "@/alerts/drawingSpec";
+import { alertOfDrawing, openDrawingAlert, useAlertStore } from "@/alerts/store";
 import { useDrawingStore } from "@/drawings/store";
 import ColorPicker from "./ColorPicker";
 import { floatBar, fontSizeOf, POS_DEFAULTS, SPEC } from "@/drawings/tools";
@@ -80,6 +82,8 @@ export default function StylePanel() {
     oy: number;
   } | null>(null);
   const tf = useChartStore((s) => s.tf);
+  const layout = api?.alertSource().layout ?? "";
+  const linkedAlert = useAlertStore((s) => (selectedId ? alertOfDrawing(s.alerts, { id: selectedId }, layout) : undefined)); // alert đang đi theo hình đang chọn
   const d = drawings.find((x) => x.id === selectedId);
   // Measure: không có toolbar như TV; hình ẩn ở khung đang xem (Visibility) cũng không
   if (!d || !api || SPEC[d.type]?.ephemeral || !visibleOn(d.visibility, tf)) return null;
@@ -236,11 +240,16 @@ export default function StylePanel() {
           <SettingsI />
         </button>
 
-        {tokens.includes("al") && (
-          <button className={btn} disabled title="Alert (sắp có)">
-            <AlertI />
-          </button>
-        )}
+        {tokens.includes("al") &&
+          (supportsAlert(d.type) ? (
+            <button className={`${btn} ${linkedAlert ? "text-[var(--accent-text)]" : ""}`} title={linkedAlert ? "Edit alert" : "Add alert"} onClick={() => void openDrawingAlert(api, d)}>
+              <AlertI />
+            </button>
+          ) : (
+            <button className={btn} disabled title="Công cụ này chưa tạo alert được">
+              <AlertI />
+            </button>
+          ))}
 
         <button
           className={btn}

@@ -119,6 +119,48 @@ class BarStore:
             rows = self.db.execute(sql, params + [limit]).fetchall()
         return [dict(zip(_COLS, r)) for r in reversed(rows)]
 
+    def logical(self, symbol: str, tf: str, times: List[int], step: int, now_bar: int) -> Optional[Tuple[List[float], float]]:
+        """Chỉ số nến (thực, gốc tuỳ ý nhưng chung) của từng thời điểm trong `times` và của nến đang chạy `now_bar`, giống hệt `timeToLogical` của web (drawings/coords.ts):
+        nội suy giữa hai nến kề nhau (nghỉ cuối tuần không tính), ngoài vùng dữ liệu thì ngoại suy theo `step`. Web luôn có nến đang chạy ở cuối danh sách, còn DB chỉ có nến đã đóng
+        (và nến vừa được EA nạp lại), nên nến đang chạy chưa có trong DB được coi như một nến ảo đặt ngay sau nến cuối. Đếm bằng SQL trên đoạn [điểm sớm nhất, nến hiện tại]
+        thay vì nạp nến vào bộ nhớ. None khi chưa có nến nào."""
+        with self._lock:
+            q = self.db.execute
+            first_t, last_t = q("SELECT MIN(t), MAX(t) FROM bars WHERE symbol=? AND tf=?", (symbol, tf)).fetchone()
+            if first_t is None:
+                return None
+            virtual = last_t < now_bar
+            eff_last = now_bar if virtual else last_t
+            at_or_before = lambda t: q("SELECT MAX(t) FROM bars WHERE symbol=? AND tf=? AND t<=?", (symbol, tf, t)).fetchone()[0]
+            base = at_or_before(min(min(times), now_bar))
+            if base is None:
+                base = first_t
+
+            def rel(bar_t: int) -> int:  # chỉ số của một nến trong DB so với nến gốc
+                lo, hi, sign = (base, bar_t, 1) if bar_t >= base else (bar_t, base, -1)
+                return sign * q("SELECT COUNT(*) FROM bars WHERE symbol=? AND tf=? AND t>? AND t<=?", (symbol, tf, lo, hi)).fetchone()[0]
+
+            eff_idx = rel(last_t) + (1 if virtual else 0)
+
+            def pos(t: int) -> float:
+                if t <= first_t:
+                    return rel(first_t) + (t - first_t) / step
+                if t >= eff_last:
+                    return eff_idx + (t - eff_last) / step
+                lo = at_or_before(t)
+                if lo == t:
+                    return float(rel(lo))
+                nxt = q("SELECT MIN(t) FROM bars WHERE symbol=? AND tf=? AND t>?", (symbol, tf, t)).fetchone()[0]
+                hi = nxt if nxt is not None else now_bar  # sau nến cuối DB: nến ảo
+                return rel(lo) + (t - lo) / (hi - lo)
+
+            if virtual:
+                l_now: Optional[float] = float(eff_idx)
+            else:
+                cur = at_or_before(now_bar)
+                l_now = None if cur is None else float(rel(cur))
+            return None if l_now is None else ([pos(t) for t in times], l_now)
+
     def last(self, symbol: str, tf: str) -> Optional[Dict[str, Any]]:
         rows = self.query(symbol, tf, limit=1)
         return rows[0] if rows else None
