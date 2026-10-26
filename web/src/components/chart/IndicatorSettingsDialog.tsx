@@ -8,7 +8,7 @@ import { SOURCES } from "@/indicators/ta";
 import { useIndicatorStore } from "@/indicators/store";
 import { Fragment, useRef } from "react";
 import ColorPicker from "./ColorPicker";
-import { Check, Section, SettingsFrame, VisibilityTab, field, num } from "./settingsParts";
+import { Check, NumberField, Section, SettingsFrame, VisibilityTab, field } from "./settingsParts";
 
 function InputRow({ def, value, onChange, enabled = true }: { def: InputDef; value: number | string | boolean; onChange: (v: number | string | boolean) => void; enabled?: boolean }) {
   if (def.type === "bool") return <Check label={def.label} checked={value as boolean} onChange={onChange} />;
@@ -16,18 +16,16 @@ function InputRow({ def, value, onChange, enabled = true }: { def: InputDef; val
     <label className={`flex items-center justify-between py-1.5 ${enabled ? "" : "opacity-55"}`} title={def.tooltip}>
       {def.label}
       {def.type === "int" || def.type === "float" ? (
-        <input
+        <NumberField
           className={`${field} w-20`}
-          type="number"
           disabled={!enabled}
           min={def.min}
           max={def.max}
-          step={def.step ?? (def.type === "int" ? 1 : "any")}
+          step={def.step ?? 1}
           value={value as number}
-          onChange={(e) => {
+          onChange={(n) => {
             // ô trống / ngoài khoảng cho phép thì giữ giá trị cũ: chart luôn tính được
-            const n = num(e.target.value, NaN);
-            if (Number.isFinite(n) && n >= (def.min ?? -Infinity) && n <= (def.max ?? Infinity)) onChange(n);
+            if (n >= (def.min ?? -Infinity) && n <= (def.max ?? Infinity)) onChange(n);
           }}
         />
       ) : (
@@ -134,16 +132,7 @@ function Dialog({ uid }: { uid: string }) {
                     return (
                       <div key={l.id} className="flex items-center gap-1.5">
                         <Check className="min-w-0 flex-1 whitespace-nowrap" label={l.title} checked={st.visible} onChange={(visible) => setStyle("levels", l.id, { visible })} />
-                        <input
-                          className={`${field} h-7 w-16`}
-                          type="number"
-                          step="any"
-                          value={st.value}
-                          onChange={(e) => {
-                            const n = num(e.target.value, NaN);
-                            if (Number.isFinite(n)) setStyle("levels", l.id, { value: n });
-                          }}
-                        />
+                        <NumberField className={`${field} h-7 w-16`} value={st.value} onChange={(n) => setStyle("levels", l.id, { value: n })} />
                         <ColorPicker value={st.color} onChange={(color) => setStyle("levels", l.id, { color })} className="h-7 w-7 p-1" />
                         <Pick value={st.lineStyle} options={LINE_STYLES} onChange={(v) => setStyle("levels", l.id, { lineStyle: v as LineStyleName })} />
                         <Pick value={String(st.width)} options={WIDTHS.map((w) => ({ id: String(w), label: `${w}px` }))} onChange={(v) => setStyle("levels", l.id, { width: Number(v) })} />

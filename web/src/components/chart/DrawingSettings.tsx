@@ -7,6 +7,7 @@ import type { Drawing } from "@/drawings/types";
 import { UNITS, type Unit } from "@/drawings/visibility";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Close } from "../icons";
+import { NumberField } from "./settingsParts";
 
 const input =
   "w-40 rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--accent)]";
@@ -28,12 +29,11 @@ function FibLevels({ levels, onChange }: { levels: FibLevel[]; onChange: (lv: Fi
       {levels.map((l, i) => (
         <div key={i} className="flex items-center gap-2">
           <input type="checkbox" className="h-4 w-4" checked={l.on} onChange={(e) => set(i, { on: e.target.checked })} />
-          <input
+          <NumberField
             className="w-20 rounded border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none focus:border-[var(--accent)]"
-            type="number"
-            step="0.001"
+            step={0.001}
             value={l.coeff}
-            onChange={(e) => e.target.value !== "" && Number.isFinite(Number(e.target.value)) && set(i, { coeff: Number(e.target.value) })}
+            onChange={(n) => set(i, { coeff: n })}
           />
           <ColorPicker value={l.color} onChange={(c) => set(i, { color: c })} className="h-7 w-7 p-1" />
         </div>
@@ -348,32 +348,14 @@ function Dialog({ init, startTab, onClose }: { init: Drawing; startTab: Settings
           {tab === "inputs" && isPos && (
             <>
               <Row label="Account size">
-                <input
-                  className={input}
-                  type="number"
-                  value={o.account}
-                  onChange={(e) =>
-                    setOpt("account", num(e.target.value, o.account))
-                  }
-                />
+                <NumberField className={input} value={o.account} onChange={(n) => setOpt("account", n)} />
               </Row>
               <Row label="Lot size">
-                <input
-                  className={input}
-                  type="number"
-                  value={o.lot}
-                  onChange={(e) => setOpt("lot", num(e.target.value, o.lot))}
-                />
+                <NumberField className={input} value={o.lot} onChange={(n) => setOpt("lot", n)} />
               </Row>
               <Row label="Risk">
                 <span className="flex items-center gap-2">
-                  <input
-                    className={`${input} w-24`}
-                    type="number"
-                    step="0.1"
-                    value={o.risk}
-                    onChange={(e) => setOpt("risk", num(e.target.value, o.risk))}
-                  />
+                  <NumberField className={`${input} w-24`} step={0.1} value={o.risk} onChange={(n) => setOpt("risk", n)} />
                   {/* như TV: rủi ro theo % tài khoản hoặc theo số tiền */}
                   <select className={`${input} w-20`} value={o.riskMode} onChange={(e) => setOpt("riskMode", e.target.value)}>
                     <option value="percent" className="text-black">%</option>
@@ -382,16 +364,7 @@ function Dialog({ init, startTab, onClose }: { init: Drawing; startTab: Settings
                 </span>
               </Row>
               <Row label="Entry price">
-                <input
-                  className={input}
-                  type="number"
-                  value={d.points[0].price}
-                  onChange={(e) =>
-                    setPoint(0, {
-                      price: num(e.target.value, d.points[0].price),
-                    })
-                  }
-                />
+                <NumberField className={input} value={d.points[0].price} onChange={(n) => setPoint(0, { price: n })} />
               </Row>
               <Row label="Leverage">
                 <input
@@ -422,12 +395,7 @@ function Dialog({ init, startTab, onClose }: { init: Drawing; startTab: Settings
                       </Row>
                     )}
                     <Row label="Price">
-                      <input
-                        className={input}
-                        type="number"
-                        value={d.points[i].price}
-                        onChange={(e) => setPoint(i, { price: num(e.target.value, d.points[i].price) })}
-                      />
+                      <NumberField className={input} value={d.points[i].price} onChange={(n) => setPoint(i, { price: n })} />
                     </Row>
                   </div>
                 );
@@ -642,12 +610,7 @@ function Dialog({ init, startTab, onClose }: { init: Drawing; startTab: Settings
                   <span className="text-sm">{`#${i + 1} (${[priceOnly ? "price" : timeOnly ? "" : "price", priceOnly ? "" : "bar"].filter(Boolean).join(", ")})`}</span>
                   <span className="flex gap-2">
                     {!timeOnly && (
-                      <input
-                        className={input} style={{ width: 110 }}
-                        type="number"
-                        value={+p.price.toFixed(api?.digits() ?? 8)}
-                        onChange={(e) => setPoint(i, { price: num(e.target.value, p.price) })}
-                      />
+                      <NumberField className={input} style={{ width: 110 }} value={+p.price.toFixed(api?.digits() ?? 8)} onChange={(n) => setPoint(i, { price: n })} />
                     )}
                     {!priceOnly && (
                       <input

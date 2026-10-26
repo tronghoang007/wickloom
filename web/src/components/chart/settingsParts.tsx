@@ -1,8 +1,9 @@
 "use client";
 
 import { UNITS, type Unit, type Visibility } from "@/drawings/visibility";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Close } from "../icons";
+import { isNumText, parseNumText, stepNum } from "./numberField";
 
 // Khung dialog Settings dùng chung (Volume, các indicator): header, tab Inputs / Style / Visibility, footer Defaults ▾ · Cancel · Ok.
 
@@ -29,6 +30,36 @@ export const Section = ({ children }: { children: ReactNode }) => (
 );
 
 export const num = (v: string, fallback: number) => (Number.isFinite(Number(v)) && v !== "" ? Number(v) : fallback);
+
+/** Ô số gõ được số thập phân: ô `type="number"` kiểu controlled coi chuỗi gõ dở như "3." là rỗng nên React ghi đè lại giá trị cũ và nuốt dấu chấm. Ô này giữ chuỗi đang gõ (`draft`); chuỗi đã thành số thì báo `onChange` (nơi nhận tự kiểm khoảng cho phép),
+ *  mất focus thì hiện lại giá trị đang áp. Nhận "." và "," làm dấu thập phân; ↑ ↓ đổi theo `step` trong [min, max] như ô số. */
+export function NumberField({ value, onChange, min, max, step = 1, className, style, disabled }: { value: number; onChange: (n: number) => void; min?: number; max?: number; step?: number; className?: string; style?: CSSProperties; disabled?: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      className={className}
+      style={style}
+      type="text"
+      inputMode="decimal"
+      disabled={disabled}
+      value={draft ?? String(value)}
+      onChange={(e) => {
+        if (!isNumText(e.target.value)) return;
+        setDraft(e.target.value);
+        const n = parseNumText(e.target.value);
+        if (Number.isFinite(n)) onChange(n);
+      }}
+      onBlur={() => setDraft(null)}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+        e.preventDefault();
+        const cur = parseNumText(draft ?? "");
+        setDraft(null);
+        onChange(stepNum(Number.isFinite(cur) ? cur : value, e.key === "ArrowUp" ? 1 : -1, step, min, max));
+      }}
+    />
+  );
+}
 
 /** Như tab Visibility của TV: mỗi đơn vị khung thời gian bật/tắt + khoảng từ–đến. */
 export function VisibilityTab({ value, onChange }: { value: Visibility | undefined; onChange: (v: Visibility) => void }) {
