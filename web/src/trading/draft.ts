@@ -31,7 +31,7 @@ export type DraftField = "price" | "sl" | "tp";
 export const DRAFT_IDS: Record<string, DraftField> = { "d:entry": "price", "d:sl": "sl", "d:tp": "tp" };
 
 /** Đường của bản nháp trên chart của `symbol` (giá vào nét liền như lệnh đã đặt; bản nháp phân biệt bằng thẻ hơi mờ): giá vào + thẻ có nút đặt lệnh (lệnh chờ: ở giá đã nhập, nhãn loại lệnh theo giá thị trường hiện tại; Market: ở giá khớp
- *  Ask / Bid, kéo đi chỗ khác thì thành lệnh chờ), SL / TP chấm chấm kèm lãi/lỗi. Chưa có giá vào hợp lệ (chưa nhập, chưa có tick) thì không có đường giá vào. */
+ *  Ask / Bid, kéo đi chỗ khác thì thành lệnh chờ), SL / TP nét liền kèm lãi/lỗi. Chưa có giá vào hợp lệ (chưa nhập, chưa có tick) thì không có đường giá vào. */
 export function draftLines(d: Draft | null, symbol: string, quote: { bid: number; ask: number } | undefined, stopTitle?: StopTitleFn): LineSpec[] {
   if (!d || d.symbol !== symbol) return [];
   const out: LineSpec[] = [];
@@ -59,7 +59,7 @@ export function draftLines(d: Draft | null, symbol: string, quote: { bid: number
   for (const [kind, v, color] of [["sl", sl, COLORS.sl], ["tp", tp, COLORS.tp]] as const) {
     if (!(v > 0)) continue;
     const t = title(kind, v);
-    out.push({ key: `d:${kind}`, price: v, color, style: "dotted", title: t, tag: { kind, owner: { t: "draft" }, qty: d.lot, label: stopLabel(t), ghosts: [], draft: true } });
+    out.push({ key: `d:${kind}`, price: v, color, style: "solid", title: t, tag: { kind, owner: { t: "draft" }, qty: d.lot, label: stopLabel(t), ghosts: [], draft: true } });
   }
   return out;
 }

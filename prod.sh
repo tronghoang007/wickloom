@@ -38,9 +38,9 @@ fi
 (cd backend && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000) &
 (cd web && npm run start -- -H 127.0.0.1 -p 3000) &
 
-# Mở MT5 (wine) ngay sau khi bật backend để EA nối lại socket; -g = không cướp focus. Đã chạy rồi thì thôi,
+# Mở MT5 (wine) ngay sau khi bật backend để EA nối lại socket; -g = không cướp focus, -j = mở ẩn (không hiện cửa sổ). Đã chạy rồi thì thôi,
 # và MT5 không bị tắt theo khi Ctrl+C script này.
 if [ "$no_mt5" = 0 ] && ! pgrep -f "MetaTrader 5.app/Contents/MacOS" >/dev/null; then
-  open -g -a "MetaTrader 5"
+  open -g -j -a "MetaTrader 5"
 fi
 wait

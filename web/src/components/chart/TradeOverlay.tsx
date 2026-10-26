@@ -94,7 +94,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
     const owner: TagOwner = { t: "position", ticket: SIM_TICKET };
     const stop = (kind: "sl" | "tp", price: number): LineSpec[] =>
       price > 0
-        ? [{ key: `s${kind}:${SIM_TICKET}`, price, color: kind === "sl" ? COLORS.sl : COLORS.tp, style: "dotted", title: `${KIND_NAME[kind]} ${money(spec ? estimatePnl(p.side, p.lot, p.entry, price, spec) : null)}`,
+        ? [{ key: `s${kind}:${SIM_TICKET}`, price, color: kind === "sl" ? COLORS.sl : COLORS.tp, style: "solid", title: `${KIND_NAME[kind]} ${money(spec ? estimatePnl(p.side, p.lot, p.entry, price, spec) : null)}`,
             tag: { kind, owner, qty: fmtLot(p.lot), label: money(spec ? estimatePnl(p.side, p.lot, p.entry, price, spec) : null), ghosts: [], draft: false } }]
         : [];
     return [
