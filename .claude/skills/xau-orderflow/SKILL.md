@@ -93,12 +93,14 @@ Sau đó `tabs_close_mcp` đóng tab.
 
 1. 3–5 dòng bối cảnh: giá hiện tại, xu hướng, vị trí so với value area, CVD / hấp thụ đáng chú ý.
 2. Bảng alert: mức | chiều cắt | vùng | cơ sở orderflow.
-3. Khi alert nổ cần xác nhận gì (vùng bán vs vùng mua; mức làm kịch bản sai).
+3. Khi alert nổ cần xác nhận gì: 3–5 dòng rút từ `docs/xau-orderflow-checklist.md` (gốc repo) gắn với các vùng vừa đặt (Supply cần hấp thụ mua / phân kỳ giảm, Demand cần hấp thụ bán / phân kỳ tăng; mức làm kịch bản sai của từng vùng), rồi nói user checklist đầy đủ nằm ở `docs/xau-orderflow-checklist.md`. Không in lại cả file.
 4. Tin USD trong cửa sổ trade (giờ VN), hoặc nói rõ không có.
 5. Nêu hạn alert (22:00 VN hôm nay), các kênh đã bật, và nhắc alert nằm trong danh sách alert (không vẽ đường trên chart) và đã vẽ N vùng lên chart (xanh = demand, đỏ = supply, id `xau-of-*`; tải lại trang để thấy).
 6. Giới hạn: volume là tick count của CFD, delta tick-rule nhiễu nên chỉ so sánh tương đối; không phải cố vấn đầu tư, quyết định vào lệnh, SL/TP, khối lượng là của user (chỉ đưa lot / SL / TP cụ thể khi user hỏi).
 
 ## Ghi chú kỹ thuật
+
+- `docs/xau-orderflow-checklist.md` (gốc repo, để user tự đọc): checklist khi giá chạm vùng (nguồn duy nhất, chung cho mọi vùng). Nếu user sửa ngưỡng hay quy trình, sửa ở file này và giữ bước 5 khớp.
 
 - Backend `:8000` (public: `/bars`, `/tickvp`, `/tickbig`, `/tickfp`, `/calendar`; cần đăng nhập: `/alerts*`). Nến JSON dạng `{t,o,h,l,c,v}`; tf `TD` là tick delta từng phút (`c` = delta phút, `v` = số tick).
 - `cond` hợp lệ: `cross`, `cross_up`, `cross_down`, `gt`, `lt`. Cắt lên = giá trước < mức ≤ giá mới (xem `backend/app/alerts.py` `hit`).
