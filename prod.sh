@@ -6,10 +6,19 @@ set -e
 cd "$(dirname "$0")"
 trap 'kill 0' EXIT
 
+# Giải phóng cổng trước (dev.sh / bản prod cũ còn chạy thì tắt luôn).
 for port in 8000 3000; do
-  if lsof -iTCP:$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo "Cổng $port đang bận (dev.sh còn chạy?). Dừng nó trước rồi chạy lại." >&2
-    exit 1
+  pids=$(lsof -iTCP:$port -sTCP:LISTEN -t 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    echo "Cổng $port đang bận, tắt tiến trình $pids" >&2
+    kill $pids 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      lsof -iTCP:$port -sTCP:LISTEN -t >/dev/null 2>&1 || break
+      sleep 0.3
+    done
+    if lsof -iTCP:$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+      kill -9 $(lsof -iTCP:$port -sTCP:LISTEN -t) 2>/dev/null || true
+    fi
   fi
 done
 
