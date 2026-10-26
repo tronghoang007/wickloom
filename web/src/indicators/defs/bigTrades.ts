@@ -69,6 +69,14 @@ export function topInRange(cells: TickCell[], from: number, to: number, count: n
   return cells.filter((k) => k.t >= from && k.t < to).sort((a, b) => b.up + b.dn - (a.up + a.dn) || b.t - a.t).slice(0, count);
 }
 
+/** Tập ô làm thang cỡ bubble: `count` ô lớn nhất của ~`count / BUBBLES_PER_BAR` nến quanh mép phải `viewEnd` của vùng đang nhìn (khối `count` nến cố định theo giờ, lấy khối chứa `viewEnd` và khối trước nó, tức `count / BUBBLES_PER_BAR` nến, không quá `end` / `t0`).
+ *  Zoom giữ mép phải thì thang không đổi nên cỡ không đổi; kéo về ngày vắng thì thang theo ngày đó (một thang chung cho cả 14 ngày làm ngày vắng toàn chấm nhỏ nhất với số thò ra ngoài, ngày dữ dội ép mọi bubble khác về nhỏ nhất). */
+export function refCells(pool: TickCell[], viewEnd: number, end: number, t0: number, step: number, count: number): TickCell[] {
+  const block = Math.max(1, Math.ceil(count / BUBBLES_PER_BAR / 2)) * step;
+  const k = Math.floor(viewEnd / block);
+  return topInRange(pool, Math.max(t0, (k - 1) * block), Math.min(end, (k + 1) * block), count);
+}
+
 /** Đầu khoảng cần tick: nến đầu của chart, nhưng không xa hơn độ sâu tick tính từ nến cuối (cũ hơn thì broker không còn tick). */
 export const bubbleFrom = (bars: Bar[], cut: number, step: number): number | null =>
   bars.length === 0 || cut >= bars.length ? null : Math.max(bars[cut].t, bars[bars.length - 1].t + step - TICK_DEPTH);
@@ -114,7 +122,7 @@ export function bubbleX(times: number[], t: number, step: number): number {
 }
 
 /** Bubble của các ô tick `cells`: x = vị trí của phút của ô trong nến chứa nó (`times` tăng dần, `step` giây một nến), y = giá. Bubble lớn vẽ trước để bubble nhỏ cùng chỗ nằm trên.
- *  Cỡ và độ đậm tính theo `ref` (các ô lớn nhất của đoạn cuối chart, mặc định chính `cells`) chứ không theo riêng các ô đang nhìn, nên zoom / kéo chart không làm đổi cỡ một bubble. */
+ *  Cỡ và độ đậm tính theo `ref` (các ô lớn nhất quanh mép phải vùng nhìn, xem `refCells`; mặc định chính `cells`) chứ không theo riêng các ô đang nhìn, nên zoom không làm đổi cỡ một bubble. */
 export function bubblesOf(cells: TickCell[], times: number[], step: number, c: Ctx, ref: TickCell[] = cells): ObjBubble[] {
   if (cells.length === 0 || times.length === 0) return [];
   const { inputs, items } = c;
@@ -174,8 +182,7 @@ export const bigTrades: IndicatorDef = {
     let cells = topInRange(pool, v0, v1, cap);
     // Pool đã đầy mà vùng nhìn hẹp (zoom sâu) chỉ có ít ô trong pool: các ô nhỏ hơn ô bé nhất của pool bị cắt, nên hỏi riêng vùng này; chờ kết quả thì vẫn hiện phần lấy từ pool
     if (cells.length < cap && pool.length >= BIG_POOL) cells = c.ticks.big(v0, v1, min, cap, size) ?? cells;
-    // thang cỡ: `count` ô lớn nhất của đoạn cuối chart (cỡ một màn hình mặc định, `count / BUBBLES_PER_BAR` nến), cố định khi zoom / kéo; lấy cả 14 ngày thì ngày dữ dội nhất ép mọi bubble ngày thường về cỡ nhỏ nhất
-    const refFrom = Math.max(t0, bars[Math.max(c.cut, bars.length - Math.ceil(count / BUBBLES_PER_BAR))].t);
-    return { ...empty, bubbles: bubblesOf(cells, bars.map((b) => b.t), step, c, topInRange(pool, refFrom, bars[bars.length - 1].t + step, count)) };
+    const ref = refCells(pool, bars[Math.min(bars.length - 1, c.range?.to ?? bars.length - 1)].t, bars[bars.length - 1].t + step, t0, step, count);
+    return { ...empty, bubbles: bubblesOf(cells, bars.map((b) => b.t), step, c, ref) };
   },
 };

@@ -5,7 +5,7 @@ import { computeExtras } from "../engine";
 import { newInstance } from "../instance";
 import { TICK_DEPTH } from "../lower";
 import type { TickSource } from "../schema";
-import { BIG_POOL, bigTrades, bubbleFrom, bubbleSize, bubbleX, lighten, niceStep, rowSize, sizeFractions, topInRange, visibleCap } from "./bigTrades";
+import { BIG_POOL, bigTrades, bubbleFrom, bubbleSize, bubbleX, lighten, niceStep, rowSize, sizeFractions, refCells, topInRange, visibleCap } from "./bigTrades";
 
 const M5 = 300;
 const bar = (t: number): Bar => ({ t, o: 100, h: 101, l: 99, c: 100, v: 1 });
@@ -183,19 +183,29 @@ describe("Big Trades", () => {
     expect(view({ from: 10, to: 13 })).toEqual(["90", "89"]); // 4 nến nhìn thấy: 2 bubble
   });
 
-  it("cỡ và độ đậm không đổi khi zoom / kéo: tính theo các ô lớn nhất của đoạn cuối chart, không theo riêng vùng nhìn", () => {
-    const cells = [cell(bars[1].t, 100, 90, 0), cell(bars[2].t, 100, 80, 0), cell(bars[3].t, 100, 70, 0), cell(bars[12].t, 100, 9, 0), cell(bars[13].t, 100, 8, 0), cell(bars[14].t, 100, 7, 0)];
+  it("zoom (mép phải giữ nguyên) không đổi cỡ và độ đậm của bubble: thang theo quanh mép phải, không theo riêng các ô đang hiện", () => {
+    const cells = [cell(bars[1].t, 100, 90, 0), cell(bars[2].t, 100, 80, 0), cell(bars[3].t, 100, 70, 0), cell(bars[16].t, 100, 9, 0), cell(bars[17].t, 100, 8, 0), cell(bars[18].t, 100, 7, 0)];
     const view = (range?: { from: number; to: number }) => run(source(cells).ticks, { count: 4, text: true }, 0, {}, range).bubbles!.find((b) => b.text === "9")!;
-    const wide = view(), zoomed = view({ from: 10, to: 19 }); // vùng nhìn 10 nến chỉ có 9 / 8 / 7: theo thang riêng thì "9" sẽ thành bubble lớn nhất
+    const wide = view(), zoomed = view({ from: 10, to: 19 }); // vùng nhìn 10 nến chỉ có 9 / 8 / 7: theo thang riêng của các ô đang hiện thì "9" sẽ thành bubble lớn nhất
     expect(zoomed.r).toBe(wide.r);
     expect(zoomed.bg).toBe(wide.bg);
     expect(view({ from: 0, to: 19 }).r).toBe(wide.r);
   });
 
-  it("thang cỡ là đoạn cuối chart (count / 0,5 nến): ô lớn ở rất xa không ép bubble gần đây về cỡ nhỏ nhất", () => {
-    const cells = [cell(bars[0].t, 100, 1000, 0), cell(bars[18].t, 100, 9, 0), cell(bars[19].t, 100, 7, 0)];
-    const nine = (inputs: Record<string, number>) => run(source(cells).ticks, { text: true, ...inputs }).bubbles!.find((b) => b.text === "9")!;
-    expect(nine({ count: 5 }).r).toBeGreaterThan(nine({ count: 100 }).r); // count 5: thang chỉ gồm 10 nến cuối (9, 7); count 100: cả chart, có ô 1000
+  it("kéo về đoạn vắng: thang theo đoạn đó, không phải chấm nhỏ nhất vì cả chart có đoạn dữ dội hơn nhiều", () => {
+    const cells = [cell(bars[1].t, 100, 10, 0), cell(bars[2].t, 100, 12, 0), cell(bars[3].t, 100, 8, 0), cell(bars[17].t, 100, 100, 0), cell(bars[18].t, 100, 120, 0), cell(bars[19].t, 100, 90, 0)];
+    const quiet = run(source(cells).ticks, { count: 3, text: true }, 0, {}, { from: 0, to: 5 }).bubbles!;
+    expect(quiet.map((b) => b.text)).toEqual(["12", "10", "8"].filter((t) => quiet.some((b) => b.text === t)));
+    expect(quiet.find((b) => b.text === "12")!.r * 2).toBeGreaterThan(30); // theo thang chung với ô 120 thì chỉ 5 (nhỏ nhất)
+  });
+
+  it("refCells: khối `count` nến cố định theo giờ, lấy khối chứa mép phải và khối trước nó, cắt ở hết nến cuối và đầu tick", () => {
+    const cells = Array.from({ length: 10 }, (_, i) => cell(i * 100, 1, i + 1, 0)); // nến 100 s, ô ở t 0..900 volume 1..10
+    const vol = (r: TickCell[]) => r.map((k) => k.up).sort((a, c) => a - c);
+    expect(vol(refCells(cells, 450, 1000, 0, 100, 2))).toEqual([5, 6]); // khối 200 s: mép phải 450 ở khối 400..600, cộng khối 200..400 -> ô t 200..500 (vol 3..6), lấy 2 lớn nhất
+    expect(vol(refCells(cells, 450, 1000, 0, 100, 4))).toEqual([5, 6, 7, 8]); // khối 400 s: 400..800 và 0..400 -> t 0..700, lấy 4 lớn nhất
+    expect(vol(refCells(cells, 450, 700, 0, 100, 10))).toEqual([1, 2, 3, 4, 5, 6, 7]); // cắt ở hết nến cuối (700)
+    expect(vol(refCells(cells, 150, 1000, 300, 100, 2))).toEqual([]); // không sớm hơn đầu tick
   });
 
   it("Maximum volume chỉ có tác dụng khi Standard deviation = 0 (ô xám đi khi > 0)", () => {
