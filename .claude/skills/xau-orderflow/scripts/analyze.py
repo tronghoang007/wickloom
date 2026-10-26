@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gom dữ liệu orderflow của vàng từ backend Wickloom (:8000) thành một bản tóm tắt để chọn vùng đặt alert.
 
-    python3 analyze.py [--symbol XAUUSDm] [--api http://localhost:8000] [--sessions 4] [--range 90]
+    python3 analyze.py [--symbol XAUUSDm] [--api http://localhost:8000] [--sessions 4] [--week 5] [--range 90]
 
 Chỉ dùng thư viện chuẩn, không cần đăng nhập (bars / tickvp / tickbig / calendar đều public).
 Mọi giờ in ra là UTC (giờ VN = UTC+7). Volume là TICK COUNT của CFD, không phải khối lượng khớp thật.
@@ -51,6 +51,28 @@ def split_sessions(m1):
         cur.append(b)
     out.append(cur)
     return [dict(t0=s[0]["t"], t1=s[-1]["t"] + 60, o=s[0]["o"], h=max(x["h"] for x in s), l=min(x["l"] for x in s), c=s[-1]["c"], ticks=sum(x["v"] for x in s), bars=s) for s in out]
+
+
+WEEKDAYS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
+
+
+def day_label(t0):
+    """Ngày giao dịch của một phiên: broker mở lại ~22:00 UTC nên phiên đó thuộc ngày hôm sau (dịch +2 giờ để lấy ngày)."""
+    d = dt.datetime.utcfromtimestamp(t0 + 2 * 3600)
+    return f"{WEEKDAYS[d.weekday()]} {d:%d/%m}"
+
+
+def merge_days(sessions):
+    """Gộp các đoạn M1 cùng ngày giao dịch (feed rớt giữa ngày, nghỉ lễ ngắn) thành một ngày; đánh nhãn `day`."""
+    out = []
+    for s in sessions:
+        lab = day_label(s["t0"])
+        if out and out[-1]["day"] == lab:
+            p = out[-1]
+            p.update(t1=s["t1"], c=s["c"], h=max(p["h"], s["h"]), l=min(p["l"], s["l"]), ticks=p["ticks"] + s["ticks"], bars=p["bars"] + s["bars"])
+        else:
+            out.append(dict(s, day=lab))
+    return out
 
 
 # --- volume profile ---------------------------------------------------------------------------------------------------------------------------------------
@@ -176,7 +198,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default="XAUUSDm")
     ap.add_argument("--api", default="http://localhost:8000")
-    ap.add_argument("--sessions", type=int, default=4, help="số phiên gần nhất tính profile riêng (phiên đang chạy tính là 1)")
+    ap.add_argument("--sessions", type=int, default=4, help="số ngày gần nhất in profile riêng (HVN / LVN, ứng viên); ngày đang chạy tính là 1")
+    ap.add_argument("--week", type=int, default=5, help="số ngày đã xong (cộng ngày đang chạy) cho bảng value dịch chuyển + composite tuần")
     ap.add_argument("--range", type=float, default=90, help="chỉ liệt kê mức giá trong ±range điểm quanh giá hiện tại")
     a = ap.parse_args()
     base, sym = a.api, a.symbol
@@ -202,14 +225,30 @@ def main():
         print(f"!! M1 cuối trễ {age:.0f} phút: thị trường đóng cửa, hoặc EA / backend không đẩy tick. Dữ liệu dưới đây KHÔNG phải trạng thái hiện tại.")
     print(f"M1 từ {hm(m1[0]['t'])} ({len(m1)} nến) | TD (tick delta) từ {hm(td[0]['t']) if td else '—'} ({len(td)} phút) | offset broker {health.get('offset')}")
 
-    sessions = split_sessions(m1)
+    sessions = merge_days(split_sessions(m1))
     cur = sessions[-1]
     live = (now - m1[-1]["t"]) <= SESSION_GAP
+    tick_from = td[0]["t"] if td else None
+    stats = {}
 
-    print("\n## Phiên (tách theo khoảng nghỉ M1 >= 45 phút)")
-    for i, s in enumerate(sessions[-12:]):
+    def day_stats(s):
+        """Profile tick của một ngày giao dịch: dict(v, hv, lv), hoặc chuỗi lý do không có."""
+        if s["t0"] not in stats:
+            if tick_from is None or s["t1"] <= tick_from:
+                stats[s["t0"]] = "không có dữ liệu tick (ngoài vùng tick history)"
+            else:
+                p = profile(base, sym, s["t0"], s["t1"] + 60, s["l"] - 2, s["h"] + 2)
+                if p:
+                    hv, lv = nodes(p)
+                    stats[s["t0"]] = dict(v=value_area(p), hv=hv, lv=lv)
+                else:
+                    stats[s["t0"]] = "profile rỗng"
+        return stats[s["t0"]]
+
+    print("\n## Ngày giao dịch (M1 liền mạch = một ngày; ngày mở lại 22:00 UTC, giờ in là UTC)")
+    for s in sessions[-12:]:
         tag = "  <- đang chạy" if s is cur and live else ""
-        print(f"{hm(s['t0'])}→{hm(s['t1'], False)}  O {s['o']:.1f} H {s['h']:.1f} L {s['l']:.1f} C {s['c']:.1f}  biên {s['h'] - s['l']:.1f}  tick {s['ticks']:.0f}{tag}")
+        print(f"{s['day']}  [{hm(s['t0'])}→{hm(s['t1'], False)}]  O {s['o']:.1f} H {s['h']:.1f} L {s['l']:.1f} C {s['c']:.1f}  biên {s['h'] - s['l']:.1f}  tick {s['ticks']:.0f}{tag}")
 
     lo7, hi7 = min(m1, key=lambda b: b["l"]), max(m1, key=lambda b: b["h"])
     print(f"\nĐáy toàn lịch sử M1: {lo7['l']:.3f} ({hm(lo7['t'])}) | đỉnh: {hi7['h']:.3f} ({hm(hi7['t'])}) | giá cách đáy {price - lo7['l']:+.1f}, cách đỉnh {price - hi7['h']:+.1f}")
@@ -220,23 +259,82 @@ def main():
     L.add(lo7["l"], 2.0, f"đáy lịch sử {hm(lo7['t'])}")
     L.add(hi7["h"], 2.0, f"đỉnh lịch sử {hm(hi7['t'])}")
 
-    # --- profile từng phiên + composite ------------------------------------------------------------------------------------------------------------------
-    pick = sessions[-a.sessions:]
-    tick_from = td[0]["t"] if td else None
-    print("\n## Volume profile tick (row 0.5) — POC / VAH / VAL / HVN / LVN")
-    comp_lo = min(s["l"] for s in pick) - 5
-    comp_hi = max(s["h"] for s in pick) + 5
-    for s in reversed(pick):
-        name = "phiên đang chạy" if s is cur and live else "phiên " + hm(s["t0"])
-        if tick_from is None or s["t1"] <= tick_from:
-            print(f"-- {name}: không có dữ liệu tick (ngoài vùng tick history)")
+    # --- cấu trúc nhiều ngày: value dịch chuyển + composite tuần ---------------------------------------------------------------------------------------
+    week = sessions[-max(1, a.week + (1 if live else 0)):]
+    days = [(s, day_stats(s)) for s in week]
+    days = [(s, st) for s, st in days if isinstance(st, dict)]
+    print(f"\n## Cấu trúc {len(week)} ngày ({week[0]['day']} → {week[-1]['day']}): value dịch chuyển (VA so với ngày trước)")
+    kinds, pv = {}, None
+    for s, st in days:
+        v = st["v"]
+        if pv is None:
+            kind, rel = None, ""
+        elif v["val"] > pv["vah"]:
+            kind, rel = "up", "VA CAO hơn (không chồng lấn)"
+        elif v["vah"] < pv["val"]:
+            kind, rel = "down", "VA THẤP hơn (không chồng lấn)"
+        else:
+            kind, rel = "ovl", f"chồng lấn, POC {v['poc'] - pv['poc']:+.1f}"
+        kinds[s["t0"]] = kind
+        tag = "  <- đang chạy" if s is cur and live else ""
+        print(f"{s['day']}  C {s['c']:.1f}  biên {s['h'] - s['l']:5.1f}  POC {v['poc']:.2f}  VA {v['val']:.1f}–{v['vah']:.1f}  delta {100 * v['delta'] / v['total']:+.1f}%  {rel}{tag}")
+        pv = v
+
+    comp = None
+    if days:
+        a0 = max(week[0]["t0"], tick_from)
+        p = profile(base, sym, a0, cur["t1"] + 60, min(s["l"] for s in week) - 5, max(s["h"] for s in week) + 5)
+        if p:
+            comp = value_area(p)
+            hv, lv = nodes(p)
+            print(f"-- COMPOSITE tuần {hm(a0)}→nay: POC {comp['poc']:.2f}  VAH {comp['vah']:.2f}  VAL {comp['val']:.2f}  tick {comp['total']:.0f}")
+            print(f"   HVN {[f'{x:.1f}({n})' for x, n in hv if abs(x - price) <= a.range]}\n   LVN {[f'{x:.1f}({n})' for x, n in lv if abs(x - price) <= a.range]}")
+            L.add(comp["poc"], 2.0, "POC composite tuần")
+            L.add(comp["vah"], 1.5, "VAH composite tuần")
+            L.add(comp["val"], 1.5, "VAL composite tuần")
+            for x, n in hv:
+                L.add(x, 1.0, "HVN composite tuần")
+
+    done = [(s, st) for s, st in days if not (s is cur and live)]
+    if comp and len(done) >= 3:
+        first, last = done[0][1]["v"]["poc"], done[-1][1]["v"]["poc"]
+        thr = 0.75 * statistics.median([s["h"] - s["l"] for s, _ in done])
+        kd = [kinds[s["t0"]] for s, _ in done]
+        trend = "up" if last - first >= thr else "down" if last - first <= -thr else None
+        pos = "above" if price > comp["vah"] else "below" if price < comp["val"] else "in"
+        where = lambda v: "TRÊN" if price > v["vah"] else "DƯỚI" if price < v["val"] else "TRONG"
+        yd = done[-1][1]["v"]
+        here = f"{where(yd)} VA {done[-1][0]['day']} ({yd['val']:.1f}–{yd['vah']:.1f})"
+        if live and days and days[-1][0] is cur:
+            td_v = days[-1][1]["v"]
+            here = f"{where(td_v)} VA hôm nay ({td_v['val']:.1f}–{td_v['vah']:.1f}); " + here
+        vv = f"{comp['val']:.1f}–{comp['vah']:.1f}"
+        verdict = {
+            ("down", "below"): f"XU HƯỚNG GIẢM: value dịch xuống, giá dưới value tuần → thị trường đang chấp nhận giá thấp; value cũ phía trên ({vv}) là vùng cung khi giá hồi.",
+            ("down", "in"): "Xu hướng giảm nhưng giá đã hồi vào value tuần: chưa chấp nhận hẳn giá thấp; mép trên VA tuần là nơi phe bán phản ứng.",
+            ("down", "above"): f"Value dịch xuống nhưng giá vượt lên trên value tuần ({vv}): ngược xu hướng, cần thấy giữ trên VAH tuần + CVD đồng thuận mới tin, không thì dễ là quét thanh khoản.",
+            ("up", "above"): f"XU HƯỚNG TĂNG: value dịch lên, giá trên value tuần → thị trường đang chấp nhận giá cao; value cũ phía dưới ({vv}) là vùng cầu khi giá lùi.",
+            ("up", "in"): "Xu hướng tăng nhưng giá đã lùi vào value tuần: chưa chấp nhận hẳn giá cao; mép dưới VA tuần là nơi phe mua phản ứng.",
+            ("up", "below"): f"Value dịch lên nhưng giá thủng xuống dưới value tuần ({vv}): ngược xu hướng, cần thấy giữ dưới VAL tuần + CVD đồng thuận mới tin, không thì dễ là quét thanh khoản.",
+            (None, "in"): "CÂN BẰNG: value không dịch rõ, giá quay quanh POC / VA tuần → mép VA là nơi phản ứng, giữa VA là nhiễu.",
+            (None, "above"): "THOÁT CÂN BẰNG LÊN: giá trên value tuần nhưng value chưa dịch lên → chờ xác nhận chấp nhận (giữ trên VAH tuần).",
+            (None, "below"): "THOÁT CÂN BẰNG XUỐNG: giá dưới value tuần nhưng value chưa dịch xuống → chờ xác nhận chấp nhận (giữ dưới VAL tuần).",
+        }[(trend, pos)]
+        print(f"\nKẾT LUẬN CẤU TRÚC — POC {done[0][0]['day']} {first:.1f} → {done[-1][0]['day']} {last:.1f} ({last - first:+.1f}; ngưỡng xu hướng ±{thr:.0f} = 0.75 × biên trung vị); VA: {kd.count('down')} ngày thấp hơn, {kd.count('up')} cao hơn, {kd.count('ovl')} chồng lấn")
+        print(f"Giá {price:.1f}: {where(comp)} value tuần ({vv}); {here}")
+        print(f"=> {verdict}")
+    elif comp:
+        print("\n(Chưa đủ 3 ngày đã xong có tick để kết luận cấu trúc — chỉ xem bảng và composite.)")
+
+    # --- profile từng ngày (HVN / LVN + ứng viên) -----------------------------------------------------------------------------------------------------
+    print("\n## Volume profile tick (row 0.5) — POC / VAH / VAL / HVN / LVN từng ngày")
+    for s in reversed(sessions[-a.sessions:]):
+        name = s["day"] + (" nay" if s is cur and live else "")
+        st = day_stats(s)
+        if isinstance(st, str):
+            print(f"-- {name}: {st}")
             continue
-        p = profile(base, sym, s["t0"], s["t1"] + 60, s["l"] - 2, s["h"] + 2)
-        if not p:
-            print(f"-- {name}: profile rỗng")
-            continue
-        v = value_area(p)
-        hv, lv = nodes(p)
+        v, hv, lv = st["v"], st["hv"], st["lv"]
         near = lambda xs: [f"{x:.1f}({n})" for x, n in xs if abs(x - price) <= a.range]
         print(f"-- {name} [{s['l']:.1f}–{s['h']:.1f}]: POC {v['poc']:.2f}  VAH {v['vah']:.2f}  VAL {v['val']:.2f}  tick {v['total']:.0f}  delta {v['delta']:+.0f} ({100 * v['delta'] / v['total']:+.1f}%)")
         print(f"   HVN {near(hv)}\n   LVN {near(lv)}")
@@ -249,19 +347,6 @@ def main():
             L.add(x, 1.0, f"HVN {name}")
         for x, n in lv:
             L.add(x, 0.5, f"LVN(mỏng) {name}")
-    if tick_from is not None and len(pick) > 1:
-        a0 = max(pick[0]["t0"], tick_from)
-        p = profile(base, sym, a0, cur["t1"] + 60, comp_lo, comp_hi)
-        if p:
-            v = value_area(p)
-            hv, lv = nodes(p)
-            print(f"-- COMPOSITE {hm(a0)}→nay: POC {v['poc']:.2f}  VAH {v['vah']:.2f}  VAL {v['val']:.2f}  tick {v['total']:.0f}")
-            print(f"   HVN {[f'{x:.1f}({n})' for x, n in hv if abs(x - price) <= a.range]}\n   LVN {[f'{x:.1f}({n})' for x, n in lv if abs(x - price) <= a.range]}")
-            L.add(v["poc"], 2.0, "POC composite")
-            L.add(v["vah"], 1.5, "VAH composite")
-            L.add(v["val"], 1.5, "VAL composite")
-            for x, n in hv:
-                L.add(x, 1.0, "HVN composite")
 
     # --- CVD phiên hiện tại ------------------------------------------------------------------------------------------------------------------------------
     rows, cover = session_cvd(cur, tdm)

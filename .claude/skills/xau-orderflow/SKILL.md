@@ -13,11 +13,11 @@ Không cần hỏi lại user về symbol, giờ trade, kênh thông báo; chỉ
 Chạy từ thư mục gốc repo (`/Users/tronghoang/Workplace/wickloom`):
 
 ```
-python3 -I .claude/skills/xau-orderflow/scripts/analyze.py            # mặc định: XAUUSDm, 4 phiên, ±90 điểm
-python3 -I .claude/skills/xau-orderflow/scripts/analyze.py --sessions 6 --range 120   # nếu cần rộng hơn
+python3 -I .claude/skills/xau-orderflow/scripts/analyze.py            # mặc định: XAUUSDm, cấu trúc 5 ngày xong + hôm nay, profile riêng 4 ngày, ±90 điểm
+python3 -I .claude/skills/xau-orderflow/scripts/analyze.py --week 8 --sessions 6 --range 120   # nếu cần rộng hơn
 ```
 
-Script in: phiên (tách theo khoảng nghỉ M1 ≥45 phút), đáy/đỉnh lịch sử, POC/VAH/VAL/HVN/LVN từng phiên + composite, CVD phiên hiện tại từng 15 phút + so sánh CVD tại đỉnh/đáy giá, các cửa sổ 5 phút tick lớn ở đáy/đỉnh cục bộ (hấp thụ), ô tick lớn, **danh sách mức ứng viên có điểm trùng (★ ≥3)**, tin USD trong cửa sổ trade, và dòng `expires_at=...` (22:00 VN) dùng cho alert. Giờ in ra là UTC; **báo cáo cho user bằng giờ VN (UTC+7)**.
+Script in: ngày giao dịch (M1 liền mạch, nhãn `T5 22/10`), đáy/đỉnh lịch sử, **bảng cấu trúc nhiều ngày** (POC / VA từng ngày, VA so với ngày trước: cao hơn / thấp hơn / chồng lấn) + composite tuần + dòng **KẾT LUẬN CẤU TRÚC** (xu hướng / cân bằng, giá so với value tuần, hôm nay và hôm qua), POC/VAH/VAL/HVN/LVN từng ngày, CVD phiên hiện tại từng 15 phút + so sánh CVD tại đỉnh/đáy giá, các cửa sổ 5 phút tick lớn ở đáy/đỉnh cục bộ (hấp thụ), ô tick lớn, **danh sách mức ứng viên có điểm trùng (★ ≥3)**, tin USD trong cửa sổ trade, và dòng `expires_at=...` (22:00 VN) dùng cho alert. Giờ in ra là UTC; **báo cáo cho user bằng giờ VN (UTC+7)**.
 
 Xử lý khi dữ liệu có vấn đề, KHÔNG tự đặt alert theo giá cũ:
 - Backend không trả lời → báo user bật backend (`dev.sh`), dừng.
@@ -27,7 +27,7 @@ Xử lý khi dữ liệu có vấn đề, KHÔNG tự đặt alert theo giá cũ
 
 ## Bước 2 — Đọc theo phương pháp orderflow
 
-1. **Bối cảnh:** xu hướng (chuỗi phiên, đáy/đỉnh), giá nằm trên / trong / dưới value area hôm nay và phiên trước. Trên VA + CVD cao nhất phiên = chấp nhận lên; trong VA = cân bằng; dưới VA = chấp nhận xuống.
+1. **Bối cảnh (bias):** lấy từ dòng `KẾT LUẬN CẤU TRÚC` của script, không dùng SMC / cấu trúc swing. Value dịch (POC các ngày xong, VA cao hơn / thấp hơn ngày trước) cho xu hướng nhiều ngày; giá so với value tuần cho biết đang chấp nhận hay chưa; giá so với VA hôm nay và hôm qua cho bias trong ngày. Trên VA + CVD cao nhất phiên = chấp nhận lên; trong VA = cân bằng; dưới VA = chấp nhận xuống. Với tuần có xu hướng, POC composite chỉ là value cũ (vùng cung / cầu khi hồi), POC từng ngày dịch mới là thông tin cấu trúc.
 2. **CVD vs giá:** đỉnh giá mới mà CVD thấp hơn đỉnh CVD = phân kỳ giảm; đáy giá mới mà CVD cao hơn = phân kỳ tăng. Dòng "Đỉnh/Đáy phiên … CVD khi đó" trong output cho đúng so sánh này.
 3. **Hấp thụ:** cửa sổ 5 phút tick ≥2× trung vị nằm ở đáy/đỉnh cục bộ, delta ≈ 0 và giá bị đẩy ngược ≥ ~10 điểm trong 15 phút sau = bên chủ động bị hấp thụ → vùng đó là cầu / cung thật.
 4. **Node:** HVN / POC = nơi giá được chấp nhận (nam châm, kháng cự / hỗ trợ). **LVN là vùng giá chạy nhanh, không phải hỗ trợ**, chỉ dùng làm mốc "gốc breakout" để tìm pullback về HVN / VAH ngay bên dưới (hoặc VAL ngay bên trên khi breakout xuống).
@@ -91,7 +91,7 @@ Sau đó `tabs_close_mcp` đóng tab.
 
 ## Bước 5 — Báo cáo cho user (ngắn, tiếng Việt, giờ VN)
 
-1. 3–5 dòng bối cảnh: giá hiện tại, xu hướng, vị trí so với value area, CVD / hấp thụ đáng chú ý.
+1. 3–5 dòng bối cảnh: giá hiện tại; cấu trúc tuần (một dòng rút từ `KẾT LUẬN CẤU TRÚC`: POC dịch từ đâu tới đâu, giá so với value tuần); vị trí so với VA hôm nay / hôm qua; CVD / hấp thụ đáng chú ý.
 2. Bảng alert: mức | chiều cắt | vùng | cơ sở orderflow.
 3. Khi alert nổ cần xác nhận gì: 3–5 dòng rút từ `docs/xau-orderflow-checklist.md` (gốc repo) gắn với các vùng vừa đặt (Supply cần hấp thụ mua / phân kỳ giảm, Demand cần hấp thụ bán / phân kỳ tăng; mức làm kịch bản sai của từng vùng), rồi nói user checklist đầy đủ nằm ở `docs/xau-orderflow-checklist.md`. Không in lại cả file.
 4. Tin USD trong cửa sổ trade (giờ VN), hoặc nói rõ không có.
