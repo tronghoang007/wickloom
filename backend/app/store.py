@@ -84,6 +84,19 @@ class BarStore:
         rows.sort(key=lambda r: (r[0], r[1]))
         return rows
 
+    def tickstat(self, symbol: str, frm: int, to: int, size: float = 0.0) -> Tuple[int, float, float]:
+        """Thống kê volume của các ô (phút, giá) trong [frm, to), gom giá như `tickbig`: (số ô, tổng volume, tổng bình phương volume), đủ để web tính trung bình và độ lệch chuẩn
+        mà không phải đọc cả triệu ô (`tickbig` chỉ trả tối đa 5000 ô lớn nhất nên thống kê trên đó bị lệch)."""
+        if size > 0:
+            inner = ("SELECT SUM(up + dn) AS v FROM tickvp WHERE symbol=? AND t>=? AND t<? AND up+dn>0 GROUP BY t, CAST(p / ? + 1e-6 AS INTEGER)")
+            args: Tuple[Any, ...] = (symbol, frm, to, size)
+        else:
+            inner = "SELECT up + dn AS v FROM tickvp WHERE symbol=? AND t>=? AND t<? AND up+dn>0"
+            args = (symbol, frm, to)
+        with self._rlock:
+            n, total, sq = self.rdb.execute(f"SELECT COUNT(*), COALESCE(SUM(v), 0), COALESCE(SUM(v * v), 0) FROM ({inner})", args).fetchone()
+        return int(n), float(total), float(sq)
+
     def tickfp(self, symbol: str, bars: List[int], end: int, size: float) -> List[Tuple[int, int, float, float]]:
         """Footprint: tick của các phút [bars[0], end) gom theo (nến, row giá). `bars` = giờ mở các nến tăng dần (nến k phủ [bars[k], bars[k+1]), nến cuối tới `end`),
         row i phủ giá [i*size, (i+1)*size). Trả (k, i, volume lên, volume xuống) tăng dần theo k rồi i."""

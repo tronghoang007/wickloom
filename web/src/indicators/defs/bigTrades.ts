@@ -19,11 +19,12 @@ const ITEMS: ItemDef[] = [
 const INPUTS: InputDef[] = [
   {
     key: "min", label: "Minimum volume", type: "int", default: 0, min: 0, group: "Filter",
-    tooltip: "Smallest number of ticks at one price within one minute that gets a bubble. 0 = automatic: only the biggest bubbles of the visible range are shown (see Maximum bubbles).",
+    tooltip: "Smallest number of ticks at one price within one minute that gets a bubble: every cell at or above it is always shown, however far you zoom. 0 = automatic: the threshold is set by Sensitivity (sigma).",
   },
   {
-    key: "count", label: "Maximum bubbles", type: "int", default: 100, min: 1, max: 3000, group: "Filter",
-    tooltip: "Keeps only this many of the biggest bubbles of the visible range, so every part of the chart gets its own biggest bubbles when you scroll. When you zoom in there are fewer (about one per two candles), so zooming does not bring in small bubbles.",
+    key: "sigma", label: "Sensitivity (sigma)", type: "float", default: 3.5, min: 0, max: 10, step: 0.1, group: "Filter",
+    tooltip: "Automatic threshold = the mean + this many standard deviations of the volume of all cells (a minute at one price row) in the candles just before the right edge of the view, like the Pine 'Big Trades Whale Detector' (2 = significant, 4 = extreme). Lower shows more bubbles. Ignored when Minimum volume is set.",
+    enabledIf: (i) => num(i, "min") === 0,
   },
   {
     key: "max", label: "Maximum volume", type: "int", default: 0, min: 0, group: "Filter",
@@ -57,25 +58,33 @@ export function lighten(color: string, t: number): string {
 
 const compact = (v: number): string => (v >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${+(v / 1e3).toFixed(1)}K` : String(Math.round(v)));
 
-/** Số ô lớn nhất đọc về cho cả khoảng đã nạp (bằng giới hạn của /tickbig): `count` bubble của vùng đang nhìn được chọn từ đây nên kéo / zoom không phải hỏi lại backend. */
+/** Số ô lớn nhất đọc về cho cả khoảng đã nạp (bằng giới hạn của /tickbig): bubble của vùng đang nhìn được chọn từ đây nên kéo / zoom không phải hỏi lại backend. */
 export const BIG_POOL = 5000;
 
-/** Số bubble tối đa cho `visibleBars` nến đang nhìn: `count` khi nhìn từ `1 / BUBBLES_PER_BAR` × `count` nến trở lên, zoom gần hơn thì ít đi theo số nến (không thì `count` bubble dồn vào vài nến, kéo cả ô nhỏ vào). */
-export const BUBBLES_PER_BAR = 0.5;
-export const visibleCap = (count: number, visibleBars: number): number => Math.max(1, Math.min(count, Math.ceil(visibleBars * BUBBLES_PER_BAR)));
+/** Trần số bubble hiện cùng lúc (zoom ra rất xa thì chỉ giữ các ô lớn nhất của vùng nhìn, để vẽ không nặng). */
+export const MAX_SHOWN = 300;
+
+/** Số nến của một khối cố định theo giờ (xem `refRange`). */
+export const BLOCK_BARS = 100;
 
 /** `count` ô lớn nhất (volume giảm dần, bằng nhau thì phút mới hơn trước) trong số các ô có phút nằm trong [from, to). */
 export function topInRange(cells: TickCell[], from: number, to: number, count: number): TickCell[] {
   return cells.filter((k) => k.t >= from && k.t < to).sort((a, b) => b.up + b.dn - (a.up + a.dn) || b.t - a.t).slice(0, count);
 }
 
-/** Tập ô làm thang cỡ bubble: `count` ô lớn nhất của ~`count / BUBBLES_PER_BAR` nến quanh mép phải `viewEnd` của vùng đang nhìn (khối `count` nến cố định theo giờ, lấy khối chứa `viewEnd` và khối trước nó, tức `count / BUBBLES_PER_BAR` nến, không quá `end` / `t0`).
- *  Zoom giữ mép phải thì thang không đổi nên cỡ không đổi; kéo về ngày vắng thì thang theo ngày đó (một thang chung cho cả 14 ngày làm ngày vắng toàn chấm nhỏ nhất với số thò ra ngoài, ngày dữ dội ép mọi bubble khác về nhỏ nhất). */
-export function refCells(pool: TickCell[], viewEnd: number, end: number, t0: number, step: number, count: number): TickCell[] {
-  const block = Math.max(1, Math.ceil(count / BUBBLES_PER_BAR / 2)) * step;
+/** Khoảng [từ, đến) quanh mép phải làm thang cỡ (`blocks` = 2) và thống kê của ngưỡng (`THR_BLOCKS`) của bubble: `blocks` khối `BLOCK_BARS` nến cố định theo giờ quanh mép phải `viewEnd` của vùng đang nhìn (khối chứa `viewEnd` và các khối trước nó, không quá `end` / `t0`).
+ *  Zoom giữ mép phải thì khoảng này không đổi nên cỡ và ngưỡng không đổi; kéo về ngày vắng thì thang theo ngày đó (một thang chung cho cả 14 ngày làm ngày vắng toàn chấm nhỏ nhất với số thò ra ngoài, ngày dữ dội ép mọi bubble khác về nhỏ nhất). */
+export function refRange(viewEnd: number, end: number, t0: number, step: number, blocks = 2): [number, number] {
+  const block = refBlock(step);
   const k = Math.floor(viewEnd / block);
-  return topInRange(pool, Math.max(t0, (k - 1) * block), Math.min(end, (k + 1) * block), count);
+  return [Math.max(t0, (k + 1 - blocks) * block), Math.min(end, (k + 1) * block)];
 }
+
+/** Thống kê của ngưỡng lấy trên `THR_BLOCKS` khối (3 lần khoảng làm thang cỡ) để một đoạn thưa sát mép phải không kéo ngưỡng xuống rồi cả vùng nhìn rộng bị tràn bubble của các ngày sôi động hơn. */
+export const THR_BLOCKS = 6;
+
+/** Bề rộng (giây) của một khối cố định theo giờ của `refRange`; các lần hỏi riêng backend cũng bám khối này để kéo chart không đổi khoá hỏi ở mỗi bước. */
+export const refBlock = (step: number): number => BLOCK_BARS * step;
 
 /** Đầu khoảng cần tick: nến đầu của chart, nhưng không xa hơn độ sâu tick tính từ nến cuối (cũ hơn thì broker không còn tick). */
 export const bubbleFrom = (bars: Bar[], cut: number, step: number): number | null =>
@@ -122,7 +131,7 @@ export function bubbleX(times: number[], t: number, step: number): number {
 }
 
 /** Bubble của các ô tick `cells`: x = vị trí của phút của ô trong nến chứa nó (`times` tăng dần, `step` giây một nến), y = giá. Bubble lớn vẽ trước để bubble nhỏ cùng chỗ nằm trên.
- *  Cỡ và độ đậm tính theo `ref` (các ô lớn nhất quanh mép phải vùng nhìn, xem `refCells`; mặc định chính `cells`) chứ không theo riêng các ô đang nhìn, nên zoom không làm đổi cỡ một bubble. */
+ *  Cỡ và độ đậm tính theo `ref` (các ô lớn nhất quanh mép phải vùng nhìn, xem `refRange`; mặc định chính `cells`) chứ không theo riêng các ô đang nhìn, nên zoom không làm đổi cỡ một bubble. */
 export function bubblesOf(cells: TickCell[], times: number[], step: number, c: Ctx, ref: TickCell[] = cells): ObjBubble[] {
   if (cells.length === 0 || times.length === 0) return [];
   const { inputs, items } = c;
@@ -170,19 +179,42 @@ export const bigTrades: IndicatorDef = {
     if (t0 === null || !c.ticks?.big) return empty;
     const size = rowSize(bars.slice(c.cut), c.tick, num(c.inputs, "group"));
     const min = Math.max(1, num(c.inputs, "min"));
-    const count = num(c.inputs, "count");
-    const pool = c.ticks.big(t0, bars[bars.length - 1].t + step, min, BIG_POOL, size);
+    const big = c.ticks.big;
+    const pool = big(t0, bars[bars.length - 1].t + step, min, BIG_POOL, size);
     if (!pool) return empty;
-    // top `count` của vùng đang nhìn (chưa biết vùng nhìn thì cả chart)
-    const v0 = Math.max(t0, bars[Math.max(c.cut, c.range?.from ?? c.cut)].t);
-    const v1 = bars[Math.min(bars.length - 1, c.range?.to ?? bars.length - 1)].t + step;
+    const vol = (k: TickCell) => k.up + k.dn;
+    const poolMin = pool.length >= BIG_POOL ? pool.reduce((m, k) => Math.min(m, vol(k)), Infinity) : 0;
+    const end = bars[bars.length - 1].t + step;
+    const block = refBlock(step);
+    // `limit` ô lớn nhất của [from, to) có volume >= minVol. Pool đầy thì các ô nhỏ hơn ô bé nhất của pool bị cắt (M1 gặp thường xuyên: ngưỡng của vài giờ gần đây thấp hơn ô bé nhất của cả 14 ngày), nên nếu pool có thể thiếu ô của khoảng này thì hỏi riêng
+    // khoảng đó, nới ra theo khối cố định để kéo / zoom nhẹ vẫn dùng lại kết quả; chờ kết quả thì vẫn dùng phần lấy từ pool (không nhấp nháy)
+    const top = (from: number, to: number, minVol: number, limit: number): TickCell[] => {
+      const got = topInRange(pool, from, to, limit).filter((k) => vol(k) >= minVol);
+      const exact = pool.length < BIG_POOL || (got.length >= limit ? vol(got[limit - 1]) : minVol) > poolMin;
+      if (exact) return got;
+      const asked = big(Math.max(t0, Math.floor(from / block) * block), Math.min(end, Math.ceil(to / block) * block), minVol, limit, size);
+      return asked ? topInRange(asked, from, to, limit) : got;
+    };
+    const last = Math.min(bars.length - 1, c.range?.to ?? bars.length - 1);
+    const v0 = Math.max(t0, bars[Math.max(c.cut, c.range?.from ?? c.cut)].t); // chưa biết vùng nhìn thì cả chart
+    const v1 = bars[last].t + step;
     if (v1 <= v0) return empty;
-    // zoom gần thì ít bubble hơn (visibleCap); cỡ tính theo ô lớn nhất của cả chart nên không đổi theo vùng nhìn
-    const cap = visibleCap(count, Math.min(bars.length - 1, c.range?.to ?? bars.length - 1) - Math.max(c.cut, c.range?.from ?? c.cut) + 1);
-    let cells = topInRange(pool, v0, v1, cap);
-    // Pool đã đầy mà vùng nhìn hẹp (zoom sâu) chỉ có ít ô trong pool: các ô nhỏ hơn ô bé nhất của pool bị cắt, nên hỏi riêng vùng này; chờ kết quả thì vẫn hiện phần lấy từ pool
-    if (cells.length < cap && pool.length >= BIG_POOL) cells = c.ticks.big(v0, v1, min, cap, size) ?? cells;
-    const ref = refCells(pool, bars[Math.min(bars.length - 1, c.range?.to ?? bars.length - 1)].t, bars[bars.length - 1].t + step, t0, step, count);
+    // Thang cỡ và ngưỡng tính trên các ô quanh mép phải vùng nhìn chứ không trên các ô đang hiện: zoom giữ mép phải thì cả cỡ lẫn tập bubble không đổi, zoom chỉ cắt bớt / thêm vào phần thấy được
+    // Minimum volume > 0: ngưỡng cố định. Không thì ngưỡng = trung bình + sigma × độ lệch chuẩn volume của mọi ô trong khoảng dài hơn quanh mép phải (thống kê đủ từ backend, không tính phần bị cắt ở đầu tick / nến cuối để ngưỡng không trôi theo từng nến mới;
+    // khoá hỏi theo khối nên không đổi khi kéo / zoom nhẹ). Chưa nạp xong thống kê thì chưa có bubble; khoảng đó không có ô nào thì chưa có ngưỡng, hiện mọi ô
+    const minIn = num(c.inputs, "min");
+    let thr = minIn;
+    if (minIn === 0) {
+      const [q0, q1] = refRange(bars[last].t, end, t0, step, THR_BLOCKS);
+      const stat = c.ticks.stat?.(q0, Math.ceil(q1 / block) * block, size);
+      if (!stat) return empty;
+      const sd = stat.n > 0 ? Math.sqrt(Math.max(0, stat.sumsq / stat.n - (stat.sum / stat.n) ** 2)) : 0;
+      thr = stat.n > 0 ? Math.max(min, stat.sum / stat.n + num(c.inputs, "sigma") * sd) : min;
+    }
+    const cells = top(v0, v1, thr, MAX_SHOWN);
+    // Cỡ và độ đậm tính trên các bubble (ô >= ngưỡng) quanh mép phải, không theo riêng các ô đang hiện
+    const [r0, r1] = refRange(bars[last].t, end, t0, step);
+    const ref = top(r0, r1, thr, MAX_SHOWN);
     return { ...empty, bubbles: bubblesOf(cells, bars.map((b) => b.t), step, c, ref) };
   },
 };

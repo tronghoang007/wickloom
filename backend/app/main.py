@@ -91,6 +91,13 @@ def get_tickbig(symbol: str, frm: int = Query(alias="from"), to: int = 0, min: f
     return {"rows": [list(r) for r in state.bars.tickbig(symbol, frm, to, min, limit, size)]}
 
 
+@app.get("/tickstat")
+def get_tickstat(symbol: str, frm: int = Query(alias="from"), to: int = 0, size: float = Query(0, ge=0)):
+    """Big Trades "Sensitivity (σ)": thống kê volume của mọi ô (phút, giá) trong [from, to) (gom giá như /tickbig): n = số ô, sum = tổng volume, sumsq = tổng bình phương."""
+    n, total, sq = state.bars.tickstat(symbol, frm, to, size)
+    return {"n": n, "sum": total, "sumsq": sq}
+
+
 @app.get("/tickfp")
 def get_tickfp(symbol: str, bars: str, end: int, size: float = Query(gt=0)):
     """Footprint "1 tick": tick của các phút [bars[0], end) gom theo (nến, row giá cao `size`, row i phủ [i*size, (i+1)*size)). `bars` = giờ mở các nến, cách nhau dấu phẩy, tăng dần (tối đa 1000).

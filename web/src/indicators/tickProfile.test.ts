@@ -1,6 +1,6 @@
 import type { Bar, TickCell } from "@/lib/api";
 import { describe, expect, it } from "vitest";
-import { LIVE_KEEP, TickBigFeed, TickProfileFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, overlapRatio, rebin, type LiveMinute, type TickHist } from "./tickProfile";
+import { LIVE_KEEP, TickBigFeed, TickProfileFeed, TickStatFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, overlapRatio, rebin, type LiveMinute, type TickHist } from "./tickProfile";
 
 const td = (t: number, c = 1, v = 1): Bar => ({ t, o: 0, h: 0, l: 0, c, v });
 const lay = { lo: 100, hi: 110, size: 5, N: 2 };
@@ -89,6 +89,24 @@ describe("TickProfileFeed", () => {
     tick(10_001);
     feed.get("S", 10, 20, lay, "a");
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe("TickStatFeed", () => {
+  it("lần đầu null và nạp ngầm tới `upTo`; xong thì trả thống kê và báo onChange; cùng chữ ký không nạp lại, đổi chữ ký hoặc row giá thì nạp lại / khoá khác", async () => {
+    const calls: [string, number, number, number][] = [];
+    let changed = 0;
+    const feed = new TickStatFeed(async (symbol, from, to, size) => (calls.push([symbol, from, to, size]), { n: 3, sum: 12, sumsq: 60 }), () => changed++);
+    const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    expect(feed.get("S", 10, 20, 0.5, "a", 15)).toBeNull();
+    await settle();
+    expect(changed).toBe(1);
+    expect(feed.get("S", 10, 20, 0.5, "a", 15)).toEqual({ n: 3, sum: 12, sumsq: 60 });
+    expect(calls).toEqual([["S", 10, 15, 0.5]]); // đọc tới `upTo`, không tới hết khoảng
+    expect(feed.get("S", 10, 20, 0.5, "b", 15)).not.toBeNull(); // chữ ký đổi: bản cũ trong lúc nạp lại
+    await settle();
+    expect(calls).toHaveLength(2);
+    expect(feed.get("S", 10, 20, 1, "b", 15)).toBeNull(); // row giá khác là khoá khác
   });
 });
 

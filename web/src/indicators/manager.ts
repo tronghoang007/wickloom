@@ -1,4 +1,4 @@
-import { TF_SECONDS, fetchBars, fetchBrokerOffset, fetchTickBig, fetchTickFp, fetchTickProfile, type Bar } from "@/lib/api";
+import { TF_SECONDS, fetchBars, fetchBrokerOffset, fetchTickBig, fetchTickFp, fetchTickProfile, fetchTickStat, type Bar } from "@/lib/api";
 import type { IChartApi, IPaneApi, IPriceLine, ISeriesApi, SeriesType, Time, UTCTimestamp } from "lightweight-charts";
 import { byId } from "./catalog";
 import { mergeCandleColors, planCandleColors } from "./candleColors";
@@ -16,7 +16,7 @@ import { ProfilePrimitive } from "./render/profile";
 import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions, scaleId } from "./render/series";
 import type { IndicatorDef, PlotData, TickSource } from "./schema";
 import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
-import { TickBigFeed, TickFpFeed, TickProfileFeed, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, mergeLiveFp, type LiveMinute } from "./tickProfile";
+import { TickBigFeed, TickFpFeed, TickProfileFeed, TickStatFeed, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, mergeLiveFp, type LiveMinute } from "./tickProfile";
 
 type Live = {
   inst: IndicatorInstance;
@@ -96,6 +96,7 @@ export class IndicatorManager {
   private tickProfiles = new TickProfileFeed((symbol, from, to, lay) => fetchTickProfile(symbol, from, to, lay.lo, lay.size, lay.N), () => this.schedule());
   private tickBig = new TickBigFeed(fetchTickBig, () => this.schedule());
   private tickFp = new TickFpFeed(fetchTickFp, () => this.schedule());
+  private tickStat = new TickStatFeed(fetchTickStat, () => this.schedule());
   private liveMinute = new Map<string, LiveMinute[]>(); // symbol -> vài phút tick gần nhất, cuối là phút đang chạy (backend đẩy sau mỗi lô tick)
   private prevColors: string[] | null = null;
   private fpOn = false;
@@ -405,6 +406,10 @@ export class IndicatorManager {
         const cut = liveCut(newest, t0, t1);
         const cells = this.tickBig.get(symbol, t0, t1, min, limit, size, `${cut}:${coverSig(cover, t0, cut)}`, cut);
         return cells && mergeLiveBig(cells, liveFrom(lives, this.tickBig.heldUpTo(symbol, t0, t1, min, limit, size) ?? cut, t0, t1), min, limit, size);
+      },
+      stat: (t0, t1, size) => {
+        const cut = liveCut(newest, t0, t1);
+        return this.tickStat.get(symbol, t0, t1, size, `${cut}:${coverSig(cover, t0, cut)}`, cut);
       },
       fp: (bars, end, size) => {
         const cut = liveCut(newest, bars[0], end);

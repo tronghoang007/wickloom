@@ -85,6 +85,19 @@ export async function fetchTickBig(symbol: string, from: number, to: number, min
   }
 }
 
+/** Thống kê volume của mọi ô (phút, giá) trong [from, to): số ô, tổng và tổng bình phương volume (backend /tickstat); `size` > 0 gom giá vào row cao `size` như /tickbig. null nếu lỗi. */
+export type TickStat = { n: number; sum: number; sumsq: number };
+export async function fetchTickStat(symbol: string, from: number, to: number, size: number): Promise<TickStat | null> {
+  const q = new URLSearchParams({ symbol, from: String(from), to: String(to), size: String(size) });
+  try {
+    const r = await fetch(`${API}/tickstat?${q}`);
+    const j = r.ok ? await r.json() : null;
+    return j && Number.isFinite(j.n) && Number.isFinite(j.sum) && Number.isFinite(j.sumsq) ? { n: j.n, sum: j.sum, sumsq: j.sumsq } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Một ô footprint: [chỉ số nến trong danh sách gửi đi, row giá (phủ [row*size, (row+1)*size)), volume lên, volume xuống]. */
 export type FpCell = [bar: number, row: number, up: number, dn: number];
 

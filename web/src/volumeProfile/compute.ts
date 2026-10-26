@@ -1,4 +1,4 @@
-import type { Bar, FpCell, TickCell } from "@/lib/api";
+import type { Bar, FpCell, TickCell, TickStat } from "@/lib/api";
 
 // Volume profile dùng chung cho drawings (FRVP / AVP) và indicator (Session / Visible Range Volume Profile).
 
@@ -50,6 +50,8 @@ export type TickSource = {
   covered: (t0: number) => boolean;
   hist: (t0: number, t1: number, lay: Layout) => { up: number[]; dn: number[] } | null;
   big?: (t0: number, t1: number, min: number, limit: number, size: number) => TickCell[] | null;
+  /** Big Trades Sensitivity (σ): số ô, tổng và tổng bình phương volume của mọi ô (phút, row giá cao `size`) trong [t0, t1) (null = chưa nạp xong). */
+  stat?: (t0: number, t1: number, size: number) => TickStat | null;
   /** Footprint: tick của các phút [bars[0], end) gom theo (nến, row giá cao `size`); `bars` = giờ mở các nến tăng dần (null = chưa nạp xong). */
   fp?: (bars: number[], end: number, size: number) => FpCell[] | null;
 };

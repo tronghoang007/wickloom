@@ -163,6 +163,28 @@ def test_tickbig_groups_prices_into_rows():
     assert len(st.tickbig("S", 0, 120, 1, 10)) == 4
 
 
+def test_tickstat_counts_cells_and_sums_their_volume():
+    from app.store import BarStore
+
+    st = BarStore(__import__("pathlib").Path(tempfile.mkdtemp()) / "b.sqlite")
+    # phút 0: 100.2 (3), 100.8 (3), 101.5 (4); phút 60: 100.5 (2); phút 120 ngoài [0, 120)
+    st.put_tickvp("S", 0, 120, [(0, 100.2, 3.0, 0.0), (0, 100.8, 1.0, 2.0), (0, 101.5, 0.0, 4.0), (60, 100.5, 2.0, 0.0), (120, 100.0, 50.0, 0.0)])
+    assert st.tickstat("S", 0, 120) == (4, 12.0, 9 + 9 + 16 + 4)  # đúng từng giá: 4 ô 3, 3, 4, 2
+    # gom row cao 1: phút 0 có row 100 (3 + 3 = 6) và row 101 (4); phút 60 row 100 (2)
+    assert st.tickstat("S", 0, 120, 1.0) == (3, 12.0, 36 + 16 + 4)
+    assert st.tickstat("S", 60, 120, 1.0) == (1, 2.0, 4.0)
+    assert st.tickstat("Other", 0, 120) == (0, 0.0, 0.0)
+
+
+def test_tickstat_endpoint():
+    sym = "TDSTAT"
+    send_ea([{"type": "ticks_hist", "symbol": sym, "broker_utc_offset": 0, "t": [1000, 2000, 3000, 61000], "p": [10, 12, 11, 11], "pb": 9, "done": True}])
+    c = TestClient(app)
+    assert c.get("/tickstat", params={"symbol": sym, "from": 0, "to": 120}).json() == {"n": 4, "sum": 4.0, "sumsq": 4.0}
+    assert c.get("/tickstat", params={"symbol": sym, "from": 60, "to": 120}).json() == {"n": 1, "sum": 1.0, "sumsq": 1.0}
+    assert c.get("/tickstat", params={"symbol": sym, "from": 0, "to": 120, "size": -1}).status_code == 422
+
+
 def test_tickfp_groups_minutes_into_bars_and_price_rows():
     from app.store import BarStore
 

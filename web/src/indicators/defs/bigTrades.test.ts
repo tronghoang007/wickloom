@@ -4,25 +4,32 @@ import { byId } from "../catalog";
 import { computeExtras } from "../engine";
 import { newInstance } from "../instance";
 import { TICK_DEPTH } from "../lower";
+import type { TickStat } from "@/lib/api";
 import type { TickSource } from "../schema";
-import { BIG_POOL, bigTrades, bubbleFrom, bubbleSize, bubbleX, lighten, niceStep, rowSize, sizeFractions, refCells, topInRange, visibleCap } from "./bigTrades";
+import { BIG_POOL, MAX_SHOWN, bigTrades, bubbleFrom, bubbleSize, bubbleX, lighten, niceStep, refRange, rowSize, sizeFractions, topInRange } from "./bigTrades";
 
 const M5 = 300;
 const bar = (t: number): Bar => ({ t, o: 100, h: 101, l: 99, c: 100, v: 1 });
 const bars = Array.from({ length: 20 }, (_, i) => bar(1_000_000 + i * M5)); // 20 nến M5
 const cell = (t: number, p: number, up: number, dn: number): TickCell => ({ t, p, up, dn });
 
-// nguồn tick giả: ghi lại tham số của lần gọi `big`
-const source = (cells: TickCell[] | null, exact?: (t0: number, t1: number) => TickCell[] | null) => {
+// thống kê volume giả: mean 5, độ lệch chuẩn 10 (12500 / 100 - 25 = 100), nên ngưỡng = 5 + 10 × sigma
+const STAT: TickStat = { n: 100, sum: 500, sumsq: 12_500 };
+const NO_CELLS: TickStat = { n: 0, sum: 0, sumsq: 0 }; // khoảng thống kê không có ô nào: chưa có ngưỡng, hiện mọi ô
+
+// nguồn tick giả: ghi lại tham số của lần gọi `big` / `stat`
+const source = (cells: TickCell[] | null, exact?: (t0: number, t1: number, min: number, limit: number) => TickCell[] | null, stat: TickStat | null = NO_CELLS) => {
   const calls: [number, number, number, number, number][] = [];
+  const statCalls: [number, number, number][] = [];
   const ticks: TickSource = {
     covered: () => true, hist: () => null,
-    big: (t0, t1, min, limit, size) => (calls.push([t0, t1, min, limit, size]), limit === BIG_POOL || !exact ? cells : exact(t0, t1)),
+    stat: (t0, t1, size) => (statCalls.push([t0, t1, size]), stat),
+    big: (t0, t1, min, limit, size) => (calls.push([t0, t1, min, limit, size]), limit === BIG_POOL || !exact ? cells : exact(t0, t1, min, limit)),
   };
-  return { ticks, calls };
+  return { ticks, calls, statCalls };
 };
-const run = (ticks?: TickSource, inputs: Record<string, number | string | boolean> = {}, cut = 0, style = {}, range?: { from: number; to: number }) =>
-  computeExtras(bigTrades, { ...newInstance("bigtrades"), inputs, style }, bars, { offset: 0 }, [], { tick: 0.01, cut, ...(range ? { range } : {}), ...(ticks ? { ticks } : {}) }).objects!;
+const run = (ticks?: TickSource, inputs: Record<string, number | string | boolean> = {}, cut = 0, style = {}, range?: { from: number; to: number }, chart = bars) =>
+  computeExtras(bigTrades, { ...newInstance("bigtrades"), inputs, style }, chart, { offset: 0 }, [], { tick: 0.01, cut, ...(range ? { range } : {}), ...(ticks ? { ticks } : {}) }).objects!;
 
 describe("sizeFractions", () => {
   it("dev > 0: trung bình ở giữa, ±dev độ lệch chuẩn là hai đầu, kẹp ngoài khoảng đó", () => {
@@ -37,16 +44,6 @@ describe("sizeFractions", () => {
     const ref = [1, 5, 9];
     expect(sizeFractions([9], 0, 0, 2, ref)).toEqual([sizeFractions(ref, 0, 0, 2)[2]]);
     expect(sizeFractions([9, 8, 7], 0, 0, 2, ref)[0]).toBe(sizeFractions(ref, 0, 0, 2)[2]);
-  });
-});
-
-describe("visibleCap", () => {
-  it("nhìn đủ rộng thì đúng Maximum bubbles; zoom gần thì ít đi theo số nến, tối thiểu 1", () => {
-    expect(visibleCap(100, 288)).toBe(100);
-    expect(visibleCap(100, 200)).toBe(100);
-    expect(visibleCap(100, 55)).toBe(28);
-    expect(visibleCap(100, 1)).toBe(1);
-    expect(visibleCap(10, 400)).toBe(10); // không vượt Maximum bubbles
   });
 });
 
@@ -130,62 +127,108 @@ describe("Big Trades", () => {
 
   it("hỏi tick [nến đầu, hết nến cuối) với Minimum volume tối thiểu 1, số bubble tối đa và row giá", () => {
     const { ticks, calls } = source([]);
-    run(ticks, { count: 50 }, 2);
+    run(ticks, {}, 2);
     expect(calls).toHaveLength(1);
-    expect(calls[0].slice(0, 4)).toEqual([bars[2].t, bars[19].t + M5, 1, BIG_POOL]); // cả khoảng đã nạp; top `count` chọn sau theo vùng nhìn
+    expect(calls[0].slice(0, 4)).toEqual([bars[2].t, bars[19].t + M5, 1, BIG_POOL]); // cả khoảng đã nạp; các bubble của vùng nhìn chọn sau
     expect(calls[0][4]).toBeCloseTo(0.1, 9); // nến cao 2 -> 2 / 20, tick 0.01
-    run(ticks, { min: 8, count: 50, group: 300 });
+    run(ticks, { min: 8, group: 300 });
     expect(calls[1][2]).toBe(8);
     expect(calls[1][4]).toBeCloseTo(3, 9); // 300 tick
   });
 
-  it("Maximum bubbles tính trên vùng đang nhìn: ngày dữ dội không chiếm hết chỗ của các ngày khác", () => {
-    const cells = [cell(bars[1].t, 100, 90, 0), cell(bars[2].t, 100, 80, 0), cell(bars[3].t, 100, 70, 0), cell(bars[12].t, 100, 9, 0), cell(bars[13].t, 100, 8, 0), cell(bars[14].t, 100, 7, 0)];
-    const view = (range?: { from: number; to: number }) => run(source(cells).ticks, { count: 2, text: true }, 0, {}, range).bubbles!.map((b) => b.text);
-    expect(view()).toEqual(["90", "80"]); // chưa biết vùng nhìn: cả chart
-    expect(view({ from: 10, to: 19 })).toEqual(["9", "8"]); // chỉ nhìn đoạn sau: top 2 của đoạn đó
-    expect(view({ from: 3, to: 12 })).toEqual(["70", "9"]); // ô ở nến cuối vùng nhìn tính, ô ngoài vùng thì không
+  it("Sensitivity (sigma): mặc định 3,5 và không còn ô Bubble count", () => {
+    const keys = bigTrades.inputs.map((i) => i.key);
+    expect(bigTrades.inputs.find((i) => i.key === "sigma")!.default).toBe(3.5);
+    expect(keys).not.toContain("count");
+    const cells = [cell(bars[3].t, 100, 30, 0), cell(bars[5].t, 100, 36, 0), cell(bars[8].t, 100, 50, 0), cell(bars[9].t, 100, 41, 0)];
+    expect(run(source(cells, undefined, STAT).ticks, { text: true }).bubbles!.map((b) => b.text)).toEqual(["50", "41"]); // không đặt sigma: 5 + 3,5 × 10 = 40
+  });
+
+  // nến M5 của `bars`, khối 100 nến = 30 000 s: cả 20 nến nằm trong một khối
+  it("zoom chỉ cắt bớt cùng một tập bubble (ngưỡng tính quanh mép phải), không thêm ô nhỏ vào", () => {
+    const cells = [cell(bars[3].t, 100, 45, 0), cell(bars[5].t, 100, 39, 0), cell(bars[8].t, 100, 60, 0), cell(bars[10].t, 100, 70, 0), cell(bars[12].t, 100, 41, 0), cell(bars[14].t, 100, 55, 0), cell(bars[16].t, 100, 48, 0),
+      cell(bars[17].t, 100, 50, 0), cell(bars[18].t, 100, 40, 0), cell(bars[19].t, 100, 30, 0)];
+    const view = (range?: { from: number; to: number }) => run(source(cells, undefined, STAT).ticks, { sigma: 4, text: true }, 0, {}, range).bubbles!.map((b) => b.text);
+    // ngưỡng 5 + 4 × 10 = 45
+    expect(view()).toEqual(["70", "60", "55", "50", "48", "45"]);
+    expect(view({ from: 10, to: 19 })).toEqual(["70", "55", "50", "48"]); // zoom vào: bớt ô ngoài vùng nhìn (60 / 45), 41 / 40 / 39 / 30 vẫn không hiện
+    expect(view({ from: 17, to: 19 })).toEqual(["50"]);
+    expect(view({ from: 0, to: 19 })).toEqual(view());
+  });
+
+  it("ngưỡng = trung bình + sigma × độ lệch chuẩn volume của mọi ô trong khoảng thống kê, hỏi thống kê theo khối cố định", () => {
+    const cells = [cell(bars[3].t, 100, 30, 0), cell(bars[5].t, 100, 36, 0), cell(bars[8].t, 100, 50, 0), cell(bars[12].t, 100, 12, 0)];
+    const { ticks, statCalls } = source(cells, undefined, STAT);
+    const texts = (inputs: Record<string, number>) => run(ticks, { text: true, ...inputs }).bubbles!.map((b) => b.text);
+    expect(texts({ sigma: 3 })).toEqual(["50", "36"]); // 5 + 3 × 10 = 35
+    expect(texts({ sigma: 2 })).toEqual(["50", "36", "30"]); // 25
+    expect(texts({ sigma: 0 })).toEqual(["50", "36", "30", "12"]); // 0 không phải tắt: ngưỡng = trung bình (5)
+    expect(statCalls[0].slice(0, 2)).toEqual([bars[0].t, 1_020_000]); // 6 khối 30 000 s tới hết khối chứa mép phải (đóng khối, không theo nến cuối) nên khoá không đổi theo từng nến
+    expect(statCalls[0][2]).toBeCloseTo(0.1, 9);
+  });
+
+  it("chưa có thống kê thì chưa có bubble; khoảng thống kê không có ô nào thì hiện mọi ô; ngưỡng không thấp hơn 1", () => {
+    const cells = Array.from({ length: 10 }, (_, i) => cell(bars[i].t, 100, 21 + i, 0));
+    const texts = (stat: TickStat | null, inputs: Record<string, number> = {}) => run(source(cells, undefined, stat).ticks, { text: true, ...inputs }).bubbles!.map((b) => b.text);
+    expect(texts(null)).toEqual([]);
+    expect(texts({ n: 0, sum: 0, sumsq: 0 }).length).toBe(10);
+    expect(texts({ n: 4, sum: 0, sumsq: 0 }).length).toBe(10); // trung bình 0, độ lệch 0 -> ngưỡng 1
+  });
+
+  it("Minimum volume > 0 đặt ngưỡng cố định thay cho sigma và không hỏi thống kê", () => {
+    const cells = Array.from({ length: 10 }, (_, i) => cell(bars[i].t, 100, 21 + i, 0)); // 21..30
+    const { ticks, statCalls } = source(cells, undefined, STAT);
+    expect(run(ticks, { sigma: 3, min: 28, text: true }).bubbles!.map((b) => b.text)).toEqual(["30", "29", "28"]); // sigma 3 sẽ đặt ngưỡng 35
+    expect(statCalls).toEqual([]);
+  });
+
+  it("ô Sensitivity (sigma) xám đi khi Minimum volume > 0", () => {
+    const sigma = bigTrades.inputs.find((i) => i.key === "sigma")!;
+    expect(sigma.enabledIf!({ min: 0 })).toBe(true);
+    expect(sigma.enabledIf!({ min: 5 })).toBe(false);
+  });
+
+  it("trần số bubble hiện cùng lúc là MAX_SHOWN: giữ các ô lớn nhất của vùng nhìn", () => {
+    const cells = Array.from({ length: MAX_SHOWN + 10 }, (_, i) => cell(bars[i % 20].t, 100 + i, 1 + i, 0)); // volume 1..310
+    const b = run(source(cells).ticks, { text: true }).bubbles!;
+    expect(b).toHaveLength(MAX_SHOWN);
+    expect([b[0].text, b[b.length - 1].text]).toEqual(["310", "11"]);
   });
 
   it("vùng nhìn bắt đầu trước nến đầu của chart (cut) thì kẹp vào nến đầu", () => {
     const cells = [cell(bars[1].t, 100, 90, 0), cell(bars[4].t, 100, 5, 0)];
-    expect(run(source(cells).ticks, { count: 5, text: true }, 3, {}, { from: 3, to: 19 }).bubbles!.map((b) => b.text)).toEqual(["5"]);
+    expect(run(source(cells).ticks, { text: true }, 3, {}, { from: 3, to: 19 }).bubbles!.map((b) => b.text)).toEqual(["5"]);
   });
 
-  it("pool chưa đầy: đã đủ dữ liệu, không hỏi thêm dù vùng nhìn có ít ô hơn Maximum bubbles", () => {
+  it("pool chưa đầy: đã đủ dữ liệu, không hỏi thêm dù vùng nhìn có ít ô", () => {
     const { ticks, calls } = source([cell(bars[12].t, 100, 9, 0)], () => []);
-    run(ticks, { count: 10 }, 0, {}, { from: 10, to: 19 });
+    run(ticks, {}, 0, {}, { from: 10, to: 19 });
     expect(calls).toHaveLength(1);
   });
 
-  it("pool đầy mà vùng nhìn hẹp có ít ô hơn Maximum bubbles: hỏi riêng vùng nhìn, kết quả đó thay phần lấy từ pool", () => {
-    const pool = Array.from({ length: BIG_POOL }, (_, i) => cell(bars[i % 10].t, 100 + i, 50, 0)); // pool toàn ô ở nửa đầu; nửa sau chỉ có ô nhỏ hơn mọi ô của pool
-    pool.push(cell(bars[12].t, 100, 40, 0));
-    const exact = [cell(bars[12].t, 100, 40, 0), cell(bars[13].t, 100, 3, 0), cell(bars[14].t, 100, 2, 0)];
-    const { ticks, calls } = source(pool, () => exact);
-    const b = run(ticks, { count: 10, text: true }, 0, {}, { from: 11, to: 15 }).bubbles!;
+  it("pool đầy mà thiếu ô trong vùng nhìn: hỏi riêng khoảng thiếu, kết quả đó thay phần lấy từ pool", () => {
+    const pool = Array.from({ length: BIG_POOL }, (_, i) => cell(bars[i % 8].t, 100 + i, 100 + i, 0)); // pool toàn ô ở nến 0..7 (volume >= 100); sau đó chỉ có ô nhỏ hơn mọi ô của pool
+    const rest = [cell(bars[12].t, 100, 40, 0), cell(bars[13].t, 100, 3, 0), cell(bars[14].t, 100, 8, 0), cell(bars[15].t, 100, 7, 0), cell(bars[17].t, 100, 6, 0), cell(bars[18].t, 100, 5, 0), cell(bars[19].t, 100, 4, 0)];
+    const exact = (t0: number, t1: number, min: number, limit: number) => rest.filter((k) => k.t >= t0 && k.t < t1 && k.up >= min).sort((a, b) => b.up - a.up).slice(0, limit);
+    const { ticks, calls } = source(pool, exact, STAT);
+    const b = run(ticks, { sigma: 0.2, text: true }, 0, {}, { from: 11, to: 19 }).bubbles!; // ngưỡng 5 + 0,2 × 10 = 7
     expect(calls).toHaveLength(2);
-    expect(calls[1].slice(0, 4)).toEqual([bars[11].t, bars[15].t + M5, 1, 3]); // 5 nến nhìn thấy -> tối đa 3 bubble (visibleCap), không phải 10
-    expect(b.map((x) => x.text)).toEqual(["40", "3", "2"]);
+    expect(calls[1].slice(0, 4)).toEqual([bars[0].t, bars[19].t + M5, 7, MAX_SHOWN]); // vùng nhìn nới ra theo khối 30 000 s (cắt ở đầu tick / hết nến cuối): ô >= ngưỡng; pool không có ô nào ở đó nên hỏi riêng
+    expect(b.map((x) => x.text)).toEqual(["40", "8", "7"]);
   });
 
-  it("đang chờ kết quả hỏi riêng vùng nhìn thì vẫn hiện bubble lấy từ pool (không nhấp nháy)", () => {
-    const pool = Array.from({ length: BIG_POOL }, (_, i) => cell(bars[i % 10].t, 100 + i, 50, 0));
+  it("đang chờ kết quả hỏi riêng thì vẫn hiện bubble lấy từ pool (không nhấp nháy)", () => {
+    const pool = Array.from({ length: BIG_POOL }, (_, i) => cell(bars[i % 8].t, 100 + i, 100 + i, 0));
     pool.push(cell(bars[12].t, 100, 40, 0));
-    const b = run(source(pool, () => null).ticks, { count: 10, text: true }, 0, {}, { from: 11, to: 15 }).bubbles!;
+    const { ticks, calls } = source(pool, () => null, STAT);
+    const b = run(ticks, { sigma: 0.2, text: true }, 0, {}, { from: 11, to: 19 }).bubbles!; // ngưỡng 7; vùng nhìn không có ô nào trong pool trừ ô 40 ở nến 12
+    expect(calls).toHaveLength(2);
     expect(b.map((x) => x.text)).toEqual(["40"]);
-  });
-
-  it("zoom gần: ít bubble hơn, không kéo ô nhỏ vào cho đủ Maximum bubbles", () => {
-    const cells = Array.from({ length: 20 }, (_, i) => cell(bars[i].t, 100, 100 - i, 0));
-    const view = (range?: { from: number; to: number }) => run(source(cells).ticks, { count: 20, text: true }, 0, {}, range).bubbles!.map((b) => b.text);
-    expect(view()).toHaveLength(10); // cả 20 nến: tối đa ceil(20 / 2) = 10 (ít hơn Maximum bubbles = 20)
-    expect(view({ from: 10, to: 13 })).toEqual(["90", "89"]); // 4 nến nhìn thấy: 2 bubble
   });
 
   it("zoom (mép phải giữ nguyên) không đổi cỡ và độ đậm của bubble: thang theo quanh mép phải, không theo riêng các ô đang hiện", () => {
     const cells = [cell(bars[1].t, 100, 90, 0), cell(bars[2].t, 100, 80, 0), cell(bars[3].t, 100, 70, 0), cell(bars[16].t, 100, 9, 0), cell(bars[17].t, 100, 8, 0), cell(bars[18].t, 100, 7, 0)];
-    const view = (range?: { from: number; to: number }) => run(source(cells).ticks, { count: 4, text: true }, 0, {}, range).bubbles!.find((b) => b.text === "9")!;
+    const view = (range?: { from: number; to: number }) => run(source(cells).ticks, { text: true }, 0, {}, range).bubbles!.find((b) => b.text === "9")!;
     const wide = view(), zoomed = view({ from: 10, to: 19 }); // vùng nhìn 10 nến chỉ có 9 / 8 / 7: theo thang riêng của các ô đang hiện thì "9" sẽ thành bubble lớn nhất
     expect(zoomed.r).toBe(wide.r);
     expect(zoomed.bg).toBe(wide.bg);
@@ -193,19 +236,22 @@ describe("Big Trades", () => {
   });
 
   it("kéo về đoạn vắng: thang theo đoạn đó, không phải chấm nhỏ nhất vì cả chart có đoạn dữ dội hơn nhiều", () => {
-    const cells = [cell(bars[1].t, 100, 10, 0), cell(bars[2].t, 100, 12, 0), cell(bars[3].t, 100, 8, 0), cell(bars[17].t, 100, 100, 0), cell(bars[18].t, 100, 120, 0), cell(bars[19].t, 100, 90, 0)];
-    const quiet = run(source(cells).ticks, { count: 3, text: true }, 0, {}, { from: 0, to: 5 }).bubbles!;
-    expect(quiet.map((b) => b.text)).toEqual(["12", "10", "8"].filter((t) => quiet.some((b) => b.text === t)));
+    const chart = Array.from({ length: 400 }, (_, i) => bar(1_000_000 + i * M5)); // 400 nến M5 = 4 khối 30 000 s: nến 0..66 / 67..166 / 167..266 / 267..366 / 367..399
+    const cells = [cell(chart[5].t, 100, 10, 0), cell(chart[6].t, 100, 12, 0), cell(chart[7].t, 100, 8, 0), cell(chart[395].t, 100, 100, 0), cell(chart[396].t, 100, 120, 0), cell(chart[397].t, 100, 90, 0)];
+    const quiet = run(source(cells).ticks, { text: true }, 0, {}, { from: 0, to: 70 }, chart).bubbles!; // mép phải ở nến 70: thang lấy nến 0..166, không có ô dữ dội ở cuối
+    expect(quiet.map((b) => b.text)).toEqual(["12", "10", "8"]);
     expect(quiet.find((b) => b.text === "12")!.r * 2).toBeGreaterThan(30); // theo thang chung với ô 120 thì chỉ 5 (nhỏ nhất)
   });
 
-  it("refCells: khối `count` nến cố định theo giờ, lấy khối chứa mép phải và khối trước nó, cắt ở hết nến cuối và đầu tick", () => {
-    const cells = Array.from({ length: 10 }, (_, i) => cell(i * 100, 1, i + 1, 0)); // nến 100 s, ô ở t 0..900 volume 1..10
+  it("refRange: khối 100 nến cố định theo giờ, lấy khối chứa mép phải và các khối trước nó, cắt ở hết nến cuối và đầu tick", () => {
+    const cells = Array.from({ length: 10 }, (_, i) => cell(i * 100, 1, i + 1, 0)); // ô ở t 0..900 volume 1..10
     const vol = (r: TickCell[]) => r.map((k) => k.up).sort((a, c) => a - c);
-    expect(vol(refCells(cells, 450, 1000, 0, 100, 2))).toEqual([5, 6]); // khối 200 s: mép phải 450 ở khối 400..600, cộng khối 200..400 -> ô t 200..500 (vol 3..6), lấy 2 lớn nhất
-    expect(vol(refCells(cells, 450, 1000, 0, 100, 4))).toEqual([5, 6, 7, 8]); // khối 400 s: 400..800 và 0..400 -> t 0..700, lấy 4 lớn nhất
-    expect(vol(refCells(cells, 450, 700, 0, 100, 10))).toEqual([1, 2, 3, 4, 5, 6, 7]); // cắt ở hết nến cuối (700)
-    expect(vol(refCells(cells, 150, 1000, 300, 100, 2))).toEqual([]); // không sớm hơn đầu tick
+    const ref = (viewEnd: number, end: number, t0: number, blocks?: number) => vol(topInRange(cells, ...refRange(viewEnd, end, t0, 2, blocks), 100)); // nến 2 s: khối 200 s
+    expect(refRange(450, 1000, 0, 2)).toEqual([200, 600]);
+    expect(ref(450, 1000, 0)).toEqual([3, 4, 5, 6]); // mép phải 450 ở khối 400..600, cộng khối 200..400 -> ô t 200..500
+    expect(ref(450, 1000, 0, 6)).toEqual([1, 2, 3, 4, 5, 6]); // nhiều khối hơn nhưng không sớm hơn đầu tick
+    expect(ref(450, 500, 0)).toEqual([3, 4, 5]); // cắt ở hết nến cuối (500)
+    expect(ref(150, 1000, 300)).toEqual([]); // không sớm hơn đầu tick
   });
 
   it("Maximum volume chỉ có tác dụng khi Standard deviation = 0 (ô xám đi khi > 0)", () => {

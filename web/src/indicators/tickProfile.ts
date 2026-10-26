@@ -1,4 +1,4 @@
-import type { Bar, FpCell, TickCell } from "@/lib/api";
+import type { Bar, FpCell, TickCell, TickStat } from "@/lib/api";
 import type { Layout } from "@/volumeProfile/compute";
 
 // Volume Profile "1 tick" (Session / Visible Range): mỗi tick rơi đúng vào row chứa giá của nó. Backend giữ histogram giá theo phút (bảng tickvp) và gom sẵn
@@ -12,6 +12,7 @@ export type TickHist = { up: number[]; dn: number[] };
 export type LiveMinute = { t: number; cells: [number, number, number][] };
 type Fetch = (symbol: string, from: number, to: number, lay: Layout) => Promise<TickHist | null>;
 type FetchBig = (symbol: string, from: number, to: number, min: number, limit: number, size: number) => Promise<TickCell[] | null>;
+type FetchStat = (symbol: string, from: number, to: number, size: number) => Promise<TickStat | null>;
 type FetchFp = (symbol: string, bars: number[], end: number, size: number) => Promise<FpCell[] | null>;
 type Entry<T> = { sig: string; data: T | null; busy: boolean; retryAt: number; upTo: number; meta?: unknown };
 
@@ -226,6 +227,23 @@ export class TickBigFeed {
   }
 
   private key = (symbol: string, t0: number, t1: number, min: number, limit: number, size: number) => `${symbol}|${t0}|${t1}|${min}|${limit}|${size}`;
+
+  clear() {
+    this.feed.clear();
+  }
+}
+
+/** Thống kê volume của các ô (phút, row giá cao `size`) trong [t0, t1) cho ngưỡng Sensitivity (σ) của Big Trades. Không cộng phút đang chạy (một phút trong cả khoảng nhiều giờ không đổi trung bình / độ lệch đáng kể). */
+export class TickStatFeed {
+  private feed: SigFeed<TickStat>;
+
+  constructor(private fetch: FetchStat, onChange: () => void, now: () => number = Date.now) {
+    this.feed = new SigFeed(onChange, now);
+  }
+
+  get(symbol: string, t0: number, t1: number, size: number, sig: string, upTo = t1): TickStat | null {
+    return this.feed.get(`${symbol}|${t0}|${t1}|${size}`, sig, () => this.fetch(symbol, t0, upTo, size), upTo);
+  }
 
   clear() {
     this.feed.clear();
