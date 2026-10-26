@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAlertPrefs, useAlertStore, useSettingsTab, type AlertSound } from "@/alerts/store";
 import { playAlertSound, unlockAudio } from "@/alerts/sound";
-import { linkTelegram, testChannel, unlinkTelegram, type AlertChannels, type ChannelKind } from "@/lib/alertsApi";
+import { useRulesStore } from "@/alerts/rules";
+import { IMPORTANCE_CHOICES, LEAD_CHOICES, MAX_LEADS, currencyChoices, leadLabel, ruleProblem, toggleCurrency, toggleLead } from "@/alerts/rulesModel";
+import { linkTelegram, testChannel, unlinkTelegram, type AlertChannels, type ChannelKind, type NewsRule, type Rules, type TradeRule } from "@/lib/alertsApi";
 import { useAuthStore } from "@/store/auth";
 import { toast } from "@/store/toast";
 import { enableDesktopNotifications } from "./AlertHost";
@@ -438,6 +440,117 @@ function TestButton({ kind, disabled }: { kind: ChannelKind; disabled?: boolean 
   );
 }
 
+/** Nút bật / tắt nhỏ cho danh sách lựa chọn nhiều mục (mốc báo trước, đồng tiền). */
+function Chip({ on, onClick, children, title }: { on: boolean; onClick: () => void; children: ReactNode; title?: string }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      title={title}
+      onClick={onClick}
+      className={`h-7 shrink-0 whitespace-nowrap rounded-md border px-2.5 text-[12px] ${on ? "border-[var(--accent)] bg-[var(--selected)] text-[var(--fg)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--hover)]"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Một dòng nhãn + dãy chip tự xuống dòng khi hết chỗ. */
+function ChipRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-h-10 items-start gap-3 py-1.5">
+      <div className="w-40 shrink-0 pt-1">{label}</div>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+/** Lưu một phần quy tắc; chặn trước các trường hợp backend chắc chắn từ chối (bật mà không có kênh...) và báo lý do bằng toast. */
+async function saveRule<K extends keyof Rules>(kind: K, rule: Rules[K], patch: Partial<Rules[K]>, tgLinked: boolean | null) {
+  const problem = ruleProblem(kind, { ...rule, ...patch }, tgLinked);
+  if (problem) return void toast(problem, { kind: "error" });
+  const r = await useRulesStore.getState().save(kind, patch);
+  if (!r.ok) toast(r.error, { kind: "error" });
+}
+
+function RuleChannels({ value, tgLinked, onChange }: { value: AlertChannels; tgLinked: boolean; onChange: (c: AlertChannels) => void }) {
+  const set = (k: ChannelKind, v: boolean) => onChange({ ...value, [k]: v });
+  return (
+    <div className="flex min-h-10 items-center gap-3">
+      <div className="w-40 shrink-0">Send via</div>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 py-1">
+        <Check wide label="Web" checked={value.web} onChange={(v) => set("web", v)} />
+        <Check wide label="Telegram" checked={value.telegram && tgLinked} soon={!tgLinked} onChange={(v) => set("telegram", v)} />
+        <Check wide label="MT5 mobile" checked={value.mt5} onChange={(v) => set("mt5", v)} />
+      </div>
+    </div>
+  );
+}
+
+function NewsRuleSection({ rule, tgLinked }: { rule: NewsRule; tgLinked: boolean }) {
+  const save = (patch: Partial<NewsRule>) => saveRule("news", rule, patch, tgLinked);
+  const dim = rule.enabled ? "" : "opacity-55";
+  return (
+    <>
+      <Section>Economic news reminders</Section>
+      <CheckRow label="Remind me before events" checked={rule.enabled} wide onChange={(v) => void save({ enabled: v })} />
+      <div className={dim}>
+        <ChipRow label="Remind before">
+          {LEAD_CHOICES.map((m) => (
+            <Chip
+              key={m}
+              on={rule.leads.includes(m)}
+              title={`Chọn tối đa ${MAX_LEADS} mốc`}
+              onClick={() => {
+                const next = toggleLead(rule.leads, m);
+                if (next) void save({ leads: next });
+                else toast(rule.leads.includes(m) ? "Phải còn ít nhất một mốc báo trước" : `Tối đa ${MAX_LEADS} mốc báo trước`, { kind: "info" });
+              }}
+            >
+              {leadLabel(m)}
+            </Chip>
+          ))}
+        </ChipRow>
+        <Row label="Importance">
+          <Select value={String(rule.min_importance) as "1" | "2" | "3"} options={IMPORTANCE_CHOICES.map((o) => ({ value: String(o.value) as "1" | "2" | "3", label: o.label }))} onChange={(v) => void save({ min_importance: Number(v) as NewsRule["min_importance"] })} />
+        </Row>
+        <ChipRow label="Currencies">
+          {currencyChoices(rule.currencies).map((c) => (
+            <Chip key={c} on={rule.currencies.includes(c)} onClick={() => void save({ currencies: toggleCurrency(rule.currencies, c) })}>
+              {c}
+            </Chip>
+          ))}
+          {rule.currencies.length === 0 && <span className="text-[12px] text-[var(--muted)]">none selected = all currencies</span>}
+        </ChipRow>
+        <RuleChannels value={rule.channels} tgLinked={tgLinked} onChange={(channels) => void save({ channels })} />
+      </div>
+      <p className="max-w-[460px] text-[12px] leading-relaxed text-[var(--muted)]">
+        Lịch lấy từ MT5 (EA gửi lên). Các sự kiện cùng giờ gộp thành một tin; sự kiện không có giờ cụ thể (cả ngày, dự kiến) không được nhắc. Backend nhắc cả khi tắt tab, miễn là backend đang chạy.
+      </p>
+    </>
+  );
+}
+
+function TradeRuleSection({ rule, tgLinked }: { rule: TradeRule; tgLinked: boolean }) {
+  const save = (patch: Partial<TradeRule>) => saveRule("trade", rule, patch, tgLinked);
+  const dim = rule.enabled ? "" : "opacity-55";
+  return (
+    <>
+      <Section>Trading events</Section>
+      <CheckRow label="Notify on SL / TP and pending fills" checked={rule.enabled} wide onChange={(v) => void save({ enabled: v })} />
+      <div className={dim}>
+        <CheckRow label="Stop loss hit" checked={rule.sl} indent wide onChange={(v) => void save({ sl: v })} />
+        <CheckRow label="Take profit hit" checked={rule.tp} indent wide onChange={(v) => void save({ tp: v })} />
+        <CheckRow label="Pending order filled" checked={rule.fill} indent wide onChange={(v) => void save({ fill: v })} />
+        <RuleChannels value={rule.channels} tgLinked={tgLinked} onChange={(channels) => void save({ channels })} />
+      </div>
+      <p className="max-w-[460px] text-[12px] leading-relaxed text-[var(--muted)]">
+        Theo dõi account MT5 đang kết nối (EA phải online); vị thế bị stop out luôn được báo. Deal xảy ra lúc backend tắt được báo bù khi nối lại, gắn &quot;(trễ)&quot;. Lệnh thị trường và đóng tay không báo.
+      </p>
+    </>
+  );
+}
+
 function AlertsTab() {
   const status = useAuthStore((st) => st.status);
   const prefs = useAlertPrefs();
@@ -445,8 +558,12 @@ function AlertsTab() {
   const [linking, setLinking] = useState(false);
   const user = status === "user";
 
+  const rules = useRulesStore((st) => st.rules);
   useEffect(() => {
-    if (user) void useAlertStore.getState().refreshChannels();
+    if (user) {
+      void useAlertStore.getState().refreshChannels();
+      void useRulesStore.getState().load();
+    }
   }, [user]);
 
   // Đang chờ người dùng bấm Start ở Telegram: hỏi lại trạng thái cho tới khi liên kết xong (hoặc hết hạn mã)
@@ -556,6 +673,17 @@ function AlertsTab() {
                 Cài MetaTrader 5 trên điện thoại, lấy MetaQuotes ID (Settings → Messages) và nhập vào MT5 trên máy này: Tools → Options → Notifications, tick Enable Push Notifications. Điện thoại nhận theo
                 terminal MT5, không theo tài khoản Wickloom. EA cần bản 2.19+ (biên dịch lại bằng F7). Tối đa 8 tin/phút; tin dồn dập được gộp.
               </p>
+            </>
+          )}
+          {rules ? (
+            <>
+              <NewsRuleSection rule={rules.news} tgLinked={!!tg?.linked} />
+              <TradeRuleSection rule={rules.trade} tgLinked={!!tg?.linked} />
+            </>
+          ) : (
+            <>
+              <Section>Economic news reminders</Section>
+              <p className="text-[var(--muted)]">Đang tải…</p>
             </>
           )}
         </>

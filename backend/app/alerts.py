@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from . import config, geometry, mt5, notify, state
+from . import config, geometry, indicators, mt5, notify, state
 from .aggregator import bar_open
 from .auth import current_user
 from .config import TF_SECONDS
@@ -28,9 +28,16 @@ MAX_NAME = 60
 MAX_MESSAGE = 200
 LOG_KEEP = 500  # dòng nhật ký giữ lại mỗi user
 REFIRE_GAP = 5.0  # "every_time" nổ lại tối đa mỗi chừng này giây (giá dao động quanh mức không được làm ngập Telegram)
+# Báo bù (mục 3 của Phase 3): alert không thấy tick nào quá CATCHUP_GAP giây rồi lại có tick (backend / EA / mạng tắt) thì soát nến M1 của khoảng đứt xem giá có chạm mức không.
+CATCHUP_GAP = 120
+CATCHUP_SETTLE = 3.0  # nến M1 hết đổ về chừng này giây thì coi là EA nạp xong
+CATCHUP_WAIT = 90.0  # tối đa chờ EA nạp nến (EA tắt lại / nạp hỏng) rồi soát với những gì đang có
+CATCHUP_MAX = 3 * 86400  # chỉ soát chừng này giây gần nhất của khoảng đứt
+IND_EVERY = 2.0  # alert theo indicator được xét chừng này giây một lần
+CHECKPOINT_EVERY = 5.0  # ghi mốc "đã đánh giá tới đâu" của alert xuống DB nhiều nhất chừng này giây một lần
 TEST_GAP = 3.0  # nút "Gửi thử": giãn cách giữa hai lần của cùng user + kênh
 
-COLS = ("id", "user_id", "symbol", "cond", "level", "trig", "tf", "expires_at", "name", "message", "channels", "state", "created_at", "fired_at", "fire_count", "drawing")
+COLS = ("id", "user_id", "symbol", "cond", "level", "trig", "tf", "expires_at", "name", "message", "channels", "state", "created_at", "fired_at", "fire_count", "drawing", "checked_at", "indicator")
 
 with state.meta.tx() as _db:
     _db.execute(
@@ -47,8 +54,17 @@ with state.meta.tx() as _db:
     # Cột thêm ở Phase 2 (alert trên hình vẽ): DB đã có từ Phase 1 thì thêm vào bảng cũ
     if "drawing" not in {r[1] for r in _db.execute("PRAGMA table_info(alerts)")}:
         _db.execute("ALTER TABLE alerts ADD COLUMN drawing TEXT")
+    if "indicator" not in {r[1] for r in _db.execute("PRAGMA table_info(alerts)")}:  # Phase 3: alert theo indicator (indicators.clean_spec)
+        _db.execute("ALTER TABLE alerts ADD COLUMN indicator TEXT")
+    if "checked_at" not in {r[1] for r in _db.execute("PRAGMA table_info(alerts)")}:  # Phase 3: giờ tick cuối alert đã được đánh giá (báo bù); NULL = alert cũ, không báo bù
+        _db.execute("ALTER TABLE alerts ADD COLUMN checked_at INTEGER")
     if "label" not in {r[1] for r in _db.execute("PRAGMA table_info(alert_log)")}:
         _db.execute("ALTER TABLE alert_log ADD COLUMN label TEXT NOT NULL DEFAULT ''")
+    # Cột thêm ở Phase 3: loại tin (alert giá / tin kinh tế / giao dịch), nội dung của tin không phải alert giá, cờ báo bù
+    _log_cols = {r[1] for r in _db.execute("PRAGMA table_info(alert_log)")}
+    for _col, _ddl in (("kind", "TEXT NOT NULL DEFAULT 'price'"), ("text", "TEXT NOT NULL DEFAULT ''"), ("late", "INTEGER NOT NULL DEFAULT 0")):
+        if _col not in _log_cols:
+            _db.execute(f"ALTER TABLE alert_log ADD COLUMN {_col} {_ddl}")
     _db.execute("CREATE TABLE IF NOT EXISTS notify_channels (user_id TEXT NOT NULL, kind TEXT NOT NULL, config TEXT NOT NULL, PRIMARY KEY (user_id, kind))")
 
 
@@ -70,11 +86,20 @@ class Alert:
     fired_at: Optional[int] = None
     fire_count: int = 0
     drawing: Optional[Dict[str, Any]] = None  # bản sao hình vẽ (geometry.clean_spec); None = alert theo mức giá cố định `level`
+    checked_at: Optional[int] = None  # giờ (UTC giây) của tick cuối đã đánh giá, hoặc lúc tạo / sửa: mốc đầu của đoạn cần báo bù
+    indicator: Optional[Dict[str, Any]] = None  # alert theo indicator (indicators.clean_spec): so một đường của indicator với `level` / giá / đường khác; None = alert giá
     # Chỉ trong bộ nhớ: backend khởi động lại thì đặt lại, nên không bao giờ bắn nhầm vì một mốc cũ.
     ref: Optional[float] = field(default=None, repr=False)  # giá tick trước, mốc để phát hiện cắt
     ref_close: Optional[float] = field(default=None, repr=False)  # giá đóng nến trước ("once_per_bar_close")
     last_bar: Optional[int] = field(default=None, repr=False)  # nến đã nổ ("once_per_bar")
     last_fire: float = field(default=0.0, repr=False)
+    flushed: Optional[int] = field(default=None, repr=False)  # `checked_at` đã ghi xuống DB
+    catch: Optional[Tuple[int, int, float]] = field(default=None, repr=False)  # đang chờ báo bù: (đầu khoảng đứt, giờ tick đầu sau khoảng đứt, giờ phát hiện)
+    # Alert theo indicator, chỉ trong bộ nhớ: mốc nến đã đóng đã xét ("đóng nến"), `checked_at` lúc nạp (chưa bị tick mới ghi đè), giá trị lần xét trước (đường, thứ được so) và khoá để khỏi tính lại khi chưa gì đổi
+    ind_bar: Optional[int] = field(default=None, repr=False)
+    ind_since: Optional[int] = field(default=None, repr=False)
+    ind_ref_b: Optional[float] = field(default=None, repr=False)
+    ind_key: Optional[Tuple[float, int]] = field(default=None, repr=False)
     # Alert trên hình vẽ, chỉ trong bộ nhớ: dải giá [lo, hi] của hình ở nến hiện tại (tính lại mỗi nến), trạng thái hình học ("ok" / "wait" / "done") và mốc trước đó
     geo_bar: Optional[int] = field(default=None, repr=False)
     geo_state: str = field(default="wait", repr=False)
@@ -85,7 +110,7 @@ class Alert:
     def public(self, with_user: bool = False) -> Dict[str, Any]:
         d = {"id": self.id, "symbol": self.symbol, "cond": self.cond, "level": self.level, "trigger": self.trigger, "tf": self.tf, "expires_at": self.expires_at,
              "name": self.name, "message": self.message, "channels": dict(self.channels), "state": self.state, "created_at": self.created_at,
-             "fired_at": self.fired_at, "fire_count": self.fire_count, "drawing": self.drawing}
+             "fired_at": self.fired_at, "fire_count": self.fire_count, "drawing": self.drawing, "indicator": self.indicator}
         if with_user:
             d["user_id"] = self.user_id
         return d
@@ -97,6 +122,7 @@ def _from_row(r: Any) -> Alert:
     chans = json.loads(d["channels"])
     d["channels"] = {k: bool(chans.get(k)) for k in CHANNEL_KEYS}
     d["drawing"] = json.loads(d["drawing"]) if d["drawing"] else None
+    d["indicator"] = json.loads(d["indicator"]) if d["indicator"] else None
     return Alert(**d)
 
 
@@ -124,7 +150,7 @@ def db_live_count(user_id: str) -> int:
 
 def db_save(a: Alert) -> None:
     vals = (a.id, a.user_id, a.symbol, a.cond, a.level, a.trigger, a.tf, a.expires_at, a.name, a.message, json.dumps(a.channels), a.state, a.created_at, a.fired_at, a.fire_count,
-            json.dumps(a.drawing) if a.drawing else None)
+            json.dumps(a.drawing) if a.drawing else None, a.checked_at, json.dumps(a.indicator) if a.indicator else None)
     with state.meta.tx() as db:
         db.execute(f"INSERT INTO alerts ({','.join(COLS)}) VALUES ({','.join('?' * len(COLS))}) ON CONFLICT(id) DO UPDATE SET "
                    + ",".join(f"{c}=excluded.{c}" for c in COLS[1:]), vals)
@@ -136,6 +162,12 @@ def db_persist_fire(a: Alert) -> None:
         db.execute("UPDATE alerts SET state=?, fired_at=?, fire_count=? WHERE id=?", (a.state, a.fired_at, a.fire_count, a.id))
 
 
+def db_checkpoint(rows: List[Tuple[int, str]]) -> None:
+    """(checked_at, id) của các alert vừa được đánh giá tiếp: ghi gộp một lần."""
+    with state.meta.tx() as db:
+        db.executemany("UPDATE alerts SET checked_at=? WHERE id=? AND state='active'", rows)
+
+
 def db_delete(user_id: str, alert_id: str) -> bool:
     with state.meta.tx() as db:
         return db.execute("DELETE FROM alerts WHERE id=? AND user_id=?", (alert_id, user_id)).rowcount > 0
@@ -145,8 +177,9 @@ def log_add(f: Fired) -> int:
     a = f.alert
     with state.meta.tx() as db:
         cur = db.execute(
-            "INSERT INTO alert_log (alert_id, user_id, time, symbol, name, message, cond, level, price, label) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (a["id"], a["user_id"], f.time, a["symbol"], a["name"], a["message"], a["cond"], a["level"], f.price, (a.get("drawing") or {}).get("label", "")),
+            "INSERT INTO alert_log (alert_id, user_id, time, symbol, name, message, cond, level, price, label, kind, text, late) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (a["id"], a["user_id"], f.time, a["symbol"], a["name"], a["message"], a["cond"], a["level"], f.price, (a.get("drawing") or {}).get("label", ""), f.kind,
+             f.line or (notify.condition_text(a) if a.get("indicator") else ""), int(f.late)),
         )
         db.execute("DELETE FROM alert_log WHERE user_id=? AND id NOT IN (SELECT id FROM alert_log WHERE user_id=? ORDER BY id DESC LIMIT ?)", (a["user_id"], a["user_id"], LOG_KEEP))
         return int(cur.lastrowid)
@@ -158,9 +191,9 @@ def log_set(log_id: int, results: Dict[str, str]) -> None:
 
 
 def log_list(user_id: str, limit: int) -> List[Dict[str, Any]]:
-    cols = ("id", "alert_id", "time", "symbol", "name", "message", "cond", "level", "price", "label", "results")
+    cols = ("id", "alert_id", "time", "symbol", "name", "message", "cond", "level", "price", "label", "kind", "text", "late", "results")
     rows = _query(f"SELECT {','.join(cols)} FROM alert_log WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit))
-    return [{**dict(zip(cols, r)), "results": json.loads(r[-1])} for r in rows]
+    return [{**dict(zip(cols, r)), "late": bool(r[-2]), "results": json.loads(r[-1])} for r in rows]
 
 
 def channel_get(user_id: str, kind: str) -> Optional[Dict[str, Any]]:
@@ -193,25 +226,56 @@ def hit(cond: str, level: float, prev: Optional[float], p: float, prev_level: Op
     return up if cond == "cross_up" else down if cond == "cross_down" else (up or down)
 
 
+def touch(cond: str, level: float, prev: Optional[float], bar: Dict[str, Any]) -> bool:
+    """Nến M1 `bar` (khi `prev` = giá đóng nến liền trước) có chạm điều kiện không: dùng để báo bù, chỉ biết khoảng giá của từng phút nên hơi rộng hơn `hit` trên từng tick.
+    Cắt lên = prev < mức <= đỉnh nến, cắt xuống = prev > mức >= đáy nến; gt / lt chỉ cần đỉnh / đáy nến vượt mức."""
+    if cond == "gt":
+        return bar["h"] > level
+    if cond == "lt":
+        return bar["l"] < level
+    p = bar["o"] if prev is None else prev
+    up, down = p < level <= bar["h"], p > level >= bar["l"]
+    return up if cond == "cross_up" else down if cond == "cross_down" else (up or down)
+
+
 class Engine:
     """Giữ alert đang chạy trong bộ nhớ theo symbol (chỉ đọc DB khi nạp và khi API đổi), so điều kiện trên từng tick / nến đóng.
     `on_price` chạy trên event loop của tick: không mạng, không chờ lâu. Việc giao thông báo giao cho `fire` (hàng đợi của Dispatcher)."""
 
     def __init__(self, fire: Callable[[Fired], None], persist: Callable[[Alert], None], clock: Callable[[], float] = time.time,
-                 logical: Optional[Callable[[str, str, List[int], int, int], Optional[Tuple[List[float], float]]]] = None):
+                 logical: Optional[Callable[[str, str, List[int], int, int], Optional[Tuple[List[float], float]]]] = None,
+                 bars: Optional[Callable[[str, int, int], List[Dict[str, Any]]]] = None, request: Optional[Callable[[str], None]] = None,
+                 checkpoint: Optional[Callable[[List[Tuple[int, str]]], None]] = None,
+                 history: Optional[Callable[[str, str, int], List[Dict[str, Any]]]] = None, live: Optional[Callable[[str, str], Optional[Dict[str, Any]]]] = None):
         self.fire = fire
         self.persist = persist
         self.clock = clock
         self.logical = logical or (lambda symbol, tf, times, step, now_bar: state.bars.logical(symbol, tf, times, step, now_bar))  # chỉ số nến của điểm neo hình vẽ (BarStore.logical)
+        self.bars = bars or (lambda symbol, lo, hi: state.bars.query(symbol, "M1", lo, hi, limit=CATCHUP_MAX // 60 + 1))  # nến M1 trong [lo, hi) để báo bù
+        self.request = request or (lambda symbol: state.request_catchup(symbol, "M1"))  # xin EA nạp nến M1 của khoảng đứt
+        self.checkpoint = checkpoint or db_checkpoint
+        self.history = history or (lambda symbol, tf, count: state.bars.query(symbol, tf, limit=count))  # `count` nến mới nhất của (symbol, tf), tăng dần (có thể gồm nến đang chạy)
+        self.live = live or (lambda symbol, tf: state.aggregator.cur.get((symbol, tf)))  # nến đang chạy do aggregator gom từ tick
         self._lock = threading.RLock()
         self._by_symbol: Dict[str, List[Alert]] = {}
+        self._bars_seen: Dict[str, float] = {}  # symbol -> lúc nhận thông điệp nến M1 gần nhất từ EA
+        self._last: Dict[str, Tuple[int, float]] = {}  # symbol -> (giờ, giá) của tick mới nhất: alert theo indicator xét theo giá này
 
     def symbols(self) -> Set[str]:
         return {s for s, lst in list(self._by_symbol.items()) if lst}
 
     def bar_pairs(self) -> Set[Tuple[str, str]]:
         """(symbol, tf) mà alert trên hình vẽ cần có nến đầy đủ trong DB (đếm chỉ số nến): khi EA nối lại thì xin nạp bù."""
-        return {(a.symbol, a.tf) for lst in list(self._by_symbol.values()) for a in lst if a.drawing}
+        return {(a.symbol, a.tf) for lst in list(self._by_symbol.values()) for a in lst if a.drawing or a.indicator}
+
+    def history_needs(self) -> Dict[Tuple[str, str], int]:
+        """(symbol, tf) -> số nến đã đóng cần có trong DB để indicator của alert hội tụ (alert theo indicator)."""
+        out: Dict[Tuple[str, str], int] = {}
+        for lst in list(self._by_symbol.values()):
+            for a in lst:
+                if a.indicator:
+                    out[(a.symbol, a.tf)] = max(out.get((a.symbol, a.tf), 0), indicators.history_need(a.indicator))
+        return out
 
     def sync(self, alert_id: str, new: Optional[Alert]) -> None:
         """Thay alert `alert_id` trong bộ nhớ bằng `new` (None = bỏ). Chỉ alert active mới ở lại; mốc giá đặt lại."""
@@ -219,8 +283,10 @@ class Engine:
             for lst in self._by_symbol.values():
                 lst[:] = [a for a in lst if a.id != alert_id]
             if new is not None and new.state == "active":
+                new.flushed = new.checked_at
+                new.ind_since = new.checked_at
                 self._by_symbol.setdefault(new.symbol, []).append(new)
-                if new.trigger == "once_per_bar_close" or new.drawing:
+                if new.trigger == "once_per_bar_close" or new.drawing or new.indicator:
                     state.aggregator.watch(new.symbol, new.tf)  # nến đóng của TF này phải được dựng dù không chart nào xem
 
     def load(self, alerts: Iterable[Alert]) -> None:
@@ -233,7 +299,8 @@ class Engine:
         if lst is not None:
             lst[:] = [x for x in lst if x.id != a.id]
 
-    def _fired(self, a: Alert, price: float, now: float) -> Fired:
+    def _fired(self, a: Alert, price: float, now: float, late_at: Optional[int] = None, values: Optional[Tuple[float, float]] = None) -> Fired:
+        """`late_at`: báo bù, giờ (UTC giây) của nến đã chạm mức; thông báo mang giờ đó và nhãn "(trễ)". `values`: (đường indicator, thứ được so) lúc nổ."""
         a.fire_count += 1
         a.fired_at = int(now)
         a.last_fire = now
@@ -242,7 +309,9 @@ class Engine:
         snap = a.public(with_user=True)
         if a.drawing and a.band:
             snap["now"] = list(a.band)  # dải giá của hình lúc nổ (cho nội dung thông báo)
-        return Fired(snap, price, int(now))
+        if values is not None:
+            snap["now"] = list(values)
+        return Fired(snap, price, int(now) if late_at is None else late_at, late=late_at is not None)
 
     def _refresh_geo(self, a: Alert, bar: int) -> None:
         """Dải giá của hình ở nến `bar` (chỉ đổi khi sang nến mới nên không tính mỗi tick)."""
@@ -274,14 +343,19 @@ class Engine:
     def on_price(self, symbol: str, t_msc: int, price: float, offset: int) -> None:
         if not self._by_symbol.get(symbol):
             return
+        self._last[symbol] = (t_msc // 1000, price)
         self._run(lambda: self._on_price(symbol, t_msc, price, offset))
 
     def _on_price(self, symbol: str, t_msc: int, price: float, offset: int) -> None:
         now = self.clock()
         fired: List[Fired] = []
         changed: List[Alert] = []
+        gapped = False
         with self._lock:
             for a in list(self._by_symbol.get(symbol, ())):
+                gapped = self._note_tick(a, t_msc // 1000, now) or gapped
+                if a.indicator:  # xét ở thread nền (eval_indicators), không trên event loop của tick
+                    continue
                 if a.drawing and a.geo_bar != bar_open(t_msc // 1000, a.tf, offset):
                     self._refresh_geo(a, bar_open(t_msc // 1000, a.tf, offset))
                 prev, a.ref = a.ref, price
@@ -306,6 +380,8 @@ class Engine:
                 fired.append(self._fired(a, price, now))
                 changed.append(a)
         self._emit(fired, changed)
+        if gapped:
+            self.request(symbol)  # ngoài khoá: gửi lệnh xuống EA
 
     def on_bar_close(self, symbol: str, tf: str, bar: Dict[str, Any]) -> None:
         if not self._by_symbol.get(symbol):
@@ -319,7 +395,7 @@ class Engine:
         changed: List[Alert] = []
         with self._lock:
             for a in list(self._by_symbol.get(symbol, ())):
-                if a.trigger != "once_per_bar_close" or a.tf != tf:
+                if a.trigger != "once_per_bar_close" or a.tf != tf or a.indicator:
                     continue
                 prev, a.ref_close = a.ref_close, close
                 prev_band, a.ref_close_band = a.ref_close_band, a.band if a.geo_bar == bar["t"] else None  # dải của chính nến vừa đóng
@@ -335,6 +411,178 @@ class Engine:
         if a.drawing is None:
             return hit(a.cond, a.level, prev, close)
         return a.geo_bar == bar_t and self._hit(a, prev, prev_band, close)
+
+    # --- báo bù lần giá chạm lúc không có tick -------------------------------------------------------------------------------------------------------------
+
+    def _note_tick(self, a: Alert, t: int, now: float) -> bool:
+        """Tick giờ `t` tới alert `a`: cập nhật mốc đã đánh giá. True nếu vừa hết một khoảng đứt dài (cần soát nến M1 của khoảng đó). Chỉ alert theo mức giá cố định
+        và không phải "đóng nến" mới báo bù bằng nến M1 được (đường trên hình vẽ đổi mức theo từng nến, "đóng nến" xét giá đóng của khung riêng, indicator tự bù theo nến đóng)."""
+        gap = a.checked_at is not None and t - a.checked_at > CATCHUP_GAP and a.catch is None and a.drawing is None and a.indicator is None and a.trigger != "once_per_bar_close"
+        if gap:
+            a.catch = (a.checked_at, t, now)
+        if a.checked_at is None or t > a.checked_at:
+            a.checked_at = t
+        return gap
+
+    def on_bars(self, symbol: str) -> None:
+        """EA vừa gửi nến M1 của `symbol` (tcp_server): ghi giờ để biết khi nào việc nạp bù đã lắng xuống."""
+        self._bars_seen[symbol] = self.clock()
+
+    def _catch_up(self, a: Alert, now: float) -> Optional[Fired]:
+        """Soát nến M1 của khoảng đứt xem giá có chạm mức của `a` không; nổ tối đa một lần (giờ nến chạm đầu tiên). Bắt đầu từ nến SAU nến của lần đánh giá cuối (nến đó phần lớn đã được
+        đánh giá trực tiếp nên soát lại sẽ báo trùng) và dừng trước nến chứa tick đầu tiên sau khoảng đứt (các tick từ đó đánh giá trực tiếp). Alert đã nổ từ lúc đó thì thôi."""
+        assert a.catch is not None
+        since, until, _ = a.catch
+        a.catch = None
+        if a.state != "active" or (a.fired_at is not None and a.fired_at >= since):
+            return None
+        first, end = since // 60 * 60, until // 60 * 60
+        prev: Optional[float] = None
+        for b in self.bars(a.symbol, max(first, end - CATCHUP_MAX), end):
+            if b["t"] == first:  # nến của lần đánh giá cuối: chỉ làm mốc giá
+                prev = b["c"]
+                continue
+            if a.expires_at and b["t"] >= a.expires_at:
+                break
+            if touch(a.cond, a.level, prev, b):
+                return self._fired(a, a.level, now, late_at=b["t"])
+            prev = b["c"]
+        return None
+
+    def run_catchups(self) -> None:
+        """Soát các alert đã phát hiện khoảng đứt mà EA đã nạp xong nến M1 (lắng CATCHUP_SETTLE giây) hoặc đã chờ quá CATCHUP_WAIT."""
+        now = self.clock()
+        fired: List[Fired] = []
+        changed: List[Alert] = []
+        with self._lock:
+            for a in [a for lst in self._by_symbol.values() for a in lst if a.catch is not None]:
+                started = a.catch[2]  # type: ignore[index]
+                seen = self._bars_seen.get(a.symbol, 0.0)
+                if not ((seen >= started and now - seen >= CATCHUP_SETTLE) or now - started >= CATCHUP_WAIT):
+                    continue
+                f = self._catch_up(a, now)
+                if f is not None:
+                    fired.append(f)
+                    changed.append(a)
+        self._emit(fired, changed)
+
+    def flush(self) -> None:
+        """Ghi mốc `checked_at` mới xuống DB (không ghi mỗi tick): khởi động lại thì biết đã đánh giá tới đâu."""
+        with self._lock:
+            rows = [(a.checked_at, a.id) for lst in self._by_symbol.values() for a in lst if a.checked_at is not None and a.checked_at != a.flushed]
+            for lst in self._by_symbol.values():
+                for a in lst:
+                    a.flushed = a.checked_at
+        if rows:
+            self.checkpoint(rows)  # type: ignore[arg-type]
+
+    # --- alert theo indicator ------------------------------------------------------------------------------------------------------------------------------
+
+    def eval_indicators(self) -> None:
+        """Xét mọi alert theo indicator (thread nền, vài giây một lần): tính indicator trên nến đã đóng trong DB (cộng nến đang chạy với giá tick mới nhất khi nổ theo giá),
+        rồi so điều kiện như alert giá. "Đóng nến": mỗi nến vừa đóng một lần, theo thứ tự, nến chưa kịp xét lúc backend / EA tắt được xét bù (gắn "(trễ)")."""
+        now = self.clock()
+        with self._lock:
+            targets = [a for lst in self._by_symbol.values() for a in lst if a.indicator]
+        cache: Dict[Tuple[str, str, int], List[Dict[str, Any]]] = {}
+        for a in targets:
+            self._run(lambda a=a: self._eval_indicator(a, now, cache))  # type: ignore[misc]
+
+    def _eval_indicator(self, a: Alert, now: float, cache: Dict[Tuple[str, str, int], List[Dict[str, Any]]]) -> None:
+        spec = a.indicator
+        assert spec is not None
+        need = indicators.history_need(spec)
+        rows = cache.get((a.symbol, a.tf, need))
+        if rows is None:
+            rows = cache[(a.symbol, a.tf, need)] = self.history(a.symbol, a.tf, need + 2)
+        step = TF_SECONDS[a.tf]
+        closed = [b for b in rows if b["t"] + step <= now]
+        if len(closed) < 2:
+            return  # chưa đủ nến (EA chưa nạp xong lịch sử)
+        fired: Optional[Fired] = None
+        if a.trigger == "once_per_bar_close":
+            fired = self._eval_closed(a, closed, step, now)
+        else:
+            fired = self._eval_live(a, closed, step, now)
+        if fired is not None:
+            self._emit([fired], [a])
+
+    @staticmethod
+    def _ind_pair(a: Alert, line: List[float], other: Optional[List[float]], i: int) -> Tuple[float, float, Optional[float], Optional[float]]:
+        """(đường, thứ được so) tại nến i và nến liền trước (None nếu thiếu số): thứ được so là `level` khi alert so với một mức cố định."""
+        cur_b = a.level if other is None else other[i]
+        prev_a, prev_b = line[i - 1], (a.level if other is None else other[i - 1])
+        ok_prev = not (math.isnan(prev_a) or math.isnan(prev_b))
+        return line[i], cur_b, (prev_a if ok_prev else None), (prev_b if ok_prev else None)
+
+    def _ind_hit(self, a: Alert, line: List[float], other: Optional[List[float]], i: int) -> Optional[Tuple[float, float]]:
+        v, lv, pv, plv = self._ind_pair(a, line, other, i)
+        if math.isnan(v) or math.isnan(lv):
+            return None
+        return (v, lv) if hit(a.cond, lv, pv, v, plv) else None
+
+    def _eval_closed(self, a: Alert, closed: List[Dict[str, Any]], step: int, now: float) -> Optional[Fired]:
+        line, other = indicators.compute(a.indicator, closed)  # type: ignore[arg-type]
+        with self._lock:
+            if a.state != "active":
+                return None
+            last_t = closed[-1]["t"]
+            if a.ind_bar is None:  # lần xét đầu: mốc là nến cuối đã đóng lúc alert được tạo / lần cuối được đánh giá (bắt đầu bù từ đó)
+                since = now if a.ind_since is None else a.ind_since
+                a.ind_bar = max((b["t"] for b in closed if b["t"] + step <= since), default=closed[0]["t"])
+            found: Optional[Tuple[int, Tuple[float, float]]] = None
+            for i in range(1, len(closed)):
+                if closed[i]["t"] > a.ind_bar:
+                    vals = self._ind_hit(a, line, other, i)
+                    if vals is not None:
+                        found = (i, vals)
+                        break
+            a.ind_bar = last_t
+            if found is None:
+                return None
+            i, vals = found
+            late = i != len(closed) - 1
+            return self._fired(a, closed[i]["c"], now, late_at=closed[i]["t"] + step if late else None, values=vals)
+
+    def _eval_live(self, a: Alert, closed: List[Dict[str, Any]], step: int, now: float) -> Optional[Fired]:
+        last = self._last.get(a.symbol)
+        if last is None:
+            return None  # chưa có tick nào của symbol này
+        price = last[1]
+        key = (price, closed[-1]["t"])
+        with self._lock:
+            if a.ind_key == key:
+                return None  # giá và nến đã đóng đều chưa đổi từ lần xét trước
+        fb = self.live(a.symbol, a.tf)
+        if fb is not None and fb["t"] > closed[-1]["t"]:
+            forming = {**fb, "c": price}
+        else:
+            forming = {"t": closed[-1]["t"] + step, "o": price, "h": price, "l": price, "c": price, "v": 0.0}
+        line, other = indicators.compute(a.indicator, closed + [forming])  # type: ignore[arg-type]
+        i = len(line) - 1
+        v, lv = self._ind_pair(a, line, other, i)[:2]
+        with self._lock:
+            if a.state != "active":
+                return None
+            prev, prev_b = a.ref, a.ind_ref_b
+            a.ref, a.ind_ref_b, a.ind_key = (None if math.isnan(v) else v), (None if math.isnan(lv) else lv), key
+            if math.isnan(v) or math.isnan(lv):
+                return None
+            if not hit(a.cond, lv, prev, v, prev_b if other is not None else None):
+                return None
+            if a.trigger == "once_per_bar":
+                if a.last_bar == forming["t"]:
+                    return None
+                a.last_bar = forming["t"]
+            elif a.trigger == "every_time" and now - a.last_fire < REFIRE_GAP:
+                return None
+            return self._fired(a, price, now, values=(v, lv))
+
+    def housekeeping(self) -> None:
+        """Việc định kỳ ở thread nền: hết hạn alert, báo bù, ghi mốc."""
+        self.sweep()
+        self.run_catchups()
+        self.flush()
 
     def sweep(self) -> None:
         """Hết hạn cho alert quá `expires_at` (kể cả symbol đang không có tick, vd cuối tuần)."""
@@ -378,9 +626,15 @@ state.symbol_sources.append(engine.symbols)
 engine.load(db_active())
 
 
+housekeeper = notify.Ticker(CHECKPOINT_EVERY, engine.housekeeping, "alert-housekeeping")
+indicator_ticker = notify.Ticker(IND_EVERY, engine.eval_indicators, "alert-indicators")
+
+
 def start() -> None:
-    """Bật thread nền (giao thông báo, long-poll Telegram nếu có token). Gọi lúc backend khởi động; gọi lại không sao."""
+    """Bật thread nền (giao thông báo, việc định kỳ của engine, long-poll Telegram nếu có token). Gọi lúc backend khởi động; gọi lại không sao."""
     dispatcher.start()
+    housekeeper.start()
+    indicator_ticker.start()
     if telegram.configured:
         linker.start()
 
@@ -402,6 +656,7 @@ class AlertIn(BaseModel):
     message: str = ""
     channels: Dict[str, bool] = {"web": True}
     drawing: Optional[Dict[str, Any]] = None  # bản sao hình vẽ (geometry.clean_spec): alert đi theo hình, `level` chỉ để hiển thị
+    indicator: Optional[Dict[str, Any]] = None  # alert theo indicator (indicators.clean_spec): `level` là thứ được so khi vs = "level"
 
 
 class AlertPatch(BaseModel):
@@ -415,6 +670,7 @@ class AlertPatch(BaseModel):
     message: Optional[str] = None
     channels: Optional[Dict[str, bool]] = None
     drawing: Optional[Dict[str, Any]] = None  # hình vẽ vừa được kéo / sửa: thay bản sao toạ độ (alert phải đã gắn hình)
+    indicator: Optional[Dict[str, Any]] = None  # đổi đường / thứ được so / tham số của alert theo indicator (cùng indicator)
     unlink: bool = False  # hình đã bị xoá nhưng giữ alert: bỏ liên kết, alert tiếp tục chạy với bản sao toạ độ cuối
     state: Optional[str] = None  # "active" | "paused" (bật lại alert đã nổ / hết hạn cũng qua đây)
 
@@ -446,7 +702,7 @@ def _check_level(v: float) -> float:
     return v
 
 
-def _check_channels(user: Dict[str, Any], ch: Dict[str, bool]) -> Dict[str, bool]:
+def check_channels(user: Dict[str, Any], ch: Dict[str, bool]) -> Dict[str, bool]:
     out = {k: bool(ch.get(k)) for k in CHANNEL_KEYS}
     if not any(out.values()):
         raise _bad("Chọn ít nhất một kênh thông báo")
@@ -468,6 +724,13 @@ def _check_drawing(raw: Dict[str, Any]) -> Dict[str, Any]:
         raise _bad(str(exc))
 
 
+def _check_indicator(raw: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        return indicators.clean_spec(raw)
+    except ValueError as exc:
+        raise _bad(str(exc))
+
+
 def _check_enums(cond: str, trigger: str, tf: str, drawing: Optional[Dict[str, Any]] = None) -> None:
     if cond not in (CONDS[:5] if drawing is None else geometry.conds_for(drawing)):
         raise _bad("Điều kiện không hợp lệ")
@@ -478,11 +741,15 @@ def _check_enums(cond: str, trigger: str, tf: str, drawing: Optional[Dict[str, A
 
 
 def _apply(a: Alert) -> Alert:
-    """Ghi DB rồi đồng bộ engine (đặt lại mốc giá) và báo EA stream tick của symbol này."""
+    """Ghi DB rồi đồng bộ engine (đặt lại mốc giá) và báo EA stream tick của symbol này. Tạo / sửa alert đặt lại mốc báo bù: không soát ngược về trước lúc này."""
+    a.checked_at = int(time.time())
+    a.catch = None
     db_save(a)
     engine.sync(a.id, a)
     state.push_subscribe()
-    if a.drawing and a.state == "active":
+    if a.indicator and a.state == "active":
+        state.ensure_history(a.symbol, a.tf, indicators.history_need(a.indicator))  # indicator cần đủ lịch sử nến đã đóng để giá trị hội tụ
+    elif a.drawing and a.state == "active":
         state.request_catchup(a.symbol, a.tf)  # đếm chỉ số nến cần đủ nến của TF này trong DB (chart không nhất thiết đang mở)
     return a
 
@@ -495,13 +762,16 @@ def list_alerts(user: Dict[str, Any] = Depends(current_user)):
 
 @router.post("", status_code=201)
 def create_alert(body: AlertIn, user: Dict[str, Any] = Depends(current_user)):
+    if body.drawing is not None and body.indicator is not None:
+        raise _bad("Alert chỉ đi theo hình vẽ hoặc indicator, không cả hai")
     spec = _check_drawing(body.drawing) if body.drawing is not None else None
+    ind = _check_indicator(body.indicator) if body.indicator is not None else None
     _check_enums(body.cond, body.trigger, body.tf, spec)
     if db_live_count(user["id"]) >= MAX_LIVE:
         raise HTTPException(409, f"Tối đa {MAX_LIVE} alert mỗi tài khoản")
     a = Alert(id=uuid.uuid4().hex, user_id=user["id"], symbol=_check_symbol(body.symbol), cond=body.cond, level=_check_level(body.level), trigger=body.trigger, tf=body.tf,
               expires_at=_check_expiry(body.expires_at), name=_text(body.name, MAX_NAME, "Tên"), message=_text(body.message, MAX_MESSAGE, "Nội dung"),
-              channels=_check_channels(user, body.channels), state="active", created_at=int(time.time()), drawing=spec)
+              channels=check_channels(user, body.channels), state="active", created_at=int(time.time()), drawing=spec, indicator=ind)
     return _apply(a).public()
 
 
@@ -578,6 +848,13 @@ def patch_alert(alert_id: str, body: AlertPatch, user: Dict[str, Any] = Depends(
         if spec["type"] != a.drawing["type"]:
             raise _bad("Không đổi được loại hình vẽ của alert")
         a.drawing = spec
+    if body.indicator is not None:
+        if a.indicator is None:
+            raise _bad("Alert này không theo indicator")
+        spec = _check_indicator(body.indicator)
+        if spec["id"] != a.indicator["id"]:
+            raise _bad("Không đổi được indicator của alert")
+        a.indicator = spec
     if body.unlink and a.drawing is not None:
         a.drawing = {**a.drawing, "id": None}
     _check_enums(a.cond, a.trigger, a.tf, a.drawing)
@@ -590,7 +867,7 @@ def patch_alert(alert_id: str, body: AlertPatch, user: Dict[str, Any] = Depends(
     if body.message is not None:
         a.message = _text(body.message, MAX_MESSAGE, "Nội dung")
     if body.channels is not None:
-        a.channels = _check_channels(user, body.channels)
+        a.channels = check_channels(user, body.channels)
     if body.state is not None:
         if body.state == "active" and a.state in ("triggered", "expired"):
             if db_live_count(user["id"]) >= MAX_LIVE:

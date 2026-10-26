@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import accounts, alerts, auth, economic, me, mt5, state, tcp_server, trade
+from . import accounts, alerts, auth, economic, me, mt5, newswatch, rules, state, tcp_server, trade, tradewatch  # noqa: F401  (tradewatch tự đăng ký người nghe của mt5.registry)
 from .config import ALLOWED_ORIGINS, TF_SECONDS
 from .state import request_backfill
 from .tickdelta import TICK_DELTA_TF
@@ -33,6 +33,7 @@ app.include_router(mt5.router)
 app.include_router(trade.router)
 app.include_router(economic.router)
 app.include_router(alerts.router)
+app.include_router(rules.router)
 
 
 _push_subscribe = state.push_subscribe
@@ -47,6 +48,7 @@ async def _startup():
     state.ea_hub.set_loop(loop)
     app.state.ea_tcp_server = await tcp_server.start_server()
     alerts.start()
+    newswatch.start()
 
 
 @app.on_event("shutdown")

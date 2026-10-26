@@ -31,21 +31,43 @@ def fmt_price(p: float) -> str:
     return f"{p:.10g}"
 
 
+def fmt_value(v: float) -> str:
+    """Giá trị của đường indicator trong tin: tối đa 4 chữ số thập phân ("82.6657", "4012.35"), không đuôi 0."""
+    s = f"{v:.4f}".rstrip("0").rstrip(".")
+    return "0" if s in ("-0", "") else s
+
+
 def when(ts: int) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(ts))
 
 
 @dataclass
 class Fired:
-    """Một lần alert nổ: ảnh chụp alert (dict như API trả) + giá lúc nổ + giờ (epoch giây UTC)."""
+    """Một thông báo giao đi: ảnh chụp alert (dict như API trả) + giá lúc nổ + giờ (epoch giây UTC).
+    `late`: báo bù (giá đã chạm lúc backend / EA tắt, `time` là giờ nến chạm). `kind` != "price": tin không phải alert giá (tin kinh tế, SL/TP...) dựng bằng `notice`,
+    `line` là nội dung chính thay cho "điều kiện · giá"."""
     alert: Dict[str, Any]
     price: float
     time: int
+    late: bool = False
+    kind: str = "price"
+    line: str = ""
+
+
+def notice(user_id: str, kind: str, title: str, line: str, channels: Dict[str, bool], now: float, symbol: str = "", message: str = "") -> Fired:
+    """Tin không đi theo một alert giá (rules.py): chỉ cần tiêu đề + nội dung + kênh. `id` = loại tin, chỉ để nhật ký / web nhận ra."""
+    alert = {"id": kind, "user_id": user_id, "symbol": symbol, "cond": kind, "level": 0.0, "name": title, "message": message, "channels": dict(channels), "drawing": None}
+    return Fired(alert, 0.0, int(now), kind=kind, line=line)
 
 
 def condition_text(a: Dict[str, Any]) -> str:
     """"XAUUSDm Crossing 4000"; alert trên hình vẽ: "XAUUSDm Crossing Up Trend Line (4001.2)" hoặc "... Rectangle (4000–4010)" (mức / dải của hình lúc nổ)."""
     cond = COND_TEXT.get(a["cond"], a["cond"])
+    ind = a.get("indicator")
+    if ind:  # "XAUUSDm RSI 14 close Crossing 70 (70.4)": đường, điều kiện, thứ được so (mức / "price" / tên đường khác) và giá trị của đường lúc nổ
+        target = fmt_price(a["level"]) if ind["vs"] == "level" else "price" if ind["vs"] == "price" else ind.get("vs_label") or ind["vs"]
+        now_vals = a.get("now")
+        return f"{a['symbol']} {ind['label']} {cond} {target}" + (f" ({fmt_value(now_vals[0])})" if now_vals else "")
     d = a.get("drawing")
     if not d:
         return f"{a['symbol']} {cond} {fmt_price(a['level'])}"
@@ -54,10 +76,18 @@ def condition_text(a: Dict[str, Any]) -> str:
     return f"{a['symbol']} {cond} {d.get('label') or d.get('type')} ({span})"
 
 
+def fired_line(f: Fired) -> str:
+    """Dòng nội dung chính: tin riêng thì `line`, alert giá thì "điều kiện · giá" (báo bù có "(trễ)" đầu dòng)."""
+    if f.line:
+        return f.line
+    s = f"{condition_text(f.alert)} · giá {fmt_price(f.price)}"
+    return f"(trễ) {s}" if f.late else s
+
+
 def telegram_text(f: Fired) -> str:
     """HTML của Telegram: tên / nội dung do người dùng gõ phải escape, không thì `<` làm sendMessage báo lỗi (hoặc chèn thẻ)."""
     a = f.alert
-    lines = [f"🔔 <b>{html.escape(a['name'] or a['symbol'])}</b>", html.escape(f"{condition_text(a)} · giá {fmt_price(f.price)}")]
+    lines = [f"🔔 <b>{html.escape(a['name'] or a['symbol'])}</b>", html.escape(fired_line(f))]
     if a["message"]:
         lines.append(html.escape(a["message"]))
     lines.append(html.escape(when(f.time)))
@@ -75,7 +105,7 @@ def _flat(s: str) -> str:
 
 def push_text(f: Fired) -> str:
     a = f.alert
-    s = f"{condition_text(a)} @ {fmt_price(f.price)}"
+    s = f.line or f"{'(trễ) ' if f.late else ''}{condition_text(a)} @ {fmt_price(f.price)}"
     if a["name"]:
         s = f"{a['name']}: {s}"
     if a["message"]:
@@ -364,7 +394,11 @@ class Dispatcher:
             log_id = self.log_add(f)
             if ch.get("web"):
                 shown = {k: v for k, v in f.alert.items() if k != "user_id"}
-                n = self.send_web(f.alert["user_id"], {"type": "alert_fired", "alert": shown, "price": f.price, "time": f.time, "log_id": log_id})
+                if f.kind == "price":
+                    msg = {"type": "alert_fired", "alert": shown, "price": f.price, "time": f.time, "log_id": log_id, "late": f.late}
+                else:
+                    msg = {"type": "alert_notice", "kind": f.kind, "title": f.alert["name"], "text": f.line, "message": f.alert["message"], "symbol": f.alert["symbol"], "time": f.time, "log_id": log_id}
+                n = self.send_web(f.alert["user_id"], msg)
                 res["web"] = "ok" if n else "không có tab Wickloom nào đang mở"
             logs.append((f, log_id, res))
         for f, _, res in logs:
@@ -400,3 +434,30 @@ class Dispatcher:
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(target=self.run, name="alert-dispatch", daemon=True)
             self._thread.start()
+
+
+class Ticker:
+    """Thread nền gọi `fn` mỗi `interval` giây (việc định kỳ: hết hạn alert, nhắc tin kinh tế...). Lỗi trong `fn` chỉ in ra, vòng lặp không dừng."""
+
+    def __init__(self, interval: float, fn: Callable[[], Any], name: str):
+        self.interval = interval
+        self.fn = fn
+        self.name = name
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def run(self) -> None:
+        while not self._stop.wait(self.interval):
+            try:
+                self.fn()
+            except Exception as exc:
+                print(f"{self.name} loi: {type(exc).__name__}: {exc}")
+
+    def start(self) -> None:
+        if self._thread is None or not self._thread.is_alive():
+            self._stop.clear()
+            self._thread = threading.Thread(target=self.run, name=self.name, daemon=True)
+            self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()

@@ -1,3 +1,5 @@
+import { supportsIndicatorAlert } from "@/alerts/indicatorSpec";
+import { openIndicatorAlert } from "@/alerts/store";
 import { presetVisibility } from "@/drawings/visibility";
 import { byId } from "@/indicators/catalog";
 import { MAIN_PANE, effectiveScale, otherPanes, paneKeyOf, type Scale } from "@/indicators/layout";
@@ -10,7 +12,7 @@ import type { MenuItem } from "./ChartContextMenu";
 import { VISIBILITY } from "./drawingMenu";
 
 /** Menu "…" của một indicator trên legend, cùng thứ tự với menu của Volume (volumeMenuItems). Mục chưa làm bị khoá. */
-export function indicatorMenuItems(store: StoreApi<IndicatorsPane>, inst: IndicatorInstance, tf: string): MenuItem[] {
+export function indicatorMenuItems(store: StoreApi<IndicatorsPane>, inst: IndicatorInstance, tf: string, symbol: string): MenuItem[] {
   const def = byId(inst.id);
   const title = def.name;
   const paneKey = paneKeyOf(inst, def);
@@ -22,7 +24,7 @@ export function indicatorMenuItems(store: StoreApi<IndicatorsPane>, inst: Indica
   const fav = useIndicatorStore.getState().favorites.includes(inst.id);
   const st = () => store.getState();
   return [
-    { label: `Add alert on ${title}`, icon: <AlertI />, shortcut: "⌥ A", disabled: true },
+    { label: `Add alert on ${title}`, icon: <AlertI />, shortcut: "⌥ A", disabled: !supportsIndicatorAlert(inst.id), onSelect: () => void openIndicatorAlert(inst, symbol, tf) },
     { label: `Add indicator/strategy on ${title}…`, disabled: true },
     {
       label: fav ? "Remove this indicator from favorites" : "Add this indicator to favorites",

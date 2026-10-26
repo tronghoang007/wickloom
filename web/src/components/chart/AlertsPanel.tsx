@@ -2,7 +2,7 @@
 
 import { CHANNEL_NAME, describe, failedChannels, sortAlerts, triggerLabel } from "@/alerts/model";
 import { digitsOf, openCreateAlert, openEditAlert, useAlertStore } from "@/alerts/store";
-import type { Alert, AlertLogRow, ChannelKind } from "@/lib/alertsApi";
+import type { Alert, AlertCond, AlertLogRow, ChannelKind } from "@/lib/alertsApi";
 import { clockAt, dayLabelAt } from "@/lib/timefmt";
 import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
@@ -107,18 +107,33 @@ function AlertRow({ a }: { a: Alert }) {
 
 function LogRow({ r }: { r: AlertLogRow }) {
   const bad = failedChannels(r.results);
-  const what = describe({ ...r, drawing: r.label ? { label: r.label } : null }, digitsOf(r.symbol));
+  const isPrice = r.kind === "price";
+  const what = isPrice ? r.text || describe({ ...r, cond: r.cond as AlertCond, drawing: r.label ? { label: r.label } : null }, digitsOf(r.symbol)) : r.text; // alert theo indicator: backend đã ghi sẵn câu điều kiện
   const keys = Object.keys(r.results) as ChannelKind[];
   return (
     <div className="border-b border-[var(--border)] px-3 py-2.5 text-sm" data-testid="alert-log-row">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 truncate font-medium">{r.name || what}</span>
+        <span className="min-w-0 truncate font-medium">
+          {r.name || what}
+          {r.late && (
+            <span className="ml-2 rounded border border-[var(--border)] px-1 align-middle text-[10px] font-normal leading-4 text-[#ff9800]" title="Giá đã chạm lúc backend / EA tắt; giờ ghi là giờ nến chạm">
+              late
+            </span>
+          )}
+        </span>
         <span className="shrink-0 text-[12px] tabular-nums text-[var(--muted)]">{when(r.time)}</span>
       </div>
-      <div className="truncate text-[12px] text-[var(--muted)]">
-        {r.name ? `${what} · ` : ""}price {r.price}
-        {r.message ? ` — ${r.message}` : ""}
-      </div>
+      {isPrice ? (
+        <div className="truncate text-[12px] text-[var(--muted)]">
+          {r.name ? `${what} · ` : ""}price {r.price}
+          {r.message ? ` — ${r.message}` : ""}
+        </div>
+      ) : (
+        <div className="whitespace-pre-line text-[12px] text-[var(--muted)]">
+          {r.text}
+          {r.message ? `\n${r.message}` : ""}
+        </div>
+      )}
       {keys.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-x-3 text-[12px]">
           {keys.map((k) => {

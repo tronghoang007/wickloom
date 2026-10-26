@@ -8,7 +8,7 @@ const draw = (id: string, price2 = 2): Drawing => ({ id, type: "trendline", poin
 const link = (d: Drawing, over: Partial<AlertDrawing> = {}): AlertDrawing => ({ ...specFromDrawing(d, { layout: "L", log: false })!, ...over });
 const alert = (id: string, drawing: AlertDrawing | null, over: Partial<Alert> = {}): Alert => ({
   id, symbol: "XAUUSDm", cond: "cross", level: 1, trigger: "once", tf: "M5", expires_at: null, name: "", message: "", channels: { web: true, telegram: false, mt5: false },
-  state: "active", created_at: 1, fired_at: null, fire_count: 0, drawing, ...over,
+  state: "active", created_at: 1, fired_at: null, fire_count: 0, drawing, indicator: null, ...over,
 });
 const doc = (drawings: Drawing[], over = {}) => ({ symbol: "XAUUSDm", layoutId: "L", drawings, ...over });
 

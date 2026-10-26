@@ -3,6 +3,7 @@
 import {
   ALERT_TFS,
   COND_OPTIONS,
+  indicatorTriggerHint,
   EXPIRY_OPTIONS,
   MAX_LIVE,
   MAX_MESSAGE,
@@ -19,6 +20,7 @@ import {
   type AlertForm,
 } from "@/alerts/model";
 import { condsFor, spanText } from "@/alerts/drawingSpec";
+import { alertPlots, levelChoices, vsOptions, withChoice } from "@/alerts/indicatorSpec";
 import { digitsOf, openAlertSettings, useAlertDialog, useAlertPrefs, useAlertStore } from "@/alerts/store";
 import type { AlertChannels, AlertPatch, ChannelsInfo } from "@/lib/alertsApi";
 import { chartGlobal } from "@/store/chart";
@@ -71,9 +73,10 @@ function Form() {
   const alerts = useAlertStore((s) => s.alerts);
   const symbols = chartGlobal((s) => s.symbols);
   const prefs = useAlertPrefs((s) => s.channels);
-  const [f, setF] = useState<AlertForm>(() => (editing ? formFromAlert(editing) : defaultForm(seed!.symbol, seed!.price, seed!.tf, prefs, digitsOf(seed!.symbol), seed!.drawing ?? null)));
+  const [f, setF] = useState<AlertForm>(() => (editing ? formFromAlert(editing) : defaultForm(seed!.symbol, seed!.price, seed!.tf, prefs, digitsOf(seed!.symbol), seed!.drawing ?? null, seed!.indicator ?? null)));
   const now = seed?.now ?? null; // mức / dải giá hiện tại của hình (chỉ có khi vừa mở từ hình vẽ)
   const conds = COND_OPTIONS.filter((o) => condsFor(f.drawing).includes(o.value));
+  const ind = f.indicator; // alert theo indicator: chọn đường, điều kiện và thứ được so thay cho mức giá
   const [busy, setBusy] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [tried, setTried] = useState(false);
@@ -103,6 +106,7 @@ function Form() {
     const r = editing
       ? await store.update(editing.id, {
           cond: x.cond, level: x.level, trigger: x.trigger, tf: x.tf, name: x.name, message: x.message, channels: x.channels,
+          ...(x.indicator ? { indicator: x.indicator } : {}),
           ...(x.expires_at === null ? { clear_expiry: true } : { expires_at: x.expires_at }),
         } as AlertPatch)
       : await store.create(x);
@@ -118,46 +122,112 @@ function Form() {
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" onMouseDown={(ev) => ev.target === ev.currentTarget && !busy && close()} onKeyDown={(ev) => ev.key === "Escape" && !busy && close()}>
       <form onSubmit={submit} role="dialog" aria-label={editing ? "Edit alert" : "Create alert"} className="flex max-h-[94vh] w-[480px] max-w-[96vw] flex-col rounded-2xl popup">
         <div className="flex items-center justify-between px-5 pb-1 pt-4">
-          <span className="text-lg font-semibold">{editing ? `Edit alert on ${shape?.label ?? editing.symbol}` : `Create alert on ${shape?.label ?? (f.symbol || "…")}`}</span>
+          <span className="text-lg font-semibold">{editing ? `Edit alert on ${shape?.label ?? ind?.label ?? editing.symbol}` : `Create alert on ${shape?.label ?? ind?.label ?? (f.symbol || "…")}`}</span>
           <button type="button" className="rounded p-1 text-[var(--muted)] hover:bg-[var(--hover)]" onClick={close} aria-label="Close">
             <Close size={22} />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2 pt-3">
           <Field label="Symbol" error={err.symbol}>
-            <input list="alert-symbols" value={f.symbol} disabled={!!editing || !!shape} onChange={(ev) => set({ symbol: ev.target.value })} className={input} autoComplete="off" />
+            <input list="alert-symbols" value={f.symbol} disabled={!!editing || !!shape || !!ind} onChange={(ev) => set({ symbol: ev.target.value })} className={input} autoComplete="off" />
             <datalist id="alert-symbols">
               {names.map((n) => (
                 <option key={n} value={n} />
               ))}
             </datalist>
           </Field>
-          <div className="flex gap-3">
-            <div className="w-1/2">
-              <Field label="Condition">
-                <select value={f.cond} onChange={(ev) => set({ cond: ev.target.value as AlertForm["cond"] })} className={`${input} bg-[var(--bg)]`}>
-                  {conds.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
+          {ind && (
+            <>
+              <div className="flex gap-3">
+                <div className="w-1/2">
+                  <Field label="Line">
+                    <select value={ind.plot} onChange={(ev) => set({ indicator: withChoice(ind, ev.target.value, ind.vs) })} className={`${input} bg-[var(--bg)]`}>
+                      {alertPlots(ind.id).map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <div className="w-1/2">
+                  <Field label="Condition">
+                    <select value={f.cond} onChange={(ev) => set({ cond: ev.target.value as AlertForm["cond"] })} className={`${input} bg-[var(--bg)]`}>
+                      {COND_OPTIONS.filter((o) => condsFor(null).includes(o.value)).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <div className="w-1/2">
+                  <Field label="Compare with">
+                    <select value={ind.vs} onChange={(ev) => set({ indicator: withChoice(ind, ind.plot, ev.target.value) })} className={`${input} bg-[var(--bg)]`}>
+                      {vsOptions(ind).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <div className="w-1/2">
+                  {ind.vs === "level" ? (
+                    <Field label="Value" error={err.level}>
+                      <input ref={levelRef} value={f.level} inputMode="decimal" onChange={(ev) => set({ level: ev.target.value })} className={input} />
+                    </Field>
+                  ) : (
+                    <Field label="Value">
+                      <div className="flex h-9 items-center rounded border border-[var(--border)] px-3 text-sm text-[var(--muted)]">{ind.vs === "price" ? "Price" : (ind.vs_label ?? ind.vs)}</div>
+                    </Field>
+                  )}
+                </div>
+              </div>
+              {ind.vs === "level" && levelChoices(ind.id).length > 0 && (
+                <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
+                  {levelChoices(ind.id).map((v) => (
+                    <button key={v} type="button" onClick={() => set({ level: String(v) })} className={`h-6 rounded border px-2 text-[12px] ${f.level === String(v) ? "border-[var(--accent)] text-[var(--fg)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--hover)]"}`}>
+                      {v}
+                    </button>
                   ))}
-                </select>
-              </Field>
-            </div>
-            <div className="w-1/2">
-              {shape ? (
-                <Field label="Level" error={err.drawing}>
-                  <div className="flex h-9 items-center rounded border border-[var(--border)] px-3 text-sm text-[var(--muted)]" title="Mức giá do hình vẽ quyết định, đổi theo từng nến">
-                    {now ? spanText(now.lo, now.hi, (v) => fmtLevel(v, digitsOf(f.symbol))) : "theo hình vẽ"}
-                  </div>
-                </Field>
-              ) : (
-                <Field label="Value" error={err.level}>
-                  <input ref={levelRef} value={f.level} inputMode="decimal" onChange={(ev) => set({ level: ev.target.value })} className={input} />
-                </Field>
+                </div>
               )}
+              <div className={err.indicator ? errCls : "-mt-1 mb-3 text-[12px] text-[var(--muted)]"}>
+                {err.indicator ?? "Indicator được tính ở backend theo đúng tham số lúc tạo (đổi Settings của indicator sau đó không đổi alert), cần backend và EA đang chạy."}
+              </div>
+            </>
+          )}
+          {!ind && (
+            <div className="flex gap-3">
+              <div className="w-1/2">
+                <Field label="Condition">
+                  <select value={f.cond} onChange={(ev) => set({ cond: ev.target.value as AlertForm["cond"] })} className={`${input} bg-[var(--bg)]`}>
+                    {conds.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <div className="w-1/2">
+                {shape ? (
+                  <Field label="Level" error={err.drawing}>
+                    <div className="flex h-9 items-center rounded border border-[var(--border)] px-3 text-sm text-[var(--muted)]" title="Mức giá do hình vẽ quyết định, đổi theo từng nến">
+                      {now ? spanText(now.lo, now.hi, (v) => fmtLevel(v, digitsOf(f.symbol))) : "theo hình vẽ"}
+                    </div>
+                  </Field>
+                ) : (
+                  <Field label="Value" error={err.level}>
+                    <input ref={levelRef} value={f.level} inputMode="decimal" onChange={(ev) => set({ level: ev.target.value })} className={input} />
+                  </Field>
+                )}
+              </div>
             </div>
-          </div>
+          )}
           {shape && (
             <div className="-mt-1 mb-3 text-[12px] text-[var(--muted)]">
               {shape.id === null
@@ -169,8 +239,8 @@ function Form() {
             <div className="-mt-1 mb-3 text-[12px] text-[var(--muted)]">Điều kiện kiểu trạng thái: nổ ngay khi giá đang thoả mãn.</div>
           )}
           <div className="flex gap-3">
-            <div className={needsTf(f.trigger) && !shape ? "w-1/2" : "w-full"}>
-              <Field label="Trigger" hint={TRIGGER_HINT[f.trigger]}>
+            <div className={(needsTf(f.trigger) || ind) && !shape ? "w-1/2" : "w-full"}>
+              <Field label="Trigger" hint={ind ? indicatorTriggerHint(f.trigger) : TRIGGER_HINT[f.trigger]}>
                 <select value={f.trigger} onChange={(ev) => set({ trigger: ev.target.value as AlertForm["trigger"] })} className={`${input} bg-[var(--bg)]`}>
                   {TRIGGER_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>
@@ -180,7 +250,7 @@ function Form() {
                 </select>
               </Field>
             </div>
-            {needsTf(f.trigger) && !shape && (
+            {(needsTf(f.trigger) || ind) && !shape && (
               <div className="w-1/2">
                 <Field label="Timeframe">
                   <select value={f.tf} onChange={(ev) => set({ tf: ev.target.value })} className={`${input} bg-[var(--bg)]`}>

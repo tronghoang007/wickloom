@@ -4,6 +4,7 @@ import { fireNotice, failedChannels, CHANNEL_NAME } from "@/alerts/model";
 import { startDrawingLinks } from "@/alerts/drawingLinks";
 import { handleFeedMessage, type FeedEffects } from "@/alerts/feed";
 import { playAlertSound, unlockAudio } from "@/alerts/sound";
+import { useRulesStore } from "@/alerts/rules";
 import { digitsOf, openCreateAlert, useAlertPrefs, useAlertStore } from "@/alerts/store";
 import { WS_URL } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
@@ -56,10 +57,14 @@ const effects: FeedEffects = {
     if (s.logLoaded) void s.refreshLog();
   },
   denied: () => {},
-  fired: (a, price, time, logId) => {
-    useAlertStore.getState().applyFired(a, logId, price, time);
-    const n = fireNotice(a, price, digitsOf(a.symbol));
+  fired: (a, price, time, logId, late) => {
+    useAlertStore.getState().applyFired(a, logId, price, time, late);
+    const n = fireNotice(a, price, digitsOf(a.symbol), late);
     announce(n.title, n.text, a.id, { symbol: a.symbol });
+  },
+  notice: (n) => {
+    useAlertStore.getState().applyNotice(n);
+    announce(n.title, n.message ? `${n.text}\n${n.message}` : n.text, `notice-${n.kind}`);
   },
   delivery: (logId, results) => {
     useAlertStore.getState().applyDelivery(logId, results);
@@ -77,7 +82,10 @@ export default function AlertHost() {
 
   useEffect(() => {
     if (status !== "user") {
-      if (status === "guest") useAlertStore.getState().reset();
+      if (status === "guest") {
+        useAlertStore.getState().reset();
+        useRulesStore.getState().reset();
+      }
       return;
     }
     let ws: WebSocket | null = null;

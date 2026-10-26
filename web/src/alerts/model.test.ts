@@ -1,12 +1,13 @@
 import { describe as suite, expect, it } from "vitest";
 import type { Alert, ChannelsInfo } from "@/lib/alertsApi";
-import { checkForm, defaultForm, describe, expiryOf, failedChannels, formFromAlert, lineAlerts, liveCount, sortAlerts, type AlertForm } from "./model";
+import { specFromInstance } from "./indicatorSpec";
+import { checkForm, defaultForm, describe, expiryOf, failedChannels, fireNotice, formFromAlert, indicatorTriggerHint, lineAlerts, liveCount, sortAlerts, type AlertForm } from "./model";
 
 const NOW = 1_800_000_000;
 const CH = { web: true, telegram: false, mt5: false };
 const base = (): AlertForm => ({ ...defaultForm("XAUUSDm", 4000.5, "M5", CH, 2), level: "4000.5" });
 const alert = (o: Partial<Alert> = {}): Alert => ({
-  id: "a", symbol: "XAUUSDm", cond: "cross", level: 4000.5, trigger: "once", tf: "M1", expires_at: null, name: "", message: "", channels: CH, state: "active", created_at: NOW, fired_at: null, fire_count: 0, drawing: null, ...o,
+  id: "a", symbol: "XAUUSDm", cond: "cross", level: 4000.5, trigger: "once", tf: "M1", expires_at: null, name: "", message: "", channels: CH, state: "active", created_at: NOW, fired_at: null, fire_count: 0, drawing: null, indicator: null, ...o,
 });
 const tg = (linked: boolean): ChannelsInfo => ({ telegram: { configured: true, linked, name: null }, mt5: { online: false, version: null, supports: false, push_enabled: null } });
 
@@ -84,6 +85,12 @@ suite("helpers", () => {
     expect(describe({ symbol: "XAUUSDm", cond: "cross_up", level: 4000.5 }, 2)).toBe("XAUUSDm Crossing up 4,000.5");
   });
 
+  it("labels a late fire in the notice", () => {
+    const a = alert({ name: "Gold", message: "look" });
+    expect(fireNotice(a, 4000.5, 2)).toEqual({ title: "Gold", text: "XAUUSDm Crossing 4,000.5 (price 4,000.5) — look" });
+    expect(fireNotice(a, 4000.5, 2, true).text).toBe("(trễ) XAUUSDm Crossing 4,000.5 (price 4,000.5) — look");
+  });
+
   it("counts live alerts and picks the ones drawn on a chart", () => {
     const list = [alert({ id: "1" }), alert({ id: "2", state: "paused" }), alert({ id: "3", state: "triggered" }), alert({ id: "4", symbol: "BTCUSDm" })];
     expect(liveCount(list)).toBe(3);
@@ -106,5 +113,62 @@ suite("helpers", () => {
       { kind: "telegram", reason: "Telegram từ chối (403)" },
       { kind: "mt5", reason: "EA offline" },
     ]);
+  });
+});
+
+suite("indicator alerts", () => {
+  const rsi = () => specFromInstance({ id: "rsi", inputs: {} })!;
+  const form = (over: Partial<AlertForm> = {}): AlertForm => ({ ...defaultForm("XAUUSDm", 70, "M15", CH, 2, null, rsi()), ...over });
+
+  it("starts on a closed bar, like TradingView, on the chart's timeframe", () => {
+    const f = form();
+    expect(f).toMatchObject({ trigger: "once_per_bar_close", tf: "M15", level: "70", cond: "cross" });
+    expect(f.indicator?.id).toBe("rsi");
+    expect(defaultForm("X", 1, "M15", CH).trigger).toBe("once"); // alert giá thường không đổi
+  });
+
+  it("sends the indicator with the form and needs a value only when comparing with one", () => {
+    const ok = checkForm(form({ level: "70" }), NOW, [], null);
+    expect(ok.errors).toEqual({});
+    expect(ok.input).toMatchObject({ symbol: "XAUUSDm", cond: "cross", level: 70, trigger: "once_per_bar_close", tf: "M15", indicator: { id: "rsi", plot: "rsi", vs: "level" } });
+    expect(checkForm(form({ level: "" }), NOW, [], null).errors.level).toBeTruthy();
+    const vsPrice = { ...rsi(), vs: "price" };
+    const c = checkForm(form({ level: "", indicator: vsPrice }), NOW, [], null);
+    expect(c.errors).toEqual({});
+    expect(c.input?.level).toBe(0); // không dùng nhưng backend cần một số hữu hạn
+  });
+
+  it("rejects a timeframe the backend cannot build and a Smoothing line that has no numbers", () => {
+    expect(checkForm(form({ tf: "MN1" }), NOW, [], null).errors.indicator).toContain("MN1");
+    const sm = { ...rsi(), plot: "sm", inputs: { ...rsi().inputs, smoothType: "None" } };
+    expect(checkForm(form({ indicator: sm }), NOW, [], null).errors.indicator).toContain("Smoothing");
+  });
+
+  it("is described like the backend text", () => {
+    const a = alert({ cond: "cross_up", level: 70, indicator: rsi() });
+    expect(describe(a, 2)).toBe("XAUUSDm RSI 14 close Crossing up 70");
+    expect(describe({ ...a, indicator: { ...rsi(), vs: "price" } }, 2)).toBe("XAUUSDm RSI 14 close Crossing up Price");
+    const macd = specFromInstance({ id: "macd", inputs: {} })!;
+    expect(describe({ ...a, cond: "cross", indicator: macd }, 2)).toBe("XAUUSDm MACD close 12 26 9 EMA EMA Crossing Signal");
+  });
+
+  it("round-trips through the edit form", () => {
+    const a = alert({ indicator: rsi(), trigger: "once_per_bar_close", tf: "M15" });
+    expect(formFromAlert(a).indicator).toEqual(rsi());
+  });
+
+  it("never draws a price line for it on the chart", () => {
+    expect(lineAlerts([alert({ id: "p" }), alert({ id: "i", indicator: rsi() })], "XAUUSDm").map((x) => x.id)).toEqual(["p"]);
+  });
+
+  it("puts the indicator value in the notice, and marks a late fire", () => {
+    const a = { ...alert({ cond: "cross_up", level: 70, indicator: rsi() }), now: [70.4123456, 70] as [number, number] };
+    expect(fireNotice(a, 4001.5, 2).text).toBe("XAUUSDm RSI 14 close Crossing up 70 (70.4123) (price 4,001.5)");
+    expect(fireNotice(a, 4001.5, 2, true).text.startsWith("(trễ) ")).toBe(true);
+  });
+
+  it("explains the two kinds of trigger", () => {
+    expect(indicatorTriggerHint("once_per_bar_close")).toContain("nến vừa đóng");
+    expect(indicatorTriggerHint("once")).toContain("nến đang chạy");
   });
 });

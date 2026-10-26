@@ -20,6 +20,16 @@ export type AlertDrawing = {
   log: boolean; // chart đang ở thang log lúc tạo: đường thẳng theo ln giá
 };
 
+/** Alert theo indicator (docs/alerts-plan.md Phase 3): so một đường của indicator với mức giá, giá, hoặc một đường khác của cùng indicator. Backend tính bằng bản Python của indicator. */
+export type AlertIndicator = {
+  id: string; // id indicator (sma, ema, wma, rsi, macd, bb, stoch)
+  inputs: Record<string, number | string | boolean>; // tham số đã điền đủ lúc tạo (đổi Settings của indicator sau đó không đổi alert)
+  plot: string; // đường được xét
+  vs: string; // "level" (so với `level` của alert), "price" (giá) hoặc id một đường khác
+  label: string; // "RSI 14 close"
+  vs_label?: string; // tên đường `vs` (backend điền)
+};
+
 export type Alert = {
   id: string;
   symbol: string;
@@ -36,22 +46,29 @@ export type Alert = {
   fired_at: number | null;
   fire_count: number;
   drawing: AlertDrawing | null; // alert trên hình vẽ: mức giá do hình quyết định (`level` chỉ là giá trị gần đây để hiển thị)
+  indicator: AlertIndicator | null; // alert theo indicator: `level` chỉ có nghĩa khi indicator.vs = "level"
 };
 
 /** Kết quả giao từng kênh của một lần nổ: "ok" hoặc lý do (tiếng Việt, từ backend). */
 export type DeliveryResults = Partial<Record<ChannelKind, string>>;
+
+/** Loại dòng nhật ký: alert giá, nhắc tin kinh tế, sự kiện giao dịch (SL / TP / lệnh chờ khớp). */
+export type LogKind = "price" | "news" | "trade";
 
 export type AlertLogRow = {
   id: number;
   alert_id: string;
   time: number;
   symbol: string;
-  name: string;
+  name: string; // alert giá: tên người đặt; tin khác: tiêu đề
   message: string;
-  cond: AlertCond;
+  cond: AlertCond | LogKind;
   level: number;
   price: number;
   label: string; // tên hình vẽ nếu alert nổ trên hình ("" nếu là mức giá cố định)
+  kind: LogKind;
+  text: string; // nội dung của tin không phải alert giá (nhiều dòng)
+  late: boolean; // báo bù: giá đã chạm lúc backend / EA tắt, `time` là giờ nến chạm
   results: DeliveryResults;
 };
 
@@ -59,6 +76,11 @@ export type ChannelsInfo = {
   telegram: { configured: boolean; linked: boolean; name: string | null };
   mt5: { online: boolean; version: string | null; supports: boolean; push_enabled: boolean | null };
 };
+
+/** Quy tắc thông báo theo tài khoản (docs/alerts-plan.md Phase 3). Mặc định tắt. */
+export type NewsRule = { enabled: boolean; leads: number[]; min_importance: 1 | 2 | 3; currencies: string[]; channels: AlertChannels };
+export type TradeRule = { enabled: boolean; sl: boolean; tp: boolean; fill: boolean; channels: AlertChannels };
+export type Rules = { news: NewsRule; trade: TradeRule };
 
 export type AlertInput = {
   symbol: string;
@@ -71,9 +93,10 @@ export type AlertInput = {
   message: string;
   channels: AlertChannels;
   drawing?: AlertDrawing | null;
+  indicator?: AlertIndicator | null;
 };
 
-export type AlertPatch = Partial<Omit<AlertInput, "expires_at" | "symbol">> & { expires_at?: number; clear_expiry?: boolean; state?: "active" | "paused"; drawing?: AlertDrawing; unlink?: boolean };
+export type AlertPatch = Partial<Omit<AlertInput, "expires_at" | "symbol">> & { expires_at?: number; clear_expiry?: boolean; state?: "active" | "paused"; drawing?: AlertDrawing; indicator?: AlertIndicator; unlink?: boolean };
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -94,6 +117,8 @@ export const createAlert = (a: AlertInput) => call<Alert>("/alerts", json("POST"
 export const patchAlert = (id: string, p: AlertPatch) => call<Alert>(`/alerts/${encodeURIComponent(id)}`, json("PATCH", p));
 export const deleteAlert = (id: string) => call<{ ok: true }>(`/alerts/${encodeURIComponent(id)}`, json("DELETE"));
 export const fetchAlertLog = (limit = 100) => call<AlertLogRow[]>(`/alerts/log?limit=${limit}`);
+export const fetchRules = () => call<Rules>("/alerts/rules");
+export const patchRule = <K extends keyof Rules>(kind: K, p: Partial<Rules[K]>) => call<Rules[K]>(`/alerts/rules/${kind}`, json("PATCH", p));
 export const fetchChannels = () => call<ChannelsInfo>("/alerts/channels");
 export const linkTelegram = () => call<{ url: string; expires_in: number }>("/alerts/channels/telegram/link", json("POST"));
 export const unlinkTelegram = () => call<{ ok: true }>("/alerts/channels/telegram", json("DELETE"));

@@ -161,6 +161,10 @@ class BarStore:
                 l_now = None if cur is None else float(rel(cur))
             return None if l_now is None else ([pos(t) for t in times], l_now)
 
+    def count(self, symbol: str, tf: str) -> int:
+        with self._lock:
+            return int(self.db.execute("SELECT COUNT(*) FROM bars WHERE symbol=? AND tf=?", (symbol, tf)).fetchone()[0])
+
     def last(self, symbol: str, tf: str) -> Optional[Dict[str, Any]]:
         rows = self.query(symbol, tf, limit=1)
         return rows[0] if rows else None

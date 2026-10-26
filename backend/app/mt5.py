@@ -83,6 +83,8 @@ class Mt5Registry:
         self._info: Dict[str, Dict[str, Any]] = {}
         self._by_writer: Dict[Any, str] = {}
         self._trade: Dict[str, Dict[str, Any]] = {}
+        # Nơi khác (tradewatch.py) đăng ký để biết khi EA báo vị thế / lệnh chờ / deal mới: (account id, "trade" | "deals", trạng thái giao dịch của account)
+        self.listeners: List[Callable[[str, str, Dict[str, Any]], None]] = []
 
     @staticmethod
     def account_id(ident: str, login: int) -> str:
@@ -149,6 +151,13 @@ class Mt5Registry:
             t["updated_at"] = self.clock()
         elif msg.get("type") == "deals":
             t["deals"] = _deals(msg.get("deals"))
+        else:
+            return
+        for fn in self.listeners:
+            try:
+                fn(aid, msg["type"], t)
+            except Exception as exc:  # người nghe lỗi không được làm hỏng luồng EA
+                print(f"mt5 listener loi: {type(exc).__name__}: {exc}")
 
     def trade(self, aid: str) -> Optional[Dict[str, Any]]:
         """Trạng thái giao dịch của account `aid` (vị thế/lệnh/deal lần cuối EA báo); None nếu account chưa từng kết nối."""

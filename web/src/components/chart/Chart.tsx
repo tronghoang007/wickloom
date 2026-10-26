@@ -1662,7 +1662,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       onHide={() => pane.indicators.getState().update(inst.uid, { hidden: inst.hidden ? undefined : true })}
       onSettings={() => pane.indicators.getState().openSettings(inst.uid)}
       onRemove={() => removeIndicator(inst.uid)}
-      onMenu={(x, y) => setCtxMenu({ x, y, items: indicatorMenuItems(pane.indicators, inst, tf) })}
+      onMenu={(x, y) => setCtxMenu({ x, y, items: indicatorMenuItems(pane.indicators, inst, tf, symbol) })}
     />
   );
 

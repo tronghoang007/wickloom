@@ -184,6 +184,14 @@ def request_catchup(symbol: str, tf: str) -> None:
     request_backfill(symbol, tf, count)
 
 
+def ensure_history(symbol: str, tf: str, need: int) -> None:
+    """Alert theo indicator cần `need` nến đã đóng để giá trị hội tụ: DB có ít hơn thì xin EA đủ số đó, không thì chỉ nối cho liền tới nến mới nhất."""
+    if bars.count(symbol, tf) < need:
+        request_backfill(symbol, tf, need)
+    else:
+        request_catchup(symbol, tf)
+
+
 # Delta theo tick realtime (CVD / Big Trades): xin EA 2 phút tick gần nhất làm gốc cho phút đang chạy
 tick_live = tickdelta.Live(lambda symbol: request_backfill(symbol, tickdelta.TICK_DELTA_TF, 2, before=int(time.time())))
 tick_gap = tickdelta.GapFill(

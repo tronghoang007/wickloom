@@ -28,7 +28,7 @@ export default function Toasts() {
           <Icon kind={t.kind} />
           <div className="min-w-0 flex-1 text-[14px] leading-[1.4]">
             {t.title && <div className="font-semibold">{t.title}</div>}
-            <div className={t.title ? "text-[var(--fg)]/85" : ""}>{t.text}</div>
+            <div className={`whitespace-pre-line ${t.title ? "text-[var(--fg)]/85" : ""}`}>{t.text}</div>
             {t.action && (
               <button
                 className="mt-1 font-semibold text-[var(--accent-text)] hover:underline"

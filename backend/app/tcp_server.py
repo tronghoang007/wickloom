@@ -90,6 +90,8 @@ def _handle_bars(body: BarsIn) -> None:
     state.broker_offset["value"] = body.broker_utc_offset
     rows = [b.model_dump() for b in body.bars]
     state.bars.upsert(body.symbol, body.tf, rows)
+    if body.tf == "M1" and rows:
+        alerts.engine.on_bars(body.symbol)  # nến M1 đang đổ về: alert báo bù chờ nó lắng xuống rồi mới soát
     merged = state.aggregator.merge(body.symbol, body.tf, rows)
     if merged:  # nến đang chạy vừa được sửa theo MT5 -> chart đổi ngay, khỏi chờ tick sau
         state._on_update(body.symbol, body.tf, merged)
@@ -174,8 +176,11 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
             await _write(writer, cmd)
 
         queued = {(c["symbol"], c["tf"]) for c in pending}
-        for sym, tf in sorted(state.hub.subscribed_pairs() | alerts.engine.bar_pairs()):  # alert trên hình vẽ cũng cần nến đủ dù không chart nào mở
-            if (sym, tf) not in queued:  # đã có lệnh xếp hàng lúc EA offline vừa gửi ở trên
+        needs = alerts.engine.history_needs()  # alert theo indicator: cần đủ lịch sử để giá trị hội tụ, không chỉ nối cho liền
+        for sym, tf in sorted(state.hub.subscribed_pairs() | alerts.engine.bar_pairs()):  # alert trên hình vẽ / indicator cũng cần nến đủ dù không chart nào mở
+            if (sym, tf) in needs:
+                state.ensure_history(sym, tf, needs[(sym, tf)])
+            elif (sym, tf) not in queued:  # đã có lệnh xếp hàng lúc EA offline vừa gửi ở trên
                 state.request_catchup(sym, tf)
 
         while True:

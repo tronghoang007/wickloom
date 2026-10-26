@@ -10,6 +10,7 @@ import {
   type Alert,
   type AlertChannels,
   type AlertDrawing,
+  type AlertIndicator,
   type AlertInput,
   type AlertLogRow,
   type AlertPatch,
@@ -26,6 +27,10 @@ import { useQuoteStore } from "@/trading/quote";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { levelNow, specFromDrawing, supportsAlert } from "./drawingSpec";
+import type { Notice } from "./feed";
+import { defaultLevel, specFromInstance, supportsIndicatorAlert } from "./indicatorSpec";
+import { describe } from "./model";
+import type { IndicatorInstance } from "@/indicators/instance";
 
 export type AlertSound = "chime" | "beep" | "alarm" | "off";
 
@@ -58,7 +63,9 @@ type State = {
   update: (id: string, patch: AlertPatch, optimistic?: Partial<Alert>) => Promise<Result<Alert>>;
   remove: (id: string) => Promise<Result<unknown>>;
   /** Một alert vừa nổ (tin `alert_fired` của backend): cập nhật trạng thái và thêm dòng nhật ký. */
-  applyFired: (a: Alert, logId: number, price: number, time: number) => void;
+  applyFired: (a: Alert, logId: number, price: number, time: number, late?: boolean) => void;
+  /** Một tin không phải alert giá (tin kinh tế, SL / TP...): thêm dòng nhật ký. */
+  applyNotice: (n: Notice) => void;
   /** Kết quả giao từng kênh của một dòng nhật ký (tin `alert_delivery`). */
   applyDelivery: (logId: number, results: DeliveryResults) => void;
   reset: () => void;
@@ -107,11 +114,17 @@ export const useAlertStore = create<State>()((set, get) => ({
     return r;
   },
 
-  applyFired: (a, logId, price, time) =>
+  applyFired: (a, logId, price, time, late = false) =>
     set((s) => ({
       alerts: replace(s.alerts, a),
       log: s.logLoaded && !s.log.some((l) => l.id === logId)
-        ? [{ id: logId, alert_id: a.id, time, symbol: a.symbol, name: a.name, message: a.message, cond: a.cond, level: a.level, price, label: a.drawing?.label ?? "", results: {} }, ...s.log]
+        ? [{ id: logId, alert_id: a.id, time, symbol: a.symbol, name: a.name, message: a.message, cond: a.cond, level: a.level, price, label: a.drawing?.label ?? "", kind: "price" as const, text: a.indicator ? describe(a, digitsOf(a.symbol)) : "", late, results: {} }, ...s.log]
+        : s.log,
+    })),
+  applyNotice: (n) =>
+    set((s) => ({
+      log: s.logLoaded && !s.log.some((l) => l.id === n.logId)
+        ? [{ id: n.logId, alert_id: n.kind, time: n.time, symbol: "", name: n.title, message: n.message, cond: n.kind, level: 0, price: 0, label: "", kind: n.kind, text: n.text, late: false, results: {} }, ...s.log]
         : s.log,
     })),
   applyDelivery: (logId, results) => set((s) => ({ log: s.log.map((l) => (l.id === logId ? { ...l, results } : l)) })),
@@ -125,6 +138,7 @@ export type AlertSeed = {
   price: number | null;
   tf: string;
   drawing?: AlertDrawing | null; // alert đi theo hình vẽ này
+  indicator?: AlertIndicator | null; // alert theo indicator này (`price` là mức mặc định khi so với một mức)
   now?: { lo: number; hi: number } | null; // mức / dải giá của hình ở nến hiện tại lúc mở hộp thoại (chỉ để xem)
 };
 type DialogState = {
@@ -149,6 +163,15 @@ export async function openCreateAlert(seed?: Partial<AlertSeed>): Promise<void> 
     editing: null,
     seed: { symbol, price: seed && "price" in seed ? (seed.price ?? null) : lastPrice(symbol), tf: seed?.tf ?? c.tf, drawing: seed?.drawing ?? null, now: seed?.now ?? null },
   });
+  void useAlertStore.getState().refreshChannels();
+}
+
+/** "Add alert on <indicator>" ở menu của indicator trên chart `symbol` / `tf`: mở hộp thoại tạo alert với đường mặc định của indicator (RSI cắt 70, MACD cắt Signal, MA so với giá...). */
+export async function openIndicatorAlert(inst: Pick<IndicatorInstance, "id" | "inputs">, symbol: string, tf: string): Promise<void> {
+  if (!(await useAuthStore.getState().requireLogin("Đăng nhập để tạo alert"))) return;
+  const spec = supportsIndicatorAlert(inst.id) ? specFromInstance(inst) : null;
+  if (!spec) return void toast("Indicator này chưa tạo alert được.", { kind: "info" });
+  useAlertDialog.setState({ editing: null, seed: { symbol, price: defaultLevel(inst.id), tf, indicator: spec } });
   void useAlertStore.getState().refreshChannels();
 }
 
