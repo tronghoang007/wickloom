@@ -73,14 +73,18 @@
 //| - 2.18: "deals" them position (DEAL_POSITION_ID), sl, tp, reason    |
 //|   (DEAL_REASON: client/mobile/web/expert/sl/tp/so...) - web ghep     |
 //|   deal vao/ra thanh vi the da dong cho tab History                  |
+//| - 2.19: ALERT ra dien thoai (docs/alerts-plan.md Phase 0): lenh      |
+//|   "notify" {id, text} -> SendNotification (MetaQuotes ID nhap o      |
+//|   Tools > Options > Notifications), tra "notify_result" {id, ok,    |
+//|   err}; "account" them push_enabled (TERMINAL_NOTIFICATIONS_ENABLED) |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.18"
+#property version "2.19"
 
-#define EA_VERSION "2.18"
+#define EA_VERSION "2.19"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -282,6 +286,7 @@ void PostAccount()
             + ",\"margin_mode\":\"" + MarginMode() + "\""
             + ",\"trade_allowed\":" + JsonBool(AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) != 0)
             + ",\"terminal_trade_allowed\":" + JsonBool(TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) != 0)
+            + ",\"push_enabled\":" + JsonBool(TerminalInfoInteger(TERMINAL_NOTIFICATIONS_ENABLED) != 0)
             + ",\"ea_trading\":" + JsonBool(TradingEnabled)
             + ",\"max_lot\":" + DoubleToString(MaxLotPerOrder, 2)
             + ",\"ea_version\":\"" + EA_VERSION + "\"}";
@@ -1496,6 +1501,21 @@ void HandlePositionModify(string line)
   ExecuteRequest(req, rq, "", false);
 }
 
+// Alert -> dien thoai: SendNotification toi da 255 ky tu, MT5 gioi han tan suat (backend da chia tin). Bao ket qua de web noi dung ly do khi that bai.
+// SendNotification chi cho biet ham tra true/false, khong biet tin co toi dien thoai hay khong.
+void HandleNotify(string line)
+{
+  long id = JsonInt(line, "id");
+  string text = JsonStr(line, "text");
+  if (StringLen(text) > 255)
+    text = StringSubstr(text, 0, 255);
+  ResetLastError();
+  bool ok = text != "" && SendNotification(text);
+  int err = ok ? 0 : GetLastError();
+  PrintFormat("TVBridge: SendNotification %s (loi %d, %d ky tu)", ok ? "OK" : "THAT BAI", err, StringLen(text));
+  SendLine("{\"type\":\"notify_result\",\"id\":" + IntegerToString(id) + ",\"ok\":" + JsonBool(ok) + ",\"err\":" + IntegerToString(err) + "}");
+}
+
 //--- nhận lệnh từ backend ---------------------------------------------
 void HandleCommand(string line)
 {
@@ -1514,6 +1534,8 @@ void HandleCommand(string line)
     HandleOrderModify(line);
   else if (type == "order_delete")
     HandleOrderDelete(line);
+  else if (type == "notify")
+    HandleNotify(line);
   else if (type == "subscribe")
     ApplySubscribe(JsonArray(line, "symbols"));
   else if (type == "backfill")

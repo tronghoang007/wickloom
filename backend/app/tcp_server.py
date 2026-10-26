@@ -3,7 +3,7 @@ import json
 import time
 from typing import Any, Dict, List, Tuple
 
-from . import economic, mt5, state, tickdelta, trade
+from . import alerts, economic, mt5, state, tickdelta, trade
 from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN
 from .models import BarsIn, SymbolsIn, TicksHistIn, TicksIn
 
@@ -43,6 +43,7 @@ def _handle_ticks(body: TicksIn) -> None:
             continue
         t_utc_msc = t.t_msc - offset * 1000
         state.aggregator.tick(body.symbol, t_utc_msc, price, t.vol, offset)
+        alerts.engine.on_price(body.symbol, t_utc_msc, price, offset)
     if fresh:
         live = _live_ticks(body, fresh)
         if live:
@@ -113,7 +114,7 @@ def _handle_ticks_hist(body: TicksHistIn) -> None:
 
 
 async def _write(writer: asyncio.StreamWriter, msg: Dict[str, Any]) -> None:
-    writer.write((json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8"))
+    writer.write((json.dumps(msg, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8"))
     await writer.drain()
 
 
@@ -165,7 +166,7 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
 
         if not state.symbols:
             await _write(writer, {"type": "need_symbols"})
-        await _write(writer, {"type": "subscribe", "symbols": sorted(state.hub.subscribed_symbols())})
+        await _write(writer, {"type": "subscribe", "symbols": sorted(state.wanted_symbols())})
 
         pending = list(state.pending_backfill)
         state.pending_backfill.clear()
@@ -200,6 +201,8 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
                     _handle_ticks_hist(TicksHistIn.model_validate(msg))
                 elif mtype == "account":
                     mt5.registry.update(writer, msg)
+                elif mtype == "notify_result":
+                    alerts.mt5push.resolve(msg)
                 elif mtype == "calendar":
                     economic.ingest(msg)
                 elif mtype in ("trade", "deals"):

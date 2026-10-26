@@ -3,7 +3,7 @@ import json
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from . import tickdelta
 from .aggregator import Aggregator
@@ -27,9 +27,27 @@ def _on_update(symbol: str, tf: str, bar: Dict[str, Any]) -> None:
     hub.publish(symbol, tf, {"type": "bar_update", "symbol": symbol, "tf": tf, "bar": bar})
 
 
+# Module khác (alerts) đăng ký ở đây thay vì được state import ngược (vòng phụ thuộc): nến vừa đóng -> hook; symbol nào cần EA stream tick ngoài các chart đang mở.
+bar_close_hooks: List[Callable[[str, str, Dict[str, Any]], None]] = []
+symbol_sources: List[Callable[[], Set[str]]] = []
+
+
 def _on_close(symbol: str, tf: str, bar: Dict[str, Any]) -> None:
     bars.upsert(symbol, tf, [bar])
     hub.publish(symbol, tf, {"type": "bar_close", "symbol": symbol, "tf": tf, "bar": bar})
+    for hook in bar_close_hooks:
+        try:
+            hook(symbol, tf, bar)
+        except Exception as exc:  # hook lỗi không được làm hỏng luồng nến
+            print(f"bar_close hook loi: {exc}")
+
+
+def wanted_symbols() -> Set[str]:
+    """Symbol EA phải stream tick: các chart đang xem + nguồn khác (alert đang chạy phải nổ cả khi tắt hết tab)."""
+    out = set(hub.subscribed_symbols())
+    for src in symbol_sources:
+        out |= src()
+    return out
 
 
 _seeding: Dict[tuple, float] = {}
@@ -112,13 +130,18 @@ class EaHub:
 
     async def _send(self, writer: Any, msg: Dict[str, Any]) -> None:
         try:
-            writer.write((json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8"))
+            writer.write((json.dumps(msg, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8"))
             await writer.drain()
         except Exception:
             self.writers.discard(writer)
 
 
 ea_hub = EaHub()
+
+
+def push_subscribe() -> None:
+    """Báo EA danh sách symbol cần stream tick (gọi khi chart / alert thêm hoặc bớt symbol)."""
+    ea_hub.push({"type": "subscribe", "symbols": sorted(wanted_symbols())})
 
 
 def request_backfill(symbol: str, tf: str, count: int = 500, pos: int = 0, before: int = 0) -> None:

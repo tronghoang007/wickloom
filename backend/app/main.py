@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import accounts, auth, economic, me, mt5, state, tcp_server, trade
+from . import accounts, alerts, auth, economic, me, mt5, state, tcp_server, trade
 from .config import ALLOWED_ORIGINS, TF_SECONDS
 from .state import request_backfill
 from .tickdelta import TICK_DELTA_TF
@@ -32,10 +32,10 @@ app.include_router(me.router)
 app.include_router(mt5.router)
 app.include_router(trade.router)
 app.include_router(economic.router)
+app.include_router(alerts.router)
 
 
-def _push_subscribe() -> None:
-    state.ea_hub.push({"type": "subscribe", "symbols": sorted(state.hub.subscribed_symbols())})
+_push_subscribe = state.push_subscribe
 
 
 @app.on_event("startup")
@@ -46,6 +46,7 @@ async def _startup():
     state.hub.set_loop(loop)
     state.ea_hub.set_loop(loop)
     app.state.ea_tcp_server = await tcp_server.start_server()
+    alerts.start()
 
 
 @app.on_event("shutdown")
@@ -140,6 +141,16 @@ for _t in TABLES:
         app.include_router(_crud(_t))
 
 
+def _ws_user_id(ws: WebSocket) -> Optional[str]:
+    """User của phiên đăng nhập (cookie) trên kết nối WebSocket; None nếu chưa đăng nhập hoặc Origin lạ (WebSocket không bị CORS chặn nên phải tự kiểm)."""
+    origin = ws.headers.get("origin")
+    if origin is not None and origin not in ALLOWED_ORIGINS:
+        return None
+    token = ws.cookies.get(auth.SESSION_COOKIE)
+    res = auth.store.resolve_session(token) if token else None
+    return res[0]["id"] if res else None
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
@@ -153,6 +164,11 @@ async def ws_endpoint(ws: WebSocket):
                 state.aggregator.watch(*pair)
                 state.request_catchup(*pair)
                 _push_subscribe()
+            elif msg.get("action") == "alerts":  # chỉ AlertHost của web xin; chart thường không nhận alert
+                uid = _ws_user_id(ws)
+                if uid is not None:
+                    state.hub.alert_users[ws] = uid
+                await ws.send_json({"type": "alerts_ready" if uid is not None else "alerts_denied"})
             elif msg.get("action") == "unsubscribe":
                 state.hub.clients[ws].discard(pair)
                 _push_subscribe()
@@ -160,4 +176,5 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         state.hub.clients.pop(ws, None)
+        state.hub.alert_users.pop(ws, None)
         _push_subscribe()  # symbol không còn ai xem thì EA thôi stream tick

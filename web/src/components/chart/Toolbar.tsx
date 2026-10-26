@@ -1,5 +1,6 @@
 "use client";
 
+import { openCreateAlert } from "@/alerts/store";
 import { useDrawingStore } from "@/drawings/store";
 import { fetchSymbols } from "@/lib/api";
 import { useSettingsStore } from "@/store/settings";
@@ -151,7 +152,7 @@ export default function Toolbar() {
         <TemplatesI />
       </button>
       {sep}
-      <button className={btn} disabled title="Alert (sắp có)">
+      <button className={btn} title="Create alert (⌥ A)" onClick={() => void openCreateAlert()}>
         <AlertI /> Alert
       </button>
       <button

@@ -125,7 +125,7 @@ class Mt5Registry:
             v = _num(msg.get(k))
             if v is not None:
                 info[k] = v
-        for k in ("trade_allowed", "terminal_trade_allowed", "ea_trading"):  # EA có quyền giao dịch không; ea_trading = input TradingEnabled
+        for k in ("trade_allowed", "terminal_trade_allowed", "ea_trading", "push_enabled"):  # EA có quyền giao dịch không; ea_trading = input TradingEnabled; push_enabled = MT5 đã bật Push Notifications (alert ra điện thoại)
             v = _flag(msg.get(k))
             if v is not None:
                 info[k] = v

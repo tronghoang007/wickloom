@@ -1,6 +1,8 @@
 "use client";
 
 import AuthDialog from "@/components/auth/AuthDialog";
+import AlertDialog from "@/components/chart/AlertDialog";
+import AlertHost from "@/components/chart/AlertHost";
 import Toasts from "@/components/Toasts";
 import ConfirmHost from "@/components/ConfirmHost";
 import ChartGrid from "@/components/chart/ChartGrid";
@@ -75,6 +77,8 @@ export default function Page() {
       <DrawingSettings />
       <OpenLayoutDialog />
       <AuthDialog />
+      <AlertDialog />
+      <AlertHost />
       <Toasts />
       <ConfirmHost />
     </div>

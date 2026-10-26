@@ -3,7 +3,8 @@
 import { useRailStore, type RailPanel } from "@/store/rail";
 import { useTicketStore } from "@/trading/ticket";
 import { type ReactNode } from "react";
-import { AddOrderI, CalendarI, Close, WatchlistI } from "../icons";
+import { AddOrderI, AlertI, CalendarI, Close, WatchlistI } from "../icons";
+import AlertsPanel from "./AlertsPanel";
 import EconomicCalendarPanel from "./EconomicCalendarPanel";
 import OrderTicket from "./OrderTicket";
 import WatchlistPanel from "./WatchlistPanel";
@@ -14,6 +15,7 @@ const cls = (active: boolean) =>
 
 const TABS: { id: RailPanel; label: string; icon: ReactNode }[] = [
   { id: "watchlist", label: "Watchlist", icon: <WatchlistI /> },
+  { id: "alerts", label: "Alerts", icon: <AlertI /> },
   { id: "calendar", label: "Economic calendar", icon: <CalendarI /> },
   { id: "order", label: "Order", icon: <AddOrderI /> }, // chỉ hiện khi đang soạn lệnh
 ];
@@ -38,7 +40,7 @@ export default function RightRail() {
             </div>
           )}
           <div className={`min-h-0 flex-1 ${open === "order" ? "flex flex-col" : "overflow-y-auto"}`}>
-            {open === "watchlist" ? <WatchlistPanel /> : open === "calendar" ? <EconomicCalendarPanel /> : <OrderTicket />}
+            {open === "watchlist" ? <WatchlistPanel /> : open === "alerts" ? <AlertsPanel /> : open === "calendar" ? <EconomicCalendarPanel /> : <OrderTicket />}
           </div>
         </div>
       )}

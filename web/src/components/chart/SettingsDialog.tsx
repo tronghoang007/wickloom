@@ -1,4 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useAlertPrefs, useAlertStore, useSettingsTab, type AlertSound } from "@/alerts/store";
+import { playAlertSound, unlockAudio } from "@/alerts/sound";
+import { linkTelegram, testChannel, unlinkTelegram, type AlertChannels, type ChannelKind } from "@/lib/alertsApi";
+import { useAuthStore } from "@/store/auth";
+import { toast } from "@/store/toast";
+import { enableDesktopNotifications } from "./AlertHost";
 import ColorPicker from "./ColorPicker";
 import {
   AlertI,
@@ -29,7 +35,7 @@ const TABS: { id: Tab; label: string; icon: ReactNode; soon?: boolean }[] = [
   { id: "canvas", label: "Canvas", icon: <CanvasI /> },
   { id: "trading", label: "Trading", icon: <TradingI /> },
   { id: "events", label: "Events", icon: <CalendarI /> },
-  { id: "alerts", label: "Alerts", icon: <AlertI />, soon: true },
+  { id: "alerts", label: "Alerts", icon: <AlertI /> },
 ];
 
 const SOON = "Sắp có";
@@ -397,6 +403,167 @@ function CanvasTab({ s, set }: P) {
 // --- dialog -----------------------------------------------------------------
 // Setting lúc mở dialog (chỉ có 1 dialog) - Cancel/X/Esc trả về đúng bản này.
 let snapshot: ChartSettings | null = null;
+
+const SOUNDS: { value: AlertSound; label: string }[] = [
+  { value: "chime", label: "Chime" },
+  { value: "beep", label: "Beep" },
+  { value: "alarm", label: "Alarm" },
+  { value: "off", label: "Off" },
+];
+const POLL_LINK_MS = 3000;
+const LINK_WAIT_MS = 10 * 60 * 1000;
+
+/** Nút gửi thử một kênh: kết quả hiện ngay cạnh nút (và trong toast) để biết kênh nào hỏng và vì sao. */
+function TestButton({ kind, disabled }: { kind: ChannelKind; disabled?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<{ ok: boolean; detail: string } | null>(null);
+  return (
+    <>
+      <button
+        type="button"
+        disabled={busy || disabled}
+        onClick={async () => {
+          setBusy(true);
+          const r = await testChannel(kind);
+          setBusy(false);
+          setRes(r.ok ? r.data : { ok: false, detail: r.error });
+          if (r.ok && r.data.ok && kind !== "web") toast("Đã gửi tin thử", { kind: "success" });
+        }}
+        className="h-8 shrink-0 rounded-md border border-[var(--border)] px-3 hover:bg-[var(--hover)] disabled:opacity-55"
+      >
+        {busy ? "Sending…" : "Send test"}
+      </button>
+      {res && <span className={`min-w-0 max-w-[260px] text-[12px] ${res.ok ? "text-[#089981]" : "text-[#f23645]"}`}>{res.ok ? "OK" : res.detail}</span>}
+    </>
+  );
+}
+
+function AlertsTab() {
+  const status = useAuthStore((st) => st.status);
+  const prefs = useAlertPrefs();
+  const info = useAlertStore((st) => st.channels);
+  const [linking, setLinking] = useState(false);
+  const user = status === "user";
+
+  useEffect(() => {
+    if (user) void useAlertStore.getState().refreshChannels();
+  }, [user]);
+
+  // Đang chờ người dùng bấm Start ở Telegram: hỏi lại trạng thái cho tới khi liên kết xong (hoặc hết hạn mã)
+  const waiting = linking && !info?.telegram.linked; // liên kết xong thì thôi chờ
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setInterval(() => void useAlertStore.getState().refreshChannels(), POLL_LINK_MS);
+    const stop = setTimeout(() => setLinking(false), LINK_WAIT_MS);
+    return () => {
+      clearInterval(t);
+      clearTimeout(stop);
+    };
+  }, [waiting]);
+
+  const setDefault = (k: keyof AlertChannels, v: boolean) => prefs.set({ channels: { ...prefs.channels, [k]: v } });
+  const tg = info?.telegram;
+  const m = info?.mt5;
+  return (
+    <>
+      <Section>This device</Section>
+      <Row label="Sound">
+        <Select value={prefs.sound} options={SOUNDS} onChange={(v) => { unlockAudio(); prefs.set({ sound: v }); playAlertSound(v); }} />
+      </Row>
+      <CheckRow
+        label="Desktop notifications"
+        checked={prefs.desktop}
+        onChange={async (v) => {
+          if (v && !(await enableDesktopNotifications())) {
+            toast("Trình duyệt đang chặn thông báo của trang này. Cho phép trong cài đặt trang (biểu tượng ổ khoá cạnh địa chỉ) rồi bật lại.", { kind: "error", ms: 9000 });
+            return;
+          }
+          prefs.set({ desktop: v });
+        }}
+      />
+      <p className="-mt-1 mb-2 pl-7 text-[12px] text-[var(--muted)]">Hiện khi alert nổ mà bạn đang ở tab / cửa sổ khác. Chỉ hoạt động khi còn một tab Wickloom mở; tắt hết tab thì dùng Telegram hoặc MT5.</p>
+      <Section>Default channels for new alerts</Section>
+      <CheckRow label="Web (toast, sound)" checked={prefs.channels.web} onChange={(v) => setDefault("web", v)} />
+      <CheckRow label="Telegram" checked={prefs.channels.telegram && !!tg?.linked} soon={!tg?.linked} onChange={(v) => setDefault("telegram", v)} />
+      <CheckRow label="MT5 mobile push" checked={prefs.channels.mt5} onChange={(v) => setDefault("mt5", v)} />
+      {!user ? (
+        <p className="mt-4 text-[12px] text-[var(--muted)]">Đăng nhập để kết nối Telegram, MT5 và tạo alert.</p>
+      ) : (
+        <>
+          <Section>Browser (this tab)</Section>
+          <Row label="Delivery path">
+            <TestButton kind="web" />
+          </Row>
+          <Section>Telegram</Section>
+          {!tg ? (
+            <p className="text-[var(--muted)]">Đang tải…</p>
+          ) : !tg.configured ? (
+            <p className="max-w-[420px] text-[12px] leading-relaxed text-[var(--muted)]">
+              Backend chưa có bot. Tạo bot qua @BotFather, đặt biến môi trường <code>WICKLOOM_TG_BOT_TOKEN</code> cho backend rồi khởi động lại. Token chỉ nằm ở backend, không bao giờ gửi xuống trình duyệt.
+            </p>
+          ) : tg.linked ? (
+            <Row label={<span>Connected{tg.name ? ` (${tg.name})` : ""}</span>}>
+              <TestButton kind="telegram" />
+              <button
+                type="button"
+                className="h-8 rounded-md border border-[var(--border)] px-3 hover:bg-[var(--hover)]"
+                onClick={async () => {
+                  const r = await unlinkTelegram();
+                  if (r.ok) {
+                    setLinking(false);
+                    prefs.set({ channels: { ...prefs.channels, telegram: false } });
+                    void useAlertStore.getState().refreshChannels();
+                  } else toast(r.error, { kind: "error" });
+                }}
+              >
+                Disconnect
+              </button>
+            </Row>
+          ) : (
+            <>
+              <Row>
+                <button
+                  type="button"
+                  className="h-8 rounded-md bg-[var(--fg)] px-4 font-medium text-[var(--bg)] hover:opacity-90"
+                  onClick={async () => {
+                    const r = await linkTelegram();
+                    if (!r.ok) return toast(r.error, { kind: "error" });
+                    window.open(r.data.url, "_blank", "noopener,noreferrer");
+                    setLinking(true);
+                  }}
+                >
+                  Connect Telegram
+                </button>
+                {waiting && <span className="text-[12px] text-[var(--muted)]">Mở Telegram, bấm Start… (mã hết hạn sau 10 phút)</span>}
+              </Row>
+            </>
+          )}
+          <Section>MT5 mobile push</Section>
+          {!m ? (
+            <p className="text-[var(--muted)]">Đang tải…</p>
+          ) : (
+            <>
+              <Row label="EA">
+                <span className={m.online ? "" : "text-[#ff9800]"}>{m.online ? `Online${m.version ? ` (v${m.version})` : ""}` : "Offline"}</span>
+              </Row>
+              <Row label="Push notifications">
+                <span className={m.push_enabled === false ? "text-[#ff9800]" : ""}>{m.push_enabled === null ? "Chưa biết (EA chưa báo)" : m.push_enabled ? "Enabled in MT5" : "Disabled in MT5"}</span>
+              </Row>
+              <Row label="Test">
+                <TestButton kind="mt5" disabled={!m.online} />
+              </Row>
+              <p className="mt-1 max-w-[420px] text-[12px] leading-relaxed text-[var(--muted)]">
+                Cài MetaTrader 5 trên điện thoại, lấy MetaQuotes ID (Settings → Messages) và nhập vào MT5 trên máy này: Tools → Options → Notifications, tick Enable Push Notifications. Điện thoại nhận theo
+                terminal MT5, không theo tài khoản Wickloom. EA cần bản 2.19+ (biên dịch lại bằng F7). Tối đa 8 tin/phút; tin dồn dập được gộp.
+              </p>
+            </>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 const closeSettings = () => useSettingsStore.setState({ open: false });
 function cancelSettings() {
   if (snapshot) useSettingsStore.getState().replace(snapshot);
@@ -423,6 +590,13 @@ export default function SettingsDialog() {
   const set = useSettingsStore((st) => st.set);
   const [tab, setTab] = useState<Tab>("symbol");
   const [tplOpen, setTplOpen] = useState(false);
+  // "Mở Settings → Alerts" từ hộp thoại alert / panel: mỗi lần yêu cầu tăng `tick`, đổi tab ngay trong lần render đó (không qua effect)
+  const alertsTick = useSettingsTab((st) => st.tick);
+  const [seenTick, setSeenTick] = useState(alertsTick);
+  if (alertsTick !== seenTick) {
+    setSeenTick(alertsTick);
+    setTab("alerts");
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -477,6 +651,7 @@ export default function SettingsDialog() {
             {tab === "canvas" && <CanvasTab {...body} />}
             {tab === "trading" && <TradingTab {...body} />}
             {tab === "events" && <EventsTab {...body} />}
+            {tab === "alerts" && <AlertsTab />}
           </div>
         </div>
         <div className="flex items-center justify-between border-t border-[var(--border)] px-5 py-3">

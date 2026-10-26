@@ -1,6 +1,6 @@
 # Alert đa kênh: trình duyệt + Telegram + MT5 mobile
 
-Ngày lập: 2026-10-25. Trạng thái: **chưa làm gì**, mới là plan.
+Ngày lập: 2026-10-25. Trạng thái (2026-10-26): **Phase 0 + Phase 1 đã code và kiểm tra** (chưa commit); Phase 2 (alert trên drawing) và Phase 3 chưa làm. Xem mục 11.
 
 ## 1. Hiện trạng
 
@@ -176,3 +176,27 @@ Mọi endpoint cần phiên đăng nhập, khoá theo `user_id` như `me.py`; PO
 - Alert indicator để sau cùng.
 - Một bot Telegram cho cả cài đặt Wickloom; mỗi user liên kết `chat_id` riêng.
 - Kênh MT5 là chung cho terminal (không theo user).
+
+## 11. Tiến độ (2026-10-26)
+
+**Đã làm (Phase 0 + 1)**
+
+- Backend: `alerts.py` (bảng `alerts` / `alert_log` / `notify_channels`, engine, API `/alerts*`), `notify.py` (Telegram, giới hạn MT5, Dispatcher), `/ws` action `alerts` (xác thực cookie + kiểm Origin) + `Hub.send_user`, `state.wanted_symbols()` để EA stream tick của symbol có alert dù không chart nào mở, hook `bar_close_hooks` cho "đóng nến". 51 test mới (`tests/test_alerts.py`), cả bộ 194 pass.
+- EA **2.19** (không phải 2.18 như plan: 2.18 đã dùng cho `deals`): lệnh `notify` -> `SendNotification`, trả `notify_result {id, ok, err}`, `account.push_enabled`. **Đã kiểm chứng trên máy thật (2026-10-26):** F7 EA 2.19, nhập MetaQuotes ID, bấm "Send test" ở Settings → Alerts → MT5 mobile push -> điện thoại nhận đúng tin của Wickloom, log Experts `10:38:35 SendNotification OK (loi 0, 38 ky tu)`. Nghĩa là MT5 chạy qua Wine đẩy push được; rủi ro ở mục 3 đã hết, giữ kênh MT5.
+- Web: `lib/alertsApi.ts`, `alerts/{model,store,feed,sound,useAlertLines}.ts`, `AlertHost` (WS riêng + toast + âm báo + Notification + phím ⌥A), `AlertDialog`, `AlertsPanel` (thanh phải: Alerts / Log), đường alert cam kéo được trên chart, Settings → Alerts (âm báo, desktop notification, kênh mặc định, kết nối Telegram, trạng thái + gửi thử MT5). Bật: nút Alert trên toolbar, menu chuột phải chart. 16 test mới; cả bộ 1225 pass, `tsc` + `next build` sạch.
+- Kiểm tra end-to-end bằng backend scratch + EA giả + bot Telegram giả + Chrome: tạo từ dialog / menu chuột phải, kéo đường đổi giá (lưu ở backend), nổ -> toast + Telegram + MT5 + nhật ký, re-activate, xoá, gửi thử từng kênh, đường lỗi MT5 hiện đúng lý do.
+
+**Lệch so với plan (có chủ ý)**
+
+- Không có cột `source` (bid/last): engine so với đúng giá chart dựng nến (`bid or last` ở `tcp_server`), nên đường alert luôn khớp nến.
+- `last_price` không lưu DB: mốc cắt chỉ ở bộ nhớ (plan cũng nói khởi động lại thì đặt lại).
+- Thêm cột `tf`: "Once per bar" / "Once per bar close" cần biết khung nến. "Once per bar close" lần đóng nến đầu tiên chỉ làm mốc (như tick đầu).
+- "Every time" nổ lại tối đa mỗi 5 giây (`REFIRE_GAP`) để giá dao động quanh mức không làm ngập Telegram.
+- Điều kiện `gt` / `lt` nổ ngay nếu giá đang thoả (khác `cross*` luôn chờ một lần cắt).
+- Tin gửi EA giờ dùng UTF-8 thô (`ensure_ascii=False`) vì `JsonStr` của EA không giải mã `\uXXXX`.
+- Nhật ký có thêm tin `alert_delivery` (kết quả từng kênh) để web báo ngay khi Telegram / MT5 lỗi.
+
+**Chưa làm**
+
+- Phase 2: nút chuông ở menu indicator / drawing / StylePanel vẫn `disabled`.
+- Phase 3 (báo trước tin kinh tế, SL/TP chạm, bù lần chạm lúc backend tắt, alert theo indicator).

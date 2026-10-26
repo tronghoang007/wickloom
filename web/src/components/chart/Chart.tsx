@@ -17,6 +17,8 @@ import { useChartStore } from "@/store/chart";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import { usePaneState } from "@/store/compose";
 import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
+import { openCreateAlert } from "@/alerts/store";
+import { useAlertLines } from "@/alerts/useAlertLines";
 import { createLineDrag, type ChartDrag } from "@/trading/chartOrders";
 import type { DragPreview } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
@@ -1195,6 +1197,9 @@ export default function Chart({ paneId }: { paneId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Đường alert của symbol này (kéo để đổi giá): alerts/useAlertLines.ts
+  useAlertLines({ symbol, chartType, replay: replayActive, getChart, getBox, getSeries, getDigits });
+
   // price precision
   useEffect(() => {
     digitsRef.current = digits;
@@ -1712,7 +1717,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       },
       { label: "Paste", shortcut: "⌘ V", disabled: true },
       "sep",
-      { label: `Add alert on ${symbol} at ${p}`, icon: <AlertI />, shortcut: "⌥ A", disabled: true },
+      { label: `Add alert on ${symbol} at ${p}`, icon: <AlertI />, shortcut: "⌥ A", disabled: price === null || replayActive, onSelect: () => void openCreateAlert({ symbol, price, tf }) },
       ...tradeMenuItems(symbol, price, digits, last, replayActive),
       "sep",
       { label: "Lock vertical cursor line by time", disabled: true },

@@ -15,6 +15,9 @@ ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
 ALLOW_REGISTER = os.environ.get("WICKLOOM_ALLOW_REGISTER", "1") != "0"  # đặt 0 khi lỡ đưa app ra mạng
 COOKIE_SECURE = os.environ.get("WICKLOOM_COOKIE_SECURE", "0") == "1"  # bật khi chạy sau HTTPS
 
+# Bot Telegram cho alert (docs/alerts-plan.md): token chỉ ở biến môi trường, không bao giờ gửi xuống web hay ghi log. Rỗng = kênh Telegram tắt.
+TG_BOT_TOKEN = os.environ.get("WICKLOOM_TG_BOT_TOKEN", "").strip()
+
 EA_TCP_HOST =os.environ.get("TV_EA_TCP_HOST", "127.0.0.1")
 EA_TCP_PORT = int(os.environ.get("TV_EA_TCP_PORT", "8001"))
 
