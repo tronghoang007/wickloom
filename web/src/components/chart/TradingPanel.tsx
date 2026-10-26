@@ -9,9 +9,11 @@ import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
 import { askCancelAll, askCloseAll, askClosePosition } from "@/trading/tagActions";
 import { accountProfit, closedPositions, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, REASON_LABEL, sideLabel } from "@/trading/format";
+import { useTradeFocus } from "@/trading/focus";
 import { tradeBlock } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
+import { useTicketStore } from "@/trading/ticket";
 import { useEffect, useState, type ReactNode } from "react";
 import EmptyState from "../EmptyState";
 import { EmptyHistoryI, EmptyOrdersI, EmptyPositionsI } from "../icons";
@@ -174,6 +176,20 @@ export default function TradingPanel() {
 
 const digitsOf = (symbol: string) => useChartStore.getState().symbols.find((s) => s.name === symbol)?.digits;
 const rowClass = "border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--hover)]";
+const rowSelected = "border-b border-[var(--border)] bg-[var(--selected)] last:border-b-0";
+
+/** Bấm một dòng vị thế / lệnh chờ = chọn lệnh đó như bấm thẻ của nó trên chart (mở bảng Modify, các lệnh khác mờ đi): chọn được cả khi hai lệnh sát nhau tới mức không bấm trúng thẻ.
+ *  Lệnh của symbol khác với chart đang xem thì chuyển chart sang symbol đó trước, vì đường SL / TP chỉ sửa được trên chart có đường của lệnh. */
+function useSelectTrade(owner: string, symbol: string) {
+  const selected = useTradeFocus((s) => s.owner === owner);
+  return {
+    selected,
+    select: () => {
+      if (useChartStore.getState().symbol !== symbol) useChartStore.getState().set({ symbol });
+      if (!selected || useTicketStore.getState().modifyOwner !== owner) useTicketStore.getState().select(owner);
+    },
+  };
+}
 const Empty = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
   <EmptyState icon={icon} className="h-full">
     {children}
@@ -217,8 +233,9 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
     setEditing(false);
     askClosePosition(p, want >= p.volume - 1e-9 ? 0 : want); // hộp thoại xác nhận rồi mới gửi; 0 = đóng hết
   };
+  const { selected, select } = useSelectTrade(`position:${p.ticket}`, p.symbol);
   return (
-    <tr className={rowClass}>
+    <tr className={`cursor-pointer ${selected ? rowSelected : rowClass}`} onClick={select} data-testid="position-row">
       <td className={td}><SymbolCell symbol={p.symbol} /></td>
       <td className={td}><SideCell side={p.type === "sell" ? "sell" : "buy"} /></td>
       <td className={td + R}>{fmtLot(p.volume)}</td>
@@ -291,8 +308,9 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
   const d = digitsOf(o.symbol);
   const busy = useOrderState((s) => s.busy);
   const block = tradeBlock({ replay: false, status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const { selected, select } = useSelectTrade(`order:${o.ticket}`, o.symbol);
   return (
-    <tr className={rowClass}>
+    <tr className={`cursor-pointer ${selected ? rowSelected : rowClass}`} onClick={select} data-testid="order-row">
       <td className={td}><SymbolCell symbol={o.symbol} /></td>
       <td className={td}><SideCell side={o.type.startsWith("buy") ? "buy" : "sell"} label={orderLabel(o.type)} /></td>
       <td className={td + R}>{fmtLot(o.volume)}</td>

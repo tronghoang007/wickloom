@@ -2,13 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mt5Account, PendingOrder, Position } from "@/lib/mt5Api";
 import type { DragPreview } from "./format";
 
-const h = vi.hoisted(() => ({ host: null as null | Record<string, (...a: never[]) => unknown>, moveStops: vi.fn(), moveOrder: vi.fn(), begin: vi.fn() }));
+const h = vi.hoisted(() => ({ host: null as null | Record<string, (...a: never[]) => unknown>, moveStops: vi.fn(), moveOrder: vi.fn(), begin: vi.fn(), tapped: false }));
 vi.mock("./lineDrag", () => ({
   LineDrag: class {
     constructor(host: Record<string, (...a: never[]) => unknown>) {
       h.host = host;
     }
     destroy() {}
+    consumeTap() {
+      return h.tapped;
+    }
     begin(...a: unknown[]) {
       h.begin(...a);
     }
@@ -50,6 +53,7 @@ let replayOn = false;
 beforeEach(() => {
   vi.useFakeTimers();
   h.host = null;
+  h.tapped = false;
   h.moveStops.mockReset().mockResolvedValue(true);
   h.moveOrder.mockReset().mockResolvedValue(true);
   keydown = null;
@@ -264,6 +268,41 @@ describe("focus lệnh trên chart", () => {
     expect(useTradeFocus.getState().owner).toBe("position:1");
     call("onAbort", "psl:1", 4090);
     keydown!({ key: "Escape" });
+    expect(useTradeFocus.getState().owner).toBeNull();
+  });
+});
+
+describe("bấm vào đường để chọn lệnh (hai thẻ đè nhau không bấm trúng được)", () => {
+  type T = { id: string; price: number; fixed?: boolean };
+  const targets = () => (h.host!.getTargets as () => T[])();
+  const byId = (id: string) => targets().find((t) => t.id === id);
+
+  it("giá vào của vị thế là đường chỉ-bấm (không kéo được); giá vào lệnh chờ, SL, TP vẫn kéo được", () => {
+    expect(byId("p:1")).toEqual({ id: "p:1", price: 4125, fixed: true });
+    expect(byId("o:2")?.fixed).toBeUndefined();
+    for (const id of ["psl:1", "ptp:1", "osl:2", "otp:2"]) expect(byId(id)?.fixed).toBeUndefined();
+  });
+
+  it("bấm đường giá vào của vị thế (onAbort click) = chọn vị thế, mở bảng Modify", () => {
+    useTicketStore.setState({ modifyOwner: null });
+    call("onAbort", "p:1", 4125, true);
+    expect(useTicketStore.getState().modifyOwner).toBe("position:1");
+    expect(useTradeFocus.getState().owner).toBe("position:1");
+  });
+
+  it("khách / account real / EA tắt: chỉ xem nhưng mọi đường lệnh vẫn bấm để chọn được, không đường nào kéo được", () => {
+    useMt5Store.setState({ accounts: [{ ...account, ea_trading: false }], loaded: true });
+    expect(targets().map((t) => t.id).sort()).toEqual(["o:2", "osl:2", "otp:2", "p:1", "psl:1", "ptp:1"]);
+    expect(targets().every((t) => t.fixed === true)).toBe(true);
+  });
+
+  it("vừa bấm một đường chỉ-bấm thì cú click chart theo sau không bỏ chọn; click nền lần khác thì bỏ", () => {
+    useTradeFocus.setState({ owner: "position:1" });
+    h.tapped = true;
+    clickHandler!();
+    expect(useTradeFocus.getState().owner).toBe("position:1");
+    h.tapped = false;
+    clickHandler!();
     expect(useTradeFocus.getState().owner).toBeNull();
   });
 });

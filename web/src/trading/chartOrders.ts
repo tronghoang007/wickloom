@@ -12,7 +12,7 @@ import { registerEditHandlers, useEditBridge } from "./editBridge";
 import { useTradeFocus } from "./focus";
 import { fmtLot, isStale, orderLabel, type DragPreview, type StopTitleFn, type TagOwner } from "./format";
 import { tradeBlock } from "./gate";
-import { LineDrag } from "./lineDrag";
+import { LineDrag, type DragTarget } from "./lineDrag";
 import { checkStopMove, isPendingType, pendingLabel, resolveOrderType, sideOfType, tooClose } from "./orderType";
 import { estimatePnl, fmtPnlCcy, pnlSpec, stopTitle } from "./pnl";
 import { useQuoteStore } from "./quote";
@@ -185,7 +185,10 @@ export function createLineDrag(o: Opts): ChartDrag {
     if (owner) useTradeFocus.getState().set(owner);
     if (owner && owner !== "draft") useTicketStore.getState().follow(owner); // thanh bên phải đang mở bảng đặt lệnh thì đổi theo lệnh đang kéo
   };
-  const onChartClick = () => useTradeFocus.getState().set(null);
+  const onChartClick = () => {
+    if (drag.consumeTap()) return; // cú bấm vừa chọn lệnh qua đường chỉ-bấm: chart cũng báo click, đừng bỏ chọn ngay
+    useTradeFocus.getState().set(null);
+  };
   o.chart.subscribeClick(onChartClick);
 
   // Đặt giá mới cho một đường của lệnh đã đặt (kiểm tra phía + vùng cấm của broker, rồi thành thay đổi chờ xác nhận): dùng cho thả tay (auto: One-click bật thì gửi ngay) và cho ô nhập ở bảng Modify (không tự gửi, có nút Modify)
@@ -232,7 +235,6 @@ export function createLineDrag(o: Opts): ChartDrag {
       const symbol = o.getSymbol();
       const quote = useQuoteStore.getState().quotes[symbol];
       const draft = draftLines(useTicketStore.getState().draft, symbol, quote).map((l) => ({ id: l.key, price: l.price }));
-      if (!canMove()) return draft;
       // đường đã thả (chờ xác nhận / đã gửi) đứng ở giá mới nên phải bắt chuột ở giá mới, và SL/TP vừa kéo ra từ nút mờ (dữ liệu EA chưa có) cũng phải kéo lại được
       const shown = (id: string, price: number) => edits.get(id)?.preview.price ?? sent.get(id)?.price ?? price;
       const orders = ordersHere().flatMap((x) => [
@@ -240,10 +242,13 @@ export function createLineDrag(o: Opts): ChartDrag {
         ...(x.sl > 0 ? [{ id: `osl:${x.ticket}`, price: shown(`osl:${x.ticket}`, x.sl) }] : []),
         ...(x.tp > 0 ? [{ id: `otp:${x.ticket}`, price: shown(`otp:${x.ticket}`, x.tp) }] : []),
       ]);
-      const positions = positionsHere().flatMap((x) => [
+      const positions: DragTarget[] = positionsHere().flatMap((x) => [
+        { id: `p:${x.ticket}`, price: x.price_open, fixed: true }, // giá vào của vị thế đã khớp: bấm để chọn, không kéo được
         ...(x.sl > 0 ? [{ id: `psl:${x.ticket}`, price: shown(`psl:${x.ticket}`, x.sl) }] : []),
         ...(x.tp > 0 ? [{ id: `ptp:${x.ticket}`, price: shown(`ptp:${x.ticket}`, x.tp) }] : []),
       ]);
+      // khách / real / EA tắt: chỉ xem, nhưng vẫn bấm vào đường để chọn lệnh (hai thẻ đè lên nhau thì bấm đường là cách duy nhất)
+      if (!canMove()) return [...draft, ...[...orders, ...positions].map((t) => ({ ...t, fixed: true }))];
       const have = new Set([...orders, ...positions].map((t) => t.id));
       const created = [...new Set([...edits.keys(), ...sent.keys()])].filter((k) => STOP_ID.test(k) && !have.has(k) && stopOf(k) !== null).map((k) => ({ id: k, price: shown(k, 0) }));
       return [...draft, ...orders, ...positions, ...created];

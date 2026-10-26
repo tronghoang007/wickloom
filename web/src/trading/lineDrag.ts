@@ -15,7 +15,8 @@ export function hitLine(y: number, lines: { id: string; y: number }[], tol = 6):
   return best ? best.id : null;
 }
 
-export type DragTarget = { id: string; price: number };
+/** `fixed` = đường chỉ để bấm chọn (giá vào của vị thế đã khớp, hoặc mọi đường khi chỉ được xem): bấm không dời thì báo `onAbort(.., click = true)`, còn lại là của chart (kéo = kéo chart). */
+export type DragTarget = { id: string; price: number; fixed?: boolean };
 
 export type LineDragHost = {
   chart: IChartApi;
@@ -38,6 +39,8 @@ const CLICK_SLOP = 4; // px: bấm tay thường rung 1-3px, mà 1px trên chart
 
 export class LineDrag {
   private drag: { id: string; from: number; price: number; y: number; moved: boolean; arm?: () => boolean } | null = null;
+  private tap: { id: string; price: number; x: number; y: number } | null = null; // nhấn xuống một đường `fixed`, chưa thả
+  private tapped = false; // vừa bấm xong một đường `fixed`: cú click của chart ngay sau đó không phải "bấm nền"
   private lock: { handleScroll: unknown; handleScale: unknown } | null = null;
   private hovering = false;
   private hoverId: string | null = null;
@@ -84,7 +87,11 @@ export class LineDrag {
     const el = e.target instanceof Element ? e.target : null;
     if (el?.closest("[data-tag-btn]")) return null;
     const tagKey = el?.closest("[data-line-key]")?.getAttribute("data-line-key");
-    if (tagKey) return this.h.getTargets().find((t) => t.id === tagKey) ?? null;
+    if (tagKey) {
+      const t = this.h.getTargets().find((x) => x.id === tagKey);
+      return t && !t.fixed ? t : null; // thẻ của đường chỉ-bấm tự xử lý cú bấm (chọn lệnh), khỏi chọn hai lần
+    }
+    if (el?.closest("[data-tag]")) return null;
     if (!this.h.container.contains(e.target as Node)) return null;
     const targets = this.h.getTargets();
     if (targets.length === 0) return null;
@@ -139,9 +146,21 @@ export class LineDrag {
 
   private onDown = (e: PointerEvent) => {
     if (e.button !== 0 || this.drag) return;
+    this.tapped = false;
+    this.tap = null;
     const t = this.pick(e);
-    if (t) this.start(e, t.id, t.price, t.price);
+    if (!t) return;
+    // đường chỉ-bấm: không chặn sự kiện, chart vẫn nhận cú nhấn nên kéo ra khỏi chỗ bấm là kéo chart như bình thường
+    if (t.fixed) this.tap = { id: t.id, price: t.price, x: e.clientX, y: e.clientY };
+    else this.start(e, t.id, t.price, t.price);
   };
+
+  /** Cú click chart ngay sau khi bấm một đường `fixed` (đọc một lần): bên dùng bỏ qua nó, không thì "bấm nền chart" bỏ chọn lệnh vừa chọn. */
+  consumeTap(): boolean {
+    const t = this.tapped;
+    this.tapped = false;
+    return t;
+  }
 
   /** Bắt đầu kéo một đường CHƯA có trên chart (nút TP/SL mờ trên thẻ lệnh): `from` = mức hiện có (0 = chưa đặt), `price` = giá khởi đầu (thả ngay không kéo thì nhận giá này).
    *  Có `arm`: đường chỉ được tạo (arm chạy, trả false = bỏ) khi con trỏ đã dời quá ngưỡng "bấm"; nhấn rồi thả không kéo thì không làm gì cả (như TradingView: "Drag to add"). */
@@ -171,7 +190,7 @@ export class LineDrag {
     this.setHoverId(t ? t.id : null);
     if (t) {
       e.stopPropagation(); // DrawingManager không được ghi đè con trỏ / tô sáng hình bên dưới
-      this.h.container.style.cursor = "ns-resize"; // trỏ vào đường (bất kỳ chỗ nào trên đường, không riêng chấm tròn): kéo lên xuống được
+      this.h.container.style.cursor = t.fixed ? "pointer" : "ns-resize"; // trỏ vào đường (bất kỳ chỗ nào trên đường, không riêng chấm tròn): kéo lên xuống được; đường chỉ-bấm thì bàn tay
       this.hovering = true;
     } else if (this.hovering) {
       this.hovering = false;
@@ -188,6 +207,15 @@ export class LineDrag {
   private onLeave = () => this.setHoverId(null);
 
   private onUp = (e: PointerEvent) => {
+    const tap = this.tap;
+    this.tap = null;
+    if (tap && !this.drag) {
+      if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < CLICK_SLOP) {
+        this.tapped = true;
+        this.h.onAbort(tap.id, tap.price, true);
+      }
+      return;
+    }
     const d = this.drag;
     if (!d) return;
     this.consume(e);
@@ -204,6 +232,7 @@ export class LineDrag {
   };
 
   private onCancel = () => {
+    this.tap = null;
     const d = this.drag;
     if (!d) return;
     this.finish();
