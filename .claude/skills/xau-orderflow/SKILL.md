@@ -1,12 +1,14 @@
 ---
 name: xau-orderflow
-description: Phân tích orderflow intraday cho vàng (XAUUSDm) từ dữ liệu tick của backend Wickloom (volume profile, CVD, hấp thụ, tin USD) rồi đặt alert các vùng quan trọng qua web + Telegram + MT5 push (hết hạn 22:00 giờ VN) và vẽ các vùng phản ứng (reaction) lên chart. Dùng khi user gõ /xau-orderflow hoặc nhờ "phân tích orderflow vàng", "đặt alert vùng", "soi vàng hôm nay", "vẽ vùng cho tôi trade", "vẽ vùng reaction".
+description: Phân tích orderflow intraday cho vàng (XAUUSDm) từ dữ liệu tick của backend Wickloom (volume profile, CVD, hấp thụ, tin USD) rồi đặt alert các vùng quan trọng qua web + Telegram + MT5 push (hết hạn 22:00 giờ VN) và vẽ các vùng phản ứng (reaction) lên chart; mỗi lần gọi lại sẽ xoá alert và vùng cũ của skill rồi đặt bộ mới. Dùng khi user gõ /xau-orderflow hoặc nhờ "phân tích orderflow vàng", "đặt alert vùng", "soi vàng hôm nay", "vẽ vùng cho tôi trade", "vẽ vùng reaction".
 ---
 
 # Orderflow vàng + đặt alert
 
 **Người dùng:** chỉ trade vàng (XAUUSDm), theo **intraday**, **hết giờ trade 22:00 giờ VN (= 15:00 UTC)**. Khi alert nổ, user tự nhìn footprint / CVD rồi tự vào lệnh. Việc của skill là chọn vùng, đặt alert và vẽ vùng lên chart (bước 4b), không đặt lệnh hộ.
 Không cần hỏi lại user về symbol, giờ trade, kênh thông báo; chỉ hỏi khi dữ liệu có vấn đề (xem bước 1).
+
+**Mỗi lần gọi là làm lại từ đầu:** skill xoá sạch alert `XAU ` (mọi trạng thái) và hình `xau-of-*` (mọi layout) của lần chạy trước rồi đặt bộ mới, **không hỏi user**. Chỉ xoá những gì skill tự tạo (tiền tố tên `XAU ` / id `xau-of-`), không đụng alert hay hình user tự tạo. Xoá chỉ diễn ra ở bước 4 / 4b, sau khi đã có bộ vùng mới: dữ liệu lỗi hoặc user dừng ở bước 1 thì bộ cũ giữ nguyên.
 
 ## Bước 1 — Lấy dữ liệu (chỉ đọc, không cần đăng nhập)
 
@@ -50,8 +52,8 @@ Alert cần đăng nhập và skill KHÔNG có mật khẩu của user, nên dù
 3. Qua `javascript_tool` (cùng một lần chạy cho mọi bước):
    - `GET http://localhost:8000/alerts` (`credentials:"include"`). Nếu 401 `Chưa đăng nhập` → dừng, in danh sách vùng dạng bảng để user tự đặt hoặc đăng nhập rồi chạy lại.
    - `GET /alerts/channels`: dùng `web` luôn; thêm `telegram` chỉ khi `telegram.linked`, thêm `mt5` chỉ khi `mt5.online && mt5.push_enabled`. Kênh nào thiếu thì nói rõ.
-   - Bỏ qua mức mới nếu đã có alert `XAUUSDm` đang `active` có tên bắt đầu `XAU ` trong vòng ±2 điểm (alert cũ đó có `on_chart:true` thì `PATCH {on_chart:false}` cho nó). Alert `XAU ` cũ còn active ở mức không còn trong danh sách mới thì **liệt kê và hỏi user có xoá không** (xoá = `DELETE /alerts/{id}`), không tự xoá.
-   - `POST /alerts` từng mức:
+   - Từ kết quả `GET /alerts`, ghi lại **id mọi alert cũ của skill**: `symbol==="XAUUSDm" && name.startsWith("XAU ")`, bất kể `state` (active, paused, triggered, expired). Đây là bộ sẽ xoá; alert không có tiền tố `XAU ` là của user, không đụng.
+   - `POST /alerts` từng mức (luôn tạo mới, không bỏ qua mức nào dù đã có alert cũ gần đó):
      ```js
      fetch("http://localhost:8000/alerts",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},
        body:JSON.stringify({symbol:"XAUUSDm",cond:"cross_up"/*hoặc cross_down*/,level:4023.5,trigger:"once",tf:"M1",
@@ -61,8 +63,9 @@ Alert cần đăng nhập và skill KHÔNG có mật khẩu của user, nên dù
          /* không gửi on_chart: mặc định false = chỉ hiện trong danh sách alert, vùng đã có hình chữ nhật ở bước 4b nên không vẽ thêm đường giá */
          channels:{web:true,telegram:true,mt5:true}})})
      ```
-   - Sửa alert đã có: `PATCH /alerts/{id}` (vd `{expires_at:…}`, `{level:…}`, `{on_chart:false}`).
-   - Cuối cùng `GET /alerts` để xác nhận mọi alert `active`, đúng kênh, hạn và `on_chart:false`.
+   - **Xoá bộ cũ:** khi mọi `POST` trả 201, `DELETE /alerts/{id}` từng id đã ghi ở trên (không hỏi user). Có `POST` nào lỗi thì **không xoá** bộ cũ, báo lỗi cho user. Tạo bộ mới trước rồi mới xoá cũ để lỗi giữa chừng không để user trắng alert; id mới khác id cũ nên không xoá nhầm.
+   - Sửa một alert cụ thể (chỉ khi user nhờ): `PATCH /alerts/{id}` (vd `{expires_at:…}`, `{level:…}`).
+   - Cuối cùng `GET /alerts` để xác nhận: alert `XAU ` còn lại đúng bằng số vừa tạo, mọi alert `active`, đúng kênh, hạn và `on_chart:false`.
 4. Giữ tab này cho bước 4b, đóng bằng `tabs_close_mcp` sau khi vẽ xong.
 
 **Tên:** `XAU <giá> · <nhãn ngắn>` (tiền tố `XAU ` bắt buộc, dùng để nhận ra alert của skill).
@@ -73,7 +76,7 @@ Alert cần đăng nhập và skill KHÔNG có mật khẩu của user, nên dù
 Mỗi alert tương ứng một hình chữ nhật (Rectangle) trên chart để user nhìn vùng trên chart. Alert của skill để `on_chart` mặc định `false` (chỉ nằm trong danh sách alert, không có đường giá cam trên chart) nên hình chữ nhật là thứ duy nhất skill để lại trên chart, và nó còn nguyên sau khi alert nổ. Vẫn dùng tab đã đăng nhập ở bước 4. Hình vẽ lưu ở `/me/drawings/<SYMBOL>__<layoutId>?scope=<SYMBOL>`, body `{version:1, items:[…]}`; ghi trực tiếp bằng PUT rồi tải lại trang (không cần bấm UI).
 
 1. Lấy `layoutId`: `localStorage["wickloom-layout-current:<uid>"]` (khoá bắt đầu bằng `wickloom-layout-current`) → `JSON.parse(...).id`; không có thì `default`.
-2. `GET` doc hiện có, **giữ nguyên mọi hình không có id bắt đầu `xau-of-`** (hình user tự vẽ), bỏ các `xau-of-*` cũ rồi thêm bộ mới. Không bao giờ PUT mảng chỉ có hình của skill.
+2. **Xoá hình cũ:** `GET http://localhost:8000/me/drawings` trả mọi doc dạng `[{id, data:{version, items}}]`. Với **mọi** doc có `id` bắt đầu `XAUUSDm__` (mọi layout, không chỉ layout hiện tại): bỏ các hình có id bắt đầu `xau-of-`, **giữ nguyên mọi hình khác** (hình user tự vẽ) và các field khác của `data`. Doc của layout hiện tại thì thêm bộ mới vào sau khi bỏ cũ; doc layout khác chỉ `PUT` lại khi thật sự có hình `xau-of-` bị bỏ. Không bao giờ PUT mảng chỉ có hình của skill. Layout hiện tại chưa có doc thì tạo doc mới `{version:1, items:[…]}`.
 3. Mỗi vùng = 1 hình `rect`: đỉnh vùng, đáy vùng lấy từ output script (vùng trùng nhau của mức ứng viên, vd 4003.5–4000.8). Vùng trên giá là supply, màu đỏ `#f23645`; dưới giá là demand, màu xanh `#089981`. Hình bắt đầu từ đầu phiên (22:00 UTC hôm trước) và kéo dài sang phải:
    ```js
    const t0=Date.UTC(Y,M-1,D,22,0)/1000, t1=Math.floor(Date.now()/1000/60)*60-180; // t0 = 22:00 UTC của phiên đang chạy
@@ -85,7 +88,7 @@ Mỗi alert tương ứng một hình chữ nhật (Rectangle) trên chart để
    ```
 4. **Chữ trên hình:** ngắn (≤ ~26 ký tự, vd `Supply · POC T6 4023.75`, `Demand · hấp thụ + VAL nay`), `hAlign:"center"`. Chữ mở đầu luôn là `Supply` (vùng trên giá, đỏ) hoặc `Demand` (vùng dưới giá, xanh), **không viết `Cung` / `Cầu` trên hình**; phần mô tả sau dấu `·` vẫn viết tiếng Việt. `vAlign` đặt ở mép **đối diện** với mức alert: alert nằm mép dưới vùng (cross_up) → `"top"`; alert nằm mép trên vùng (cross_down) → `"bottom"`; alert nằm ngoài mép dưới vùng (vd quét đáy) → `"top"`.
 5. Kiểm tra: `GET` lại doc, rồi `navigate` lại `http://localhost:3000`, đợi ~3 giây, chụp màn hình và nhìn các vùng đã hiện (cần nạp thêm `mcp__claude-in-chrome__computer`). Không bấm nút `auto`, không kéo chart (đổi view có thể lưu vào layout của user).
-6. Hình vẽ **không tự hết hạn** như alert; mỗi lần chạy skill thay bộ `xau-of-*` cũ bằng bộ mới. Tab chart user đang mở phải **tải lại (F5)** mới thấy; nếu user vẽ thêm trước khi tải lại, hình của skill có thể bị ghi đè, nói user tải lại ngay.
+6. Hình vẽ **không tự hết hạn** như alert nên việc dọn là của skill: mỗi lần chạy xoá sạch `xau-of-*` cũ (bước 2) rồi mới thêm bộ mới, vùng của hôm qua không bao giờ nằm lại chart. Tab chart user đang mở phải **tải lại (F5)** mới thấy; nếu user vẽ thêm trước khi tải lại, hình của skill có thể bị ghi đè, nói user tải lại ngay.
 
 Sau đó `tabs_close_mcp` đóng tab.
 
@@ -95,7 +98,7 @@ Sau đó `tabs_close_mcp` đóng tab.
 2. Bảng alert: mức | chiều cắt | vùng | cơ sở orderflow.
 3. Khi alert nổ cần xác nhận gì: 3–5 dòng rút từ `docs/xau-orderflow-checklist.md` (gốc repo) gắn với các vùng vừa đặt (Supply cần hấp thụ mua / phân kỳ giảm, Demand cần hấp thụ bán / phân kỳ tăng; mức làm kịch bản sai của từng vùng), rồi nói user checklist đầy đủ nằm ở `docs/xau-orderflow-checklist.md`. Không in lại cả file.
 4. Tin USD trong cửa sổ trade (giờ VN), hoặc nói rõ không có.
-5. Nêu hạn alert (22:00 VN hôm nay), các kênh đã bật, và nhắc alert nằm trong danh sách alert (không vẽ đường trên chart) và đã vẽ N vùng lên chart (xanh = demand, đỏ = supply, id `xau-of-*`; tải lại trang để thấy).
+5. Nêu hạn alert (22:00 VN hôm nay), các kênh đã bật, và nhắc alert nằm trong danh sách alert (không vẽ đường trên chart) và đã vẽ N vùng lên chart (xanh = demand, đỏ = supply, id `xau-of-*`; tải lại trang để thấy). Ghi một dòng đã dọn gì của lần trước: "đã xoá X alert + Y vùng cũ" (X = số alert `XAU ` cũ, Y = số hình `xau-of-*` cũ; nếu không có gì cũ thì bỏ dòng này).
 6. Giới hạn: volume là tick count của CFD, delta tick-rule nhiễu nên chỉ so sánh tương đối; không phải cố vấn đầu tư, quyết định vào lệnh, SL/TP, khối lượng là của user (chỉ đưa lot / SL / TP cụ thể khi user hỏi).
 
 ## Ghi chú kỹ thuật
@@ -106,5 +109,6 @@ Sau đó `tabs_close_mcp` đóng tab.
 - `cond` hợp lệ: `cross`, `cross_up`, `cross_down`, `gt`, `lt`. Cắt lên = giá trước < mức ≤ giá mới (xem `backend/app/alerts.py` `hit`).
 - Hình vẽ: `Drawing` = `{id,type,points:[{time(epoch giây),price}],color,width,dash,text,textColor,opts,locked,hidden}` (xem `web/src/drawings/types.ts`); `rect` có `opts.extend` (`none|left|right|both`), `background`, `backgroundColor` (nền alpha 0.15 theo màu), `hAlign`/`vAlign`/`fontSize` (xem `tools.ts` `rectangle`, `boxText`). Lưu tại `/me/drawings/<symbol>__<layoutId>` (xem `web/src/drawings/doc.ts`).
 - `on_chart` (mặc định `false`): `true` thì web vẽ price line (kéo được) của alert trên chart; `false` thì alert chỉ hiện trong danh sách. Alert tạo từ dialog trên chart gửi `true` (xem `web/src/alerts/model.ts` `lineAlerts`).
-- Tối đa 100 alert đang chạy mỗi tài khoản. `trigger:"once"`: nổ một lần rồi thôi.
+- Tối đa 100 alert đang chạy mỗi tài khoản. `trigger:"once"`: nổ một lần rồi thôi. `state` của alert: `active | paused | triggered | expired`; `DELETE /alerts/{id}` xoá được ở mọi trạng thái (trả `{ok:true}`, id lạ 404).
+- `GET /me/drawings` liệt kê mọi doc hình vẽ của tài khoản (`[{id, data}]`), `PUT /me/drawings/{id}` ghi đè cả doc (xem `backend/app/me.py`); vì vậy luôn GET → sửa → PUT, không ghi mảng rút gọn.
 - Chỉ phiên đang chạy có tick realtime; BTC và symbol khác không nằm trong skill này.
