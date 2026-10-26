@@ -37,7 +37,7 @@ IND_EVERY = 2.0  # alert theo indicator được xét chừng này giây một l
 CHECKPOINT_EVERY = 5.0  # ghi mốc "đã đánh giá tới đâu" của alert xuống DB nhiều nhất chừng này giây một lần
 TEST_GAP = 3.0  # nút "Gửi thử": giãn cách giữa hai lần của cùng user + kênh
 
-COLS = ("id", "user_id", "symbol", "cond", "level", "trig", "tf", "expires_at", "name", "message", "channels", "state", "created_at", "fired_at", "fire_count", "drawing", "checked_at", "indicator")
+COLS = ("id", "user_id", "symbol", "cond", "level", "trig", "tf", "expires_at", "name", "message", "channels", "state", "created_at", "fired_at", "fire_count", "drawing", "checked_at", "indicator", "on_chart")
 
 with state.meta.tx() as _db:
     _db.execute(
@@ -58,6 +58,9 @@ with state.meta.tx() as _db:
         _db.execute("ALTER TABLE alerts ADD COLUMN indicator TEXT")
     if "checked_at" not in {r[1] for r in _db.execute("PRAGMA table_info(alerts)")}:  # Phase 3: giờ tick cuối alert đã được đánh giá (báo bù); NULL = alert cũ, không báo bù
         _db.execute("ALTER TABLE alerts ADD COLUMN checked_at INTEGER")
+    if "on_chart" not in {r[1] for r in _db.execute("PRAGMA table_info(alerts)")}:  # 1 = chart vẽ đường giá của alert; 0 (mặc định) = chỉ nằm trong danh sách alert
+        _db.execute("ALTER TABLE alerts ADD COLUMN on_chart INTEGER NOT NULL DEFAULT 0")
+        _db.execute("UPDATE alerts SET on_chart=1")  # alert có từ trước giữ nguyên đường trên chart
     if "label" not in {r[1] for r in _db.execute("PRAGMA table_info(alert_log)")}:
         _db.execute("ALTER TABLE alert_log ADD COLUMN label TEXT NOT NULL DEFAULT ''")
     # Cột thêm ở Phase 3: loại tin (alert giá / tin kinh tế / giao dịch), nội dung của tin không phải alert giá, cờ báo bù
@@ -88,6 +91,7 @@ class Alert:
     drawing: Optional[Dict[str, Any]] = None  # bản sao hình vẽ (geometry.clean_spec); None = alert theo mức giá cố định `level`
     checked_at: Optional[int] = None  # giờ (UTC giây) của tick cuối đã đánh giá, hoặc lúc tạo / sửa: mốc đầu của đoạn cần báo bù
     indicator: Optional[Dict[str, Any]] = None  # alert theo indicator (indicators.clean_spec): so một đường của indicator với `level` / giá / đường khác; None = alert giá
+    on_chart: bool = False  # True = chart vẽ đường giá của alert; False = chỉ nằm trong danh sách alert
     # Chỉ trong bộ nhớ: backend khởi động lại thì đặt lại, nên không bao giờ bắn nhầm vì một mốc cũ.
     ref: Optional[float] = field(default=None, repr=False)  # giá tick trước, mốc để phát hiện cắt
     ref_close: Optional[float] = field(default=None, repr=False)  # giá đóng nến trước ("once_per_bar_close")
@@ -110,7 +114,7 @@ class Alert:
     def public(self, with_user: bool = False) -> Dict[str, Any]:
         d = {"id": self.id, "symbol": self.symbol, "cond": self.cond, "level": self.level, "trigger": self.trigger, "tf": self.tf, "expires_at": self.expires_at,
              "name": self.name, "message": self.message, "channels": dict(self.channels), "state": self.state, "created_at": self.created_at,
-             "fired_at": self.fired_at, "fire_count": self.fire_count, "drawing": self.drawing, "indicator": self.indicator}
+             "fired_at": self.fired_at, "fire_count": self.fire_count, "drawing": self.drawing, "indicator": self.indicator, "on_chart": self.on_chart}
         if with_user:
             d["user_id"] = self.user_id
         return d
@@ -123,6 +127,7 @@ def _from_row(r: Any) -> Alert:
     d["channels"] = {k: bool(chans.get(k)) for k in CHANNEL_KEYS}
     d["drawing"] = json.loads(d["drawing"]) if d["drawing"] else None
     d["indicator"] = json.loads(d["indicator"]) if d["indicator"] else None
+    d["on_chart"] = bool(d["on_chart"])
     return Alert(**d)
 
 
@@ -150,7 +155,7 @@ def db_live_count(user_id: str) -> int:
 
 def db_save(a: Alert) -> None:
     vals = (a.id, a.user_id, a.symbol, a.cond, a.level, a.trigger, a.tf, a.expires_at, a.name, a.message, json.dumps(a.channels), a.state, a.created_at, a.fired_at, a.fire_count,
-            json.dumps(a.drawing) if a.drawing else None, a.checked_at, json.dumps(a.indicator) if a.indicator else None)
+            json.dumps(a.drawing) if a.drawing else None, a.checked_at, json.dumps(a.indicator) if a.indicator else None, int(a.on_chart))
     with state.meta.tx() as db:
         db.execute(f"INSERT INTO alerts ({','.join(COLS)}) VALUES ({','.join('?' * len(COLS))}) ON CONFLICT(id) DO UPDATE SET "
                    + ",".join(f"{c}=excluded.{c}" for c in COLS[1:]), vals)
@@ -657,6 +662,7 @@ class AlertIn(BaseModel):
     channels: Dict[str, bool] = {"web": True}
     drawing: Optional[Dict[str, Any]] = None  # bản sao hình vẽ (geometry.clean_spec): alert đi theo hình, `level` chỉ để hiển thị
     indicator: Optional[Dict[str, Any]] = None  # alert theo indicator (indicators.clean_spec): `level` là thứ được so khi vs = "level"
+    on_chart: bool = False  # True: chart vẽ đường giá (kéo được) của alert; mặc định chỉ hiện trong danh sách alert
 
 
 class AlertPatch(BaseModel):
@@ -673,6 +679,7 @@ class AlertPatch(BaseModel):
     indicator: Optional[Dict[str, Any]] = None  # đổi đường / thứ được so / tham số của alert theo indicator (cùng indicator)
     unlink: bool = False  # hình đã bị xoá nhưng giữ alert: bỏ liên kết, alert tiếp tục chạy với bản sao toạ độ cuối
     state: Optional[str] = None  # "active" | "paused" (bật lại alert đã nổ / hết hạn cũng qua đây)
+    on_chart: Optional[bool] = None
 
 
 def _bad(msg: str) -> HTTPException:
@@ -771,7 +778,7 @@ def create_alert(body: AlertIn, user: Dict[str, Any] = Depends(current_user)):
         raise HTTPException(409, f"Tối đa {MAX_LIVE} alert mỗi tài khoản")
     a = Alert(id=uuid.uuid4().hex, user_id=user["id"], symbol=_check_symbol(body.symbol), cond=body.cond, level=_check_level(body.level), trigger=body.trigger, tf=body.tf,
               expires_at=_check_expiry(body.expires_at), name=_text(body.name, MAX_NAME, "Tên"), message=_text(body.message, MAX_MESSAGE, "Nội dung"),
-              channels=check_channels(user, body.channels), state="active", created_at=int(time.time()), drawing=spec, indicator=ind)
+              channels=check_channels(user, body.channels), state="active", created_at=int(time.time()), drawing=spec, indicator=ind, on_chart=body.on_chart)
     return _apply(a).public()
 
 
@@ -868,6 +875,8 @@ def patch_alert(alert_id: str, body: AlertPatch, user: Dict[str, Any] = Depends(
         a.message = _text(body.message, MAX_MESSAGE, "Nội dung")
     if body.channels is not None:
         a.channels = check_channels(user, body.channels)
+    if body.on_chart is not None:
+        a.on_chart = body.on_chart
     if body.state is not None:
         if body.state == "active" and a.state in ("triggered", "expired"):
             if db_live_count(user["id"]) >= MAX_LIVE:

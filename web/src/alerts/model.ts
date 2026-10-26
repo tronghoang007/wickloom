@@ -186,8 +186,8 @@ export function sortAlerts(list: Alert[]): Alert[] {
   return [...list].sort((a, b) => (live(a) === live(b) ? (live(a) ? b.created_at - a.created_at : (b.fired_at ?? b.created_at) - (a.fired_at ?? a.created_at)) : live(a) ? -1 : 1));
 }
 
-/** Giá của alert để vẽ đường trên chart của `symbol`: chỉ alert đang chạy / tạm dừng của symbol đó. */
-export const lineAlerts = (alerts: Alert[], symbol: string) => alerts.filter((a) => a.symbol === symbol && !a.drawing && !a.indicator && (a.state === "active" || a.state === "paused"));
+/** Giá của alert để vẽ đường trên chart của `symbol`: chỉ alert đang chạy / tạm dừng của symbol đó và có `on_chart` (alert khác chỉ nằm trong danh sách). */
+export const lineAlerts = (alerts: Alert[], symbol: string) => alerts.filter((a) => a.symbol === symbol && !a.drawing && !a.indicator && a.on_chart && (a.state === "active" || a.state === "paused"));
 
 /** Tiêu đề + nội dung của toast / thông báo trình duyệt khi alert nổ. `now` = mức / dải giá của hình lúc nổ (alert trên hình vẽ); `late` = báo bù (giá chạm lúc backend / EA tắt). */
 export function fireNotice(a: Pick<Alert, "name" | "symbol" | "cond" | "level" | "message" | "drawing" | "indicator"> & { now?: [number, number] }, price: number, digits: number, late = false): { title: string; text: string } {

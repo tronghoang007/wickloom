@@ -109,7 +109,7 @@ function Form() {
           ...(x.indicator ? { indicator: x.indicator } : {}),
           ...(x.expires_at === null ? { clear_expiry: true } : { expires_at: x.expires_at }),
         } as AlertPatch)
-      : await store.create(x);
+      : await store.create({ ...x, on_chart: true }); // alert tạo ngay trên chart thì chart vẽ đường (kéo được) như TV
     setBusy(false);
     if (!r.ok) return setServerError(r.error);
     toast(describe(r.data, digitsOf(r.data.symbol)), { title: editing ? "Alert updated" : "Alert created", kind: "success" });

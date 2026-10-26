@@ -47,6 +47,7 @@ export type Alert = {
   fire_count: number;
   drawing: AlertDrawing | null; // alert trên hình vẽ: mức giá do hình quyết định (`level` chỉ là giá trị gần đây để hiển thị)
   indicator: AlertIndicator | null; // alert theo indicator: `level` chỉ có nghĩa khi indicator.vs = "level"
+  on_chart: boolean; // true: chart vẽ đường giá (kéo được) của alert; false: chỉ nằm trong danh sách alert
 };
 
 /** Kết quả giao từng kênh của một lần nổ: "ok" hoặc lý do (tiếng Việt, từ backend). */
@@ -94,6 +95,7 @@ export type AlertInput = {
   channels: AlertChannels;
   drawing?: AlertDrawing | null;
   indicator?: AlertIndicator | null;
+  on_chart?: boolean;
 };
 
 export type AlertPatch = Partial<Omit<AlertInput, "expires_at" | "symbol">> & { expires_at?: number; clear_expiry?: boolean; state?: "active" | "paused"; drawing?: AlertDrawing; indicator?: AlertIndicator; unlink?: boolean };

@@ -499,6 +499,16 @@ def test_create_list_patch_delete_roundtrip_keeps_engine_in_sync():
     assert alerts.db_get(uid, a["id"]) is None
 
 
+def test_on_chart_defaults_off_and_survives_a_reload_from_the_db():
+    c = client()
+    uid = login(c)
+    assert c.post("/alerts", json=BODY).json()["on_chart"] is False
+    a = c.post("/alerts", json={**BODY, "level": 4010, "on_chart": True}).json()
+    assert a["on_chart"] is True and alerts.db_get(uid, a["id"]).on_chart is True  # lưu xuống DB, đọc lại vẫn True
+    assert c.patch(f"/alerts/{a['id']}", json={"name": "x"}).json()["on_chart"] is True  # sửa trường khác không đụng cờ
+    assert c.patch(f"/alerts/{a['id']}", json={"on_chart": False}).json()["on_chart"] is False
+
+
 def test_other_users_alerts_are_invisible_and_untouchable():
     a_c, b_c = client(), client()
     login(a_c, "a@example.com")

@@ -7,7 +7,7 @@ const NOW = 1_800_000_000;
 const CH = { web: true, telegram: false, mt5: false };
 const base = (): AlertForm => ({ ...defaultForm("XAUUSDm", 4000.5, "M5", CH, 2), level: "4000.5" });
 const alert = (o: Partial<Alert> = {}): Alert => ({
-  id: "a", symbol: "XAUUSDm", cond: "cross", level: 4000.5, trigger: "once", tf: "M1", expires_at: null, name: "", message: "", channels: CH, state: "active", created_at: NOW, fired_at: null, fire_count: 0, drawing: null, indicator: null, ...o,
+  id: "a", symbol: "XAUUSDm", cond: "cross", level: 4000.5, trigger: "once", tf: "M1", expires_at: null, name: "", message: "", channels: CH, state: "active", created_at: NOW, fired_at: null, fire_count: 0, drawing: null, indicator: null, on_chart: true, ...o,
 });
 const tg = (linked: boolean): ChannelsInfo => ({ telegram: { configured: true, linked, name: null }, mt5: { online: false, version: null, supports: false, push_enabled: null } });
 
@@ -95,6 +95,12 @@ suite("helpers", () => {
     const list = [alert({ id: "1" }), alert({ id: "2", state: "paused" }), alert({ id: "3", state: "triggered" }), alert({ id: "4", symbol: "BTCUSDm" })];
     expect(liveCount(list)).toBe(3);
     expect(lineAlerts(list, "XAUUSDm").map((a) => a.id)).toEqual(["1", "2"]);
+  });
+
+  it("keeps an alert that is off the chart in the list but draws no line for it", () => {
+    const list = [alert({ id: "1" }), alert({ id: "2", on_chart: false })];
+    expect(liveCount(list)).toBe(2);
+    expect(lineAlerts(list, "XAUUSDm").map((a) => a.id)).toEqual(["1"]);
   });
 
   it("sorts live alerts first (newest first), then finished ones by when they fired", () => {
