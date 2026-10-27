@@ -1,6 +1,6 @@
 # Checklist khi giá chạm vùng đã vẽ (XAUUSDm, intraday)
 
-Dùng cho mọi vùng do `/xau-orderflow` tạo (hình `xau-of-*` + alert tên `XAU …`). Alert nổ ở **mép gần** của vùng: mép dưới vùng đỏ (Supply) hoặc mép trên vùng xanh (Demand). Lúc đó mới **bắt đầu quan sát**, chưa phải lúc vào lệnh.
+Dùng cho mọi vùng do `/xau-orderflow-intraday` tạo (hình `xau-of-*` + alert tên `XAU …`). Alert nổ ở **mép gần** của vùng: mép dưới vùng đỏ (Supply) hoặc mép trên vùng xanh (Demand). Lúc đó mới **bắt đầu quan sát**, chưa phải lúc vào lệnh.
 
 Quyết định vào lệnh, SL/TP và khối lượng là của bạn. Skill chỉ chọn vùng và đặt alert, không đặt lệnh hộ.
 
@@ -14,7 +14,7 @@ Quyết định vào lệnh, SL/TP và khối lượng là của bạn. Skill ch
 ## 2. Bối cảnh
 
 - [ ] Giá đang trên, trong hay dưới value area hôm nay và phiên trước?
-- [ ] Vào cùng hay ngược xu hướng intraday? Ngược xu hướng thì đòi xác nhận mạnh hơn.
+- [ ] Vào cùng hay ngược bias trong ngày? Vùng viền đứt trên chart (alert mở đầu `Ngược XH:`) là ngược bias trong ngày: đòi cả hấp thụ lẫn phân kỳ CVD. Viền liền là theo bias, một dấu hiệu xác nhận là đủ. Ngày cân bằng (biên nén) thì mọi vùng viền liền, nhưng mép VA mới là nơi phản ứng, giữa VA là nhiễu.
 
 ## 3. Mở footprint / CVD và chờ phản ứng tại vùng
 
@@ -41,7 +41,7 @@ Quyết định vào lệnh, SL/TP và khối lượng là của bạn. Skill ch
 ## 6. Sau đó
 
 - [ ] Alert `trigger: once` nổ một lần rồi thôi. Muốn theo dõi tiếp thì dùng vùng còn lại hoặc đặt alert mới.
-- [ ] Alert hết hạn lúc 22:00 VN, nhưng hình chữ nhật không tự mất. Hôm sau chạy lại `/xau-orderflow` để thay bộ vùng mới.
+- [ ] Alert hết hạn lúc 22:00 VN, nhưng hình chữ nhật không tự mất. Hôm sau chạy lại `/xau-orderflow-intraday` để thay bộ vùng mới.
 
 ## Lưu ý
 

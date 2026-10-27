@@ -178,6 +178,72 @@ def absorption(rows, sess_median_ticks5):
     return out
 
 
+# --- bias trong ngày --------------------------------------------------------------------------------------------------------------------------------------
+
+RECENT = 3 * 3600  # POC "gần đây" (3 giờ cuối) so với POC phần đầu ngày
+ACCEPT = 3600  # giá đứng ngoài value đã hình thành ít nhất 1 giờ mới tính là chấp nhận
+MOM = 120  # phút xét xung lực giá + CVD
+MIN_PRIOR = 2 * 3600  # phần đầu ngày phải có ít nhất 2 giờ dữ liệu thì mới so sánh
+
+
+def intraday_bias(base, sym, cur, prev_v, tdm, med_range):
+    """Bias trong ngày = tổng 4 phiếu (+1 tăng / -1 giảm / 0 trung tính), chỉ dùng dữ liệu của phiên đang chạy (trừ VA hôm qua làm mốc).
+    Hướng chỉ có khi |tổng| >= 2. Ngưỡng tính theo biên ngày trung vị của các ngày trước (med_range). Trả (tổng, hướng, nhãn, các dòng in)."""
+    bars, t0, t1 = cur["bars"], cur["t0"], cur["t1"]
+    px, el = bars[-1]["c"], t1 - t0
+    lo, hi = cur["l"] - 2, cur["h"] + 2
+    sc, out = 0, []
+
+    def vote(v, text):
+        nonlocal sc
+        sc += v
+        out.append(f"  {v:+d}  {text}")
+
+    if prev_v:  # giá hiện tại, không phải giá mở cửa: mở cửa trên VA rồi bị bán xuống dưới VA thì phiếu này phải đổi chiều theo
+        edge = 0.1 * med_range  # nhô qua mép VA vài điểm chưa tính: tránh bias nhảy qua lại ở mép
+        v = 1 if px > prev_v["vah"] + edge else -1 if px < prev_v["val"] - edge else 0
+        vote(v, f"Giá {px:.1f} {'TRÊN' if v > 0 else 'DƯỚI' if v < 0 else 'TRONG'} VA hôm qua ({prev_v['val']:.1f}–{prev_v['vah']:.1f}, đệm ±{edge:.0f}); mở cửa {cur['o']:.1f}")
+    else:
+        out.append("   .  Giá so với VA hôm qua: không có VA hôm qua")
+
+    old = profile(base, sym, t0, t1 - ACCEPT, lo, hi) if el >= ACCEPT + MIN_PRIOR else None
+    if old:
+        va = value_area(old)
+        cl = [b["c"] for b in bars if b["t"] >= t1 - ACCEPT]
+        up, dn = sum(c > va["vah"] for c in cl) / len(cl), sum(c < va["val"] for c in cl) / len(cl)
+        v = 1 if up >= 0.8 else -1 if dn >= 0.8 else 0
+        vote(v, f"Chấp nhận ngoài value: value tới {hm(t1 - ACCEPT, False)} = {va['val']:.1f}–{va['vah']:.1f}, 60 phút cuối {100 * up:.0f}% đóng trên / {100 * dn:.0f}% đóng dưới (cần ≥80%)")
+    else:
+        out.append("   .  Chấp nhận ngoài value: chưa đủ dữ liệu trong ngày")
+
+    e = profile(base, sym, t0, t1 - RECENT, lo, hi) if el >= RECENT + MIN_PRIOR else None
+    late = profile(base, sym, t1 - RECENT, t1 + 60, lo, hi) if e else None
+    if e and late:
+        pe, pl = value_area(e)["poc"], value_area(late)["poc"]
+        thr = 0.35 * med_range
+        v = 1 if pl - pe >= thr else -1 if pl - pe <= -thr else 0
+        vote(v, f"POC dịch: {pe:.1f} (từ đầu ngày tới {hm(t1 - RECENT, False)}) → {pl:.1f} (3 giờ cuối) = {pl - pe:+.1f}, ngưỡng ±{thr:.0f}")
+    else:
+        out.append("   .  POC dịch: chưa đủ dữ liệu trong ngày")
+
+    if len(bars) > MOM:
+        w = bars[-MOM:]
+        mv = px - w[0]["o"]
+        dc = sum(tdm[b["t"]]["c"] for b in w if b["t"] in tdm)
+        thr = 0.3 * med_range
+        big = abs(mv) >= thr
+        v = (1 if mv > 0 else -1) if big and mv * dc > 0 else 0
+        vote(v, f"Xung lực 2 giờ: giá {mv:+.1f}, delta {dc:+.0f} → " + ("đồng thuận" if v else "phân kỳ giá/delta" if big and mv * dc < 0 else f"giá chưa đi đủ {thr:.0f} điểm"))
+    else:
+        out.append("   .  Xung lực 2 giờ: chưa đủ dữ liệu trong ngày")
+
+    d = "up" if sc >= 2 else "down" if sc <= -2 else None
+    label = "TĂNG" if d == "up" else "GIẢM" if d == "down" else "CÂN BẰNG" + (" (nghiêng nhẹ tăng)" if sc == 1 else " (nghiêng nhẹ giảm)" if sc == -1 else "")
+    rng = cur["h"] - cur["l"]
+    out.append(f"      Biên hôm nay {rng:.1f} = {rng / med_range:.2f}× biên trung vị {med_range:.1f} của các ngày trước" + (" → nén" if rng < 0.8 * med_range and el >= 6 * 3600 else ""))
+    return sc, d, label, out
+
+
 # --- ứng viên mức giá -------------------------------------------------------------------------------------------------------------------------------------
 
 class Levels:
@@ -201,9 +267,13 @@ def main():
     ap.add_argument("--sessions", type=int, default=4, help="số ngày gần nhất in profile riêng (HVN / LVN, ứng viên); ngày đang chạy tính là 1")
     ap.add_argument("--week", type=int, default=5, help="số ngày đã xong (cộng ngày đang chạy) cho bảng value dịch chuyển + composite tuần")
     ap.add_argument("--range", type=float, default=90, help="chỉ liệt kê mức giá trong ±range điểm quanh giá hiện tại")
+    ap.add_argument("--asof", help="chạy lại như thể bây giờ là thời điểm này: epoch giây hoặc 'MM-DD HH:MM' UTC (kiểm chứng bias của một buổi đã qua)")
+    ap.add_argument("--bias-only", action="store_true", help="in bias trong ngày rồi thoát; dòng cuối là BIAS=up|down|none (skill monitor đọc dòng này mỗi lần bật)")
     a = ap.parse_args()
     base, sym = a.api, a.symbol
     now = int(time.time())
+    if a.asof:
+        now = int(a.asof) if a.asof.isdigit() else int(dt.datetime.strptime(f"{dt.datetime.utcnow().year}-{a.asof}", "%Y-%m-%d %H:%M").replace(tzinfo=dt.timezone.utc).timestamp())
 
     try:
         health = api(base, "/health")
@@ -213,6 +283,11 @@ def main():
     if not m1:
         sys.exit(f"Không có nến M1 của {sym}")
     td = api(base, f"/bars?symbol={sym}&tf=TD&limit=50000")
+    if a.asof:
+        m1 = [b for b in m1 if b["t"] <= now]
+        td = [b for b in td if b["t"] <= now]
+        if not m1:
+            sys.exit(f"Không có nến M1 nào trước {hm(now)} UTC")
     tdm = {b["t"]: b for b in td}
     price = m1[-1]["c"]
     age = (now - m1[-1]["t"]) / 60
@@ -249,6 +324,27 @@ def main():
     for s in sessions[-12:]:
         tag = "  <- đang chạy" if s is cur and live else ""
         print(f"{s['day']}  [{hm(s['t0'])}→{hm(s['t1'], False)}]  O {s['o']:.1f} H {s['h']:.1f} L {s['l']:.1f} C {s['c']:.1f}  biên {s['h'] - s['l']:.1f}  tick {s['ticks']:.0f}{tag}")
+
+    bias = None  # hướng bias trong ngày ("up" / "down" / None) — quyết định vùng nào là theo / ngược XH
+    if not live:
+        print("\n## BIAS TRONG NGÀY: không có (thị trường đóng, phiên cuối đã xong)")
+    elif len(sessions) < 2:
+        print("\n## BIAS TRONG NGÀY: không có (chưa có ngày trước để so)")
+    else:
+        prev_st = day_stats(sessions[-2])
+        med_range = statistics.median([s["h"] - s["l"] for s in sessions[-6:-1]])
+        sc, bias, label, lines = intraday_bias(base, sym, cur, prev_st["v"] if isinstance(prev_st, dict) else None, tdm, med_range)
+        print(f"\n## BIAS TRONG NGÀY — phiên {cur['day']} từ {hm(cur['t0'])} UTC, 4 phiếu (+1 tăng / -1 giảm / 0 trung tính; hướng chỉ có khi |tổng| ≥ 2)")
+        print("\n".join(lines))
+        print(f"=> BIAS TRONG NGÀY: {label} (tổng {sc:+d})")
+        if bias:
+            with_t, against = ("Demand (mua khi giá lùi xuống)", "Supply") if bias == "up" else ("Supply (bán khi giá hồi lên)", "Demand")
+            print(f"HƯỚNG THEO BIAS TRONG NGÀY: {with_t}; {against} là ngược bias (đòi xác nhận mạnh hơn)")
+        else:
+            print("HƯỚNG THEO BIAS TRONG NGÀY: không có (trong ngày chưa nghiêng rõ) — Supply và Demand ngang nhau, ưu tiên mép VA hôm nay / hôm qua")
+    if a.bias_only:
+        print(f"BIAS={bias or 'none'}")
+        return
 
     lo7, hi7 = min(m1, key=lambda b: b["l"]), max(m1, key=lambda b: b["h"])
     print(f"\nĐáy toàn lịch sử M1: {lo7['l']:.3f} ({hm(lo7['t'])}) | đỉnh: {hi7['h']:.3f} ({hm(hi7['t'])}) | giá cách đáy {price - lo7['l']:+.1f}, cách đỉnh {price - hi7['h']:+.1f}")
@@ -296,11 +392,18 @@ def main():
                 L.add(x, 1.0, "HVN composite tuần")
 
     done = [(s, st) for s, st in days if not (s is cur and live)]
+    trend = None
     if comp and len(done) >= 3:
         first, last = done[0][1]["v"]["poc"], done[-1][1]["v"]["poc"]
         thr = 0.75 * statistics.median([s["h"] - s["l"] for s, _ in done])
         kd = [kinds[s["t0"]] for s, _ in done]
         trend = "up" if last - first >= thr else "down" if last - first <= -thr else None
+        settled = ""
+        if trend and len(days) >= 3:  # cú xả / bơm cũ nằm trong cửa sổ nhưng 3 ngày gần nhất đã cân bằng lại → không còn là xu hướng
+            r3 = days[-1][1]["v"]["poc"] - days[-3][1]["v"]["poc"]
+            if r3 * (1 if trend == "up" else -1) < 0.5 * thr:
+                settled = f" [cú {'bơm' if trend == 'up' else 'xả'} cũ đã cân bằng lại: POC 3 ngày gần nhất {r3:+.1f}, dưới nửa ngưỡng {0.5 * thr:.0f}]"
+                trend = None
         pos = "above" if price > comp["vah"] else "below" if price < comp["val"] else "in"
         where = lambda v: "TRÊN" if price > v["vah"] else "DƯỚI" if price < v["val"] else "TRONG"
         yd = done[-1][1]["v"]
@@ -320,9 +423,11 @@ def main():
             (None, "above"): "THOÁT CÂN BẰNG LÊN: giá trên value tuần nhưng value chưa dịch lên → chờ xác nhận chấp nhận (giữ trên VAH tuần).",
             (None, "below"): "THOÁT CÂN BẰNG XUỐNG: giá dưới value tuần nhưng value chưa dịch xuống → chờ xác nhận chấp nhận (giữ dưới VAL tuần).",
         }[(trend, pos)]
-        print(f"\nKẾT LUẬN CẤU TRÚC — POC {done[0][0]['day']} {first:.1f} → {done[-1][0]['day']} {last:.1f} ({last - first:+.1f}; ngưỡng xu hướng ±{thr:.0f} = 0.75 × biên trung vị); VA: {kd.count('down')} ngày thấp hơn, {kd.count('up')} cao hơn, {kd.count('ovl')} chồng lấn")
+        print(f"\nKẾT LUẬN CẤU TRÚC NHIỀU NGÀY (bối cảnh, KHÔNG quyết định hướng hôm nay) — POC {done[0][0]['day']} {first:.1f} → {done[-1][0]['day']} {last:.1f} ({last - first:+.1f}; ngưỡng xu hướng ±{thr:.0f} = 0.75 × biên trung vị); VA: {kd.count('down')} ngày thấp hơn, {kd.count('up')} cao hơn, {kd.count('ovl')} chồng lấn{settled}")
         print(f"Giá {price:.1f}: {where(comp)} value tuần ({vv}); {here}")
         print(f"=> {verdict}")
+        if bias and trend and bias != trend:
+            print(f"Lệch: bias trong ngày {'TĂNG' if bias == 'up' else 'GIẢM'} ngược cấu trúc nhiều ngày → theo bias trong ngày; vùng của cấu trúc cũ chỉ là mốc tham khảo")
     elif comp:
         print("\n(Chưa đủ 3 ngày đã xong có tick để kết luận cấu trúc — chỉ xem bảng và composite.)")
 
@@ -390,7 +495,8 @@ def main():
     for it in sorted(cands, key=lambda z: -z[0]):
         side = "TRÊN " if it[0] > price else "DƯỚI "
         mark = "★" if it[1] >= 3 else " "
-        print(f"{mark}{side}{it[0]:9.2f}  ({it[0] - price:+6.1f})  điểm {it[1]:.1f}  {'; '.join(dict.fromkeys(it[2]))}")
+        tag = "" if bias is None else "  [theo XH]" if (it[0] > price) == (bias == "down") else "  [ngược XH]"
+        print(f"{mark}{side}{it[0]:9.2f}  ({it[0] - price:+6.1f})  điểm {it[1]:.1f}  {'; '.join(dict.fromkeys(it[2]))}{tag}")
 
     # --- tin kinh tế --------------------------------------------------------------------------------------------------------------------------------------------
     try:

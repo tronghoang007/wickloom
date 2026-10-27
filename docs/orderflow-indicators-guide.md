@@ -168,7 +168,7 @@ VRVP vẽ **một** histogram cho đoạn chart đang nhìn thấy, ghim ở mé
 ## 6. Kết hợp cho vàng intraday
 
 1. **Trước phiên**: đánh dấu POC/VAH/VAL của SVP phiên trước và các HVN/LVN trên VRVP vài ngày gần nhất. Đó là các vùng chờ.
-2. **Đặt alert** ở mép gần các vùng đó (web + Telegram + MT5 push, hết hạn 22:00 giờ VN). `/xau-orderflow` làm bước 1–2 tự động.
+2. **Đặt alert** ở mép gần các vùng đó (web + Telegram + MT5 push, hết hạn 22:00 giờ VN). `/xau-orderflow-intraday` làm bước 1–2 tự động.
 3. **Khi alert nổ**: chuyển M1–M5 và mở checklist `docs/xau-orderflow-checklist.md`. Trong đó dùng CVD (phân kỳ, hấp thụ), Big Trades (bong bóng lớn tại vùng) và Footprint (hấp thụ, kiệt sức, stacked imbalance).
 4. **Vào lệnh khi có ít nhất một dấu hiệu xác nhận**, tốt nhất là hấp thụ cộng phân kỳ CVD. SL đặt ngoài vùng bị hấp thụ hoặc ngoài mức làm kịch bản sai.
 5. **Đứng ngoài** nếu giá xuyên vùng cùng delta và CVD mà không bị hấp thụ, hoặc đang sát giờ tin USD.
