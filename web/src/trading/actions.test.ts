@@ -106,6 +106,7 @@ describe("placeMarket", () => {
     expect(useOrderState.getState().busy).toBe(true);
     await placeMarket("buy", "XAUUSDm", 0.1); // bị bỏ
     expect(sendOrder).toHaveBeenCalledTimes(1);
+    expect(toastMock.mock.calls.at(-1)?.[0]).toMatch(/Đang xử lý lệnh trước/);
     release(done());
     await first;
     expect(useOrderState.getState().busy).toBe(false);

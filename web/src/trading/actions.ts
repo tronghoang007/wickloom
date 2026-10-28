@@ -43,7 +43,10 @@ function report(o: TradeOutcome, success: string | ((r: TradeResult) => string),
 }
 
 async function run<T>(reason: string, task: (accountId: string) => Promise<T>): Promise<T | undefined> {
-  if (useOrderState.getState().busy) return undefined;
+  if (useOrderState.getState().busy) {
+    toast("Đang xử lý lệnh trước, chờ kết quả rồi bấm lại", { ms: 3000 }); // không gửi, nhưng cho biết cú bấm đã bị bỏ
+    return undefined;
+  }
   useOrderState.setState({ busy: true });
   try {
     if (!(await useAuthStore.getState().requireLogin(reason))) return undefined;

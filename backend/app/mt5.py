@@ -177,8 +177,8 @@ class Mt5Registry:
         return self._by_writer.get(writer)
 
     def writer(self, aid: str) -> Optional[Any]:
-        """Kết nối EA đang online của account `aid` (None nếu offline) - nơi gửi lệnh giao dịch xuống."""
-        return next((w for w, a in self._by_writer.items() if a == aid), None)
+        """Kết nối EA đang online của account `aid` (None nếu offline) - nơi gửi lệnh giao dịch xuống. Có hai kết nối (EA vừa nối lại mà kết nối cũ chưa kịp đóng) thì lấy kết nối MỚI NHẤT."""
+        return next((w for w, a in reversed(self._by_writer.items()) if a == aid), None)
 
     def snapshot(self) -> List[Dict[str, Any]]:
         """Online trước, rồi theo lần thấy gần nhất. `active` = account đang cấp dữ liệu (hoặc vừa cấp gần nhất khi offline)."""

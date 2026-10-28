@@ -89,6 +89,16 @@ def test_account_message_keeps_trading_flags_and_ignores_junk():
     assert r.writer(AID) is None
 
 
+def test_writer_prefers_newest_connection_of_account():
+    r = mt5.Mt5Registry()
+    old, new = object(), object()
+    r.register(old, HELLO)
+    r.register(new, HELLO)  # EA nối lại trước khi kết nối cũ đóng
+    assert r.writer(AID) is new
+    r.remove(new)
+    assert r.writer(AID) is old
+
+
 def test_symbols_in_keep_trade_specs_and_old_ea_has_none():
     from app.models import SymbolInfo
 
