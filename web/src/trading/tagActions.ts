@@ -2,13 +2,12 @@ import type { PendingOrder, Position } from "@/lib/mt5Api";
 import { MODE_LABEL } from "@/lib/mt5Format";
 import { chartGlobal } from "@/store/chart";
 import { askConfirm } from "@/store/confirm";
-import { useMt5Store } from "@/store/mt5";
 import { useSettingsStore } from "@/store/settings";
 import { cancelAllOrders, cancelOrder, closeAllTrades, closeTrade, moveStop } from "./actions";
 import { fmtLot, fmtPnl, fmtPx, orderLabel, positionPnl, sideLabel, type LineSpec } from "./format";
 import { submitDraft } from "./submit";
 import { useTicketStore } from "./ticket";
-import { useTradeStore } from "./store";
+import { tradeAccount, useTradeStore } from "./store";
 
 // Nút trên thẻ lệnh của chart (kiểu TradingView): đặt lệnh của bản nháp, và dấu × của từng loại thẻ. Đọc store lúc gọi nên gọi được từ bất kỳ đâu.
 
@@ -26,7 +25,7 @@ export function askClosePosition(p: Position, volume = 0): void {
     return;
   }
   const sym = chartGlobal.getState().symbols.find((s) => s.name === p.symbol);
-  const account = useMt5Store.getState().accounts.find((a) => a.active);
+  const account = tradeAccount();
   const ccy = account?.currency ?? "";
   const pnl = positionPnl(p);
   const mode = account && MODE_LABEL[account.mode] ? ` · ${MODE_LABEL[account.mode]}` : "";
@@ -50,7 +49,7 @@ const digitsOf = (symbol: string) => chartGlobal.getState().symbols.find((s) => 
 
 /** Dòng "Account" của hộp thoại xác nhận (tên + nhãn DEMO / REAL). */
 function accountRows(): { label: string; value: string }[] {
-  const account = useMt5Store.getState().accounts.find((a) => a.active);
+  const account = tradeAccount();
   if (!account) return [];
   const mode = MODE_LABEL[account.mode] ? ` · ${MODE_LABEL[account.mode]}` : "";
   return [{ label: "Account", value: `${account.name || account.broker || account.server}${mode}` }];
@@ -84,7 +83,7 @@ export function askCloseAll(positions: Position[]): void {
     void run();
     return;
   }
-  const ccy = useMt5Store.getState().accounts.find((a) => a.active)?.currency ?? "";
+  const ccy = tradeAccount()?.currency ?? "";
   const pnl = positions.reduce((s, p) => s + positionPnl(p), 0);
   askConfirm({
     title: "Đóng tất cả vị thế",

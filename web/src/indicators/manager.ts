@@ -125,7 +125,9 @@ export class IndicatorManager {
   update(list: IndicatorInstance[], bars: Bar[], feed: FeedKey) {
     // Đổi symbol/khung: series còn điểm của khung cũ tới lần sync sau (250ms), làm trục thời gian của chart có điểm thừa
     // xen giữa nến mới -> chỉ số logic lệch so với chỉ số nến lúc Chart đặt góc nhìn. Xoá ngay để trục chỉ còn nến.
-    if (feed.symbol !== this.feed.symbol || feed.tf !== this.feed.tf) {
+    // Thoát Replay cũng vậy: nến tải lại là đoạn mới nhất, series còn điểm của đoạn đang replay (cũ hơn, nằm ngoài nến mới) -> góc nhìn "nến mới nhất" rơi về quá khứ.
+    const leftReplay = this.feed.end !== undefined && feed.end === undefined;
+    if (feed.symbol !== this.feed.symbol || feed.tf !== this.feed.tf || leftReplay) {
       this.wipe();
       for (const l of this.live) l.memo = {}; // những gì indicator nhớ (cặp pool / thống kê của Big Trades...) là của symbol / khung cũ
     }

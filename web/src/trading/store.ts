@@ -1,12 +1,17 @@
-import { fetchTrade, type TradeData } from "@/lib/mt5Api";
+import { fetchTrade, type Mt5Account, type TradeData } from "@/lib/mt5Api";
 import { useMt5Store } from "@/store/mt5";
 import { create } from "zustand";
 
-// Trạng thái giao dịch CHỈ ĐỌC của account MT5 đang cấp dữ liệu (docs/trade-plan.md T1). Hỏi GET /accounts/{id}/trade định kỳ.
+// Trạng thái giao dịch CHỈ ĐỌC của account MT5 đang cấp dữ liệu (docs/trade-plan.md T1). Hỏi GET /accounts/{id}/trade định kỳ. Đang Replay thì `data` là dữ liệu của sàn giả lập
+// (trading/simStore.ts, cùng khuôn) nên panel / chart / bảng đặt lệnh hiện lệnh giả lập; dữ liệu MT5 vẫn được hỏi vào `real` và trả lại khi thoát Replay.
 export type TradeTab = "positions" | "orders" | "history";
 
 type State = {
   data: TradeData | null;
+  real: TradeData | null;
+  sim: boolean;
+  /** Dữ liệu của sàn giả lập; null = về dữ liệu MT5. */
+  setSim: (d: TradeData | null) => void;
   open: boolean; // panel dưới chart đang mở rộng
   tab: TradeTab;
   setOpen: (v: boolean) => void;
@@ -15,24 +20,28 @@ type State = {
   clear: () => void;
 };
 
-export const useTradeStore = create<State>()((set) => ({
+export const useTradeStore = create<State>()((set, get) => ({
   data: null,
+  real: null,
+  sim: false,
+  setSim: (d) => set(d ? { sim: true, data: d } : { sim: false, data: get().real }),
   open: false,
   tab: "positions",
   setOpen: (open) => set({ open }),
   showTab: (tab) => set({ tab, open: true }),
   refresh: async () => {
     const active = useMt5Store.getState().accounts.find((a) => a.active);
+    const put = (real: TradeData | null) => set(get().sim ? { real } : { real, data: real });
     if (!active) {
-      set({ data: null });
+      put(null);
       return;
     }
     const { data, unauthorized, gone } = await fetchTrade(active.id);
-    if (data) set({ data });
-    else if (unauthorized || gone) set({ data: null }); // hết phiên / account biến mất: không giữ vị thế cũ
+    if (data) put(data);
+    else if (unauthorized || gone) put(null); // hết phiên / account biến mất: không giữ vị thế cũ
     // lỗi mạng: giữ bản cũ (isStale() sẽ làm mờ khi quá 15s)
   },
-  clear: () => set({ data: null }),
+  clear: () => set(get().sim ? { real: null } : { real: null, data: null }),
 }));
 
 export const TRADE_POLL_MS = 2000;
@@ -44,4 +53,16 @@ export function startTradePolling(): () => void {
     if (typeof document === "undefined" || !document.hidden) void useTradeStore.getState().refresh();
   }, TRADE_POLL_MS);
   return () => clearInterval(t);
+}
+
+/** Account đang nhận lệnh: account giả lập khi đang Replay, còn lại account MT5 đang cấp dữ liệu. */
+export const tradeAccount = (): Mt5Account | undefined => {
+  const t = useTradeStore.getState();
+  return t.sim ? t.data?.account : useMt5Store.getState().accounts.find((a) => a.active);
+};
+
+export function useTradeAccount(): Mt5Account | undefined {
+  const sim = useTradeStore((s) => (s.sim ? s.data?.account : undefined));
+  const real = useMt5Store((s) => s.accounts.find((a) => a.active));
+  return sim ?? real;
 }

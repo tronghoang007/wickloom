@@ -4,6 +4,7 @@ import { fmtMoney } from "@/lib/mt5Format";
 import ModeBadge from "./ModeBadge";
 import type { PendingOrder, Position, TradeData } from "@/lib/mt5Api";
 import { useAuthStore } from "@/store/auth";
+import { askConfirm } from "@/store/confirm";
 import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
@@ -12,6 +13,7 @@ import { accountProfit, closedPositions, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime
 import { useTradeFocus } from "@/trading/focus";
 import { tradeBlock } from "@/trading/gate";
 import { normalizeLot } from "@/trading/lot";
+import { resetSim } from "@/trading/simStore";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
 import { useTicketStore } from "@/trading/ticket";
 import { useEffect, useState, type ReactNode } from "react";
@@ -84,12 +86,14 @@ function useNowSec() {
 }
 
 /** Panel Trading dưới chart (docs/trade-plan.md T1-T2): vị thế, lệnh chờ, lịch sử, tóm tắt account MT5 đang cấp dữ liệu. Chỉ hiện khi đã đăng nhập
- *  và có account MT5 kết nối. Đóng / đóng một phần vị thế ở tab Positions (chỉ account demo); lệnh chờ và sửa SL/TP chưa có (T3-T4). */
+ *  và có account MT5 kết nối. Đóng / đóng một phần vị thế ở tab Positions (chỉ account demo); lệnh chờ và sửa SL/TP chưa có (T3-T4).
+ *  Đang Replay: panel là của account giả lập (trading/simStore.ts, nhãn REPLAY, khách cũng thấy), có nút Reset để làm lại sổ lệnh từ số dư MT5. */
 export default function TradingPanel() {
   const status = useAuthStore((s) => s.status);
   const loaded = useMt5Store((s) => s.loaded);
   const activeId = useMt5Store((s) => s.accounts.find((a) => a.active)?.id);
   const data = useTradeStore((s) => s.data);
+  const sim = useTradeStore((s) => s.sim);
   const open = useTradeStore((s) => s.open);
   const tab = useTradeStore((s) => s.tab);
   const now = useNowSec();
@@ -99,7 +103,7 @@ export default function TradingPanel() {
     useTradeStore.getState().clear();
   }, [status, activeId]);
 
-  if (status !== "user" || !loaded || !activeId || !data) return null;
+  if (!data || (!sim && (status !== "user" || !loaded || !activeId))) return null;
   const stale = isStale(data, now);
   const a = data.account;
   const pnl = accountProfit(data);
@@ -122,6 +126,23 @@ export default function TradingPanel() {
         <span className="flex items-center gap-2 px-1.5">
           <span className="max-w-[160px] truncate text-[13px]" title={a.server || undefined}>{a.name || a.broker || a.server}</span>
           <ModeBadge mode={a.mode} />
+          {sim && (
+            <button
+              className="inline-flex h-[18px] cursor-pointer items-center rounded border border-[var(--border)] px-1.5 text-[10px] leading-none text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+              title="Làm lại account giả lập từ số dư MT5: xoá vị thế, lệnh chờ và lịch sử của Replay"
+              onClick={() =>
+                askConfirm({
+                  title: "Reset account Replay",
+                  message: "Xoá vị thế, lệnh chờ và lịch sử giả lập; số dư về lại số dư account MT5.",
+                  confirmLabel: "Reset",
+                  danger: true,
+                  onConfirm: resetSim,
+                })
+              }
+            >
+              Reset
+            </button>
+          )}
           {stale && <span className="inline-flex h-[18px] items-center rounded border border-[var(--border)] bg-[var(--hover)] px-1.5 text-[10px] leading-none text-[var(--muted)]">{a.online ? "dữ liệu cũ" : "offline"}</span>}
         </span>
         <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
@@ -199,7 +220,7 @@ const Empty = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => 
 function Positions({ data }: { data: TradeData }) {
   const busy = useOrderState((s) => s.busy);
   if (data.positions.length === 0) return <Empty icon={<EmptyPositionsI />}>Không có vị thế đang mở.</Empty>;
-  const block = tradeBlock({ replay: false, status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const block = tradeBlock({ status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   return (
     <table className="w-full text-xs tabular-nums">
       <Head
@@ -223,7 +244,7 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
   // vào được lệnh đóng khi account sẵn sàng; spec/giá chỉ cần cho widget SELL/BUY
-  const block = tradeBlock({ replay: false, status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const block = tradeBlock({ status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   const sym = useChartStore.getState().symbols.find((s) => s.name === p.symbol);
   const spec = sym?.volume_min && sym.volume_step ? { min: sym.volume_min, max: p.volume, step: sym.volume_step } : null;
   const canPartial = spec !== null && p.volume > spec.min + 1e-9; // lot lớn hơn lot tối thiểu thì mới đóng một phần được
@@ -287,7 +308,7 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
 function Orders({ data }: { data: TradeData }) {
   const busy = useOrderState((s) => s.busy);
   if (data.orders.length === 0) return <Empty icon={<EmptyOrdersI />}>Không có lệnh chờ.</Empty>;
-  const block = tradeBlock({ replay: false, status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const block = tradeBlock({ status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   return (
     <table className="w-full text-xs tabular-nums">
       <Head
@@ -307,7 +328,7 @@ function Orders({ data }: { data: TradeData }) {
 function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account"] }) {
   const d = digitsOf(o.symbol);
   const busy = useOrderState((s) => s.busy);
-  const block = tradeBlock({ replay: false, status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const block = tradeBlock({ status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
   const { selected, select } = useSelectTrade(`order:${o.ticket}`, o.symbol);
   return (
     <tr className={`cursor-pointer ${selected ? rowSelected : rowClass}`} onClick={select} data-testid="order-row">

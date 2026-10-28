@@ -8,6 +8,8 @@ import { useOrderState } from "@/trading/actions";
 import { tradeBlock } from "@/trading/gate";
 import { lotSpec } from "@/trading/lot";
 import { spreadPips, useQuoteStore } from "@/trading/quote";
+import { SIM_ACCOUNT_ID } from "@/trading/simId";
+import { useTradeAccount } from "@/trading/store";
 import { useTicketStore } from "@/trading/ticket";
 import { useMemo } from "react";
 import PriceText from "./PriceText";
@@ -15,19 +17,19 @@ import PriceText from "./PriceText";
 const sideBtn = "flex min-w-[72px] cursor-pointer flex-col items-center justify-center rounded-md px-2.5 pb-px text-white";
 
 /** Widget SELL | spread | BUY như TradingView, dưới dòng tiêu đề của chart (docs/trade-plan.md T2-T3): bấm thì mở bảng đặt lệnh (OrderTicket, nơi chỉnh lot) cho account MT5 đang cấp dữ liệu.
- *  Chưa đặt được thì nút mờ đi và tooltip/toast nói lý do (tradeBlock); khách bấm thì ra popup đăng nhập. */
+ *  Chưa đặt được thì nút mờ đi và tooltip/toast nói lý do (tradeBlock); khách bấm thì ra popup đăng nhập. Đang Replay thì đặt lệnh với account giả lập (trading/simStore.ts), khách cũng được. */
 export default function TradeWidget({ symbol, digits, replay }: { symbol: string; digits: number; replay: boolean }) {
   const quote = useQuoteStore((s) => s.quotes[symbol]);
   const status = useAuthStore((s) => s.status);
   const loaded = useMt5Store((s) => s.loaded);
-  const account = useMt5Store((s) => s.accounts.find((a) => a.active));
+  const account = useTradeAccount(); // đang Replay: account giả lập, giá là giá replay
   const sym = chartGlobal((s) => s.symbols.find((x) => x.name === symbol));
   const busy = useOrderState((s) => s.busy);
   const spec = useMemo(() => lotSpec(sym, account?.max_lot), [sym, account?.max_lot]);
   const block = tradeBlock({ replay, status, loaded, account, spec, hasQuote: !!quote });
 
   const click = (side: "buy" | "sell") => {
-    if (status === "guest") {
+    if (status === "guest" && account?.id !== SIM_ACCOUNT_ID) {
       void useAuthStore.getState().requireLogin("Đăng nhập để giao dịch");
       return;
     }

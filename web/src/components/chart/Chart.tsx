@@ -24,7 +24,7 @@ import type { DragPreview } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
 import { parseNum } from "@/trading/draft";
 import { useTicketStore } from "@/trading/ticket";
-import { useReplaySim } from "@/trading/replaySim";
+import { enterSim, feedSim, leaveSim, restartSim, seedSim } from "@/trading/simStore";
 import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
@@ -327,6 +327,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   const m1EndRef = useRef(Infinity);
   const aheadRef = useRef(false); // đang tải tiếp phía trước con trỏ
   const cursorRef = useRef(0);
+  const simFedRef = useRef<number | null>(null); // giờ replay đã đưa cho sàn giả lập; null = lần tới chỉ lấy giá (seed)
   const prevSymbolRef = useRef(symbol);
   const wasActiveRef = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
@@ -368,10 +369,12 @@ export default function Chart({ paneId }: { paneId: string }) {
   } | null>(null);
   const selecting = usePaneState(pane.replay, (s) => s.selecting);
   const replayActive = usePaneState(pane.replay, (s) => s.active);
-  // Thoát Replay (hoặc chart bị gỡ): xoá vị thế giả lập của pane này
+  // Đang Replay: giao diện giao dịch dùng account giả lập (trading/simStore.ts); thoát Replay (hoặc chart bị gỡ) thì về account MT5. Replay chỉ chạy trên chart active nên một lúc chỉ một chart bật
   useEffect(() => {
-    if (!replayActive) useReplaySim.getState().reset(paneId);
-  }, [replayActive, paneId]);
+    if (!replayActive) return;
+    enterSim();
+    return () => leaveSim();
+  }, [replayActive]);
   const playing = usePaneState(pane.replay, (s) => s.playing);
   const speed = usePaneState(pane.replay, (s) => s.speed);
   const interval = usePaneState(pane.replay, (s) => s.interval);
@@ -543,10 +546,13 @@ export default function Chart({ paneId }: { paneId: string }) {
     setLegend(legendAt(vis.length - 1));
     const last = vis[vis.length - 1];
     if (last && pane.replay.getState().active) {
-      const sim = useReplaySim.getState();
+      // sàn giả lập: nhận các nến vừa chạy qua từ lần trước tới con trỏ (M1 khi Replay cập nhật theo phút, còn lại nến của chart) để khớp lệnh chờ / SL / TP theo đúng đường giá
       const sym = pane.chart.getState().symbol;
-      if (seed) sim.seed(paneId, sym, last);
-      else sim.ingest(paneId, sym, last); // nến replay mới: giá khớp lệnh + kiểm tra SL / TP giả lập
+      const cursor = cursorRef.current;
+      const from = simFedRef.current;
+      if (seed || from === null || cursor <= from) seedSim(sym, last.c, cursor);
+      else feedSim(sym, (wantM1() && m1Ref.current.length > 0 ? m1Ref.current : fullRef.current).filter((b) => b.t >= from && b.t < cursor), cursor);
+      simFedRef.current = cursor;
     }
   };
 
@@ -633,8 +639,10 @@ export default function Chart({ paneId }: { paneId: string }) {
       fullRef.current = [...bars];
       fullEndRef.current = Infinity;
     }
-    // Chọn lại nến (kể cả lùi về trước): vị thế giả lập cũ thuộc về thời điểm khác, bỏ
-    useReplaySim.getState().reset(paneId);
+    // Chọn lại nến (kể cả lùi về trước): vị thế / lệnh chờ giả lập đang mở thuộc về thời điểm khác, đóng ở giá cũ
+    enterSim();
+    restartSim();
+    simFedRef.current = null;
     cursorRef.current = b.t + TF_SECONDS[pane.chart.getState().tf];
     // Cắt chỉ bỏ phần đuôi nên chỉ số nến còn lại không đổi: giữ nguyên góc nhìn như TV. Không đặt lại thì setData
     // giữ khoảng cách tới nến cuối (rightOffset) và chart nhảy về vùng cũ hơn nến vừa chọn.
@@ -1847,7 +1855,6 @@ export default function Chart({ paneId }: { paneId: string }) {
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
         <TradeOverlay
-          paneId={paneId}
           symbol={symbol}
           chartType={chartType}
           replay={replayActive}
@@ -2056,7 +2063,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           </div>
         )}
       </div>
-      {(selecting || replayActive) && <ReplayBar paneId={paneId} symbol={symbol} onStep={() => stepReplay()} />}
+      {(selecting || replayActive) && <ReplayBar onStep={() => stepReplay()} />}
       <div className="flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm">
         <div className="flex gap-0.5">
           {RANGES.map((r) => (

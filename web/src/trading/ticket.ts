@@ -1,6 +1,6 @@
 import { chartGlobal } from "@/store/chart";
 import { useRailStore } from "@/store/rail";
-import { useMt5Store } from "@/store/mt5";
+import { tradeAccount } from "./store";
 import { create } from "zustand";
 import { useTradeFocus } from "./focus";
 import type { Draft, TicketMode } from "./draft";
@@ -48,7 +48,7 @@ export const useTicketStore = create<State>()((set) => ({
   },
   open: (seed) => {
     const sym = chartGlobal.getState().symbols.find((s) => s.name === seed.symbol);
-    const account = useMt5Store.getState().accounts.find((a) => a.active);
+    const account = tradeAccount();
     const spec = lotSpec(sym, account?.max_lot);
     const digits = seed.digits ?? sym?.digits ?? 5;
     useRailStore.getState().openOrder(); // bảng đặt lệnh nằm ở thanh bên phải: mở thanh ra

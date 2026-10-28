@@ -1,6 +1,6 @@
 import { apiFetch } from "./api";
 
-export type Mt5Mode = "demo" | "real" | "contest" | "unknown";
+export type Mt5Mode = "demo" | "real" | "contest" | "replay" | "unknown"; // replay = account giả lập của Replay (trading/sim.ts), không phải MT5
 
 /** Account MT5 mà EA TVBridge báo lên (GET /accounts). `login`/`name`/số dư thiếu khi EA < v2.10. */
 export type Mt5Account = {

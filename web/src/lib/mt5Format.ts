@@ -1,8 +1,8 @@
 import type { Mt5Account, Mt5Mode } from "./mt5Api";
 
 // Huy hiệu trên avatar và nhãn trong dropdown: đỏ = Real (tiền thật), xanh lá = Demo, xám = offline / chưa biết.
-export const MODE_LABEL: Record<Mt5Mode, string> = { demo: "DEMO", real: "REAL", contest: "CONTEST", unknown: "" };
-export const MODE_COLOR: Record<Mt5Mode, string> = { demo: "#089981", real: "#f23645", contest: "#d69a00", unknown: "#787b86" };
+export const MODE_LABEL: Record<Mt5Mode, string> = { demo: "DEMO", real: "REAL", contest: "CONTEST", replay: "REPLAY", unknown: "" };
+export const MODE_COLOR: Record<Mt5Mode, string> = { demo: "#089981", real: "#f23645", contest: "#d69a00", replay: "#2962ff", unknown: "#787b86" };
 const OFFLINE_COLOR = "#787b86";
 
 export const badgeColor = (a: Mt5Account | undefined) => (a && a.online ? MODE_COLOR[a.mode] : OFFLINE_COLOR);

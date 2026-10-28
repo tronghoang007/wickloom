@@ -18,7 +18,7 @@ export type DraftEnv = {
 /** Vì sao bản nháp chưa gửi được (null = được): chặn chung của giao dịch (tradeBlock) rồi luật riêng của Market / lệnh chờ. */
 export function draftError(d: Draft, e: DraftEnv): string | null {
   const spec = lotSpec(e.sym, e.account?.max_lot);
-  const gate = tradeBlock({ replay: false, status: e.status, loaded: e.loaded, account: e.account, spec, hasQuote: !!e.quote });
+  const gate = tradeBlock({ status: e.status, loaded: e.loaded, account: e.account, spec, hasQuote: !!e.quote });
   if (gate) return gate;
   const digits = e.sym?.digits ?? 5;
   const lot = parseNum(d.lot);

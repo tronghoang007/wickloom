@@ -1,17 +1,29 @@
 import { create } from "zustand";
 
-// Giá Bid/Ask mới nhất của từng symbol, lấy từ tick realtime mà Chart nhận qua WebSocket. Widget SELL/BUY đọc ở đây.
+// Giá Bid/Ask mới nhất của từng symbol, lấy từ tick realtime mà Chart nhận qua WebSocket. Widget SELL/BUY đọc ở đây. Đang Replay thì `quotes` là giá của sàn giả lập (trading/simStore.ts):
+// mọi chỗ đọc giá để đặt / kiểm lệnh tự dùng giá replay; giá thật vẫn được ghi vào `real` và trả lại khi thoát Replay.
 type Quote = { bid: number; ask: number };
-type State = { quotes: Record<string, Quote>; set: (symbol: string, bid: number, ask: number) => void };
+type State = {
+  quotes: Record<string, Quote>;
+  real: Record<string, Quote>;
+  sim: boolean;
+  set: (symbol: string, bid: number, ask: number) => void;
+  /** Giá của sàn giả lập; null = về giá thật. */
+  setSim: (quotes: Record<string, Quote> | null) => void;
+};
 
 export const useQuoteStore = create<State>()((set, get) => ({
   quotes: {},
+  real: {},
+  sim: false,
   set: (symbol, bid, ask) => {
     if (!(bid > 0) || !(ask > 0)) return; // tick thiếu một phía (vd chỉ có last)
-    const cur = get().quotes[symbol];
+    const cur = get().real[symbol];
     if (cur && cur.bid === bid && cur.ask === ask) return; // tick lặp: khỏi render lại
-    set({ quotes: { ...get().quotes, [symbol]: { bid, ask } } });
+    const real = { ...get().real, [symbol]: { bid, ask } };
+    set(get().sim ? { real } : { real, quotes: real });
   },
+  setSim: (quotes) => set(quotes ? { sim: true, quotes } : { sim: false, quotes: get().real }),
 }));
 
 /** Spread theo pip như TradingView ("45.0"): symbol 3 / 5 chữ số có pipette nên 1 pip = 10 điểm (vàng 0.45 → 45.0, EURUSD 0.00012 → 1.2); còn lại tính theo điểm. */

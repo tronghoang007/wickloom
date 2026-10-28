@@ -8,6 +8,8 @@ import { tradeBlock } from "@/trading/gate";
 import { currentLot, lotSpec } from "@/trading/lot";
 import { defaultSide, resolveOrderType, snapPrice, type Side } from "@/trading/orderType";
 import { useQuoteStore } from "@/trading/quote";
+import { SIM_ACCOUNT_ID } from "@/trading/simId";
+import { tradeAccount } from "@/trading/store";
 import { useTicketStore } from "@/trading/ticket";
 import { AddOrderI, BuyI, SellI } from "../icons";
 import type { MenuItem } from "./ChartContextMenu";
@@ -21,7 +23,7 @@ export function tradeMenuItems(symbol: string, price: number | null, digits: num
   const mid = q ? (q.bid + q.ask) / 2 : lastClose;
   const above = price !== null && mid !== undefined && price >= mid;
   const sym = chartGlobal.getState().symbols.find((s) => s.name === symbol);
-  const account = useMt5Store.getState().accounts.find((a) => a.active);
+  const account = tradeAccount();
   const spec = lotSpec(sym, account?.max_lot);
   const lot = spec ? currentLot(account?.id, symbol, spec) : null;
   const p = price === null ? "" : px(price, digits);
@@ -30,7 +32,7 @@ export function tradeMenuItems(symbol: string, price: number | null, digits: num
   const order = (side: Side) => () => {
     if (price === null) return;
     const auth = useAuthStore.getState();
-    if (auth.status === "guest") {
+    if (auth.status === "guest" && account?.id !== SIM_ACCOUNT_ID) {
       void auth.requireLogin("Đăng nhập để giao dịch");
       return;
     }

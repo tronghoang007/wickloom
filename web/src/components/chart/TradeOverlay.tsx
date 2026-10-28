@@ -3,17 +3,13 @@
 import { LineStyle, type IChartApi, type IPriceLine, type ISeriesApi, type SeriesType } from "lightweight-charts";
 import { drawingGlobal } from "@/drawings/store";
 import { useAuthStore } from "@/store/auth";
-import { useMt5Store } from "@/store/mt5";
 import { canModifyTrades, makeStopTitle } from "@/trading/chartOrders";
-import { chartGlobal } from "@/store/chart";
 import { draftLines } from "@/trading/draft";
 import { useTradeFocus, withAlpha } from "@/trading/focus";
 import { HANDLE_INSET } from "@/trading/lineDrag";
-import { COLORS, fmtLot, fmtPnl, ghostsFor, tradeLines, type DragPreview, type LineSpec, type TagOwner } from "@/trading/format";
-import { estimatePnl, pnlSpec } from "@/trading/pnl";
+import { tradeLines, type DragPreview, type LineSpec, type TagOwner } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
-import { openPnl, useReplaySim } from "@/trading/replaySim";
-import { useTradeStore } from "@/trading/store";
+import { useTradeAccount, useTradeStore } from "@/trading/store";
 import { closeFromTag, placeFromTag } from "@/trading/tagActions";
 import { useTicketStore } from "@/trading/ticket";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -24,19 +20,9 @@ const LINK_X = HANDLE_INSET; // đường nối dọc + chấm tròn trên mỗi
 
 const STYLE = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted } as const;
 const OWNER_ID = (o: TagOwner) => (o.t === "draft" ? "draft" : `${o.t}:${o.ticket}`);
-/** Dấu × trên thẻ vị thế giả lập: thẻ giá vào = Flatten (chốt ở giá nến replay hiện tại); thẻ SL / TP = bỏ mức đó. */
-function closeSim(paneId: string, kind: "entry" | "sl" | "tp", sym: Parameters<typeof pnlSpec>[0], ccy: string) {
-  if (kind !== "entry") {
-    useReplaySim.getState().setStop(paneId, kind, 0);
-    return;
-  }
-  const spec = pnlSpec(sym, ccy || "USD");
-  if (spec) useReplaySim.getState().flatten(paneId, spec);
-}
 
 const KIND_NAME = { sl: "SL", tp: "TP" } as const;
 const KIND_FULL = { sl: "Stop loss", tp: "Take profit" } as const; // chữ của tooltip nút TP / SL mờ (như TradingView)
-const SIM_TICKET = -1; // vị thế giả lập của Replay (không phải lệnh thật)
 const PNL_UP = "#089981"; // số lãi / lỗ trên thẻ (nhãn bắt đầu bằng + / -) tô xanh / đỏ theo dấu, không theo màu đường
 const PNL_DOWN = "#f23645";
 const DIM = 0.5; // độ đục của lệnh không được focus (0.3 làm chữ thẻ chỉ còn ~1.7:1, không đọc được)
@@ -54,10 +40,9 @@ function useNowSec() {
 }
 
 type Props = {
-  paneId: string; // vị thế giả lập của Replay (trading/replaySim.ts) thuộc về pane này
   symbol: string;
   chartType: string; // đổi loại nến thì series mới: đường giá cũ mất theo series cũ
-  replay: boolean;
+  replay: boolean; // chart đang Replay: chỉ hiện lệnh của account giả lập (trading/simStore.ts); chart thường chỉ hiện lệnh MT5
   preview: DragPreview[]; // đường đang kéo / chờ xác nhận / vừa gửi
   getChart: () => IChartApi | null;
   getSeries: () => ISeriesApi<SeriesType> | null;
@@ -71,49 +56,26 @@ type Props = {
 /** Vị thế, lệnh chờ và bản nháp lệnh trên chart kiểu TradingView (docs/trade-plan.md T3-T4): đường giá (price line: nền liền cho lệnh đã đặt, nét đứt cho bản nháp, chấm cho SL/TP)
  *  cùng các thẻ DOM nằm trên đường: [Buy/Sell của bản nháp] [TP+] [SL+] [lot | loại lệnh hoặc lãi/lỗi | ×], và đường nối dọc giữa giá vào với SL/TP. Kéo thẻ = kéo đường (LineDrag
  *  nhận ra thẻ qua `data-line-key`); kéo nút TP/SL mờ ra giá cần đặt để tạo mới. Vị trí cập nhật mỗi khung hình vì chart không báo khi trục giá đổi. */
-export default function TradeOverlay({ paneId, symbol, chartType, replay, preview, getChart, getSeries, getMainRect, getDigits, onGhost, onConfirmEdit, onCancelEdit }: Props) {
+export default function TradeOverlay({ symbol, chartType, replay, preview, getChart, getSeries, getMainRect, getDigits, onGhost, onConfirmEdit, onCancelEdit }: Props) {
   const tradeData = useTradeStore((s) => s.data);
+  const sim = useTradeStore((s) => s.sim);
   const draft = useTicketStore((s) => s.draft);
   const quote = useQuoteStore((s) => s.quotes[symbol]);
-  const account = useMt5Store((s) => s.accounts.find((a) => a.active));
+  const account = useTradeAccount();
   const status = useAuthStore((s) => s.status);
   const tool = drawingGlobal((s) => s.tool);
   const now = useNowSec();
   const ccy = account?.currency ?? "";
 
-  // Đang Replay: đường thật ẩn, chỉ hiện vị thế GIẢ LẬP của Replay (một đường giá vào, thẻ [lot | lãi/lỗi | ×]; × = Flatten). Ticket âm = vị thế giả lập.
-  const sim = useReplaySim((s) => s.byPane[paneId]);
-  const symInfo = chartGlobal((s) => s.symbols.find((x) => x.name === symbol));
-  const lines = useMemo<LineSpec[]>(() => {
-    if (!replay) return [...tradeLines(tradeData, symbol, now, preview, makeStopTitle(), ccy), ...draftLines(draft, symbol, quote, makeStopTitle())];
-    const p = sim?.position;
-    if (!sim || !p || sim.symbol !== symbol) return [];
-    const spec = pnlSpec(symInfo, ccy || "USD");
-    const money = (v: number | null) => (v === null ? "—" : `${fmtPnl(v)} ${ccy || "USD"}`);
-    const label = money(openPnl(sim, spec));
-    const owner: TagOwner = { t: "position", ticket: SIM_TICKET };
-    const stop = (kind: "sl" | "tp", price: number): LineSpec[] =>
-      price > 0
-        ? [{ key: `s${kind}:${SIM_TICKET}`, price, color: kind === "sl" ? COLORS.sl : COLORS.tp, style: "solid", title: `${KIND_NAME[kind]} ${money(spec ? estimatePnl(p.side, p.lot, p.entry, price, spec) : null)}`,
-            tag: { kind, owner, qty: fmtLot(p.lot), label: money(spec ? estimatePnl(p.side, p.lot, p.entry, price, spec) : null), ghosts: [], draft: false } }]
-        : [];
-    return [
-      {
-        key: "sim:pos",
-        price: p.entry,
-        color: p.side === "buy" ? COLORS.buy : COLORS.sell,
-        style: "solid",
-        title: `${p.side.toUpperCase()} ${fmtLot(p.lot)} ${label}`,
-        tag: { kind: "entry", owner, qty: fmtLot(p.lot), label, ghosts: ghostsFor(p.sl, p.tp), draft: false },
-      },
-      ...stop("sl", p.sl),
-      ...stop("tp", p.tp),
-    ];
-  }, [replay, tradeData, symbol, now, preview, ccy, draft, quote, sim, symInfo]);
+  // Lệnh của account đang nhận lệnh: chart đang Replay chỉ hiện lệnh giả lập, chart thường chỉ hiện lệnh MT5 (bên kia ẩn hết, kể cả bản nháp)
+  const lines = useMemo<LineSpec[]>(
+    () => (replay !== sim ? [] : [...tradeLines(tradeData, symbol, now, preview, makeStopTitle(), ccy), ...draftLines(draft, symbol, quote, makeStopTitle())]),
+    [replay, sim, tradeData, symbol, now, preview, ccy, draft, quote],
+  );
   // chủ (vị thế / lệnh chờ) đang có thay đổi chờ xác nhận: thẻ giá vào của nó hiện Discard / Confirm
   const pendingOwners = useMemo(() => new Set(lines.filter((l) => l.tag?.pending).map((l) => OWNER_ID((l.tag as NonNullable<LineSpec["tag"]>).owner))), [lines]);
   // đọc lại store mỗi lần render: account / đăng nhập đổi thì render lại (đã đăng ký ở trên)
-  const modify = status === "user" && account !== undefined && canModifyTrades();
+  const modify = (sim || status === "user") && account !== undefined && canModifyTrades();
 
   // --- vẽ đường giá và đặt vị trí thẻ, mỗi khung hình ---
   const root = useRef<HTMLDivElement>(null);
@@ -274,8 +236,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
       {lines.flatMap((l) => {
         const tag = l.tag;
         if (!tag) return [];
-        const isSim = tag.owner.t === "position" && tag.owner.ticket === SIM_TICKET;
-        const live = tag.draft || modify || isSim; // đã đặt thì cần được phép sửa: guest / real / EA tắt chỉ xem (vị thế giả lập của Replay thì luôn đóng được)
+        const live = tag.draft || modify; // đã đặt thì cần được phép sửa: guest / real / EA tắt chỉ xem
         const draggable = live && !(tag.kind === "entry" && tag.owner.t === "position"); // giá vào của vị thế đã khớp không kéo được; SL/TP, lệnh chờ và bản nháp thì có
         const c = l.color;
         const mine = OWNER_ID(tag.owner);
@@ -377,7 +338,7 @@ export default function TradeOverlay({ paneId, symbol, chartType, replay, previe
                   data-tag-btn
                   title={closeTitle}
                   aria-label={closeTitle}
-                  onClick={() => (isSim ? closeSim(paneId, tag.kind, symInfo, ccy) : closeFromTag(l, symbol, digits))}
+                  onClick={() => closeFromTag(l, symbol, digits)}
                   className="flex w-6 cursor-pointer items-center justify-center border-l hover:bg-white/10"
                   style={{ borderColor: fc(c) }}
                 >

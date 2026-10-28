@@ -29,8 +29,7 @@ import { createLineDrag, type ChartDrag } from "./chartOrders";
 import { useTradeFocus } from "./focus";
 import { useQuoteStore } from "./quote";
 import { clearEdit, seedEditStop, setEditPrice } from "./editBridge";
-import { useReplaySim } from "./replaySim";
-import type { PnlSpec } from "./pnl";
+import { SIM_ACCOUNT_ID } from "./simId";
 import { useTradeStore } from "./store";
 import { useTicketStore } from "./ticket";
 
@@ -63,12 +62,11 @@ beforeEach(() => {
   useQuoteStore.setState({ quotes: { XAUUSDm: { bid: 4130, ask: 4130.2 } } });
   chartGlobal.setState({ symbols: [{ name: "XAUUSDm", digits: 3, tick_size: 0.001 } as never] });
   useSettingsStore.setState({ s: { ...DEFAULT_SETTINGS, oneClick: false } });
-  useTradeStore.setState({ data: { account, positions: [position], orders: [order], deals: [], updated_at: Date.now() / 1000 } });
+  useTradeStore.setState({ sim: false, data: { account, positions: [position], orders: [order], deals: [], updated_at: Date.now() / 1000 } });
   previews = [];
   clickHandler = null;
   replayOn = false;
   h.begin.mockReset();
-  useReplaySim.setState({ byPane: {} });
   useTradeFocus.setState({ owner: null });
   ctl = createLineDrag({
     chart: { subscribeClick: (f: () => void) => (clickHandler = f), unsubscribeClick: vi.fn() } as never,
@@ -307,60 +305,27 @@ describe("bấm vào đường để chọn lệnh (hai thẻ đè nhau không b
   });
 });
 
-describe("Replay: SL / TP của vị thế giả lập", () => {
-  const spec: PnlSpec = { tickSize: 0.001, tickValue: 0.1, tickValueLoss: 0.1 };
-  const targets = () => (h.host!.getTargets as () => { id: string; price: number }[])();
-  const sim = () => useReplaySim.getState().byPane.p1.position;
-  beforeEach(() => {
+describe("Replay: chart chỉ kéo lệnh của account cùng phía", () => {
+  const targets = () => (h.host!.getTargets as () => { id: string; price: number }[])().map((t) => t.id);
+  const simAccount = { ...account, id: SIM_ACCOUNT_ID, mode: "replay" } as Mt5Account;
+  const simData = () => ({ account: simAccount, positions: [{ ...position, ticket: 1001 }], orders: [], deals: [], updated_at: 0 });
+
+  it("chart đang Replay mà giao diện còn ở account MT5 (chưa chuyển): không kéo gì", () => {
     replayOn = true;
-    const st = useReplaySim.getState();
-    st.ingest("p1", "XAUUSDm", { t: 1000, h: 4100, l: 4100, c: 4100 });
-    st.order("p1", "buy", 0.1, spec);
-  });
-
-  it("đang Replay: không kéo được lệnh thật, chỉ SL / TP giả lập đã đặt", () => {
     expect(targets()).toEqual([]);
-    useReplaySim.getState().setStop("p1", "sl", 4090);
-    useReplaySim.getState().setStop("p1", "tp", 4120);
-    expect(targets()).toEqual([{ id: "ssl:-1", price: 4090 }, { id: "stp:-1", price: 4120 }]);
   });
 
-  it("kéo đường: áp thẳng vào vị thế giả lập (không qua bước xác nhận); mức sai phía bị bỏ qua", () => {
-    useReplaySim.getState().setStop("p1", "sl", 4090);
-    call("onMove", "ssl:-1", 4085);
-    expect(sim()?.sl).toBe(4085);
-    call("onMove", "ssl:-1", 4110); // trên giá hiện tại: không hợp lệ cho SL của Buy
-    expect(sim()?.sl).toBe(4085);
-    call("onDrop", "ssl:-1", 4085, 4090);
-    expect(previews.flat()).toEqual([]); // không có xem trước / chờ xác nhận kiểu lệnh thật
+  it("account giả lập: kéo được SL / TP như lệnh thật, kể cả khách và dữ liệu 'cũ' (sổ giả lập luôn mới)", () => {
+    replayOn = true;
+    useAuthStore.setState({ status: "guest" });
+    useTradeStore.setState({ sim: true, data: simData() });
+    expect(targets()).toEqual(["p:1001", "psl:1001", "ptp:1001"]);
+    drop("psl:1001", 4100);
+    expect(last()).toEqual([expect.objectContaining({ key: "psl:1001", price: 4100, pending: true })]);
   });
 
-  it("Esc / thả không dời: về mức cũ; đường vừa kéo ra từ nút mờ (mức cũ 0) thì bị bỏ", () => {
-    useReplaySim.getState().setStop("p1", "tp", 4120);
-    call("onMove", "stp:-1", 4130);
-    call("onAbort", "stp:-1", 4120);
-    expect(sim()?.tp).toBe(4120);
-    call("onAbort", "stp:-1", 0);
-    expect(sim()?.tp).toBe(0);
-  });
-
-  it("kéo nút TP / SL mờ trên thẻ: nhấn chưa đặt gì, chỉ khi bắt đầu kéo mới đặt mức gợi ý theo giá nến hiện tại", () => {
-    ctl.beginStop({ t: "position", ticket: -1 }, "tp", {} as never);
-    expect(sim()?.tp).toBe(0);
-    const arm = h.begin.mock.calls[0][4] as () => boolean;
-    expect(h.begin).toHaveBeenCalledWith({}, "stp:-1", 0, expect.any(Number), expect.any(Function));
-    expect(arm()).toBe(true);
-    expect(sim()?.tp).toBeGreaterThan(4100);
-    ctl.beginStop({ t: "position", ticket: -1 }, "sl", {} as never);
-    expect(sim()?.sl).toBe(0);
-    (h.begin.mock.calls[1][4] as () => boolean)();
-    expect(sim()?.sl).toBeLessThan(4100);
-    expect(sim()?.sl).toBeGreaterThan(0);
-  });
-
-  it("chưa có vị thế giả lập: nút mờ không làm gì", () => {
-    useReplaySim.setState({ byPane: {} });
-    ctl.beginStop({ t: "position", ticket: -1 }, "sl", {} as never);
-    expect(h.begin).not.toHaveBeenCalled();
+  it("chart thường khi đang có Replay ở chart khác: không kéo lệnh giả lập", () => {
+    useTradeStore.setState({ sim: true, data: simData() });
+    expect(targets()).toEqual([]);
   });
 });

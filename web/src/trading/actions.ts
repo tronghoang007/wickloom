@@ -1,13 +1,14 @@
 import { sendCancelOrder, sendClosePosition, sendMarketOrder, sendModifyOrder, sendModifyPosition, sendPendingOrder, type PendingRequest, type TradeOutcome, type TradeResult } from "@/lib/tradeApi";
 import type { PendingOrder } from "@/lib/mt5Api";
 import { useAuthStore } from "@/store/auth";
-import { useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
 import { create } from "zustand";
 import { fmtLot, fmtPx } from "./format";
 import { isPendingType, pendingLabel, resolveOrderType, sideOfType } from "./orderType";
 import { useQuoteStore } from "./quote";
-import { useTradeStore } from "./store";
+import { SIM_ACCOUNT_ID } from "./simId";
+import { simApi } from "./simStore";
+import { tradeAccount, useTradeStore } from "./store";
 
 // Hành động giao dịch của người dùng (docs/trade-plan.md T2-T3): luôn qua requireLogin, mỗi lần chỉ một lệnh đang bay, kết quả báo bằng toast.
 export const useOrderState = create<{ busy: boolean }>()(() => ({ busy: false }));
@@ -19,7 +20,16 @@ export function newClientId(): string {
   return raw.slice(0, 24);
 }
 
-const activeAccount = () => useMt5Store.getState().accounts.find((a) => a.active);
+const realApi = {
+  market: sendMarketOrder,
+  pending: sendPendingOrder,
+  close: sendClosePosition,
+  cancel: sendCancelOrder,
+  modifyOrder: sendModifyOrder,
+  modifyPosition: sendModifyPosition,
+};
+/** Account giả lập của Replay: lệnh tới sàn giả lập (trading/simStore.ts) thay vì backend, cùng chữ ký và cùng cách trả kết quả. */
+const api = (accountId: string) => (accountId === SIM_ACCOUNT_ID ? simApi : realApi);
 
 /** EA đẩy vị thế mới ngay sau khi khớp; hỏi lại sớm để panel/chart cập nhật mà không chờ nhịp poll 2s. */
 function refreshSoon() {
@@ -49,8 +59,9 @@ async function run<T>(reason: string, task: (accountId: string) => Promise<T>): 
   }
   useOrderState.setState({ busy: true });
   try {
+    if (tradeAccount()?.id === SIM_ACCOUNT_ID) return await task(SIM_ACCOUNT_ID); // Replay: không cần đăng nhập, không có gì tới MT5
     if (!(await useAuthStore.getState().requireLogin(reason))) return undefined;
-    const acc = activeAccount();
+    const acc = tradeAccount();
     if (!acc) {
       toast("Chưa có account MT5 kết nối", { ms: 5000 });
       return undefined;
@@ -64,7 +75,7 @@ async function run<T>(reason: string, task: (accountId: string) => Promise<T>): 
 /** Buy/Sell market `volume` lot (đã chuẩn hoá theo step), kèm SL/TP tuỳ chọn (0 = không đặt). Trả true nếu sàn đã khớp. */
 export async function placeMarket(side: "buy" | "sell", symbol: string, volume: number, digits?: number, stops: { sl?: number; tp?: number } = {}): Promise<boolean> {
   const done = await run("Đăng nhập để giao dịch", async (accountId) => {
-    const o = await sendMarketOrder(accountId, { symbol, side, volume, sl: stops.sl, tp: stops.tp, clientId: newClientId() });
+    const o = await api(accountId).market(accountId, { symbol, side, volume, sl: stops.sl, tp: stops.tp, clientId: newClientId() });
     const price = o.kind === "done" && o.result.price > 0 ? ` @ ${fmtPx(o.result.price, digits)}` : "";
     return report(o, `${side === "buy" ? "Buy" : "Sell"} ${fmtLot(volume)} ${symbol}${price}`, false, "Order filled");
   });
@@ -74,7 +85,7 @@ export async function placeMarket(side: "buy" | "sell", symbol: string, volume: 
 /** Đóng vị thế `ticket`; `volume` = 0 đóng hết, khác 0 đóng một phần. */
 export function closeTrade(ticket: number, symbol: string, volume = 0): Promise<void> {
   return run("Đăng nhập để giao dịch", async (accountId) => {
-    const o = await sendClosePosition(accountId, ticket, volume);
+    const o = await api(accountId).close(accountId, ticket, volume);
     report(o, `Đã đóng ${volume > 0 ? `${fmtLot(volume)} lot của ` : ""}${symbol} #${ticket}`, false, "Position closed");
   }).then(() => undefined);
 }
@@ -83,7 +94,7 @@ export function closeTrade(ticket: number, symbol: string, volume = 0): Promise<
 export function closeAllTrades(tickets: number[]): Promise<void> {
   return run("Đăng nhập để giao dịch", async (accountId) => {
     let ok = 0;
-    for (const t of tickets) if (report(await sendClosePosition(accountId, t, 0), "", true)) ok++;
+    for (const t of tickets) if (report(await api(accountId).close(accountId, t, 0), "", true)) ok++;
     if (ok > 0) toast(`Đã đóng ${ok}/${tickets.length} vị thế`, { ms: 4000, title: "Positions closed", kind: ok === tickets.length ? "success" : "info" });
   }).then(() => undefined);
 }
@@ -92,7 +103,7 @@ export function closeAllTrades(tickets: number[]): Promise<void> {
 export function cancelAllOrders(tickets: number[]): Promise<void> {
   return run("Đăng nhập để giao dịch", async (accountId) => {
     let ok = 0;
-    for (const t of tickets) if (report(await sendCancelOrder(accountId, t), "", true)) ok++;
+    for (const t of tickets) if (report(await api(accountId).cancel(accountId, t), "", true)) ok++;
     if (ok > 0) toast(`Đã huỷ ${ok}/${tickets.length} lệnh chờ`, { ms: 4000, title: "Orders cancelled", kind: ok === tickets.length ? "success" : "info" });
   }).then(() => undefined);
 }
@@ -101,7 +112,7 @@ export type PendingParams = Omit<PendingRequest, "clientId">;
 
 // Một lần đặt lệnh chờ (đã ở trong run). Giá nhảy làm EA chọn loại khác loại web hiển thị thì vẫn đặt (demo) và nói rõ trong toast.
 async function pendingCall(accountId: string, r: PendingParams, digits: number | undefined, quiet = false): Promise<boolean> {
-  const o = await sendPendingOrder(accountId, { ...r, clientId: newClientId() });
+  const o = await api(accountId).pending(accountId, { ...r, clientId: newClientId() });
   return report(
     o,
     (res) => {
@@ -122,7 +133,7 @@ export async function placePending(r: PendingParams, digits?: number): Promise<b
 /** Huỷ lệnh chờ `ticket`. */
 export async function cancelOrder(ticket: number, symbol: string): Promise<boolean> {
   return (
-    (await run("Đăng nhập để giao dịch", async (accountId) => report(await sendCancelOrder(accountId, ticket), `Đã huỷ lệnh chờ ${symbol} #${ticket}`, false, "Order cancelled"))) === true
+    (await run("Đăng nhập để giao dịch", async (accountId) => report(await api(accountId).cancel(accountId, ticket), `Đã huỷ lệnh chờ ${symbol} #${ticket}`, false, "Order cancelled"))) === true
   );
 }
 
@@ -135,7 +146,7 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
     const resolved = type && q ? resolveOrderType(sideOfType(type), price, q.bid, q.ask) : type;
     if (!type || resolved === type) {
       // cùng loại (hoặc chưa có giá để so: để EA quyết, nó từ chối nếu loại sẽ đổi)
-      return report(await sendModifyOrder(accountId, order.ticket, { price, ...stops }), `Đã đổi giá ${order.symbol} #${order.ticket} → ${fmtPx(price, digits)}`, false, "Order modified");
+      return report(await api(accountId).modifyOrder(accountId, order.ticket, { price, ...stops }), `Đã đổi giá ${order.symbol} #${order.ticket} → ${fmtPx(price, digits)}`, false, "Order modified");
     }
     if (!resolved) {
       toast("Giá vào trùng giá thị trường: lệnh chờ không đặt được ở đó", { ms: 6000 });
@@ -148,7 +159,7 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
       true,
     );
     if (!placed) return false; // lệnh cũ còn nguyên
-    const del = await sendCancelOrder(accountId, order.ticket);
+    const del = await api(accountId).cancel(accountId, order.ticket);
     if (del.kind === "done" && del.result.ok) {
       toast(`Đã chuyển lệnh #${order.ticket} thành ${pendingLabel(resolved)} ${fmtLot(order.volume)} ${order.symbol} @ ${fmtPx(price, digits)}`, { ms: 5000, title: "Pending order placed", kind: "success" });
     } else {
@@ -172,7 +183,7 @@ export async function moveStops(t: StopsTarget, changes: StopChange[], digits?: 
   const where = `${t.symbol} #${t.ticket}`;
   const patch = (pick: (c: StopChange) => number) => Object.fromEntries(changes.map((c) => [c.field, pick(c)])) as { sl?: number; tp?: number };
   const call = (accountId: string, p: { sl?: number; tp?: number }) =>
-    t.target === "position" ? sendModifyPosition(accountId, t.ticket, p) : sendModifyOrder(accountId, t.ticket, p);
+    t.target === "position" ? api(accountId).modifyPosition(accountId, t.ticket, p) : api(accountId).modifyOrder(accountId, t.ticket, p);
   const undo = () =>
     void run("Đăng nhập để giao dịch", async (accountId) => {
       const back = changes.length === 1 && changes[0].from > 0 ? `Đã hoàn tác ${names} ${where} → ${fmtPx(changes[0].from, digits)}` : changes.length === 1 ? `Đã bỏ ${names} ${where}` : `Đã hoàn tác ${names} ${where}`;

@@ -21,12 +21,19 @@ vi.mock("@/store/auth", () => ({ useAuthStore: { getState: () => ({ requireLogin
 const toastMock = vi.fn();
 vi.mock("@/store/toast", () => ({ toast: (...a: unknown[]) => toastMock(...a) }));
 const refresh = vi.fn();
-vi.mock("./store", () => ({ useTradeStore: { getState: () => ({ refresh }) } }));
+const simAcc = { current: null as Mt5Account | null }; // đang Replay: account giả lập
+vi.mock("./store", () => ({
+  useTradeStore: { getState: () => ({ refresh }) },
+  tradeAccount: () => simAcc.current ?? useMt5Store.getState().accounts.find((a) => a.active),
+}));
+const simMarket = vi.fn();
+vi.mock("./simStore", () => ({ simApi: { market: (...a: unknown[]) => simMarket(...a) } }));
 
 import { useMt5Store } from "@/store/mt5";
 import type { PendingOrder } from "@/lib/mt5Api";
 import { cancelOrder, closeTrade, moveOrder, moveStop, moveStops, newClientId, placeMarket, placePending, useOrderState } from "./actions";
 import { useQuoteStore } from "./quote";
+import { SIM_ACCOUNT_ID } from "./simId";
 
 const acc = { id: "S:1", server: "S", mode: "demo", online: true, active: true } as Mt5Account;
 const done = (o: Partial<{ ok: boolean; message: string; price: number; orderType: string; typeChanged: boolean }> = {}): TradeOutcome => ({
@@ -35,7 +42,8 @@ const done = (o: Partial<{ ok: boolean; message: string; price: number; orderTyp
 
 beforeEach(() => {
   vi.useFakeTimers();
-  for (const m of [sendOrder, sendClose, sendPending, sendModify, sendCancel, sendModifyPos, requireLogin, toastMock, refresh]) m.mockReset();
+  for (const m of [sendOrder, sendClose, sendPending, sendModify, sendCancel, sendModifyPos, requireLogin, toastMock, refresh, simMarket]) m.mockReset();
+  simAcc.current = null;
   useQuoteStore.setState({ quotes: { XAUUSDm: { bid: 4130, ask: 4130.2 } } });
   requireLogin.mockResolvedValue(true);
   useMt5Store.setState({ accounts: [acc], loaded: true });
@@ -89,6 +97,16 @@ describe("placeMarket", () => {
     expect(toastMock).toHaveBeenCalledWith("Hiện chỉ giao dịch được trên account demo", expect.objectContaining({ ms: 7000, kind: "error" }));
     await vi.advanceTimersByTimeAsync(2000);
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("đang Replay (account giả lập): gửi tới sàn giả lập, không đòi đăng nhập, không gì tới backend", async () => {
+    simAcc.current = { ...acc, id: SIM_ACCOUNT_ID, mode: "replay" };
+    simMarket.mockResolvedValue(done({ price: 4000.2 }));
+    expect(await placeMarket("buy", "XAUUSDm", 0.1, 3)).toBe(true);
+    expect(requireLogin).not.toHaveBeenCalled();
+    expect(sendOrder).not.toHaveBeenCalled();
+    expect(simMarket).toHaveBeenCalledWith(SIM_ACCOUNT_ID, expect.objectContaining({ symbol: "XAUUSDm", side: "buy", volume: 0.1 }));
+    expect(toastMock.mock.calls[0][0]).toBe("Buy 0.10 XAUUSDm @ 4000.200");
   });
 
   it("chưa có account MT5 → báo, không gửi", async () => {

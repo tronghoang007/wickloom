@@ -8,6 +8,8 @@ import { draftError, type DraftEnv } from "./draftCheck";
 import { lotSpec, normalizeLot, writeLot } from "./lot";
 import { resolveOrderType, snapPrice, type Side } from "./orderType";
 import { useQuoteStore } from "./quote";
+import { simNow } from "./simStore";
+import { tradeAccount } from "./store";
 import { useTicketStore } from "./ticket";
 
 // Hành động trên bản nháp lệnh (panel bên phải và thanh đặt lệnh trên chart dùng chung): đọc store lúc gọi nên gọi được từ bất kỳ đâu.
@@ -15,10 +17,10 @@ function env(symbol: string): DraftEnv {
   return {
     sym: chartGlobal.getState().symbols.find((s) => s.name === symbol),
     quote: useQuoteStore.getState().quotes[symbol],
-    account: useMt5Store.getState().accounts.find((a) => a.active),
+    account: tradeAccount(),
     status: useAuthStore.getState().status,
     loaded: useMt5Store.getState().loaded,
-    nowSec: Date.now() / 1000,
+    nowSec: simNow() ?? Date.now() / 1000, // Replay: hết hạn của lệnh chờ tính theo giờ replay
   };
 }
 

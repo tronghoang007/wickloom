@@ -4,7 +4,6 @@ import { drawingGlobal } from "@/drawings/store";
 import { chartGlobal } from "@/store/chart";
 import { useAuthStore } from "@/store/auth";
 import { useSettingsStore } from "@/store/settings";
-import { useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
 import { moveOrder, moveStops, type StopChange } from "./actions";
 import { DRAFT_IDS, defaultStop, draftLines, parseNum } from "./draft";
@@ -16,25 +15,26 @@ import { LineDrag, type DragTarget } from "./lineDrag";
 import { checkStopMove, isPendingType, pendingLabel, resolveOrderType, sideOfType, tooClose } from "./orderType";
 import { estimatePnl, fmtPnlCcy, pnlSpec, stopTitle } from "./pnl";
 import { useQuoteStore } from "./quote";
-import { useReplaySim } from "./replaySim";
+import { SIM_ACCOUNT_ID } from "./simId";
 import { seedDraftStop } from "./submit";
-import { useTradeStore } from "./store";
+import { tradeAccount, useTradeStore } from "./store";
 import { useTicketStore } from "./ticket";
 
 /** Nhãn đường SL/TP kèm lãi/lỗi dự kiến theo tiền account (đọc store lúc gọi, nên dùng được cho mọi chart). */
 export function makeStopTitle(): StopTitleFn {
   return (kind, side, lot, entry, price, symbol) => {
     const sym = chartGlobal.getState().symbols.find((s) => s.name === symbol);
-    const ccy = useMt5Store.getState().accounts.find((a) => a.active)?.currency ?? "";
+    const ccy = tradeAccount()?.currency ?? "";
     return stopTitle(kind, side, lot, entry, price, pnlSpec(sym, ccy), ccy);
   };
 }
 
-/** Đang được sửa / huỷ / đóng lệnh trên chart không: đã đăng nhập, account demo, EA bật giao dịch. Khách / real / EA tắt thì chỉ xem (bản nháp vẫn kéo được). */
+/** Đang được sửa / huỷ / đóng lệnh trên chart không: đã đăng nhập, account demo, EA bật giao dịch. Khách / real / EA tắt thì chỉ xem (bản nháp vẫn kéo được). Account giả lập của Replay: luôn được. */
 export function canModifyTrades(): boolean {
+  const account = tradeAccount();
+  if (account?.id === SIM_ACCOUNT_ID) return true;
   const status = useAuthStore.getState().status;
-  const account = useMt5Store.getState().accounts.find((a) => a.active);
-  return status === "user" && tradeBlock({ replay: false, status, loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true }) === null;
+  return status === "user" && tradeBlock({ status, loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true }) === null;
 }
 
 /** `owner` của confirmEdit / cancelEdit = "position:<ticket>" | "order:<ticket>" (cùng khoá với nhóm thẻ trên chart); cancelEdit không tham số bỏ mọi thay đổi đang chờ. */
@@ -47,18 +47,16 @@ type Opts = {
   getSeries: () => ISeriesApi<SeriesType> | null;
   getSymbol: () => string;
   getDigits: () => number;
-  isReplay: () => boolean;
-  paneId: string; // SL / TP của vị thế GIẢ LẬP của Replay (trading/replaySim.ts) kéo được khi đang Replay
+  isReplay: () => boolean; // chart đang Replay: chỉ kéo lệnh của account giả lập (trading/simStore.ts), chart thường chỉ kéo lệnh của account MT5
+  paneId: string;
   setPreview: (p: DragPreview[]) => void; // mọi đường đang kéo / chờ xác nhận / đã gửi chờ EA báo
 };
 
 const STOP_ID = /^(psl|ptp|osl|otp):(\d+)$/;
-const SIM_STOP = /^s(sl|tp):-1$/; // đường SL / TP của vị thế giả lập (ticket -1)
-const SIM_OWNER = -1;
 
 /** Lắp LineDrag cho một chart. Kéo được: (1) entry / SL / TP của bảng đặt lệnh đang mở, ghi thẳng vào bản nháp; (2) khi giao dịch được (khách / real / EA tắt đều không): đường lệnh chờ
  *  (thả tay → `moveOrder`: cùng loại sửa giá, qua giá thị trường thì đặt mới đúng loại rồi xoá cũ) và đường SL/TP của vị thế / lệnh chờ (thả tay → `moveStops`, có "Hoàn tác").
- *  Mọi chỗ thả đều kiểm tra phía + vùng cấm của broker trước khi gửi. Đang Replay hoặc đang chọn công cụ vẽ thì không kéo gì. */
+ *  Mọi chỗ thả đều kiểm tra phía + vùng cấm của broker trước khi gửi. Đang chọn công cụ vẽ, hoặc chart không cùng phía với account đang nhận lệnh (Replay / thật), thì không kéo gì. */
 export function createLineDrag(o: Opts): ChartDrag {
   const stopTitleFn = makeStopTitle();
   const symbolInfo = () => chartGlobal.getState().symbols.find((s) => s.name === o.getSymbol());
@@ -202,7 +200,7 @@ export function createLineDrag(o: Opts): ChartDrag {
         toast(why, { ms: 6000 });
         return publish();
       }
-      const ccy = useMt5Store.getState().accounts.find((a) => a.active)?.currency ?? "";
+      const ccy = tradeAccount()?.currency ?? "";
       const spec = pnlSpec(symbolInfo(), ccy);
       const pnlText = spec ? ` (${fmtPnlCcy(estimatePnl(stop.side, stop.lot, stop.entry, price, spec), ccy)})` : "";
       const preview = { key: id, price, title: stopTitleFn(stop.field, stop.side, stop.lot, stop.entry, price, stop.symbol) };
@@ -226,12 +224,7 @@ export function createLineDrag(o: Opts): ChartDrag {
     listenOn: o.listenOn,
     getSeries: o.getSeries,
     getTargets: () => {
-      if (drawingGlobal.getState().tool) return [];
-      if (o.isReplay()) {
-        // đang Replay: chỉ SL / TP của vị thế giả lập kéo được (đặt thẳng vào kho giả lập, không có bước chờ xác nhận)
-        const p = useReplaySim.getState().byPane[o.paneId]?.position;
-        return p ? [...(p.sl > 0 ? [{ id: "ssl:-1", price: p.sl }] : []), ...(p.tp > 0 ? [{ id: "stp:-1", price: p.tp }] : [])] : [];
-      }
+      if (drawingGlobal.getState().tool || o.isReplay() !== useTradeStore.getState().sim) return [];
       const symbol = o.getSymbol();
       const quote = useQuoteStore.getState().quotes[symbol];
       const draft = draftLines(useTicketStore.getState().draft, symbol, quote).map((l) => ({ id: l.key, price: l.price }));
@@ -256,11 +249,6 @@ export function createLineDrag(o: Opts): ChartDrag {
     digits: o.getDigits,
     tickSize: () => symbolInfo()?.tick_size || 10 ** -o.getDigits(),
     onMove: (id, price) => {
-      const sim = SIM_STOP.exec(id);
-      if (sim) {
-        useReplaySim.getState().setStop(o.paneId, sim[1] as "sl" | "tp", price); // sai phía thì không đổi (đường đứng ở mức cuối hợp lệ)
-        return;
-      }
       focusLine(id);
       if (id in DRAFT_IDS) return patchDraft(id, price);
       const stop = stopOf(id);
@@ -273,11 +261,6 @@ export function createLineDrag(o: Opts): ChartDrag {
     },
     onHover: (id) => useTradeFocus.getState().setHover(id === null ? null : id in DRAFT_IDS ? "draft" : ownerOf(id)),
     onAbort: (id, from, click) => {
-      const sim = SIM_STOP.exec(id);
-      if (sim) {
-        useReplaySim.getState().setStop(o.paneId, sim[1] as "sl" | "tp", from); // Esc / bấm không kéo: về mức cũ (0 = bỏ mức vừa kéo ra)
-        return;
-      }
       // bấm vào đường mà không kéo = chọn lệnh đó (mở bảng Modify ở thanh bên phải); kéo (kể cả thả lại đúng giá cũ) hay Esc thì chỉ focus, không mở bảng
       const clicked = click && !(id in DRAFT_IDS) ? ownerOf(id) : null;
       if (clicked) useTicketStore.getState().select(clicked);
@@ -287,7 +270,6 @@ export function createLineDrag(o: Opts): ChartDrag {
       publish();
     },
     onDrop: (id, price) => {
-      if (SIM_STOP.test(id)) return; // đã áp dụng lúc kéo
       if (id in DRAFT_IDS) {
         wasMarket = false; // bản nháp đã nhận giá mới lúc kéo
         return;
@@ -300,16 +282,6 @@ export function createLineDrag(o: Opts): ChartDrag {
   /** Kéo nút TP / SL mờ trên thẻ lệnh ra giá cần đặt (như TradingView). Bản nháp: ghi thẳng vào bản nháp; vị thế / lệnh chờ đã đặt: đường hiện ra ở mức gợi ý rồi theo con trỏ, thả tay mới gửi.
    *  Đường chỉ hiện ra khi con trỏ bắt đầu kéo (nhấn chuột chưa làm gì); bấm không kéo thì không đặt gì. */
   const beginStop = (owner: TagOwner, kind: "sl" | "tp", e: PointerEvent) => {
-    if (owner.t === "position" && owner.ticket === SIM_OWNER) {
-      // vị thế giả lập của Replay: mức gợi ý đo từ giá nến hiện tại, rồi theo con trỏ
-      const sim = useReplaySim.getState().byPane[o.paneId];
-      if (!sim?.position || sim.price === null) return;
-      const sym = symbolInfo();
-      const digits = o.getDigits();
-      const seed = defaultStop(kind, sim.position.side, sim.price, sym?.tick_size || 10 ** -digits, digits);
-      drag.begin(e, `s${kind}:-1`, 0, seed, () => useReplaySim.getState().setStop(o.paneId, kind, seed));
-      return;
-    }
     if (owner.t === "draft") {
       drag.begin(e, `d:${kind}`, 0, 0, () => {
         seedDraftStop(kind);

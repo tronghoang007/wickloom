@@ -17,7 +17,8 @@ import { pendingLabel, resolveOrderType, snapPrice } from "@/trading/orderType";
 import { estimatePnl, pnlSpec, pointsBetween, priceForPnl, type PnlSpec } from "@/trading/pnl";
 import { spreadPips, useQuoteStore } from "@/trading/quote";
 import { seedDraftStop, setDraftMode, startDraft, submitDraft } from "@/trading/submit";
-import { useTradeStore } from "@/trading/store";
+import { useSimStore } from "@/trading/simStore";
+import { useTradeAccount, useTradeStore } from "@/trading/store";
 import { askCancelOrder, askClosePosition, askRemoveStop } from "@/trading/tagActions";
 import { useTicketStore, type TicketRest } from "@/trading/ticket";
 import { useEffect, useState } from "react";
@@ -52,7 +53,7 @@ export default function OrderTicket() {
 function ModifyPanel({ owner }: { owner: string }) {
   const data = useTradeStore((s) => s.data);
   const byPane = useEditBridge((s) => s.byPane);
-  const account = useMt5Store((s) => s.accounts.find((a) => a.active));
+  const account = useTradeAccount();
   const busy = useOrderState((s) => s.busy);
   const symbols = useChartStore((s) => s.symbols);
   const [kind, tk] = owner.split(":");
@@ -261,7 +262,7 @@ function ModifyStop({ kind, keyId, was, now, buy, entry, lot, digits, tick, spec
 function RestPanel({ rest }: { rest: TicketRest }) {
   const symbol = useChartStore((s) => s.symbol);
   const sym = chartGlobal((s) => s.symbols.find((x) => x.name === symbol));
-  const account = useMt5Store((s) => s.accounts.find((a) => a.active));
+  const account = useTradeAccount();
   const spec = lotSpec(sym, account?.max_lot);
   const lot = spec ? fmtLotValue(currentLot(account?.id, symbol, spec), spec) : "";
   const d: Draft = { symbol, side: rest.side, mode: rest.mode, price: "", sl: "", tp: "", lot, until: false, untilText: "" };
@@ -397,7 +398,7 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
   const quote = useQuoteStore((s) => s.quotes[d.symbol]);
   const status = useAuthStore((s) => s.status);
   const loaded = useMt5Store((s) => s.loaded);
-  const account = useMt5Store((s) => s.accounts.find((a) => a.active));
+  const account = useTradeAccount();
   const busy = useOrderState((s) => s.busy);
   const spec = lotSpec(sym, account?.max_lot);
   const ccy = account?.currency ?? "";
@@ -425,7 +426,8 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
   const bid = quote?.bid ?? 0;
   const ask = quote?.ask ?? 0;
   const type = !market && quote && price > 0 ? resolveOrderType(d.side, price, bid, ask) : null;
-  const err = idle ? null : draftError(d, { sym, quote, account, status, loaded, nowSec: now });
+  const replayNow = useSimStore((s) => (s.on ? (s.book?.time ?? null) : null)); // Replay: "hết hạn phải ở tương lai" tính theo giờ replay
+  const err = idle ? null : draftError(d, { sym, quote, account, status, loaded, nowSec: replayNow ?? now });
 
   // Giá vào để đo điểm và lãi/lỗi: giá vào của lệnh chờ, hoặc giá khớp market (Buy mua ở Ask, Sell bán ở Bid)
   const entry = market ? (buy ? ask : bid) : price;

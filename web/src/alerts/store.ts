@@ -152,7 +152,7 @@ export const useAlertDialog = create<DialogState>()((set) => ({ seed: null, edit
 export const digitsOf = (symbol: string) => chartGlobal.getState().symbols.find((s) => s.name === symbol)?.digits ?? 5;
 
 /** Giá hiện tại của symbol (bid từ tick realtime), null khi chưa có tick. */
-export const lastPrice = (symbol: string): number | null => useQuoteStore.getState().quotes[symbol]?.bid ?? null;
+export const lastPrice = (symbol: string): number | null => useQuoteStore.getState().real[symbol]?.bid ?? null;
 
 /** Mở hộp thoại tạo alert (cần đăng nhập). Không truyền gì = symbol của chart đang active tại giá hiện tại. */
 export async function openCreateAlert(seed?: Partial<AlertSeed>): Promise<void> {

@@ -121,7 +121,7 @@ function TradingAccounts() {
   const accounts = useMt5Store((s) => s.accounts);
   const loaded = useMt5Store((s) => s.loaded);
   const switchable = useMt5Store((s) => s.switchable);
-  const trade = useTradeStore((s) => s.data);
+  const trade = useTradeStore((s) => s.real); // số liệu MT5, kể cả khi panel đang hiện account giả lập của Replay
   return (
     <div className="border-b border-[var(--border)] px-4 py-3">
       <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Trading accounts (MT5)</div>

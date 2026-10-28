@@ -2,15 +2,8 @@
 
 import { TF_SECONDS } from "@/lib/api";
 import { SPEEDS, exitReplay, useReplayStore } from "@/replay/store";
-import { chartGlobal, useChartStore } from "@/store/chart";
-import { useMt5Store } from "@/store/mt5";
-import { parseNum } from "@/trading/draft";
-import { fmtPnl, fmtPx, pnlClass } from "@/trading/format";
-import { currentLot, fmtLotValue, lotSpec, normalizeLot } from "@/trading/lot";
-import { pnlSpec } from "@/trading/pnl";
-import { emptySim, openPnl, useReplaySim } from "@/trading/replaySim";
-import { toast } from "@/store/toast";
-import { useEffect, useRef, useState } from "react";
+import { useChartStore } from "@/store/chart";
+import { useState } from "react";
 import { Tv } from "../icons";
 
 const TF_LABEL: Record<string, string> = {
@@ -104,65 +97,7 @@ function Pop({
   );
 }
 
-/** Cụm vào lệnh giả lập của Replay (như Replay Trading của TV): Sell | lot | Buy | Flatten. Khớp theo giá nến replay đang chạy, một vị thế gộp cho symbol đang xem, lãi/lỗi tính
- *  theo tick value của MT5 (cần EA >= 2.14, hoặc symbol tính bằng đúng tiền account). Không gửi gì tới MT5. Chi tiết: `trading/replaySim.ts`. */
-function ReplayTrade({ paneId, symbol, active }: { paneId: string; symbol: string; active: boolean }) {
-  const sim = useReplaySim((s) => s.byPane[paneId]) ?? emptySim(symbol);
-  const sym = chartGlobal((s) => s.symbols.find((x) => x.name === symbol));
-  const account = useMt5Store((s) => s.accounts.find((a) => a.active));
-  const ccy = account?.currency ?? "USD";
-  const spec = pnlSpec(sym, ccy);
-  const lotSp = lotSpec(sym, account?.max_lot) ?? { min: 0.01, max: 100, step: 0.01 };
-  const lotText = sim.lot || fmtLotValue(currentLot(account?.id, symbol, lotSp), lotSp);
-  const ready = active && sim.price !== null && spec !== null;
-  const hint = !active ? "Chọn nến để bắt đầu Replay" : !spec ? "Chưa biết giá trị một tick của symbol này (cần EA ≥ 2.14)" : sim.price === null ? "Chưa có giá replay" : undefined;
-  const order = (side: "buy" | "sell") => spec && useReplaySim.getState().order(paneId, side, normalizeLot(parseNum(lotText), lotSp), spec);
-  // SL / TP giả lập vừa tự chốt (nến replay chạm mức): báo một lần cho mỗi sự kiện
-  const seen = useRef(sim.event?.id ?? 0);
-  useEffect(() => {
-    const e = sim.event;
-    if (!e || e.id === seen.current) return;
-    seen.current = e.id;
-    toast(`Replay: ${e.reason === "sl" ? "SL" : "TP"} chạm @ ${fmtPx(e.price, sym?.digits)} · ${fmtPnl(e.pnl)} ${ccy}`, { ms: 5000 });
-  }, [sim.event, sym?.digits, ccy]);
-  const pnl = openPnl(sim, spec);
-  const shownPnl = sim.position ? pnl : sim.trades > 0 ? sim.realized : null;
-  const pill = "h-[30px] rounded px-4 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:brightness-100";
-  return (
-    <div className="mr-12 flex items-center justify-self-end gap-1.5" data-testid="replay-trade" title={hint}>
-      {shownPnl !== null && (
-        <span className={`mr-1.5 hidden whitespace-nowrap text-xs tabular-nums lg:inline ${pnlClass(shownPnl)}`} data-testid="replay-pnl">
-          {sim.position ? "P/L" : "Realized"} {fmtPnl(shownPnl)} {ccy}
-        </span>
-      )}
-      <button type="button" disabled={!ready} className={`${pill} bg-[#f23645]`} onClick={() => order("sell")}>
-        Sell
-      </button>
-      <input
-        aria-label="Replay order size"
-        inputMode="decimal"
-        value={lotText}
-        onChange={(e) => useReplaySim.getState().setLot(paneId, e.target.value)}
-        onBlur={() => useReplaySim.getState().setLot(paneId, fmtLotValue(normalizeLot(parseNum(lotText), lotSp), lotSp))}
-        onKeyDown={(e) => e.stopPropagation()}
-        className="h-[30px] w-14 rounded border border-[var(--border)] bg-transparent text-center text-sm tabular-nums outline-none focus:border-[var(--accent)]"
-      />
-      <button type="button" disabled={!ready} className={`${pill} bg-[#2962ff]`} onClick={() => order("buy")}>
-        Buy
-      </button>
-      <button
-        type="button"
-        disabled={!sim.position || !spec}
-        className="h-[30px] rounded border border-[var(--border)] px-3 text-sm hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent"
-        onClick={() => spec && useReplaySim.getState().flatten(paneId, spec)}
-      >
-        Flatten
-      </button>
-    </div>
-  );
-}
-
-export default function ReplayBar({ paneId, symbol, onStep }: { paneId: string; symbol: string; onStep: () => void }) {
+export default function ReplayBar({ onStep }: { onStep: () => void }) {
   const { selecting, active, playing, speed, interval } = useReplayStore();
   const tf = useChartStore((s) => s.tf);
   const ivl = interval && TF_SECONDS[interval] < TF_SECONDS[tf] ? interval : tf;
@@ -219,7 +154,6 @@ export default function ReplayBar({ paneId, symbol, onStep }: { paneId: string; 
         <JumpIcon />
       </button>
       </div>
-      <ReplayTrade paneId={paneId} symbol={symbol} active={active} />
       <button
         className="absolute right-3 flex h-[38px] w-[38px] items-center justify-center rounded hover:bg-[var(--hover)]"
         title="Close replay"

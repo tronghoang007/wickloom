@@ -1,4 +1,5 @@
 import type { Deal, PendingOrder, Position, TradeData } from "@/lib/mt5Api";
+import { SIM_ACCOUNT_ID } from "./simId";
 
 // Hàm thuần cho panel Trading và đường vị thế/lệnh chờ trên chart (docs/trade-plan.md T1: chỉ đọc).
 
@@ -145,6 +146,7 @@ export const STALE_SECONDS = 15;
 /** Dữ liệu cũ: account offline, hoặc EA lâu rồi chưa báo vị thế/lệnh. UI phải làm mờ và không vẽ đường trên chart. */
 export function isStale(data: TradeData | null, nowSec: number): boolean {
   if (!data) return true;
+  if (data.account.id === SIM_ACCOUNT_ID) return false; // sổ lệnh giả lập của Replay: luôn mới
   if (!data.account.online) return true;
   return data.updated_at === null || nowSec - data.updated_at > STALE_SECONDS;
 }
