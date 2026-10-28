@@ -47,12 +47,26 @@ def test_ingest_offset_and_continuation():
     assert rows == [{"t": 0, "o": 0.0, "h": 2.0, "l": 0.0, "c": 2.0, "v": 2.0}]
     # tiếp nối: tick đầu bằng giá cuối thông điệp trước (11) -> giữ chiều lên; không cont thì dùng pb
     b = TicksHistIn(symbol=sym, broker_utc_offset=off, t=[(60 + off) * 1000 + 1], p=[11], cont=True)
-    assert tickdelta.ingest(b)[0]["c"] == 1.0
+    assert tickdelta.ingest(b)[-1] == {"t": 60, "o": 0.0, "h": 1.0, "l": 0.0, "c": 1.0, "v": 1.0}
     c = TicksHistIn(symbol=sym, broker_utc_offset=off, t=[(120 + off) * 1000 + 1], p=[11], pb=12.0)
     assert tickdelta.ingest(c)[0]["c"] == -1.0
     # giá bằng pb: giữ chiều pd của tick trước cửa sổ
     d = TicksHistIn(symbol=sym, broker_utc_offset=off, t=[(180 + off) * 1000 + 1], p=[12], pb=12.0, pd=-1)
     assert tickdelta.ingest(d)[0]["c"] == -1.0
+
+
+def test_ingest_minute_split_across_messages_is_summed_not_replaced():
+    sym = "TDSPLIT"
+    # EA cắt thông điệp giữa phút 0 (quá nhiều tick): phần sau là `cont`, phút 0 phải đủ 5 tick chứ không chỉ 2 tick của phần sau
+    a = TicksHistIn(symbol=sym, broker_utc_offset=0, t=[1000, 2000, 3000], p=[10, 11, 12], pb=9.0)
+    hist: dict = {}
+    tickdelta.ingest(a, hist)
+    b = TicksHistIn(symbol=sym, broker_utc_offset=0, t=[4000, 5000, 61000], p=[13, 14, 13], cont=True, done=True)
+    hist2: dict = {}
+    rows = tickdelta.ingest(b, hist2)
+    assert rows[0] == {"t": 0, "o": 0.0, "h": 5.0, "l": 0.0, "c": 5.0, "v": 5.0}
+    assert rows[1]["t"] == 60 and rows[1]["c"] == -1.0
+    assert sum(u + d for (m, _), (u, d) in hist2.items() if m == 0) == 5.0  # histogram của phút 0 cũng đủ (put_tickvp xoá rồi ghi lại cả phút)
 
 
 def test_ticks_hist_over_tcp_is_stored_and_served():
@@ -196,6 +210,9 @@ def test_tickfp_groups_minutes_into_bars_and_price_rows():
     assert st.tickfp("S", [60, 120], 120, 1.0) == [(0, 100, 2.0, 0.0), (0, 101, 0.0, 4.0)]
     assert st.tickfp("Other", [0, 120], 240, 1.0) == []
     assert st.tickfp("S", [], 240, 1.0) == [] and st.tickfp("S", [0], 240, 0) == [] and st.tickfp("S", [300], 240, 1.0) == []
+    # chart thiếu nến 120 (lỗ): phút 120 không dồn vào nến 60 (ngoài giá của nó), nến 180 vẫn có phút của nó
+    st.put_tickvp("S", 180, 180, [(180, 98.5, 1.0, 0.0)])
+    assert st.tickfp("S", [0, 60, 180], 240, 1.0) == [(0, 100, 4.0, 2.0), (1, 100, 2.0, 0.0), (1, 101, 0.0, 4.0), (2, 98, 1.0, 0.0)]
 
 
 def test_tickfp_endpoint():

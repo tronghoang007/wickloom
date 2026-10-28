@@ -24,9 +24,9 @@ const BIG_NEAR = 0.5; // ô Big Trades của khoảng cùng đầu dùng tạm �
 const STAT_NEAR = 0.5; // thống kê của khoảng khác dùng tạm được khi trùng từng đó (khoảng dịch một khối trong 6 khối trùng ~0.71)
 const HEAD_SLACK = 300; // giây: nến delta đầu tiên muộn hơn đầu profile quá chừng này là chưa nạp tới đầu (giống LowerFeed: 5 phút)
 
-/** Dữ liệu tick đã nạp (nến delta "TD", tăng dần) phủ tới đầu `t0` chưa. */
-export function coversFrom(cover: Bar[], t0: number): boolean {
-  return cover.length > 0 && cover[0].t <= t0 + HEAD_SLACK;
+/** Dữ liệu tick đã nạp (nến delta "TD", tăng dần) phủ tới đầu `t0` chưa. `start` (>= t0): lúc thị trường thật sự có giao dịch từ `t0` (LowerFeed.tradeStart), tick đầu muộn tới đó vẫn là đủ. */
+export function coversFrom(cover: Bar[], t0: number, start = t0): boolean {
+  return cover.length > 0 && cover[0].t <= Math.max(t0, start) + HEAD_SLACK;
 }
 
 /** Chữ ký phần nến delta trong [t0, t1): đổi khi nạp thêm phút hoặc phút cuối được EA tính lại (backend đã ghi lại histogram của phút đó). */
@@ -213,6 +213,8 @@ export class TickProfileFeed {
 }
 
 type BigWin = { symbol: string; t0: number; t1: number; min: number; limit: number; size: number };
+/** Ô Big Trades; `floor` (bản mượn đã lọc từ một bản bị cắt ở `limit` ô): các ô nhỏ hơn mức này có thể thiếu dù danh sách ít hơn `limit` ô. */
+export type BigCells = TickCell[] & { floor?: number };
 
 /** Như `TickProfileFeed` cho Big Trades: các ô (phút, giá) lớn nhất của [t0, t1) có volume >= `min`. */
 export class TickBigFeed {
@@ -223,7 +225,7 @@ export class TickBigFeed {
   }
 
   /** Các ô đã nạp của [t0, t1); chưa có thì nạp ngầm rồi gọi `onChange`, trong lúc chờ trả bản của khoảng cùng đầu / ngưỡng / số ô / row có `t1` gần nhất (xem `borrow`) hoặc null. */
-  get(symbol: string, t0: number, t1: number, min: number, limit: number, size: number, sig: string, upTo = t1): TickCell[] | null {
+  get(symbol: string, t0: number, t1: number, min: number, limit: number, size: number, sig: string, upTo = t1): BigCells | null {
     const w: BigWin = { symbol, t0, t1, min, limit, size };
     const key = this.key(symbol, t0, t1, min, limit, size);
     return this.feed.get(key, sig, () => this.fetch(symbol, t0, upTo, min, limit, size), upTo, w) ?? this.borrow(key, w)?.cells ?? null;
@@ -246,7 +248,9 @@ export class TickBigFeed {
     );
     if (!near) return null;
     const m = near.meta;
-    const cells = m.t1 > w.t1 || m.t0 < w.t0 || m.min < w.min ? near.data.filter((c) => c.t >= w.t0 && c.t < w.t1 && c.up + c.dn >= w.min) : near.data;
+    if (!(m.t1 > w.t1 || m.t0 < w.t0 || m.min < w.min)) return { cells: near.data, upTo: Math.min(near.upTo, w.t1) };
+    const cells: BigCells = near.data.filter((c) => c.t >= w.t0 && c.t < w.t1 && c.up + c.dn >= w.min);
+    if (near.data.length >= m.limit) cells.floor = near.data.reduce((lo, c) => Math.min(lo, c.up + c.dn), Infinity); // bản gốc bị cắt: lọc xong ít ô hơn vẫn không đủ
     return { cells, upTo: Math.min(near.upTo, w.t1) };
   }
 
@@ -291,9 +295,12 @@ export class TickFpFeed {
     this.feed = new SigFeed(onChange, now);
   }
 
-  /** `step`: giây mỗi nến chart, thuộc khoá (cửa sổ của khung lớn hay bắt đầu đúng giờ của một cửa sổ khung nhỏ: không được dùng ô theo nến của khung kia). */
-  get(symbol: string, bars: number[], end: number, size: number, sig: string, upTo = end, step = 0): FpCell[] | null {
-    return this.feed.get(this.key(symbol, bars, size, step), sig, () => this.fetch(symbol, bars, upTo, size), upTo);
+  /** `step`: giây mỗi nến chart, thuộc khoá (cửa sổ của khung lớn hay bắt đầu đúng giờ của một cửa sổ khung nhỏ: không được dùng ô theo nến của khung kia).
+   *  `strict` (Replay): bản cũ đọc DB xa hơn `upTo` (mốc cắt vừa lùi) không được hiện trong lúc nạp lại: ô không có thời gian nên không bỏ được phần sau mốc. */
+  get(symbol: string, bars: number[], end: number, size: number, sig: string, upTo = end, step = 0, strict = false): FpCell[] | null {
+    const key = this.key(symbol, bars, size, step);
+    const got = this.feed.get(key, sig, () => this.fetch(symbol, bars, upTo, size), upTo);
+    return strict && got && (this.feed.heldUpTo(key) ?? upTo) > upTo ? null : got;
   }
 
   heldUpTo(symbol: string, bars: number[], size: number, step = 0): number | undefined {

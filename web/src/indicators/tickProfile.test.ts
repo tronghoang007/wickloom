@@ -1,6 +1,6 @@
 import type { Bar, TickCell } from "@/lib/api";
 import { describe, expect, it } from "vitest";
-import { LIVE_KEEP, TickBigFeed, TickFpFeed, TickProfileFeed, TickStatFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, overlapRatio, rebin, type LiveMinute, type TickHist } from "./tickProfile";
+import { LIVE_KEEP, TickBigFeed, TickFpFeed, TickProfileFeed, type BigCells, TickStatFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, overlapRatio, rebin, type LiveMinute, type TickHist } from "./tickProfile";
 
 const td = (t: number, c = 1, v = 1): Bar => ({ t, o: 0, h: 0, l: 0, c, v });
 const lay = { lo: 100, hi: 110, size: 5, N: 2 };
@@ -12,6 +12,7 @@ describe("coversFrom / coverSig", () => {
     expect(coversFrom(cover, 800)).toBe(true); // 1000 <= 800 + 300
     expect(coversFrom(cover, 600)).toBe(false);
     expect(coversFrom([], 0)).toBe(false);
+    expect(coversFrom(cover, 0, 900)).toBe(true); // nến mở trong giờ nghỉ, thị trường mở lúc 900: tick đầu 1000 vẫn là đủ
   });
   it("chữ ký đổi khi thêm phút hoặc phút cuối đổi giá trị, không đổi khi nến ngoài khoảng đổi", () => {
     const base = coverSig(cover, 1000, 1180);
@@ -178,6 +179,18 @@ describe("TickBigFeed", () => {
     expect(feed.get("S", 0, 660, 3, 200, 0.5, "d")).toBeNull();
     expect(feed.get("S", 0, 660, 3, 100, 1, "d")).toBeNull();
     await settle();
+  });
+
+  it("bản mượn lọc từ một bản bị cắt ở `limit` ô: đánh dấu `floor` (ô nhỏ hơn có thể thiếu); bản gốc chưa đầy thì không", async () => {
+    const full = new TickBigFeed(async (_s, from, to) => [{ t: from, p: 1, up: 9, dn: 0 }, { t: to - 60, p: 2, up: 5, dn: 0 }] as TickCell[], () => {});
+    const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    full.get("S", 0, 600, 1, 2, 0.5, "a"); // limit 2, trả đúng 2 ô: bị cắt
+    await settle();
+    const cut = full.get("S", 0, 500, 1, 2, 0.5, "b")!; // Replay lùi mốc: còn 1 ô nhưng không phải "đủ"
+    expect([cut.length, (cut as BigCells).floor]).toEqual([1, 5]);
+    full.get("S", 0, 600, 1, 3, 0.5, "a"); // limit 3, trả 2 ô: đủ
+    await settle();
+    expect((full.get("S", 0, 500, 1, 3, 0.5, "b") as BigCells).floor).toBeUndefined();
   });
 
   it("lần nạp trước của khoá lỗi thì không mượn bản của khoảng khác", async () => {
@@ -454,5 +467,16 @@ describe("TickFpFeed", () => {
     await settle();
     expect(feed.get("S", [0, 300], 600, 1, "a", 600, 300)).toEqual([[0, 2, 1, 0]]);
     expect(feed.get("S", [0, 3600], 7200, 1, "a", 7200, 3600)).toBeNull(); // H1 cùng nến đầu, cùng row: khoá khác
+  });
+
+  it("strict (Replay lùi mốc): bản cũ đọc xa hơn mốc mới không hiện trong lúc nạp lại; bình thường vẫn hiện bản cũ", async () => {
+    const feed = new TickFpFeed(async (_s, _bars, end) => [[0, end, 1, 0]], () => {});
+    const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    feed.get("S", [0, 300], 600, 1, "a", 600, 300, true);
+    await settle();
+    expect(feed.get("S", [0, 300], 420, 1, "b", 420, 300, true)).toBeNull(); // mốc lùi về 420: bản tới 600 có tick sau mốc
+    await settle();
+    expect(feed.get("S", [0, 300], 420, 1, "b", 420, 300, true)).toEqual([[0, 420, 1, 0]]);
+    expect(feed.get("S", [0, 300], 480, 1, "c", 480, 300)).toEqual([[0, 420, 1, 0]]); // bước tới: bản cũ ngắn hơn, vẫn hiện
   });
 });

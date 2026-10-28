@@ -195,6 +195,22 @@ export class LowerFeed {
     return true;
   }
 
+  /** Đầu phần có giao dịch từ `t0`: nến M1 đầu tiên từ `t0` có giá đổi, khi M1 đã nạp phủ tới `t0` (khung chuẩn dò lỗ của tick); chưa biết thì `t0`.
+   *  Nến chart mở trong giờ nghỉ (H4 Chủ nhật 20:00, thị trường mở 22:00) có tick đầu muộn hơn nhiều mà dữ liệu tick vẫn đủ. */
+  tradeStart(symbol: string, t0: number): number {
+    const e = this.cache.get(`${symbol}|M1`);
+    if (!e || e.lo === Infinity || e.lo > t0) return t0;
+    let lo = 0;
+    let hi = e.bars.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (e.bars[mid].t < t0) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < e.bars.length; i++) if (priceMoved(e.bars[i])) return e.bars[i].t;
+    return t0;
+  }
+
   /** Bỏ hết cache (đổi broker / symbol không cần: cache theo symbol). */
   clear() {
     this.cache.clear();
@@ -248,18 +264,18 @@ export class LowerFeed {
     }
     const oracle = oracleOf(need);
     const ref = oracle ? this.cache.get(`${symbol}|${oracle}`) : undefined;
-    const job = this.nextGap(need, to, entries, oracle && ref && ref.lo !== Infinity && !ref.busy ? { tf: oracle, entry: ref } : undefined);
+    const job = this.nextGap(need, to, entries, oracle && ref && ref.lo !== Infinity && !ref.busy ? { tf: oracle, entry: ref } : undefined, oracle ? this.tradeStart(symbol, need.from) : need.from);
     if (job) void this.runFill(symbol, job.tf, job.entry, job.gap);
   }
 
   /** Thứ tự ưu tiên: thiếu đầu của khung mịn nhất; hết đường (đã xin, không có thêm) thì thiếu đầu của khung thô hơn; mịn nhất đủ đầu thì lỗ hổng bên trong (mới → cũ). */
-  private nextGap(need: LowerNeed, to: number, entries: Entry[], oracle?: { tf: string; entry: Entry }): { tf: string; entry: Entry; gap: Gap } | null {
+  private nextGap(need: LowerNeed, to: number, entries: Entry[], oracle?: { tf: string; entry: Entry }, start = need.from): { tf: string; entry: Entry; gap: Gap } | null {
     const now = this.now();
     const status = (e: Entry, g: Gap) => ((e.tries.get(g.key) ?? 0) >= MAX_TRIES ? "done" : now < e.readyAt ? "wait" : "ready");
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
       const tf = need.tfs[i];
-      const head = headGap(e.bars, stepOf(tf), need.from, to);
+      const head = headGap(e.bars, stepOf(tf), i === 0 ? start : need.from, to); // tick: thiếu đầu tính từ lúc có giao dịch (không xin EA phần giờ nghỉ)
       if (!head) {
         if (i > 0) return null;
         const ref = entries.length > 1 ? { tf: need.tfs[1], entry: entries[1] } : oracle; // khung thô hơn kế tiếp; không có thì khung chuẩn (đã đọc xong)

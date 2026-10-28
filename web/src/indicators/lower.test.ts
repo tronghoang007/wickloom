@@ -487,6 +487,16 @@ describe("LowerFeed xin EA nạp thêm", () => {
       expect(holeCalls(ea).map((c) => c.before)).toEqual([23 * 60]); // lỗ 3 phút thì xin, lỗ 2 phút thì không
     });
 
+    it("đầu khoảng nằm trong giờ nghỉ (M1 chưa có phút giá đổi): TD bắt đầu lúc thị trường mở là đủ, không xin EA phần đầu; tradeStart = phút đó", async () => {
+      const open = all.slice(10); // thị trường mở từ phút 10
+      const { ea, clock, feed } = mk({ TD: open, M1: moving(open) }, { TD: open });
+      await drive(feed, clock, need, 2400, ea.calls);
+      expect(holeCalls(ea)).toEqual([]);
+      expect(feed.tradeStart("X", 0)).toBe(600);
+      expect(feed.tradeStart("X", 900)).toBe(900);
+      expect(feed.tradeStart("Y", 0)).toBe(0); // chưa nạp M1: chưa biết
+    });
+
     it("broker không có tick ở đó: thử đúng hai lần rồi thôi", async () => {
       const { ea, clock, feed } = mk({ TD: tdWith([10, 30]), M1: moving(all) }, { TD: tdWith([10, 30]) });
       await drive(feed, clock, need, 2400, ea.calls);

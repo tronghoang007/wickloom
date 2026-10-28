@@ -1287,7 +1287,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     const cover = this.tickCover.get(symbol, { tfs: [TICK_TF], from: span.t0 }, span.t1 + step); // tới hết khoảng của profile (không tới hiện tại: FRVP đóng từ lâu không cần tick mới)
     return {
       covered: (t0) => {
-        const ok = coversFrom(cover, t0);
+        const ok = coversFrom(cover, t0, this.tickCover.tradeStart(symbol, t0));
         this.markFine(d, !ok);
         return ok;
       },

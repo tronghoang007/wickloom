@@ -105,9 +105,15 @@ class BarStore:
         sql = ("SELECT t, CAST(p / ? + 1e-6 AS INTEGER) AS i, SUM(up), SUM(dn) FROM tickvp WHERE symbol=? AND t>=? AND t<? AND up+dn>0 GROUP BY t, i")
         with self._rlock:
             rows = self.rdb.execute(sql, (size, symbol, bars[0], end)).fetchall()
+        # độ dài nến = khoảng nhỏ nhất giữa hai nến liền nhau: phút nằm trong lỗ của nến chart (sau nến k + độ dài, trước nến k + 1) không thuộc nến k.
+        # Nến tháng dài không đều (28-31 ngày) nên không kiểm
+        step = min((b - a for a, b in zip(bars, bars[1:]) if b > a), default=0)
+        check = 0 < step < 28 * 86400
         acc: Dict[Tuple[int, int], List[float]] = {}
         for t, i, u, d in rows:
             k = bisect_right(bars, t) - 1
+            if check and t >= bars[k] + step:
+                continue
             cell = acc.setdefault((k, i), [0.0, 0.0])
             cell[0] += u
             cell[1] += d

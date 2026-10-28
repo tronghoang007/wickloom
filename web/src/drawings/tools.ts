@@ -538,12 +538,14 @@ export function profileSource(c: Ctx, from: number, to: number): Bar[] {
     const first = c.bars[0]?.t ?? Infinity;
     return [...fine.filter((b) => b.t + c.profileStep! <= first), ...c.bars.filter(inRange)];
   }
+  // nến chart vắt qua đầu / cuối phần khung nhỏ (DB chỉ giữ M1 vài ngày, khung nhỏ bắt đầu giữa nến chart): lấy nguyên nến chart đó, bỏ phần khung nhỏ nằm trong nó
+  // (không thì phần của nến đó trước / sau khung nhỏ mất hẳn)
   const start = fine[0].t, end = fine[fine.length - 1].t + c.profileStep;
-  return [
-    ...c.bars.filter((b) => inRange(b) && b.t + c.step <= start),
-    ...fine,
-    ...c.bars.filter((b) => inRange(b) && b.t >= end),
-  ];
+  const head = c.bars.filter((b) => inRange(b) && b.t < start);
+  const headEnd = head.length > 0 ? Math.max(start, head[head.length - 1].t + c.step) : start;
+  const straddle = c.bars.find((b) => inRange(b) && b.t >= headEnd && b.t < end && b.t + c.step > end);
+  const tailFrom = straddle ? straddle.t : end;
+  return [...head, ...fine.filter((b) => b.t >= headEnd && b.t < tailFrom), ...c.bars.filter((b) => inRange(b) && b.t >= tailFrom)];
 }
 
 /** Giờ mở của nến chứa `t` (`bars` tăng dần, mỗi nến dài `step`); `t` ngoài dải nến thì giữ nguyên. */

@@ -236,6 +236,16 @@ describe("Big Trades", () => {
     expect(b.map((x) => x.text)).toEqual(["40", "8", "7"]);
   });
 
+  it("pool là bản mượn tạm lọc từ một pool đầy (`floor`): ít ô vẫn không coi là đủ, hỏi riêng vùng nhìn", () => {
+    const pool = Object.assign([cell(bars[2].t, 100, 150, 0)], { floor: 100 }); // Replay vừa lùi mốc: còn 1 ô >= 100, ô nhỏ hơn đã bị cắt khỏi pool gốc
+    const rest = [cell(bars[12].t, 100, 40, 0)];
+    const exact = (t0: number, t1: number, min: number, limit: number) => rest.filter((k) => k.t >= t0 && k.t < t1 && k.up >= min).slice(0, limit);
+    const { ticks, calls } = source(pool, exact, STAT);
+    const b = run(ticks, { sigma: 0.2, text: true }, 0, {}, { from: 11, to: 19 }).bubbles!;
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(b.map((x) => x.text)).toEqual(["40"]);
+  });
+
   it("phần nới thêm có nhiều ô lớn hơn chiếm hết kết quả: hỏi lại đúng vùng nhìn", () => {
     const pool = Array.from({ length: BIG_POOL }, (_, i) => cell(bars[i % 8].t, 100 + i, 100 + i, 0));
     // nến 0..7 (phần nới, ngoài vùng nhìn 11..19): rất nhiều ô 50; vùng nhìn: vài ô 8..9

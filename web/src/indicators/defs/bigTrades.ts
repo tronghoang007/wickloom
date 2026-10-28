@@ -1,4 +1,5 @@
 import type { Bar, TickCell, TickStat } from "@/lib/api";
+import type { BigCells } from "../tickProfile";
 import { TICK_DEPTH } from "../lower";
 import { indexAtTime } from "../objects";
 import { num, type Ctx, type IndicatorDef, type InputDef, type ItemDef, type ObjBubble, type ObjectSet } from "../schema";
@@ -203,12 +204,13 @@ export const bigTrades: IndicatorDef = {
     if (!pool) return empty;
     if (ready && memo) Object.assign(memo, { min, pool, stat });
     const vol = (k: TickCell) => k.up + k.dn;
-    const poolMin = pool.length >= BIG_POOL ? pool.reduce((m, k) => Math.min(m, vol(k)), Infinity) : 0;
+    // pool đầy (bị cắt ở BIG_POOL ô), hoặc bản mượn tạm đã lọc từ một pool đầy (`floor`): các ô nhỏ hơn mức đó có thể thiếu
+    const poolMin = pool.length >= BIG_POOL ? pool.reduce((m, k) => Math.min(m, vol(k)), Infinity) : ((pool as BigCells).floor ?? 0);
     // `limit` ô lớn nhất của [from, to) có volume >= minVol. Pool đầy thì các ô nhỏ hơn ô bé nhất của pool bị cắt (M1 gặp thường xuyên: ngưỡng của vài giờ gần đây thấp hơn ô bé nhất của cả 14 ngày), nên nếu pool có thể thiếu ô của khoảng này thì hỏi riêng
     // khoảng đó, nới ra theo khối cố định để kéo / zoom nhẹ vẫn dùng lại kết quả; chờ kết quả thì vẫn dùng phần lấy từ pool (không nhấp nháy)
     const top = (from: number, to: number, minVol: number, limit: number): TickCell[] => {
       const got = topInRange(pool, from, to, limit).filter((k) => vol(k) >= minVol);
-      const exact = pool.length < BIG_POOL || (got.length >= limit ? vol(got[limit - 1]) : minVol) > poolMin;
+      const exact = poolMin === 0 || (got.length >= limit ? vol(got[limit - 1]) : minVol) > poolMin;
       if (exact || !ready) return got; // cặp cũ đang dùng tạm: không hỏi thêm theo row giá mới
       const ask = Math.min(BIG_POOL, limit * 4); // khoảng nới rộng: các ô lớn ở phần nới thêm không được chiếm hết chỗ của vùng nhìn
       const asked = big(Math.max(t0, Math.floor(from / block) * block), Math.min(end, Math.ceil(to / block) * block), minVol, ask, size);

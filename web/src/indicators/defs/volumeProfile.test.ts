@@ -31,9 +31,21 @@ describe("profileSource", () => {
   });
   it("có nến khung nhỏ phủ hết: chỉ dùng chúng", () => {
     const fine = m1(t0, t0 + 8 * M15);
-    const s = profileSource(c, fine, t0, t0 + 8 * M15, M15);
-    expect(s).toHaveLength(8 * 15);
+    const s = profileSource(c, fine, t0, t0 + 7 * M15, M15); // trước nến cuối (đang chạy)
+    expect(s).toHaveLength(7 * 15);
     expect(s.every((b) => b.v === 1)).toBe(true);
+  });
+  it("nến cuối đang chạy: giữ nến khung nhỏ, phần nến chart có thêm (volume, đỉnh mới) sau lần đọc khung nhỏ cuối thành một nến phụ", () => {
+    const fine = m1(t0, t0 + 7 * M15 + 5 * 60); // nến cuối mới có 5 phút M1 (đọc 15 giây một lần)
+    const lastFine = fine.filter((b) => b.t >= t0 + 7 * M15);
+    const peak = Math.max(...lastFine.map((b) => b.h)) + 3;
+    const live = [...c.slice(0, -1), { ...c[7], h: peak, v: lastFine.length + 4 }]; // nến chart: đỉnh mới + 4 tick sau đó
+    const s = profileSource(live, fine, t0, t0 + 8 * M15, M15);
+    expect(s).toHaveLength(7 * 15 + 5 + 1);
+    expect(s.at(-1)).toMatchObject({ h: peak, v: 4, c: c[7].c });
+    // nến chart không có gì mới hơn: không thêm
+    const same = [...c.slice(0, -1), { ...c[7], h: Math.max(...lastFine.map((b) => b.h)), l: Math.min(...lastFine.map((b) => b.l)), v: lastFine.length }];
+    expect(profileSource(same, fine, t0, t0 + 8 * M15, M15)).toHaveLength(7 * 15 + 5);
   });
   it("lỗ hổng trong dữ liệu khung nhỏ được lấp bằng nến chart, kết quả tăng dần", () => {
     const fine = [...m1(t0, t0 + 2 * M15), ...m1(t0 + 4 * M15, t0 + 8 * M15)]; // thiếu nến chart #2, #3

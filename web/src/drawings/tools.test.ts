@@ -267,6 +267,13 @@ describe("profileSource: ghép nến khung nhỏ với nến chart", () => {
     expect(ts(profileSource(base(fine), 0, 3600))).toEqual([0, 900, 1200, 1500, 1800, 2700]);
   });
 
+  it("khung nhỏ bắt đầu / dừng giữa một nến chart: lấy nguyên nến chart đó (không mất phần trước / sau khung nhỏ)", () => {
+    const fine = [1200, 1500, 1800, 2100].map((t) => mk(t)); // bắt đầu giữa nến 900, dừng giữa nến 1800
+    expect(ts(profileSource(base(fine), 0, 3600))).toEqual([0, 900, 1800, 2700]);
+    const fine2 = [1200, 1500, 1800, 2100, 2400].map((t) => mk(t)); // dừng đúng mép nến 1800
+    expect(ts(profileSource(base(fine2), 0, 3600))).toEqual([0, 900, 1800, 2100, 2400, 2700]);
+  });
+
   it("nến 'khung nhỏ' thô hơn khung chart (neo trước lịch sử chart đã nạp): chỉ dùng phần trước nến chart đầu tiên", () => {
     const coarse = [-3600, -1800, 0].map((t) => mk(t)); // 1800s, nến 0 trùng nến chart
     expect(ts(profileSource({ ...base(coarse), profileStep: 1800 } as Ctx, -3600, 3600))).toEqual([-3600, -1800, 0, 900, 1800, 2700]);

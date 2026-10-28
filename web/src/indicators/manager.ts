@@ -16,7 +16,7 @@ import { ProfilePrimitive } from "./render/profile";
 import { LWC_LINE_STYLE, addAnchorSeries, addPlotSeries, plotOptions, scaleId } from "./render/series";
 import type { IndicatorDef, PlotData, TickSource } from "./schema";
 import { fillShown, fillStyle, levelStyle, plotStyle } from "./style";
-import { TickBigFeed, TickFpFeed, TickProfileFeed, TickStatFeed, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, mergeLiveFp, type LiveMinute } from "./tickProfile";
+import { TickBigFeed, TickFpFeed, TickProfileFeed, TickStatFeed, appendLive, type BigCells, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, mergeLiveFp, type LiveMinute } from "./tickProfile";
 
 type Live = {
   inst: IndicatorInstance;
@@ -468,14 +468,17 @@ export class IndicatorManager {
     const replay = this.feed.end !== undefined;
     const E = replay ? this.dataEnd(step) : Infinity;
     return {
-      covered: (t0) => coversFrom(cover, t0),
+      covered: (t0) => coversFrom(cover, t0, this.lower.tradeStart(symbol, t0)),
       hist: (t0, t1, lay) => liveHist(this.tickProfiles, symbol, cover, lives, t0, Math.min(t1, E), lay, replay),
       big: (t0, t1, min, limit, size) => {
         t1 = Math.min(t1, E);
         if (t1 <= t0) return [];
         const cut = liveCut(newest, t0, t1);
         const cells = this.tickBig.get(symbol, t0, t1, min, limit, size, `${cut}:${coverSig(cover, t0, cut)}`, cut);
-        return cells && mergeLiveBig(cells, liveFrom(lives, this.tickBig.heldUpTo(symbol, t0, t1, min, limit, size) ?? cut, t0, t1), min, limit, size);
+        if (!cells) return null;
+        const out: BigCells = mergeLiveBig(cells, liveFrom(lives, this.tickBig.heldUpTo(symbol, t0, t1, min, limit, size) ?? cut, t0, t1), min, limit, size);
+        if (cells.floor !== undefined && out !== cells) out.floor = cells.floor; // bản mượn chưa đủ: giữ dấu cho Big Trades
+        return out;
       },
       stat: (t0, t1, size) => {
         t1 = Math.min(t1, E);
@@ -486,7 +489,7 @@ export class IndicatorManager {
       fp: (bars, end, size) => {
         end = Math.min(end, E);
         const cut = liveCut(newest, bars[0], end);
-        const cells = this.tickFp.get(symbol, bars, end, size, `${cut}:${bars.length}:${coverSig(cover, bars[0], cut)}`, cut, step);
+        const cells = this.tickFp.get(symbol, bars, end, size, `${cut}:${bars.length}:${coverSig(cover, bars[0], cut)}`, cut, step, replay);
         return cells && mergeLiveFp(cells, liveFrom(lives, this.tickFp.heldUpTo(symbol, bars, size, step) ?? cut, bars[0], end), bars, end, size);
       },
     };

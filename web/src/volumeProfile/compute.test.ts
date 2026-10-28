@@ -32,4 +32,10 @@ describe("finishProfile", () => {
     const flat = [{ t: 0, o: 100, h: 100, l: 100, c: 100, v: 5 }];
     expect(profileLayout(flat, 0.5, 24)).toEqual({ lo: 100, hi: 100.5, size: 0.5, N: 1 });
   });
+
+  it("Number of rows: Row Size 1 là một row, tới 1000 row (như ô nhập)", () => {
+    const bars = [{ t: 0, o: 0, h: 5000, l: 0, c: 5000, v: 1 }];
+    expect(profileLayout(bars, 1, 1)?.N).toBe(1);
+    expect(profileLayout(bars, 1, 1000)?.N).toBe(1000);
+  });
 });

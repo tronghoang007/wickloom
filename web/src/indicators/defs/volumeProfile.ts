@@ -67,7 +67,30 @@ export function profileSource(chart: Bar[], lower: Bar[], t0: number, t1: number
   const fine = lower.slice(lo, end);
   if (fine.length === 0) return chart.filter((b) => b.t >= t0 && b.t < t1);
   const fill = chart.filter((b) => b.t >= t0 && b.t < t1 && !overlaps(fine, b.t, b.t + step));
+  const rest = liveRest(chart, fine, t0, t1);
+  if (rest) fill.push(rest);
   return fill.length === 0 ? fine : [...fine, ...fill].sort((a, b) => a.t - b.t);
+}
+
+/** Nến khung nhỏ chỉ đọc lại mỗi 15 giây, nến chart cuối (đang chạy) mới theo từng tick: phần nến chart đó có mà nến khung nhỏ bên trong chưa có (volume thêm, đỉnh / đáy mới)
+ *  thành một nến phụ sau nến khung nhỏ cuối, giữ nguyên phần chi tiết của khung nhỏ. null nếu không thiếu gì. */
+function liveRest(chart: Bar[], fine: Bar[], t0: number, t1: number): Bar | null {
+  const last = chart[chart.length - 1];
+  if (!last || last.t < t0 || last.t >= t1) return null;
+  let v = 0, h = -Infinity, l = Infinity;
+  let tail: Bar | undefined;
+  for (const b of fine) {
+    if (b.t < last.t) continue;
+    v += b.v;
+    h = Math.max(h, b.h);
+    l = Math.min(l, b.l);
+    tail = b;
+  }
+  if (!tail) return null; // không có nến khung nhỏ nào trong nến cuối: nến chart đã được lấy nguyên
+  const more = last.v - v;
+  if (!(more > 0) && last.h <= h && last.l >= l) return null;
+  // phần sau nến khung nhỏ cuối chạy từ giá đóng của nó tới giá hiện tại, cộng đỉnh / đáy mới nếu có
+  return { t: tail.t + 1, o: tail.c, h: last.h > h ? last.h : Math.max(tail.c, last.c), l: last.l < l ? last.l : Math.min(tail.c, last.c), c: last.c, v: Math.max(0, more) };
 }
 
 /** Chỉ số nến đầu tiên từ `from` trở đi mà vùng giá [l, h] chứa mức của từng đường POC / VAH / VAL (đường không có nến nào cắt thì không có khoá): đường "Extend" dừng ở đó như TV. */

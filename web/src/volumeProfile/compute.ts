@@ -23,7 +23,7 @@ export function profileLayout(bars: Bar[], tick: number, rows: number, layout = 
   // giá đứng yên đúng một mức (h = l = bội số tick): vẫn một row cao 1 tick, không thì row cao 0 và profile không hiện gì
   const lowTick = Math.floor(priceLow / tick), highTick = Math.max(lowTick + 1, Math.ceil(priceHigh / tick));
   const totalTicks = Math.max(1, highTick - lowTick);
-  const requestedRows = Math.max(2, Math.min(500, Math.round(rows)));
+  const requestedRows = Math.max(1, Math.min(VP_MAX_ROWS, Math.round(rows))); // như ô Row Size (1..1000)
   const rowCandidates = [...new Set([
     Math.max(1, Math.floor(totalTicks / requestedRows)),
     Math.max(1, Math.ceil(totalTicks / requestedRows)),

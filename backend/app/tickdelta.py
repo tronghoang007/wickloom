@@ -21,8 +21,9 @@ from .models import TicksHistIn
 
 TICK_DELTA_TF = "TD"
 
-# symbol -> (giá, chiều) của tick cuối thông điệp trước, dùng cho thông điệp `cont` kế tiếp cùng một yêu cầu
-_carry: Dict[str, Tuple[float, int]] = {}
+# symbol -> bộ gom cuối thông điệp trước (giá / chiều của tick cuối + phút đang mở), dùng cho thông điệp `cont` kế tiếp cùng một yêu cầu:
+# EA cắt thông điệp quá dài ngay giữa phút (hiếm), phần sau phải cộng tiếp vào phút đó chứ không thay nó
+_carry: Dict[str, "Acc"] = {}
 
 Cells = Dict[float, List[float]]  # giá -> [volume lên, volume xuống] của một phút
 Row = Dict[str, Any]  # dòng bars tf "TD"
@@ -92,14 +93,13 @@ _seq = itertools.count(1)  # thứ tự nhận lịch sử tick và thứ tự x
 
 def ingest(body: TicksHistIn, hist: Optional[Dict[Tuple[int, float], List[float]]] = None) -> List[Dict[str, Any]]:
     """Phân loại một thông điệp `ticks_hist` -> các dòng bars tf "TD" (người gọi ghi vào kho) và, nếu có `hist`, histogram giá theo phút.
-    EA cắt thông điệp ở ranh giới phút nên mỗi phút nằm trọn trong một thông điệp."""
+    EA thường cắt thông điệp ở ranh giới phút; phút quá nhiều tick bị cắt giữa chừng thì thông điệp `cont` sau cộng tiếp vào phút đó (dòng của phút đó được ghi lại đủ)."""
     off = body.broker_utc_offset * 1000
     t = [x - off for x in body.t]
     cont = _carry.get(body.symbol) if body.cont else None
-    prev_price, prev_dir = cont if cont else (body.pb, -1 if body.pd < 0 else 1)
-    acc = Acc(prev_price, prev_dir)
+    acc = _copy(cont) if cont else Acc(body.pb, -1 if body.pd < 0 else 1)
     _run(acc, t, body.p, body.w)
-    _carry[body.symbol] = (acc.prev_price, acc.prev_dir)
+    _carry[body.symbol] = _copy(acc)
     last = acc.row()
     if body.done and last is not None:
         _tail[body.symbol] = (_copy(acc), max(t), next(_seq))
