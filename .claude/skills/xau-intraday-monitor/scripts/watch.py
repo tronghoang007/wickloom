@@ -21,7 +21,7 @@ import urllib.request
 UTC = dt.timezone.utc
 SL_PAD = 0.3      # SL nằm ngoài mức sai kịch bản thêm ngần này (spread vàng ~0.25)
 TP_PAD = 0.3      # TP dừng trước mép vùng đối diện ngần này
-MIN_TICK = 400.0  # tick/phút tối thiểu để tính là "tick cao" (ngưỡng thật = max(MIN_TICK, 2 × trung vị 90 phút gần nhất))
+MIN_TICK = 0.0    # sàn tick/phút cho "tick cao" (ngưỡng thật = max(MIN_TICK, 2 × trung vị 90 phút gần nhất)). Tick của CFD = số lần Bid đổi, tuỳ broker và giờ: sàn 400 cũ làm 10–18h VN gần như không phút nào đạt (hấp thụ chỉ có từ 19h), nên chỉ dùng ngưỡng tương đối
 DIV_MIN = 15.0    # đỉnh/đáy mới mà CVD chênh ít hơn ngần này so với lần trước = nhiễu của tick-rule, không tính phân kỳ (≈ một phút delta bình thường)
 
 
@@ -91,6 +91,8 @@ def proposal(z, price, zones):
     """Gợi ý vào / SL / TP cho tín hiệu của vùng `z` ở giá `price`: SL ngoài mức sai kịch bản, TP về mép vùng đối diện gần nhất."""
     sup = z.side == "S"
     edge = max(z.bad, z.hi) if sup else min(z.bad, z.lo)   # `bad` nằm trong vùng (vd alert ghi M5 đóng >4019 mà vùng tới 4019.12) thì SL vẫn ra ngoài mép vùng
+    if z.peak is not None:   # SL ngoài cả đỉnh / đáy giá đã quét trong vùng: 27/10 19:32 SL 4027.05 nằm dưới râu 4027.2 của chính nến tín hiệu
+        edge = max(edge, z.peak) if sup else min(edge, z.peak)
     sl = edge + SL_PAD if sup else edge - SL_PAD
     risk = (sl - price) if sup else (price - sl)
     if risk <= 0:
@@ -113,15 +115,15 @@ def proposal(z, price, zones):
             "tp1": round(tp1, 2), "tp2": round(tp2, 2), "risk": round(risk, 2), "rr1": round(rr1, 2), "why": "; ".join(z.reasons), "warn": warn}
 
 
-M5 = {"k": None, "h": 0.0, "l": 0.0}   # đỉnh / đáy của nến M5 đang chạy, cộng dồn từ các nến M1 đã đóng
+M5 = {"k": None, "h": 0.0, "l": 0.0, "d": 0.0}   # đỉnh / đáy / delta của nến M5 đang chạy, cộng dồn từ các nến M1 đã đóng
 
 
-def m5_update(b):
+def m5_update(b, dl):
     k = b["t"] // 300
     if M5["k"] != k:
-        M5.update(k=k, h=b["h"], l=b["l"])
+        M5.update(k=k, h=b["h"], l=b["l"], d=dl)
     else:
-        M5["h"], M5["l"] = max(M5["h"], b["h"]), min(M5["l"], b["l"])
+        M5["h"], M5["l"], M5["d"] = max(M5["h"], b["h"]), min(M5["l"], b["l"]), M5["d"] + dl
 
 
 def confirm(z, b, zones, flags, signals):
@@ -144,28 +146,39 @@ def confirm(z, b, zones, flags, signals):
         flags.append(f"{z.label}: mới có {have}, vùng ngược XH cần thêm một dấu hiệu nữa")
 
 
+def bad_close(z, b, flags, cancels):
+    """M5 đóng qua mức sai kịch bản: báo một lần, huỷ tín hiệu của vùng nếu có. Trả True nếu vừa báo."""
+    sup = z.side == "S"
+    if z.bad_fired or b["t"] % 300 != 240 or not (b["c"] >= z.bad if sup else b["c"] <= z.bad):   # t % 300 == 240: M1 cuối của nến M5, giá đóng của nó là giá đóng M5
+        return False
+    z.bad_fired = True
+    flags.append(f"{z.label}: SAI kịch bản (M5 đóng {'trên' if sup else 'dưới'} {z.bad:.1f}, giá đóng {b['c']:.1f})")
+    if z.signalled:
+        z.signalled = False
+        cancels.append({"zone": z.name, "side": "SELL" if sup else "BUY", "price": round(b["c"], 2), "bad": z.bad})
+    return True
+
+
 def zone_step(z, zones, b, dl, tk, cv, s3, ht, flags, signals, cancels):
     """Một nến M1 đã đóng với một vùng đang `armed`. Trả True nếu nến chạm vùng."""
     sup = z.side == "S"
     ov = b["h"] >= z.lo and b["l"] <= z.hi
-    m5_end = b["t"] % 300 == 240   # M1 cuối của một nến M5: giá đóng của nó là giá đóng M5
-    if m5_end and (b["c"] >= z.bad if sup else b["c"] <= z.bad) and not z.bad_fired:
-        z.bad_fired = True
-        flags.append(f"{z.label}: SAI kịch bản (M5 đóng {'trên' if sup else 'dưới'} {z.bad:.1f}, giá đóng {b['c']:.1f})")
-        if z.signalled:
-            z.signalled = False
-            cancels.append({"zone": z.name, "side": "SELL" if sup else "BUY", "price": round(b["c"], 2), "bad": z.bad})
-    elif not z.bad_fired:
+    m5_end = b["t"] % 300 == 240
+    if not bad_close(z, b, flags, cancels) and not z.bad_fired:
         if (b["h"] >= z.bad if sup else b["l"] <= z.bad) and "wick" not in z.said:
             z.said.add("wick")
             flags.append(f"{z.label}: râu {'lên' if sup else 'xuống'} {b['h'] if sup else b['l']:.1f} qua mức sai kịch bản {z.bad:.1f}, chờ M5 đóng (giá đóng M1 {b['c']:.1f})")
         elif m5_end:
             z.said.discard("wick")   # M5 đóng lại phía trong: lần quét sau được báo lại
     if m5_end and z.entered and not z.bad_fired and not z.rej and ((M5["h"] >= z.lo and b["c"] < z.lo) if sup else (M5["l"] <= z.hi and b["c"] > z.hi)):
-        z.rej = True
-        z.reasons.append(f"M5 {vn(b['t'] - 240)} râu {'lên' if sup else 'xuống'} {M5['h'] if sup else M5['l']:.1f} vào vùng, đóng {b['c']:.1f} ngoài mép {'dưới' if sup else 'trên'} vùng")
-        flags.append(f"{z.label}: M5 TỪ CHỐI (râu {'lên' if sup else 'xuống'} {M5['h'] if sup else M5['l']:.1f}, M5 đóng {b['c']:.1f} ngoài mép {'dưới' if sup else 'trên'} vùng)")
-        confirm(z, b, zones, flags, signals)
+        if (M5["d"] < 0) if sup else (M5["d"] > 0):   # delta M5 phải cùng chiều từ chối: râu vào vùng rồi lùi ra mà delta còn theo phía đẩy thì chỉ là chạm vùng (backtest 12 ngày: bớt 17 lệnh, bớt 8 SL)
+            z.rej = True
+            z.reasons.append(f"M5 {vn(b['t'] - 240)} râu {'lên' if sup else 'xuống'} {M5['h'] if sup else M5['l']:.1f} vào vùng, đóng {b['c']:.1f} ngoài mép {'dưới' if sup else 'trên'} vùng, Δ M5 {M5['d']:+.0f}")
+            flags.append(f"{z.label}: M5 TỪ CHỐI (râu {'lên' if sup else 'xuống'} {M5['h'] if sup else M5['l']:.1f}, M5 đóng {b['c']:.1f} ngoài mép {'dưới' if sup else 'trên'} vùng, Δ M5 {M5['d']:+.0f})")
+            confirm(z, b, zones, flags, signals)
+        elif "rej0" not in z.said:
+            z.said.add("rej0")
+            flags.append(f"{z.label}: M5 râu vào vùng rồi đóng ngoài nhưng Δ M5 {M5['d']:+.0f} còn theo phía {'mua' if sup else 'bán'} = chưa tính từ chối")
     if z.bad_fired or not ov:
         return ov and not z.bad_fired
     if not z.entered:
@@ -190,11 +203,13 @@ def zone_step(z, zones, b, dl, tk, cv, s3, ht, flags, signals, cancels):
             flags.append(f"{z.label}: {word.lower()} {ext:.1f}, CVD {cv:+.0f} (trước {z.ref[1]:+.0f}) = không phân kỳ")
         z.ref = (ext, cv)
     if tk >= ht:
-        if sup and dl > 0 and b["c"] <= b["h"] - 1.5:
+        # hấp thụ = bên chủ động đẩy (|Δ| ≥ 5% tick) mà nến không đi được theo hướng đó; 27/10 20:00 nến +4 điểm Δ +40/842 tick là phá lên, không phải hấp thụ
+        held = abs(dl) >= 0.05 * tk and (b["c"] <= b["o"] if sup else b["c"] >= b["o"])
+        if sup and dl > 0 and b["c"] <= b["h"] - 1.5 and held:
             z.abs = True
             z.reasons.append(f"hấp thụ mua Δ {dl:+.0f} tick {tk:.0f} ({vn(b['t'])} VN)")
             flags.append(f"{z.label}: HẤP THỤ MUA (Δ {dl:+.0f}, tick {tk:.0f} ≥ {ht:.0f}, giá bị đẩy xuống khỏi {b['h']:.1f})")
-        elif not sup and dl < 0 and b["c"] >= b["l"] + 1.5:
+        elif not sup and dl < 0 and b["c"] >= b["l"] + 1.5 and held:
             z.abs = True
             z.reasons.append(f"hấp thụ bán Δ {dl:+.0f} tick {tk:.0f} ({vn(b['t'])} VN)")
             flags.append(f"{z.label}: HẤP THỤ BÁN (Δ {dl:+.0f}, tick {tk:.0f} ≥ {ht:.0f}, giá bị đẩy lên khỏi {b['l']:.1f})")
@@ -207,7 +222,7 @@ def zone_step(z, zones, b, dl, tk, cv, s3, ht, flags, signals, cancels):
 def step(zones, b, dl, tk, cv, s3, ht):
     """Xử lý một nến M1 đã đóng. Trả (cờ, đang trong vùng nào đó, tín hiệu, huỷ)."""
     flags, inside, signals, cancels = [], False, [], []
-    m5_update(b)
+    m5_update(b, dl)
     for z in zones:
         sup = z.side == "S"
         if z.armed:
@@ -218,6 +233,8 @@ def step(zones, b, dl, tk, cv, s3, ht):
                     if moved >= k and k not in z.push:
                         z.push.add(k)
                         flags.append(f"{z.label}: giá {'bị đẩy ngược xuống' if sup else 'bật lên'} {k}+ điểm từ {'đỉnh' if sup else 'đáy'} {z.peak:.1f} (Σ3p Δ {s3:+.0f})")
+        else:
+            bad_close(z, b, flags, cancels)   # giá đã đóng qua hẳn vùng (hết armed) vẫn phải báo sai kịch bản / huỷ tín hiệu: 27/10 S1, S2 bị phá lên 4048 mà không có HUỶ
         # trạng thái armed theo giá ĐÓNG của nến này, nến sau mới dùng: nến xuyên qua vùng từ phía sai không bị tính là sai kịch bản
         approach = b["c"] < z.lo if sup else b["c"] > z.hi
         beyond = b["c"] > z.hi if sup else b["c"] < z.lo

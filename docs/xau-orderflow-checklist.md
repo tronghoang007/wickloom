@@ -14,14 +14,15 @@ Quyết định vào lệnh, SL/TP và khối lượng là của bạn. Skill ch
 ## 2. Bối cảnh
 
 - [ ] Giá đang trên, trong hay dưới value area hôm nay và phiên trước?
-- [ ] Vào cùng hay ngược bias trong ngày? Vùng viền đứt trên chart (alert mở đầu `Ngược XH:`) là ngược bias trong ngày: đòi cả hấp thụ lẫn phân kỳ CVD. Viền liền là theo bias, một dấu hiệu xác nhận là đủ. Ngày cân bằng (biên nén) thì mọi vùng viền liền, nhưng mép VA mới là nơi phản ứng, giữa VA là nhiễu.
+- [ ] Vào cùng hay ngược bias trong ngày? Vùng viền đứt trên chart (alert mở đầu `Ngược XH:`) là ngược bias trong ngày: đòi hai trong ba dấu hiệu (hấp thụ, phân kỳ CVD, M5 từ chối). Viền liền là theo bias, một dấu hiệu xác nhận là đủ. Ngày cân bằng (biên nén) thì mọi vùng viền liền, nhưng mép VA mới là nơi phản ứng, giữa VA là nhiễu.
 
 ## 3. Mở footprint / CVD và chờ phản ứng tại vùng
 
 | | Supply (bán) | Demand (mua) |
 |---|---|---|
-| Hấp thụ | Delta dương, tick ≥2× bình thường mà giá không vượt lên được | Delta âm, tick ≥2× bình thường mà giá không xuống thêm |
+| Hấp thụ | Delta dương rõ (≥5% số tick), tick ≥2× bình thường mà nến không đóng cao hơn mở (giá không vượt lên được) | Delta âm rõ (≥5% số tick), tick ≥2× bình thường mà nến không đóng thấp hơn mở (giá không xuống thêm) |
 | CVD | Giá lên đỉnh mới mà CVD thấp hơn đỉnh CVD trước (phân kỳ giảm) | Giá xuống đáy mới mà CVD cao hơn (phân kỳ tăng) |
+| M5 từ chối | Râu M5 vào vùng, M5 đóng dưới mép dưới vùng, delta M5 âm | Râu M5 vào vùng, M5 đóng trên mép trên vùng, delta M5 dương |
 | Giá sau đó | Bị đẩy ngược xuống, khoảng ≥10 điểm trong ~15 phút | Bật lên, khoảng ≥10 điểm trong ~15 phút |
 
 - [ ] Có ít nhất một dấu hiệu xác nhận ở trên, tốt nhất là hấp thụ cộng phân kỳ.

@@ -181,7 +181,8 @@ def absorption(rows, sess_median_ticks5):
 # --- bias trong ngày --------------------------------------------------------------------------------------------------------------------------------------
 
 RECENT = 3 * 3600  # POC "gần đây" (3 giờ cuối) so với POC phần đầu ngày
-ACCEPT = 3600  # giá đứng ngoài value đã hình thành ít nhất 1 giờ mới tính là chấp nhận
+ACCEPT = 1800  # giá đứng ngoài value đã hình thành ít nhất 30 phút mới tính là chấp nhận (60 phút làm bias tăng 27/10 trễ tới 21:30 VN; kiểm tra 12 ngày 28/10: 30 phút tốt hơn ở cả hai nửa dữ liệu)
+POC_THR = 0.25  # POC 3 giờ cuối dịch ≥ ngần này × biên trung vị mới tính (0.35 trước 28/10)
 MOM = 120  # phút xét xung lực giá + CVD
 MIN_PRIOR = 2 * 3600  # phần đầu ngày phải có ít nhất 2 giờ dữ liệu thì mới so sánh
 
@@ -212,7 +213,7 @@ def intraday_bias(base, sym, cur, prev_v, tdm, med_range):
         cl = [b["c"] for b in bars if b["t"] >= t1 - ACCEPT]
         up, dn = sum(c > va["vah"] for c in cl) / len(cl), sum(c < va["val"] for c in cl) / len(cl)
         v = 1 if up >= 0.8 else -1 if dn >= 0.8 else 0
-        vote(v, f"Chấp nhận ngoài value: value tới {hm(t1 - ACCEPT, False)} = {va['val']:.1f}–{va['vah']:.1f}, 60 phút cuối {100 * up:.0f}% đóng trên / {100 * dn:.0f}% đóng dưới (cần ≥80%)")
+        vote(v, f"Chấp nhận ngoài value: value tới {hm(t1 - ACCEPT, False)} = {va['val']:.1f}–{va['vah']:.1f}, {ACCEPT // 60} phút cuối {100 * up:.0f}% đóng trên / {100 * dn:.0f}% đóng dưới (cần ≥80%)")
     else:
         out.append("   .  Chấp nhận ngoài value: chưa đủ dữ liệu trong ngày")
 
@@ -220,7 +221,7 @@ def intraday_bias(base, sym, cur, prev_v, tdm, med_range):
     late = profile(base, sym, t1 - RECENT, t1 + 60, lo, hi) if e else None
     if e and late:
         pe, pl = value_area(e)["poc"], value_area(late)["poc"]
-        thr = 0.35 * med_range
+        thr = POC_THR * med_range
         v = 1 if pl - pe >= thr else -1 if pl - pe <= -thr else 0
         vote(v, f"POC dịch: {pe:.1f} (từ đầu ngày tới {hm(t1 - RECENT, False)}) → {pl:.1f} (3 giờ cuối) = {pl - pe:+.1f}, ngưỡng ±{thr:.0f}")
     else:
@@ -402,7 +403,9 @@ def main():
         if trend and len(days) >= 3:  # cú xả / bơm cũ nằm trong cửa sổ nhưng 3 ngày gần nhất đã cân bằng lại → không còn là xu hướng
             r3 = days[-1][1]["v"]["poc"] - days[-3][1]["v"]["poc"]
             if r3 * (1 if trend == "up" else -1) < 0.5 * thr:
-                settled = f" [cú {'bơm' if trend == 'up' else 'xả'} cũ đã cân bằng lại: POC 3 ngày gần nhất {r3:+.1f}, dưới nửa ngưỡng {0.5 * thr:.0f}]"
+                back = r3 * (1 if trend == "up" else -1) < 0   # 3 ngày gần nhất POC đi ngược hẳn cú cũ
+                settled = (f" [cú {'bơm' if trend == 'up' else 'xả'} cũ đã bị lấy lại: POC 3 ngày gần nhất {r3:+.1f}, ngược chiều cú cũ]" if back else
+                           f" [cú {'bơm' if trend == 'up' else 'xả'} cũ đã cân bằng lại: POC 3 ngày gần nhất {r3:+.1f}, chưa tới nửa ngưỡng {0.5 * thr:.0f}]")
                 trend = None
         pos = "above" if price > comp["vah"] else "below" if price < comp["val"] else "in"
         where = lambda v: "TRÊN" if price > v["vah"] else "DƯỚI" if price < v["val"] else "TRONG"
