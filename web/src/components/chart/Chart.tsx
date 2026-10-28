@@ -569,10 +569,14 @@ export default function Chart({ paneId }: { paneId: string }) {
     if (!b) return;
     if (!pane.replay.getState().active) fullRef.current = [...bars];
     cursorRef.current = b.t + TF_SECONDS[pane.chart.getState().tf];
+    // Cắt chỉ bỏ phần đuôi nên chỉ số nến còn lại không đổi: giữ nguyên góc nhìn như TV. Không đặt lại thì setData
+    // giữ khoảng cách tới nến cuối (rightOffset) và chart nhảy về vùng cũ hơn nến vừa chọn.
+    const view = chartRef.current?.timeScale().getVisibleLogicalRange();
     pane.replay.setState({ selecting: false, active: true, playing: false });
     setHover(null);
     if (wantM1()) await loadM1(b.t);
     applyVisible(buildVisible(cursorRef.current));
+    if (view) chartRef.current?.timeScale().setVisibleLogicalRange(view);
   };
 
   const onSelectMove = (e: RMouseEvent<HTMLDivElement>) => {

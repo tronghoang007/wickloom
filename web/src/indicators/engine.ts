@@ -21,7 +21,7 @@ export function shiftBy<T>(a: T[], offset: number, fill: T): T[] {
 export const futureTimes = (last: number, count: number, step: number): number[] => Array.from({ length: count }, (_, k) => last + (k + 1) * step);
 
 /** Phần môi trường của chart mà compute có thể cần ngoài nến: kích thước tick, vùng đang nhìn. */
-export type Env = { tick?: number; range?: { from: number; to: number }; cut?: number; ticks?: TickSource };
+export type Env = { tick?: number; range?: { from: number; to: number }; cut?: number; ticks?: TickSource; memo?: Record<string, unknown> };
 
 function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calendar: CalendarOpts, lower: Bar[] = [], env: Env = {}): Ctx {
   const memo = new Map<string, Num>();
@@ -30,7 +30,7 @@ function makeCtx(def: IndicatorDef, inst: IndicatorInstance, bars: Bar[], calend
     if (!s) memo.set(name, (s = source(bars, name)));
     return s;
   };
-  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar, lower, items: itemStyles(inst, def), tick: env.tick && env.tick > 0 ? env.tick : 0.01, cut: env.cut ?? 0, ...(env.range ? { range: env.range } : {}), ...(env.ticks ? { ticks: env.ticks } : {}) };
+  return { bars, inputs: resolveInputs(def, inst.inputs), src, calendar, lower, items: itemStyles(inst, def), tick: env.tick && env.tick > 0 ? env.tick : 0.01, cut: env.cut ?? 0, ...(env.range ? { range: env.range } : {}), ...(env.ticks ? { ticks: env.ticks } : {}), ...(env.memo ? { memo: env.memo } : {}) };
 }
 
 /** Tính mọi plot của 1 instance trên `bars` (đã gồm lịch sử nạp ngầm). Luôn trả đủ plot của def; mỗi plot dài bars.length, cộng thêm offset nếu offset dương. */

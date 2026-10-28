@@ -175,6 +175,24 @@ describe("Big Trades", () => {
     expect(texts({ n: 4, sum: 0, sumsq: 0 }).length).toBe(10); // trung bình 0, độ lệch 0 -> ngưỡng 1
   });
 
+  it("row giá đổi nấc (pool / thống kê mới chưa về): vẽ tiếp bằng cặp hợp lệ gần nhất, không trộn pool mới với thống kê cũ; đổi Minimum volume thì không dùng", () => {
+    const cells = [cell(bars[3].t, 100, 50, 0), cell(bars[8].t, 100, 60, 0)];
+    const newer = [cell(bars[4].t, 100, 99, 0)];
+    const texts = (ticks: TickSource, memo: Record<string, unknown>, inputs: Record<string, number> = {}) =>
+      computeExtras(bigTrades, { ...newInstance("bigtrades"), inputs: { text: true, ...inputs }, style: {} }, bars, { offset: 0 }, [], { tick: 0.01, cut: 0, ticks, memo }).objects!.bubbles!.map((b) => b.text);
+    const memo: Record<string, unknown> = {};
+    expect(texts(source(cells, undefined, STAT).ticks, memo)).toEqual(["60", "50"]); // ngưỡng 5 + 3.5 × 10 = 40
+    expect(texts(source(null, undefined, null).ticks, memo)).toEqual(["60", "50"]); // cả hai chưa về: giữ cặp cũ
+    expect(texts(source(newer, undefined, null).ticks, memo)).toEqual(["60", "50"]); // pool mới về trước thống kê: vẫn cặp cũ
+    expect(texts(source(newer, undefined, STAT).ticks, memo)).toEqual(["99"]); // đủ cặp mới thì thay
+    expect(texts(source(null, undefined, null).ticks, memo)).toEqual(["99"]); // và cặp mới thành cặp để giữ
+    expect(texts(source(null, undefined, null).ticks, {})).toEqual([]); // chưa từng có gì thì trống
+    const fixed: Record<string, unknown> = {};
+    expect(texts(source(cells).ticks, fixed, { min: 20 })).toEqual(["60", "50"]);
+    expect(texts(source(null).ticks, fixed, { min: 20 })).toEqual(["60", "50"]);
+    expect(texts(source(null).ticks, fixed, { min: 30 })).toEqual([]); // ngưỡng cố định khác: không dùng bản của ngưỡng cũ
+  });
+
   it("Minimum volume > 0 đặt ngưỡng cố định thay cho sigma và không hỏi thống kê", () => {
     const cells = Array.from({ length: 10 }, (_, i) => cell(bars[i].t, 100, 21 + i, 0)); // 21..30
     const { ticks, statCalls } = source(cells, undefined, STAT);

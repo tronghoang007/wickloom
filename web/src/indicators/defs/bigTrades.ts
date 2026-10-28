@@ -1,4 +1,4 @@
-import type { Bar, TickCell } from "@/lib/api";
+import type { Bar, TickCell, TickStat } from "@/lib/api";
 import { TICK_DEPTH } from "../lower";
 import { indexAtTime } from "../objects";
 import { num, type Ctx, type IndicatorDef, type InputDef, type ItemDef, type ObjBubble, type ObjectSet } from "../schema";
@@ -159,6 +159,8 @@ export function bubblesOf(cells: TickCell[], times: number[], step: number, c: C
     .sort((a, b) => b.r - a.r);
 }
 
+type BigMemo = { min?: number; pool?: TickCell[]; stat?: TickStat };
+
 export const bigTrades: IndicatorDef = {
   id: "bigtrades", name: "Big Trades", title: "Big trades", overlay: true,
   inputs: INPUTS,
@@ -180,33 +182,45 @@ export const bigTrades: IndicatorDef = {
     const size = rowSize(bars.slice(c.cut), c.tick, num(c.inputs, "group"));
     const min = Math.max(1, num(c.inputs, "min"));
     const big = c.ticks.big;
-    const pool = big(t0, bars[bars.length - 1].t + step, min, BIG_POOL, size);
-    if (!pool) return empty;
-    const vol = (k: TickCell) => k.up + k.dn;
-    const poolMin = pool.length >= BIG_POOL ? pool.reduce((m, k) => Math.min(m, vol(k)), Infinity) : 0;
     const end = bars[bars.length - 1].t + step;
     const block = refBlock(step);
+    const last = Math.min(bars.length - 1, c.range?.to ?? bars.length - 1);
+    const minIn = num(c.inputs, "min");
+    const gotPool = big(t0, end, min, BIG_POOL, size);
+    // Thống kê của ngưỡng hỏi cùng lúc với pool chứ không đợi pool về: hai lần nạp chạy song song nên khi row giá đổi (khoá mới cả hai) cả hai về gần như cùng lúc
+    const statWin = (): [number, number] => {
+      const [q0, q1] = refRange(bars[last].t, end, t0, step, THR_BLOCKS);
+      return [q0, Math.ceil(q1 / block) * block];
+    };
+    const gotStat = minIn === 0 && bars[last] ? c.ticks.stat?.(...statWin(), size) : undefined;
+    // Row giá đổi nấc (trung vị biên độ 200 nến cuối trôi qua ngưỡng làm tròn) là khoá mới của cả pool lẫn thống kê, chưa có gì để vẽ tới khi cả hai về. Trong lúc chờ vẽ tiếp bằng cặp (pool, thống kê)
+    // hợp lệ gần nhất, luôn đi cùng nhau để ngưỡng khớp với các ô; chỉ dùng khi cùng ngưỡng Minimum volume. Cặp mới về đủ thì thay.
+    const memo = c.memo as BigMemo | undefined;
+    const ready = !!gotPool && (minIn !== 0 || !!gotStat);
+    const kept = !ready && memo?.pool && memo.min === min && (minIn !== 0 || memo.stat) ? memo : undefined;
+    const pool = ready ? gotPool : kept?.pool;
+    const stat = ready ? gotStat : kept?.stat;
+    if (!pool) return empty;
+    if (ready && memo) Object.assign(memo, { min, pool, stat });
+    const vol = (k: TickCell) => k.up + k.dn;
+    const poolMin = pool.length >= BIG_POOL ? pool.reduce((m, k) => Math.min(m, vol(k)), Infinity) : 0;
     // `limit` ô lớn nhất của [from, to) có volume >= minVol. Pool đầy thì các ô nhỏ hơn ô bé nhất của pool bị cắt (M1 gặp thường xuyên: ngưỡng của vài giờ gần đây thấp hơn ô bé nhất của cả 14 ngày), nên nếu pool có thể thiếu ô của khoảng này thì hỏi riêng
     // khoảng đó, nới ra theo khối cố định để kéo / zoom nhẹ vẫn dùng lại kết quả; chờ kết quả thì vẫn dùng phần lấy từ pool (không nhấp nháy)
     const top = (from: number, to: number, minVol: number, limit: number): TickCell[] => {
       const got = topInRange(pool, from, to, limit).filter((k) => vol(k) >= minVol);
       const exact = pool.length < BIG_POOL || (got.length >= limit ? vol(got[limit - 1]) : minVol) > poolMin;
-      if (exact) return got;
+      if (exact || !ready) return got; // cặp cũ đang dùng tạm: không hỏi thêm theo row giá mới
       const asked = big(Math.max(t0, Math.floor(from / block) * block), Math.min(end, Math.ceil(to / block) * block), minVol, limit, size);
       return asked ? topInRange(asked, from, to, limit) : got;
     };
-    const last = Math.min(bars.length - 1, c.range?.to ?? bars.length - 1);
     const v0 = Math.max(t0, bars[Math.max(c.cut, c.range?.from ?? c.cut)].t); // chưa biết vùng nhìn thì cả chart
     const v1 = bars[last].t + step;
     if (v1 <= v0) return empty;
     // Thang cỡ và ngưỡng tính trên các ô quanh mép phải vùng nhìn chứ không trên các ô đang hiện: zoom giữ mép phải thì cả cỡ lẫn tập bubble không đổi, zoom chỉ cắt bớt / thêm vào phần thấy được
     // Minimum volume > 0: ngưỡng cố định. Không thì ngưỡng = trung bình + sigma × độ lệch chuẩn volume của mọi ô trong khoảng dài hơn quanh mép phải (thống kê đủ từ backend, không tính phần bị cắt ở đầu tick / nến cuối để ngưỡng không trôi theo từng nến mới;
     // khoá hỏi theo khối nên không đổi khi kéo / zoom nhẹ). Chưa nạp xong thống kê thì chưa có bubble; khoảng đó không có ô nào thì chưa có ngưỡng, hiện mọi ô
-    const minIn = num(c.inputs, "min");
     let thr = minIn;
     if (minIn === 0) {
-      const [q0, q1] = refRange(bars[last].t, end, t0, step, THR_BLOCKS);
-      const stat = c.ticks.stat?.(q0, Math.ceil(q1 / block) * block, size);
       if (!stat) return empty;
       const sd = stat.n > 0 ? Math.sqrt(Math.max(0, stat.sumsq / stat.n - (stat.sum / stat.n) ** 2)) : 0;
       thr = stat.n > 0 ? Math.max(min, stat.sum / stat.n + num(c.inputs, "sigma") * sd) : min;

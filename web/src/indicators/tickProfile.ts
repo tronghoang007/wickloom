@@ -20,6 +20,8 @@ const MAX_ACTIVE = 2; // số yêu cầu backend chạy cùng lúc
 const MAX_ENTRIES = 64; // kết quả giữ trong bộ nhớ (kéo chart với Visible Range liên tục tạo khoá mới)
 const RETRY_MS = 10_000;
 const NEAR = 0.8; // histogram của profile khác dùng tạm được khi khoảng thời gian trùng từng đó (xem `TickProfileFeed.borrow`)
+const BIG_NEAR = 0.5; // ô Big Trades của khoảng cùng đầu dùng tạm được khi `t1` lệch không quá nửa độ dài khoảng (xem `TickBigFeed.borrow`)
+const STAT_NEAR = 0.5; // thống kê của khoảng khác dùng tạm được khi trùng từng đó (khoảng dịch một khối trong 6 khối trùng ~0.71)
 const HEAD_SLACK = 300; // giây: nến delta đầu tiên muộn hơn đầu profile quá chừng này là chưa nạp tới đầu (giống LowerFeed: 5 phút)
 
 /** Dữ liệu tick đã nạp (nến delta "TD", tăng dần) phủ tới đầu `t0` chưa. */
@@ -210,6 +212,8 @@ export class TickProfileFeed {
   }
 }
 
+type BigWin = { symbol: string; t0: number; t1: number; min: number; limit: number; size: number };
+
 /** Như `TickProfileFeed` cho Big Trades: các ô (phút, giá) lớn nhất của [t0, t1) có volume >= `min`. */
 export class TickBigFeed {
   private feed: SigFeed<TickCell[]>;
@@ -218,12 +222,29 @@ export class TickBigFeed {
     this.feed = new SigFeed(onChange, now);
   }
 
+  /** Các ô đã nạp của [t0, t1); chưa có thì nạp ngầm rồi gọi `onChange`, trong lúc chờ trả bản của khoảng cùng đầu / ngưỡng / số ô / row có `t1` gần nhất (xem `borrow`) hoặc null. */
   get(symbol: string, t0: number, t1: number, min: number, limit: number, size: number, sig: string, upTo = t1): TickCell[] | null {
-    return this.feed.get(this.key(symbol, t0, t1, min, limit, size), sig, () => this.fetch(symbol, t0, upTo, min, limit, size), upTo);
+    const w: BigWin = { symbol, t0, t1, min, limit, size };
+    const key = this.key(symbol, t0, t1, min, limit, size);
+    return this.feed.get(key, sig, () => this.fetch(symbol, t0, upTo, min, limit, size), upTo, w) ?? this.borrow(key, w)?.cells ?? null;
   }
 
   heldUpTo(symbol: string, t0: number, t1: number, min: number, limit: number, size: number): number | undefined {
-    return this.feed.heldUpTo(this.key(symbol, t0, t1, min, limit, size));
+    const key = this.key(symbol, t0, t1, min, limit, size);
+    return this.feed.heldUpTo(key) ?? this.borrow(key, { symbol, t0, t1, min, limit, size })?.upTo;
+  }
+
+  /** `t1` đổi (Replay bước thêm một nến, nến mới nối đuôi, kéo mốc cắt) là khoá mới chưa có gì để vẽ, bubble biến mất tới khi backend trả. Thay vào đó dùng tạm các ô đã nạp của khoảng
+   *  cùng symbol / đầu / ngưỡng / số ô / row có `t1` gần nhất, bỏ các ô từ `t1` trở đi (mốc cắt lùi về sớm hơn thì không lộ ô của phía sau). Lần nạp trước của khoá này lỗi thì không dùng. */
+  private borrow(key: string, w: BigWin): { cells: TickCell[]; upTo: number } | null {
+    if (this.feed.failed(key)) return null;
+    const near = this.feed.nearest<BigWin>(
+      key,
+      (m) => (m.symbol === w.symbol && m.t0 === w.t0 && m.min === w.min && m.limit === w.limit && m.size === w.size ? 1 - Math.min(1, Math.abs(m.t1 - w.t1) / Math.max(1, w.t1 - w.t0)) : -1),
+      BIG_NEAR,
+    );
+    if (!near) return null;
+    return { cells: near.meta.t1 > w.t1 ? near.data.filter((c) => c.t < w.t1) : near.data, upTo: Math.min(near.upTo, w.t1) };
   }
 
   private key = (symbol: string, t0: number, t1: number, min: number, limit: number, size: number) => `${symbol}|${t0}|${t1}|${min}|${limit}|${size}`;
@@ -233,6 +254,8 @@ export class TickBigFeed {
   }
 }
 
+type StatWin = { symbol: string; t0: number; t1: number; size: number };
+
 /** Thống kê volume của các ô (phút, row giá cao `size`) trong [t0, t1) cho ngưỡng Sensitivity (σ) của Big Trades. Không cộng phút đang chạy (một phút trong cả khoảng nhiều giờ không đổi trung bình / độ lệch đáng kể). */
 export class TickStatFeed {
   private feed: SigFeed<TickStat>;
@@ -241,8 +264,14 @@ export class TickStatFeed {
     this.feed = new SigFeed(onChange, now);
   }
 
+  /** Khoảng thống kê dịch theo khối cố định: sang khối mới chưa có bản của khoá này thì dùng tạm bản của khoảng cùng symbol / row trùng nhiều nhất (ngưỡng chỉ lệch nhẹ), không để bubble biến mất. */
   get(symbol: string, t0: number, t1: number, size: number, sig: string, upTo = t1): TickStat | null {
-    return this.feed.get(`${symbol}|${t0}|${t1}|${size}`, sig, () => this.fetch(symbol, t0, upTo, size), upTo);
+    const key = `${symbol}|${t0}|${t1}|${size}`;
+    const w: StatWin = { symbol, t0, t1, size };
+    const got = this.feed.get(key, sig, () => this.fetch(symbol, t0, upTo, size), upTo, w);
+    if (got) return got;
+    if (this.feed.failed(key)) return null;
+    return this.feed.nearest<StatWin>(key, (m) => (m.symbol === symbol && m.size === size ? overlapRatio(m.t0, m.t1, t0, t1) : 0), STAT_NEAR)?.data ?? null;
   }
 
   clear() {

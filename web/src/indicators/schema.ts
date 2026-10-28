@@ -129,6 +129,8 @@ export type Ctx = {
   range?: { from: number; to: number };
   /** Dữ liệu tick theo `def.ticks`; không có = indicator không cần / đang tắt "1 tick". */
   ticks?: TickSource;
+  /** Chỗ indicator nhớ giữa các lần tính (mỗi instance một bản, xoá khi đổi symbol / khung hoặc dựng lại indicator); chỉ có khi chạy trong chart. */
+  memo?: Record<string, unknown>;
 };
 
 export type IndicatorDef = {

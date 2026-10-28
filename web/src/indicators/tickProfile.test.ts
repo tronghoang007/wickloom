@@ -108,6 +108,18 @@ describe("TickStatFeed", () => {
     expect(calls).toHaveLength(2);
     expect(feed.get("S", 10, 20, 1, "b", 15)).toBeNull(); // row giá khác là khoá khác
   });
+
+  it("khoảng dịch sang khối mới: dùng tạm thống kê của khoảng trùng nhiều trong lúc nạp; ít trùng hoặc row khác thì chưa có", async () => {
+    const stat = { n: 3, sum: 12, sumsq: 60 };
+    const feed = new TickStatFeed(async () => stat, () => {});
+    const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    feed.get("S", 0, 600, 0.5, "a");
+    await settle();
+    expect(feed.get("S", 100, 700, 0.5, "a")).toBe(stat); // trùng 500 / 700 ≈ 0.71
+    expect(feed.get("S", 500, 1100, 0.5, "a")).toBeNull(); // trùng 100 / 1100
+    expect(feed.get("S", 100, 700, 1, "a")).toBeNull(); // row giá khác
+    await settle();
+  });
 });
 
 describe("TickBigFeed", () => {
@@ -140,6 +152,40 @@ describe("TickBigFeed", () => {
     await settle();
     expect(calls.slice(2).map((c) => [c[3], c[4], c[5]])).toEqual([[4, 100, 0.5], [3, 50, 0.5]]); // tối đa 2 yêu cầu cùng lúc
     expect(calls).toHaveLength(4);
+  });
+
+  it("t1 đổi (Replay bước thêm nến): dùng tạm bản của khoảng cùng đầu / ngưỡng / số ô / row cho tới khi nạp xong; lùi mốc thì bỏ các ô từ t1 trở đi", async () => {
+    const calls: number[] = [];
+    const feed = new TickBigFeed(async (_s, from, to, min) => (calls.push(to), [{ t: from, p: 1, up: min, dn: 0 }, { t: to - 60, p: 2, up: min, dn: 0 }] as TickCell[]), () => {});
+    const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    expect(feed.get("S", 0, 600, 3, 100, 0.5, "a")).toBeNull();
+    await settle();
+    const first = feed.get("S", 0, 600, 3, 100, 0.5, "a")!;
+    expect(first.map((c) => c.t)).toEqual([0, 540]);
+    // thêm một nến: khoá mới chưa có gì nhưng vẫn có bản cũ để vẽ; mốc DB của bản mượn là mốc của bản cũ
+    expect(feed.get("S", 0, 660, 3, 100, 0.5, "b")).toBe(first);
+    expect(feed.heldUpTo("S", 0, 660, 3, 100, 0.5)).toBe(600);
+    await settle();
+    expect(feed.get("S", 0, 660, 3, 100, 0.5, "b")!.map((c) => c.t)).toEqual([0, 600]); // nạp xong: bản đúng của khoá
+    // mốc lùi về sớm hơn: mượn bản gần nhất (t1 = 600) nhưng bỏ ô từ 500 trở đi
+    expect(feed.get("S", 0, 500, 3, 100, 0.5, "c")!.map((c) => c.t)).toEqual([0]);
+    await settle();
+    // đầu, ngưỡng khác hoặc t1 quá xa thì không mượn
+    expect(feed.get("S", 60, 660, 3, 100, 0.5, "d")).toBeNull();
+    expect(feed.get("S", 0, 660, 4, 100, 0.5, "d")).toBeNull();
+    expect(feed.get("S", 0, 5000, 3, 100, 0.5, "d")).toBeNull();
+    await settle();
+  });
+
+  it("lần nạp trước của khoá lỗi thì không mượn bản của khoảng khác", async () => {
+    let n = 0;
+    const feed = new TickBigFeed(async (_s, from, _to, min) => (++n === 1 ? [{ t: from, p: 1, up: min, dn: 0 } as TickCell] : null), () => {});
+    const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    feed.get("S", 0, 600, 3, 100, 0.5, "a");
+    await settle();
+    expect(feed.get("S", 0, 660, 3, 100, 0.5, "b")).not.toBeNull(); // đang nạp: mượn
+    await settle(); // lần nạp này trả null (lỗi)
+    expect(feed.get("S", 0, 660, 3, 100, 0.5, "b")).toBeNull();
   });
 });
 

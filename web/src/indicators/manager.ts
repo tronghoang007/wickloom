@@ -7,7 +7,7 @@ import { planUpdate, type Snap } from "./diff";
 import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
 import { instanceShown, plotColor, resolveInputs, showsPriceLabel, type IndicatorInstance } from "./instance";
 import { clampSlot, effectiveScale, otherPaneKeys, paneIndices, paneKeyOf } from "./layout";
-import { LowerFeed, TICK_TF, eaBackfill } from "./lower";
+import { LowerFeed, TICK_TF, capBars, eaBackfill } from "./lower";
 import { trimFootprints, trimObjects, trimProfiles } from "./objects";
 import { FillPrimitive, type FillEdge } from "./render/fill";
 import { FootprintPrimitive } from "./render/footprint";
@@ -34,6 +34,7 @@ type Live = {
   data: PlotData[]; // giá trị đã tính (đã cắt theo nến chart) cho legend
   styleKey: string;
   anchorKey: string; // dữ liệu series neo đang giữ (nến đầu + số nến)
+  memo: Record<string, unknown>; // chỗ indicator nhớ giữa các lần tính (Ctx.memo)
 };
 
 export type FeedKey = { symbol: string; tf: string };
@@ -123,11 +124,48 @@ export class IndicatorManager {
   update(list: IndicatorInstance[], bars: Bar[], feed: FeedKey) {
     // Đổi symbol/khung: series còn điểm của khung cũ tới lần sync sau (250ms), làm trục thời gian của chart có điểm thừa
     // xen giữa nến mới -> chỉ số logic lệch so với chỉ số nến lúc Chart đặt góc nhìn. Xoá ngay để trục chỉ còn nến.
-    if (feed.symbol !== this.feed.symbol || feed.tf !== this.feed.tf) this.wipe();
+    if (feed.symbol !== this.feed.symbol || feed.tf !== this.feed.tf) {
+      this.wipe();
+      for (const l of this.live) l.memo = {}; // những gì indicator nhớ (cặp pool / thống kê của Big Trades...) là của symbol / khung cũ
+    }
+    // Replay cắt về mốc cũ hơn: series còn điểm của các nến sau mốc cắt tới lần sync sau, rồi co lại làm góc nhìn nhảy về đầu dữ liệu
+    // (LWC giữ rightOffset khi nến cuối lùi). Bỏ ngay các điểm đó để trục chỉ còn các nến đã cắt.
+    if (bars.length > 0 && this.bars.length > 0 && bars[bars.length - 1].t < this.bars[this.bars.length - 1].t) this.truncate(bars);
     this.list = list;
     this.bars = bars;
     this.feed = feed;
     this.schedule();
+  }
+
+  /** Cắt tại chỗ phần đã tính của mọi indicator theo các nến `bars` (đã ngắn đi): giữ nguyên giá trị của các nến còn lại, chỉ bỏ điểm của các nến sau. Khác `wipe`: series không rỗng nên bubble / profile / footprint
+   *  (vẽ nhờ series neo) không biến mất trong lúc chờ sync sau, và không phải tính lại khi góc nhìn chưa ổn định. */
+  private truncate(bars: Bar[]) {
+    const times = bars.map((b) => b.t);
+    const last = times[times.length - 1];
+    this.times = times;
+    for (const l of this.live) {
+      l.def.plots.forEach((_, k) => {
+        const snap = l.snaps[k];
+        const d = l.data[k];
+        if (!snap || !d) return;
+        let m = snap.times.length;
+        while (m > 0 && snap.times[m - 1] > last) m--;
+        if (m === snap.times.length) return;
+        const nd: PlotData = {
+          values: d.values.slice(0, m),
+          ...(d.colors ? { colors: d.colors.slice(0, m) } : {}),
+          ...(d.candle ? { candle: { o: d.candle.o.slice(0, m), h: d.candle.h.slice(0, m), l: d.candle.l.slice(0, m) } } : {}),
+        };
+        const ts = snap.times.slice(0, m);
+        l.snaps[k] = { times: ts, values: nd.values, ...(snap.colors ? { colors: snap.colors.slice(0, m) } : {}), ...(snap.aux ? { aux: snap.aux.map((a) => a.slice(0, m)) } : {}) };
+        l.data[k] = nd;
+        l.series[k].setData(ts.map((t, i) => this.point(t, nd, i)) as never);
+      });
+      if (l.anchor && l.anchorKey) {
+        l.anchor.setData(times.map((t) => ({ time: t as UTCTimestamp, value: 0 })) as never);
+        l.anchorKey = `${times[0]}:${times.length}`;
+      }
+    }
   }
 
   private wipe() {
@@ -230,7 +268,7 @@ export class IndicatorManager {
         footprints = new FootprintPrimitive();
         anchor!.attachPrimitive(footprints);
       }
-      this.live.push({ inst, def, series, anchor, lines, fills, objects, profiles, footprints, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "" });
+      this.live.push({ inst, def, series, anchor, lines, fills, objects, profiles, footprints, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "", memo: {} });
     });
     // Series trên được dựng với pane chính ở trên cùng (pane riêng 1..n); đặt pane chính vào đúng chỗ giữa các pane riêng
     const main = this.getMainPane();
@@ -326,7 +364,7 @@ export class IndicatorManager {
       const range = l.def.needsRange ? this.visibleRange(cut) : undefined;
       const ticks = this.tickSource(l, all, cut, step, cal ?? { offset: 0 }, range); // trước nến khung nhỏ: tick là nguồn chính, nến chỉ để dự phòng
       const lowerBars = this.lowerBars(l, all, cut, step, cal ?? { offset: 0 }, range);
-      const env = { tick: this.getTick(), cut, ...(range ? { range } : {}), ...(ticks ? { ticks } : {}) };
+      const env = { tick: this.getTick(), cut, memo: l.memo, ...(range ? { range } : {}), ...(ticks ? { ticks } : {}) };
       const out = computeInstance(l.def, l.inst, all, cal ?? { offset: 0 }, lowerBars);
       l.data = l.def.plots.map((p, k) => {
         const d = trimPlot(out[p.id], cut);
@@ -387,7 +425,9 @@ export class IndicatorManager {
   private lowerBars(l: Live, all: Bar[], cut: number, step: number, calendar: { offset: number; dayOpens?: number[] }, range?: { from: number; to: number }): Bar[] {
     if (!l.def.lower) return [];
     const need = l.def.lower(resolveInputs(l.def, l.inst.inputs), { bars: all, cut, step, calendar, ...(range ? { range } : {}) });
-    return need ? this.lower.get(this.feed.symbol, need, this.bars[this.bars.length - 1].t + step) : [];
+    if (!need) return [];
+    const to = this.bars[this.bars.length - 1].t + step;
+    return capBars(this.lower.get(this.feed.symbol, need, to), to);
   }
 
   /** Tick cho volume profile "1 tick": nạp nến delta tick (EA gửi lịch sử tick) rồi cấp histogram giá theo row cho từng profile. */

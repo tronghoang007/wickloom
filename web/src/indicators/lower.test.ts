@@ -1,9 +1,23 @@
 import type { Bar } from "@/lib/api";
 import { describe, expect, it, vi } from "vitest";
-import { LOWER_TFS, LowerFeed, TICK_TF, autoLowerTf, lowerCandidates, mergeSources, stepOf, withinBudget } from "./lower";
+import { LOWER_TFS, LowerFeed, TICK_TF, autoLowerTf, capBars, lowerCandidates, mergeSources, stepOf, withinBudget } from "./lower";
 
 const bar = (t: number, c = 1, v = 1): Bar => ({ t, o: c, h: c, l: c, c, v });
 const run = (tf: string, from: number, count: number): Bar[] => Array.from({ length: count }, (_, i) => bar(from + i * ({ M1: 60, M5: 300 }[tf] ?? 60), i));
+
+describe("capBars", () => {
+  it("không có nến nào từ mốc `to` trở đi -> trả lại đúng mảng (không sao chép)", () => {
+    const a = run("M1", 1000, 5); // 1000..1240
+    expect(capBars(a, 1300)).toBe(a);
+    expect(capBars([], 1300)).toEqual([]);
+  });
+  it("Replay: bỏ các nến bắt đầu từ `to` trở đi", () => {
+    const a = run("M1", 1000, 5);
+    expect(capBars(a, 1120).map((b) => b.t)).toEqual([1000, 1060]);
+    expect(capBars(a, 1000)).toEqual([]);
+    expect(capBars(a, 1001).map((b) => b.t)).toEqual([1000]);
+  });
+});
 
 describe("mergeSources", () => {
   it("khung thô chỉ lấy nến nằm hoàn toàn trước chỗ khung mịn bắt đầu", () => {

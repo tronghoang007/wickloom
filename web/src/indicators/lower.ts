@@ -92,6 +92,20 @@ export function overlaps(bars: Bar[], from: number, to: number): boolean {
   return lo < bars.length && bars[lo].t < to;
 }
 
+/** Chỉ giữ các nến của `bars` (tăng dần) bắt đầu trước `to`; không cần cắt thì trả lại đúng mảng đó. Cache khung nhỏ còn cả phần sau nến cuối của chart
+ *  (Replay đã cắt chart về mốc cũ), nếu không cắt thì nến cuối gom luôn "tương lai". */
+export function capBars(bars: Bar[], to: number): Bar[] {
+  if (bars.length === 0 || bars[bars.length - 1].t < to) return bars;
+  let lo = 0;
+  let hi = bars.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid].t < to) lo = mid + 1;
+    else hi = mid;
+  }
+  return bars.slice(0, lo);
+}
+
 /** Các khung ứng viên cho một chart khung `chartStep` giây: từ khung `first` trở lên (thô dần), chỉ lấy khung nhỏ hơn khung chart. */
 export function lowerCandidates(chartStep: number, first: string): string[] {
   const i = LOWER_TFS.indexOf(first as (typeof LOWER_TFS)[number]);
