@@ -36,12 +36,13 @@ type Props = {
   replay: boolean; // đang Replay: không hiện sự kiện sau nến đang chạy (lộ kết quả)
   getChart: () => IChartApi | null;
   getBars: () => readonly { t: number }[];
+  getReplayEnd?: () => number | undefined; // con trỏ Replay: nến cuối có thể mới chạy dở tới đây
 };
 
 /** Biểu tượng sự kiện kinh tế trên chart kiểu TradingView: lá cờ tròn của quốc gia, viền theo mức quan trọng (đỏ cao / cam vừa / vàng thấp), nằm sát trục thời gian tại giờ công bố;
  *  CHỈ sự kiện sắp tới (từ bây giờ): sự kiện đã qua không vẽ; nhiều sự kiện cùng chỗ gộp thành một (không đánh số); BẤM vào ra thẻ chi tiết (giờ, tên, dự báo / kỳ trước), bấm ra ngoài hoặc Esc để đóng. Chỉ hiện sự kiện của các đồng tiền của symbol đang xem;
  *  bật / tắt và mức quan trọng ở Settings > Events. Vị trí tính lại khi cuộn / zoom / đổi dữ liệu (đọc mỗi khung hình vì chart không báo mọi thay đổi). */
-export default function CalendarMarkers({ symbol, tf, replay, getChart, getBars }: Props) {
+export default function CalendarMarkers({ symbol, tf, replay, getChart, getBars, getReplayEnd }: Props) {
   const show = useSettingsStore((s) => s.s.showEvents);
   const minImportance = useSettingsStore((s) => s.s.eventsMinImportance);
   const events = useCalendarStore((s) => s.events);
@@ -100,10 +101,11 @@ export default function CalendarMarkers({ symbol, tf, replay, getChart, getBars 
       if (!range) return;
       const w = ts.width();
       const nowSec = Date.now() / 1000;
-      const sig = `${range.from.toFixed(2)}|${range.to.toFixed(2)}|${w}|${bars.length}|${bars[bars.length - 1].t}|${ts.height()}|${Math.floor(nowSec / 30)}`; // mỗi 30s tính lại để sự kiện vừa qua biến mất
+      // Replay: hết dữ liệu ở con trỏ (nến cuối chạy dở thì trước cuối nến), sự kiện từ đó trở đi là tương lai
+      const lastT = (replay ? getReplayEnd?.() : undefined) ?? bars[bars.length - 1].t + tfSec;
+      const sig = `${range.from.toFixed(2)}|${range.to.toFixed(2)}|${w}|${bars.length}|${lastT}|${ts.height()}|${Math.floor(nowSec / 30)}`; // mỗi 30s tính lại để sự kiện vừa qua biến mất
       if (sig === sigRef.current) return;
       sigRef.current = sig;
-      const lastT = bars[bars.length - 1].t + tfSec;
       const pts: { x: number; e: CalEvent }[] = [];
       for (const e of candRef.current) {
         if (e.time < nowSec) continue; // đã qua: bỏ
@@ -130,7 +132,7 @@ export default function CalendarMarkers({ symbol, tf, replay, getChart, getBars 
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [show, tf, replay, getChart, getBars]);
+  }, [show, tf, replay, getChart, getBars, getReplayEnd]);
 
   if (!show || marks.length === 0) return null;
   const bottom = axisH + AXIS_GAP;

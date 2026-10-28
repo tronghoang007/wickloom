@@ -217,6 +217,14 @@ type Legend = { bar: Bar; prev: number | null };
 // cuối tuần/nghỉ lễ) -> phải hỏi EA trước khi vẽ đoạn cũ hơn.
 const gapLimit = (tf: string) => Math.max(5 * 86400, 3 * TF_SECONDS[tf]);
 const MAX_BLANK_BARS = 20000; // đổi TF: góc nhìn cũ hơn dữ liệu tối đa bấy nhiêu nến thì vẫn đi nạp (mỗi lần 500 nến), xa hơn thì bỏ
+
+// Replay: tối đa n nến `tf` trong [from, from + n nến). Backend trả các nến MỚI NHẤT của khoảng nên phải chặn cả hai đầu, không thì
+// replay xa nhận về đoạn gần hiện tại và bước đầu nhảy cóc tới đó. end = Infinity khi cửa sổ đã chạm hiện tại.
+async function fetchAhead(symbol: string, tf: string, from: number, n: number) {
+  const to = from + n * TF_SECONDS[tf];
+  const bars = await fetchBars(symbol, tf, to, n, from);
+  return { bars, end: to > Date.now() / 1000 ? Infinity : to };
+}
 const hasHole = (bars: Bar[], tf: string) => bars.some((b, i) => i > 0 && b.t - bars[i - 1].t > gapLimit(tf));
 
 // Bar cũ hơn `firstT` lấy từ DB dùng được nếu nối liền với `firstT`, hoặc EA đã trả lời
@@ -314,6 +322,10 @@ export default function Chart({ paneId }: { paneId: string }) {
   const [clock, setClock] = useState("");
   const fullRef = useRef<Bar[]>([]);
   const m1Ref = useRef<Bar[]>([]);
+  // fullRef / m1Ref đủ nến tới mốc này (Infinity = tới hiện tại); hết phần đã tải thì stepReplay tải tiếp từ đây
+  const fullEndRef = useRef(Infinity);
+  const m1EndRef = useRef(Infinity);
+  const aheadRef = useRef(false); // đang tải tiếp phía trước con trỏ
   const cursorRef = useRef(0);
   const prevSymbolRef = useRef(symbol);
   const wasActiveRef = useRef(false);
@@ -495,24 +507,24 @@ export default function Chart({ paneId }: { paneId: string }) {
     const out = full.slice(0, n);
     const next = full[n];
     if (next && next.t < cursorT) {
+      // Nến đang chạy dở dựng từ M1 tới con trỏ; không có M1 thì bỏ hẳn (hiện cả nến = lộ phần tương lai của nó)
       const m = m1Ref.current.filter((x) => x.t >= next.t && x.t < cursorT);
-      out.push(
-        m.length
-          ? {
-              t: next.t,
-              o: m[0].o,
-              h: Math.max(...m.map((x) => x.h)),
-              l: Math.min(...m.map((x) => x.l)),
-              c: m[m.length - 1].c,
-              v: m.reduce((s, x) => s + x.v, 0),
-            }
-          : next,
-      );
+      if (m.length)
+        out.push({
+          t: next.t,
+          o: m[0].o,
+          h: Math.max(...m.map((x) => x.h)),
+          l: Math.min(...m.map((x) => x.l)),
+          c: m[m.length - 1].c,
+          v: m.reduce((s, x) => s + x.v, 0),
+        });
     }
     return out;
   };
 
-  const applyVisible = (vis: Bar[]) => {
+  /** seed: nến cuối đổi vì đổi timeframe chứ không phải giá mới -> lệnh giả lập chỉ lấy giá, không xét SL / TP
+   *  (cao / thấp của nến TF mới gồm cả giá trước lúc vào lệnh). */
+  const applyVisible = (vis: Bar[], seed = false) => {
     const old = barsRef.current;
     barsRef.current = vis;
     const incremental =
@@ -530,7 +542,12 @@ export default function Chart({ paneId }: { paneId: string }) {
     refreshExtras();
     setLegend(legendAt(vis.length - 1));
     const last = vis[vis.length - 1];
-    if (last && pane.replay.getState().active) useReplaySim.getState().ingest(paneId, pane.chart.getState().symbol, last); // nến replay mới: giá khớp lệnh + kiểm tra SL / TP giả lập
+    if (last && pane.replay.getState().active) {
+      const sim = useReplaySim.getState();
+      const sym = pane.chart.getState().symbol;
+      if (seed) sim.seed(paneId, sym, last);
+      else sim.ingest(paneId, sym, last); // nến replay mới: giá khớp lệnh + kiểm tra SL / TP giả lập
+    }
   };
 
   const wantM1 = () => {
@@ -539,13 +556,47 @@ export default function Chart({ paneId }: { paneId: string }) {
   };
 
   const loadM1 = async (from: number) => {
-    m1Ref.current = await fetchBars(
-      pane.chart.getState().symbol,
-      "M1",
-      undefined,
-      50000,
-      from,
-    );
+    const r = await fetchAhead(pane.chart.getState().symbol, "M1", from, 50000);
+    m1Ref.current = r.bars;
+    m1EndRef.current = r.end;
+  };
+
+  // Phát hết phần đã tải mà phía trước còn dữ liệu: tải cửa sổ kế tiếp rồi chạy luôn bước đang chờ (bấm Forward lúc đang tải
+  // không bị nuốt; cửa sổ rỗng thì đi tiếp cửa sổ sau). Bỏ kết quả nếu trong lúc chờ dữ liệu replay đã được nạp lại (đổi TF, chọn lại nến...).
+  const loadAhead = (full: boolean, m1: boolean) => {
+    if (aheadRef.current) return;
+    aheadRef.current = true;
+    const { symbol, tf } = pane.chart.getState();
+    const baseFull = fullRef.current;
+    const baseM1 = m1Ref.current;
+    const jobs: Promise<void>[] = [];
+    let applied = false;
+    if (full)
+      jobs.push(
+        fetchAhead(symbol, tf, fullEndRef.current, 5000).then(({ bars, end }) => {
+          if (fullRef.current !== baseFull) return;
+          const lastT = baseFull[baseFull.length - 1]?.t ?? -Infinity;
+          fullRef.current = [...baseFull, ...bars.filter((b) => b.t > lastT)];
+          fullEndRef.current = end;
+          applied = true;
+        }),
+      );
+    if (m1)
+      jobs.push(
+        fetchAhead(symbol, "M1", m1EndRef.current, 50000).then(({ bars, end }) => {
+          if (m1Ref.current !== baseM1) return;
+          const keep = baseM1.filter((x) => x.t >= cursorRef.current - TF_SECONDS[tf]); // nến đang chạy còn cần M1 từ đầu nến
+          m1Ref.current = [...keep, ...bars];
+          m1EndRef.current = end;
+          applied = true;
+        }),
+      );
+    Promise.all(jobs)
+      .catch(() => {})
+      .finally(() => {
+        aheadRef.current = false;
+        if (applied && pane.replay.getState().active && !stepReplay()) pane.replay.setState({ playing: false });
+      });
   };
 
   const stepReplay = (): boolean => {
@@ -553,12 +604,19 @@ export default function Chart({ paneId }: { paneId: string }) {
     if (!st.active) return false;
     const tfs = TF_SECONDS[pane.chart.getState().tf];
     let t = cursorRef.current;
-    if (!wantM1() || m1Ref.current.length === 0) {
-      const next = fullRef.current.find((b) => b.t + tfs > t);
+    const useM1 = wantM1() && m1Ref.current.length > 0;
+    const next = fullRef.current.find((b) => b.t + tfs > t);
+    const m = useM1 ? m1Ref.current.find((x) => x.t >= t) : undefined;
+    const moreFull = !next && fullEndRef.current !== Infinity;
+    const moreM1 = useM1 && !m && m1EndRef.current !== Infinity;
+    if (moreFull || moreM1) {
+      loadAhead(moreFull, moreM1);
+      return true;
+    }
+    if (!useM1) {
       if (!next) return false;
       t = next.t + tfs;
     } else {
-      const m = m1Ref.current.find((x) => x.t >= t);
       if (!m) return false;
       t = Math.max(t, m.t) + TF_SECONDS[st.interval];
     }
@@ -571,7 +629,12 @@ export default function Chart({ paneId }: { paneId: string }) {
     const bars = barsRef.current;
     const b = bars[idx];
     if (!b) return;
-    if (!pane.replay.getState().active) fullRef.current = [...bars];
+    if (!pane.replay.getState().active) {
+      fullRef.current = [...bars];
+      fullEndRef.current = Infinity;
+    }
+    // Chọn lại nến (kể cả lùi về trước): vị thế giả lập cũ thuộc về thời điểm khác, bỏ
+    useReplaySim.getState().reset(paneId);
     cursorRef.current = b.t + TF_SECONDS[pane.chart.getState().tf];
     // Cắt chỉ bỏ phần đuôi nên chỉ số nến còn lại không đổi: giữ nguyên góc nhìn như TV. Không đặt lại thì setData
     // giữ khoảng cách tới nến cuối (rightOffset) và chart nhảy về vùng cũ hơn nến vừa chọn.
@@ -1181,6 +1244,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   const getSeries = useCallback(() => seriesRef.current, []);
   const getDigits = useCallback(() => digitsRef.current, []);
   const getBars = useCallback(() => barsRef.current, []);
+  const getReplayEnd = useCallback(() => (pane.replay.getState().active ? cursorRef.current : undefined), [pane]);
 
   // Kéo các đường giao dịch (lệnh chờ, entry/SL/TP của bảng đặt lệnh): nghe chuột ở phần tử bao quanh chart, trước DrawingManager
   useEffect(() => {
@@ -1217,13 +1281,16 @@ export default function Chart({ paneId }: { paneId: string }) {
     });
   }, [digits, chartType]);
 
-  // symbol/tf change resets replay settings
+  // đổi symbol thoát Replay (bỏ cả bước cập nhật); đổi TF giữ bước cập nhật nếu nó vẫn nhỏ hơn TF mới (vd 1m update: 1h -> 4h), không thì về bằng nến
   useEffect(() => {
     if (prevSymbolRef.current !== symbol) {
       prevSymbolRef.current = symbol;
       exitReplay(pane.replay);
+      pane.replay.setState({ interval: "" });
+      return;
     }
-    pane.replay.setState({ interval: "" });
+    const iv = pane.replay.getState().interval;
+    if (iv && !(TF_SECONDS[iv] < TF_SECONDS[tf])) pane.replay.setState({ interval: "" });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, tf]);
 
@@ -1352,17 +1419,30 @@ export default function Chart({ paneId }: { paneId: string }) {
       const anchor = replayActiveNow ? cursorRef.current : undefined;
       let bars = await fetchBars(symbol, tf, anchor);
       if (!alive) return;
-      if (replayActiveNow) {
-        keepViewRef.current = null;
-        fullRef.current = bars;
+      if (replayActiveNow && anchor !== undefined) {
+        // /bars?to= chỉ trả nến TRƯỚC mốc cắt: phải tải thêm đoạn phía sau thì Play / Forward mới có nến để chạy tiếp
+        const ahead = await fetchAhead(symbol, tf, anchor, 5000);
+        if (!alive) return;
+        fullRef.current = [...bars, ...ahead.bars];
+        fullEndRef.current = ahead.end;
         if (bars.length === 0) {
           // tf này chưa có cache tới mốc cắt -> xin EA nạp thêm, chờ "bars_loaded" rồi
           // load() sẽ tự chạy lại (xem ws.onmessage bên dưới).
           triggerBackfillAt(symbol, tf, 500, anchor).catch(() => {});
         }
-        if (wantM1()) await loadM1(cursorRef.current - TF_SECONDS[tf]);
+        // Mốc cắt nằm giữa một nến của TF mới (vd 1h -> 4h): cần M1 để dựng nến đó tới con trỏ
+        const tfs = TF_SECONDS[tf];
+        const midBar = bars.some((b) => b.t + tfs > anchor);
+        if (wantM1() || midBar) await loadM1(anchor - tfs);
         if (!alive) return;
-        applyVisible(buildVisible(cursorRef.current));
+        applyVisible(buildVisible(anchor), true);
+        // giữ góc nhìn qua lần đổi TF như lúc không replay (keepView.ts)
+        const kv = keepViewRef.current;
+        if (kv && barsRef.current.length && chartRef.current) {
+          const view = restoreView(kv, barsRef.current.length);
+          if (view.to > -MAX_BLANK_BARS && view.from < barsRef.current.length - 1) chartRef.current.timeScale().setVisibleLogicalRange(view);
+          keepViewRef.current = null;
+        }
         return;
       }
       const kv = keepViewRef.current;
@@ -1449,8 +1529,9 @@ export default function Chart({ paneId }: { paneId: string }) {
         if (m.type === "bars_loaded" && m.tf === tf) {
           if (pane.replay.getState().active) {
             // EA vừa nạp xong đoạn thiếu cho mốc cắt hiện tại -> load() lại để fill
-            // fullRef.current/áp dụng visible range đúng mốc.
-            load();
+            // fullRef.current/áp dụng visible range đúng mốc. Đã có nến trước mốc thì bỏ qua: load() lại thay
+            // lịch sử đã cuộn về bằng 500 nến (chart co bên trái, góc nhìn nhảy) mà không thêm gì.
+            if (!(fullRef.current[0]?.t < cursorRef.current)) load();
             return;
           }
           if (barsRef.current.length === 0) {
@@ -1783,7 +1864,7 @@ export default function Chart({ paneId }: { paneId: string }) {
         <div className="pointer-events-none absolute left-3 z-[3]" style={{ bottom: (chartRef.current?.timeScale().height() ?? 28) + 10 }}>
           <BrandLogo size={30} watermark />
         </div>
-        <CalendarMarkers symbol={symbol} tf={tf} replay={replayActive} getChart={getChart} getBars={getBars} />
+        <CalendarMarkers symbol={symbol} tf={tf} replay={replayActive} getChart={getChart} getBars={getBars} getReplayEnd={getReplayEnd} />
         {ctxMenu && (
           <ChartContextMenu
             x={ctxMenu.x}

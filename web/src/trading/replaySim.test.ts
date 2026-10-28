@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { chartGlobal } from "@/store/chart";
 import type { PnlSpec } from "./pnl";
-import { checkStop, emptySim, flatten, ingest, openPnl, placeOrder, setStop, useReplaySim, type SimState } from "./replaySim";
+import { checkStop, emptySim, flatten, ingest, openPnl, placeOrder, seed, setStop, useReplaySim, type SimState } from "./replaySim";
 
 const spec: PnlSpec = { tickSize: 0.01, tickValue: 1, tickValueLoss: 1 }; // 1 USD mỗi tick 0.01 cho 1 lot → 100 USD / 1.00 giá / lot
 const at = (price: number, t = 1000, s: SimState = emptySim("XAUUSDm")): SimState => ({ ...s, price, time: t });
@@ -127,6 +127,16 @@ describe("SL / TP giả lập", () => {
     expect(same.position).not.toBeNull();
     const higher = ingest(a, bar(1000, { c: 4003, h: 4013, l: 3999 }), spec); // đỉnh mới 4013 ≥ TP
     expect(higher.event).toMatchObject({ reason: "tp", price: 4010 });
+  });
+
+  it("đổi timeframe (seed): nến TF mới có đáy cũ dưới SL nhưng không chốt; bước sau chỉ tính phần mở rộng mới", () => {
+    // 1h -> 4h giữa Replay: nến 4h đã có đáy 3985 từ trước lúc vào lệnh Buy, SL 3990
+    const a = setStop(buy(), "sl", 3990);
+    const s = seed(a, bar(900, { c: 4000, h: 4008, l: 3985 }));
+    expect(s.position).not.toBeNull();
+    expect(s.event).toBeNull();
+    expect(ingest(s, bar(900, { c: 4001, h: 4008, l: 3985 }), spec).position).not.toBeNull();
+    expect(ingest(s, bar(900, { c: 3995, h: 4008, l: 3984 }), spec).event).toMatchObject({ reason: "sl", price: 3990 });
   });
 
   it("nến mới: tính cả khoảng nhảy từ giá trước (gap) tới nến mới", () => {

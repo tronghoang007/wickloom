@@ -114,10 +114,15 @@ export function ingest(s: SimState, bar: SimBar, spec: PnlSpec | null): SimState
   return { ...closed, event: { id: (s.event?.id ?? 0) + 1, reason, price, pnl: estimatePnl(p.side, p.lot, p.entry, price, spec), time: bar.t } };
 }
 
+/** Nến cuối đổi mà giá không đi thêm (đổi timeframe giữa Replay): nhận nến làm mốc so sánh cho bước sau, không xét SL / TP. */
+export const seed = (s: SimState, bar: SimBar): SimState => ({ ...s, price: bar.c, time: bar.t, bar: { t: bar.t, h: bar.h, l: bar.l } });
+
 type Store = {
   byPane: Record<string, SimState>;
   /** Nến replay mới (mỗi bước replay). Đổi symbol so với trạng thái đang giữ thì bắt đầu lại sạch. Tự kiểm tra SL / TP. */
   ingest: (paneId: string, symbol: string, bar: SimBar) => void;
+  /** Như ingest nhưng không xét SL / TP (xem `seed`). */
+  seed: (paneId: string, symbol: string, bar: SimBar) => void;
   setLot: (paneId: string, lot: string) => void;
   order: (paneId: string, side: Side, lot: number, spec: PnlSpec) => void;
   flatten: (paneId: string, spec: PnlSpec) => void;
@@ -141,6 +146,8 @@ export const useReplaySim = create<Store>()((set, get) => ({
         return ingest(base, bar, specOf(symbol));
       }),
     ),
+  seed: (id, symbol, bar) =>
+    set((st) => patch(st.byPane, id, (s) => seed(s.symbol && s.symbol !== symbol ? emptySim(symbol, s.lot) : { ...s, symbol }, bar))),
   setLot: (id, lot) => set((st) => patch(st.byPane, id, (s) => ({ ...s, lot }))),
   order: (id, side, lot, spec) => set((st) => patch(st.byPane, id, (s) => placeOrder(s, side, lot, spec))),
   flatten: (id, spec) => set((st) => patch(st.byPane, id, (s) => flatten(s, spec))),
