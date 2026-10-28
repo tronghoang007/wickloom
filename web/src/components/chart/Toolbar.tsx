@@ -23,7 +23,6 @@ import {
   Replay,
   SettingsI,
   SunI,
-  TemplatesI,
   Undo,
 } from "../icons";
 import AccountMenu from "./AccountMenu";
@@ -148,9 +147,6 @@ export default function Toolbar() {
       </Menu>
       {sep}
       <IndicatorsDialog className={btn} icon={<IndicatorsI />} />
-      <button className={iconBtn} disabled title="Indicator templates (sắp có)">
-        <TemplatesI />
-      </button>
       {sep}
       <button className={btn} title="Create alert (⌥ A)" onClick={() => void openCreateAlert()}>
         <AlertI /> Alert

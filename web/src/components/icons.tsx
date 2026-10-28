@@ -170,14 +170,6 @@ export const IndicatorsI = () => (
     <rect x="19.5" y="13" width="3" height="9" rx="0.5" />
   </Tv>
 );
-export const TemplatesI = () => (
-  <Tv>
-    <rect x="6.5" y="6.5" width="6" height="6" rx="2" />
-    <rect x="15.5" y="6.5" width="6" height="6" rx="2" />
-    <rect x="6.5" y="15.5" width="6" height="6" rx="2" />
-    <rect x="15.5" y="15.5" width="6" height="6" rx="2" />
-  </Tv>
-);
 // Templates của thanh nổi trên hình đang chọn (TV): 3 ô + dấu cộng
 export const TemplatesAddI = () => (
   <Tv>
