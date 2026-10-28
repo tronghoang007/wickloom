@@ -5,6 +5,7 @@ import time
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app import accounts, alerts, auth, config, mt5, notify, state, tcp_server
 from app.alerts import Alert, Engine, hit
@@ -710,9 +711,10 @@ def test_ws_alert_feed_needs_login_and_a_known_origin(app_lifespan):
             ws.send_json({"action": "alerts"})
             assert ws.receive_json() == {"type": "alerts_denied"}  # chưa đăng nhập
         uid = login(c)
-        with c.websocket_connect("/ws", headers={"Origin": "http://evil.example"}) as ws:
-            ws.send_json({"action": "alerts"})
-            assert ws.receive_json() == {"type": "alerts_denied"}
+        with pytest.raises(WebSocketDisconnect):  # Origin lạ: từ chối ngay lúc bắt tay (main.ws_endpoint), không chỉ phần alert
+            with c.websocket_connect("/ws", headers={"Origin": "http://evil.example"}) as ws:
+                ws.send_json({"action": "alerts"})
+                ws.receive_json()
         with c.websocket_connect("/ws") as ws:
             ws.send_json({"action": "alerts"})
             assert ws.receive_json() == {"type": "alerts_ready"}

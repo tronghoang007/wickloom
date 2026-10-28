@@ -269,7 +269,7 @@ def test_flush_writes_only_the_checkpoints_that_changed():
     assert r.checkpoints == []  # vừa nạp từ DB: mốc đã có sẵn
     r.tick(99, T + 10)
     r.engine.flush()
-    assert sorted(r.checkpoints[0]) == [(T + 10, "a"), (T + 10, "b")]
+    assert sorted(r.checkpoints[0]) == [(T + 10, 99, "a"), (T + 10, 99, "b")]  # mốc kèm giá của tick
     r.engine.flush()
     assert len(r.checkpoints) == 1
 
@@ -280,11 +280,11 @@ def test_checkpoint_survives_in_the_database():
     made = c.post("/alerts", json={"symbol": SYM, "cond": "cross", "level": 4000.0, "channels": {"web": True}}).json()
     row = alerts.db_get(uid, made["id"])
     assert row is not None and row.checked_at is not None  # tạo alert đặt mốc báo bù = lúc tạo
-    alerts.db_checkpoint([(100, made["id"])])
+    alerts.db_checkpoint([(100, 4000.5, made["id"])])
     assert alerts.db_get(uid, made["id"]).checked_at == 100
     alerts.engine._by_symbol.clear()
     alerts.engine.load(alerts.db_active())  # backend khởi động lại: mốc đọc lại từ DB
-    assert alerts.engine._by_symbol[SYM][0].checked_at == 100
+    assert alerts.engine._by_symbol[SYM][0].checked_at == 100 and alerts.engine._by_symbol[SYM][0].ref == 4000.5  # giá đã ghi làm mốc cắt cho tick đầu
     c.patch(f"/alerts/{made['id']}", json={"level": 4001.0})
     assert alerts.db_get(uid, made["id"]).checked_at > 100  # sửa alert đặt lại mốc: không soát ngược về trước lúc sửa
 

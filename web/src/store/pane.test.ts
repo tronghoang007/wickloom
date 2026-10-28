@@ -3,7 +3,7 @@ import { indicatorGlobal, useIndicatorStore } from "@/indicators/store";
 import { exitReplay, useReplayStore } from "@/replay/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chartGlobal, useChartStore } from "./chart";
-import { PRIMARY_PANE_ID, flushAllDrawings, getPane, isActivePane, useLayoutStore } from "./layout";
+import { DEFAULT_LAYOUT_ID, PRIMARY_PANE_ID, flushAllDrawings, getPane, isActivePane, snapshotLayout, useLayoutStore } from "./layout";
 import { DEFAULT_CHART, DEFAULT_VOLUME, applyPaneInit, createPane, snapshotPane } from "./paneStores";
 import { PANE_KEY, bindPanePersistence, loadPaneInit, parsePaneInit } from "./paneStorage";
 import { useVolumeStore } from "./volume";
@@ -87,6 +87,24 @@ describe("pane active + facade", () => {
     expect(seen).toHaveBeenCalledTimes(4);
   });
 
+  it("subscribe: mở layout khác (pane mới cùng id active) → nghe pane mới, bỏ pane cũ", () => {
+    const seen = vi.fn();
+    const off = useChartStore.subscribe(seen);
+    const old = p1();
+    useLayoutStore.getState().applyLayout(snapshotLayout(), "other"); // activeId vẫn là "p1" nhưng là pane mới
+    expect(p1()).not.toBe(old);
+    expect(seen).toHaveBeenCalledTimes(1); // báo để UI đọc lại từ pane mới
+    p1().chart.setState({ symbol: "BTCUSD" });
+    expect(useChartStore.getState().symbol).toBe("BTCUSD");
+    expect(seen).toHaveBeenCalledTimes(2);
+    old.chart.setState({ symbol: "ETHUSD" }); // pane đã bỏ: im lặng
+    expect(seen).toHaveBeenCalledTimes(2);
+    useLayoutStore.getState().setTemplate("s"); // bớt pane không active: pane active giữ nguyên, không báo thừa
+    expect(seen).toHaveBeenCalledTimes(2);
+    off();
+    useLayoutStore.getState().applyLayout(snapshotLayout(), DEFAULT_LAYOUT_ID);
+  });
+
   it("setActive bỏ qua id không tồn tại", () => {
     useLayoutStore.getState().setActive("nope");
     expect(useLayoutStore.getState().activeId).toBe(PRIMARY_PANE_ID);
@@ -160,8 +178,16 @@ describe("state tách theo pane", () => {
       ({ flushSave: () => new Promise<void>((r) => setTimeout(() => { done.push(id); r(); }, ms)) }) as never;
     p1().draw.setState({ api: api("p1", 20) });
     getPane("p2").draw.setState({ api: api("p2", 5) });
-    await flushAllDrawings();
+    await expect(flushAllDrawings()).resolves.toBe(true);
     expect(done.sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("flushAllDrawings: một chart chưa lưu được (flushSave → false) thì trả false", async () => {
+    p1().draw.setState({ api: { flushSave: () => Promise.resolve(true) } as never });
+    getPane("p2").draw.setState({ api: { flushSave: () => Promise.resolve(false) } as never });
+    await expect(flushAllDrawings()).resolves.toBe(false);
+    getPane("p2").draw.setState({ api: null }); // chart chưa có manager: coi như không có gì để lưu
+    await expect(flushAllDrawings()).resolves.toBe(true);
   });
 
   it("snapshotPane / applyPaneInit round-trip, bỏ phần chạy (replay, drawings)", () => {

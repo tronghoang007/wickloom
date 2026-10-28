@@ -27,6 +27,9 @@ export const useQuoteStore = create<State>()((set, get) => ({
   setSim: (quotes) => set(quotes ? { sim: true, quotes } : { sim: false, quotes: get().real }),
 }));
 
+/** Giá cho chart đang hiện (`replay` = chart đó đang Replay): pane khác đang Replay thì chart thường vẫn thấy giá THẬT (kho `quotes` lúc đó là giá giả lập). */
+export const quoteOf = (s: Pick<State, "quotes" | "real" | "sim">, symbol: string, replay: boolean): Quote | undefined => (s.sim && !replay ? s.real[symbol] : s.quotes[symbol]);
+
 // Spread điển hình của từng symbol cho Replay (nến replay chỉ có Bid): trung vị các mẫu spread thật, mỗi 30 giây một mẫu, giữ 120 mẫu gần nhất (~1 giờ có tick), nhớ qua lần tải
 // trang nên vào Replay lúc chưa có tick (cuối tuần, trang vừa mở) vẫn có spread. Không lấy tick cuối: spread giãn lúc đóng cửa / rollover.
 const SPREAD_KEY = "wickloom-spreads";

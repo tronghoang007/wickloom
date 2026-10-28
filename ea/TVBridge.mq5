@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TVBridge.mq5 - đẩy symbol/tick/bar sang backend qua TCP socket   |
-//| VERSION: 2.11 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
+//| VERSION: 2.21 (xem EA_VERSION bên dưới - in ra Experts log lúc   |
 //| EnsureConnected() để biết bản đang chạy có phải bản mới nhất)    |
 //| - 2.00: chuyển từ WebRequest sang TCP socket                     |
 //| - 2.01: fix SendLine coi SocketSend=0 (buffer đầy) là lỗi fatal  |
@@ -38,7 +38,7 @@
 //|   KHÔNG có code gửi/sửa/đóng lệnh trong EA                       |
 //| - 2.12: GIAO DỊCH từ web (docs/trade-plan.md T2): "order_send"   |
 //|   (Buy/Sell market + SL/TP) và "position_close" (đóng/đóng một   |
-//|   phần), trả "trade_result". MẶC ĐỊNH TẮT (TradingEnabled=false);|
+//|   phần), trả "trade_result". MẶC ĐỊNH TẮT (2.21: BẬT sẵn);       |
 //|   account không phải demo bị từ chối trừ khi AllowRealAccount.   |
 //|   Luôn OrderCheck trước OrderSend. "symbols" thêm volume_min/    |
 //|   max/step, contract_size, stops_level, freeze_level; "account"  |
@@ -77,14 +77,22 @@
 //|   "notify" {id, text} -> SendNotification (MetaQuotes ID nhap o      |
 //|   Tools > Options > Notifications), tra "notify_result" {id, ok,    |
 //|   err}; "account" them push_enabled (TERMINAL_NOTIFICATIONS_ENABLED) |
+//| - 2.20: lech gio broker lam tron boi 15 phut (hai lan doc dong ho    |
+//|   co luc lech 1s -> gio nen lech 1s); "ticks_hist" them "end" (UTC  |
+//|   ms cuoi cua so) va LUON gui done (ca khi khong co tick); "calendar"|
+//|   them "partial" khi bi cat 3000 su kien; deals lay toi TimeCurrent |
+//|   +1 ngay; doc lenh tu backend theo byte (khong vo ky tu UTF-8 bi   |
+//|   cat giua hai lan doc), JsonStr giai ma \" \n \uXXXX            |
+//| - 2.21: TradingEnabled mac dinh BAT (tat nhanh bang nut Algo      |
+//|   Trading; account khong phai demo van bi chan nhu cu)            |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.19"
+#property version "2.21"
 
-#define EA_VERSION "2.19"
+#define EA_VERSION "2.21"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -96,8 +104,8 @@ input int TickHistChunk = 20000; // so tick toi da trong mot thong diep "ticks_h
 input int DealsDays = 30;  // lich su deal gui len web (chi doc)
 input int MaxDeals = 200;
 
-input group "Giao dich tu web (mac dinh TAT)"
-input bool TradingEnabled = false;   // cho phep web dat/dong lenh qua EA nay
+input group "Giao dich tu web (mac dinh BAT tu 2.21, chi demo tru khi AllowRealAccount)"
+input bool TradingEnabled = true;    // cho phep web dat/dong lenh qua EA nay
 input bool AllowRealAccount = false; // khoa them: account KHONG phai demo chi duoc giao dich khi bat cai nay
 input int MagicNumber = 20261022;    // magic cua lenh do app dat (phan biet voi lenh tay / EA khac)
 input double MaxLotPerOrder = 1.0;   // EA tu choi lenh lon hon, ke ca khi web gui sai
@@ -110,7 +118,7 @@ input int CalendarDaysAhead = 14;    // toi may ngay sau
 input int CalendarRefreshSec = 300;  // lam moi dinh ky (so thuc te / du bao thay doi moi khi co cong bo)
 
 int g_sock = INVALID_HANDLE;
-string g_rx = "";
+uchar g_rx[];  // byte nhan tu backend chua thanh dong (giai ma UTF-8 theo tung dong: mot ky tu nhieu byte co the bi cat giua hai lan SocketRead)
 ulong g_lastConnectTryMs = 0;
 ulong g_lastPingMs = 0;
 ulong g_backoffUntilMs = 0; // server tu choi (token sai / dang nhan EA khac) -> cho lau hon
@@ -131,7 +139,14 @@ string g_subs[];
 ulong g_lastMsc[];
 
 //--- helpers ------------------------------------------------------
-int BrokerOffset() { return (int)(TimeTradeServer() - TimeGMT()); }
+// Lech gio server - UTC, lam tron boi 15 phut: TimeTradeServer() va TimeGMT() la hai lan doc dong ho, sang giay giua hai lan thi lech 1s.
+// LUU Y: day la lech gio HIEN TAI, dung cho ca nen / deal lich su. Broker co gio mua he (GMT+2/+3) thi phan lich su truoc lan doi gio lech 1 gio
+// (Exness = UTC+0 nen khong bi). Doi tung nen theo lich DST cua broker can biet quy tac cua tung broker: chua lam.
+int BrokerOffset()
+{
+  int raw = (int)(TimeTradeServer() - TimeGMT());
+  return (int)MathRound(raw / 900.0) * 900;
+}
 // Gio server cua MT5 -> epoch UTC (0 = khong co: giu 0). Web hien moi thoi gian nhu UTC, giong cach nen da gui (rates.time - offset)
 long ToUtc(long serverTime) { return serverTime > 0 ? serverTime - BrokerOffset() : 0; }
 
@@ -153,7 +168,7 @@ void CloseSocket()
     SocketClose(g_sock);
     g_sock = INVALID_HANDLE;
   }
-  g_rx = "";
+  ArrayFree(g_rx);
 }
 
 bool SendLine(string json)
@@ -450,8 +465,9 @@ void PostDeals()
 {
   g_dealsDirty = false;
   g_lastDealsMs = GetTickCount64();
-  datetime to = TimeCurrent();
-  datetime from = (datetime)((long)to - (long)DealsDays * 86400);
+  // TimeCurrent() = gio cua bao gia cuoi: deal vua khop sau bao gia do (thi truong im) se nam ngoai [from, to] -> lay du them 1 ngay
+  datetime to = (datetime)((long)TimeCurrent() + 86400);
+  datetime from = (datetime)((long)TimeCurrent() - (long)DealsDays * 86400);
   if (!HistorySelect(from, to))
     return;
   int total = HistoryDealsTotal();
@@ -575,7 +591,8 @@ bool PostCalendar()
   int n = ArraySize(values);
   string js = "";
   int cnt = 0;
-  for (int i = 0; i < n && cnt < 3000; i++)
+  int i = 0;
+  for (; i < n && cnt < 3000; i++)
   {
     MqlCalendarEvent e;
     if (!CalendarEventById(values[i].event_id, e))
@@ -609,7 +626,8 @@ bool PostCalendar()
     g_calendarWarned = true;
     return false;
   }
-  string msg = "{\"type\":\"calendar\",\"from\":" + IntegerToString(ToUtc((long)from)) + ",\"to\":" + IntegerToString(ToUtc((long)to)) + ",\"events\":[" + js + "]}";
+  // partial = con su kien chua gui (cat o 3000): backend khong xoa su kien vang mat trong cua so
+  string msg = "{\"type\":\"calendar\",\"from\":" + IntegerToString(ToUtc((long)from)) + ",\"to\":" + IntegerToString(ToUtc((long)to)) + (i < n ? ",\"partial\":true" : "") + ",\"events\":[" + js + "]}";
   if (!SendLine(msg))
     return false;
   g_calendarOk = true;
@@ -621,17 +639,78 @@ bool PostCalendar()
 }
 
 //--- JSON parse tối giản --------------------------------------------
+int HexDigit(ushort ch)
+{
+  if (ch >= '0' && ch <= '9')
+    return ch - '0';
+  if (ch >= 'a' && ch <= 'f')
+    return ch - 'a' + 10;
+  if (ch >= 'A' && ch <= 'F')
+    return ch - 'A' + 10;
+  return -1;
+}
+
+// Gia tri chuoi cua `key`, giai ma escape JSON (\" \\ \n \t \r \/ \uXXXX): text cua "notify" co the chua dau nhay / xuong dong.
+// Truoc 2.20 dung o dau nhay dau tien (ke ca \") va giu nguyen chuoi escape
 string JsonStr(string obj, string key)
 {
   int p = StringFind(obj, "\"" + key + "\"");
   if (p < 0)
     return "";
   p = StringFind(obj, ":", p);
-  int q1 = StringFind(obj, "\"", p);
-  int q2 = StringFind(obj, "\"", q1 + 1);
-  if (q1 < 0 || q2 < 0)
+  if (p < 0)
     return "";
-  return StringSubstr(obj, q1 + 1, q2 - q1 - 1);
+  int q1 = StringFind(obj, "\"", p);
+  if (q1 < 0)
+    return "";
+  int len = StringLen(obj);
+  int q2 = StringFind(obj, "\"", q1 + 1);
+  if (q2 < 0)
+    return "";
+  if (StringFind(StringSubstr(obj, q1 + 1, q2 - q1 - 1), "\\") < 0)
+    return StringSubstr(obj, q1 + 1, q2 - q1 - 1); // khong co escape: nhanh nhu cu
+  string out = "";
+  for (int i = q1 + 1; i < len; i++)
+  {
+    ushort ch = StringGetCharacter(obj, i);
+    if (ch == '\"')
+      return out;
+    if (ch != '\\' || i + 1 >= len)
+    {
+      out += ShortToString(ch);
+      continue;
+    }
+    ushort e = StringGetCharacter(obj, ++i);
+    if (e == 'n')
+      out += "\n";
+    else if (e == 't')
+      out += "\t";
+    else if (e == 'r')
+      out += "\r";
+    else if (e == 'u' && i + 4 < len)
+    {
+      int code = 0;
+      bool ok = true;
+      for (int k = 1; k <= 4 && ok; k++)
+      {
+        int d = HexDigit(StringGetCharacter(obj, i + k));
+        if (d < 0)
+          ok = false;
+        else
+          code = code * 16 + d;
+      }
+      if (ok)
+      {
+        out += ShortToString((ushort)code); // MQL5 string la UTF-16: cap surrogate \uD83D\uDE00 ghep lai dung
+        i += 4;
+      }
+      else
+        out += "u";
+    }
+    else
+      out += ShortToString(e); // \" \\ \/
+  }
+  return "";
 }
 
 long JsonInt(string obj, string key)
@@ -920,10 +999,11 @@ string JoinDoubles(const double &a[], int n, int digits)
   return all + part;
 }
 
-bool SendTickChunk(string symbol, int offset, int digits, const long &t[], const double &p[], const double &w[], int n, bool useW, double pb, int pd, bool cont, bool done)
+// endMs = UTC ms cuoi cua so da doc: backend biet lich su nay co toi gio hien tai khong (lam goc cho delta realtime), ke ca khi cua so khong co tick
+bool SendTickChunk(string symbol, int offset, int digits, const long &t[], const double &p[], const double &w[], int n, bool useW, double pb, int pd, bool cont, bool done, long endMs)
 {
   string js = "{\"type\":\"ticks_hist\",\"broker_utc_offset\":" + IntegerToString(offset) + ",\"symbol\":\"" + Esc(symbol) + "\",\"pb\":" + DoubleToString(pb, 8) + ",\"pd\":" + IntegerToString(pd)
-              + ",\"cont\":" + (cont ? "true" : "false") + ",\"done\":" + (done ? "true" : "false")
+              + ",\"cont\":" + (cont ? "true" : "false") + ",\"done\":" + (done ? "true" : "false") + ",\"end\":" + IntegerToString(endMs)
               + ",\"t\":[" + JoinLongs(t, n) + "],\"p\":[" + JoinDoubles(p, n, digits) + "]";
   if (useW)
     js += ",\"w\":[" + JoinDoubles(w, n, 2) + "]";
@@ -977,7 +1057,7 @@ void TickHistory(string symbol, int minutes, long before)
   if (n <= 0)
   {
     PrintFormat("TickHistory %s: khong co tick (n=%d, loi %d, %d nen M1 toi %s)", symbol, n, GetLastError(), minutes, IntegerToString(endMs / 1000));
-    return;
+    n = 0; // van gui "done" rong ben duoi: backend khong cho mai (lap khoang dut / goc delta realtime)
   }
 
   int cap = TickHistChunk * 2;
@@ -996,7 +1076,7 @@ void TickHistory(string symbol, int minutes, long before)
     long m = (long)ticks[i].time_msc / 60000;
     if (cnt > 0 && ((m != curMin && cnt >= TickHistChunk) || cnt >= cap)) // cat o ranh gioi phut; qua cap thi cat luon (phut do bi chia hai, hiem)
     {
-      if (!SendTickChunk(symbol, offset, digits, tt, pp, ww, cnt, useLast, pb, pd, cont, false))
+      if (!SendTickChunk(symbol, offset, digits, tt, pp, ww, cnt, useLast, pb, pd, cont, false, endMs))
         return;
       sent += cnt;
       cnt = 0;
@@ -1008,7 +1088,7 @@ void TickHistory(string symbol, int minutes, long before)
     ww[cnt] = weight;
     cnt++;
   }
-  if (cnt > 0 && SendTickChunk(symbol, offset, digits, tt, pp, ww, cnt, useLast, pb, pd, cont, true))
+  if (SendTickChunk(symbol, offset, digits, tt, pp, ww, cnt, useLast, pb, pd, cont, true, endMs)) // cnt = 0 van gui (done rong)
     sent += cnt;
   PrintFormat("TickHistory %s: %d tick (%d nen M1 toi %s, %s)", symbol, sent, minutes, IntegerToString(endMs / 1000), useLast ? "Last" : "Bid");
 }
@@ -1575,15 +1655,27 @@ void PumpRx()
       CloseSocket();
       return;
     }
-    g_rx += CharArrayToString(buf, 0, n, CP_UTF8);
+    int old = ArraySize(g_rx);
+    ArrayResize(g_rx, old + n);
+    ArrayCopy(g_rx, buf, old, 0, n);
   }
+  // Tach dong theo byte '\n' roi moi giai ma UTF-8 ca dong (HandleCommand co the CloseSocket -> g_rx rong, vong lap tu dung)
   while (true)
   {
-    int p = StringFind(g_rx, "\n");
+    int size = ArraySize(g_rx);
+    int p = -1;
+    for (int k = 0; k < size; k++)
+    {
+      if (g_rx[k] == 10)
+      {
+        p = k;
+        break;
+      }
+    }
     if (p < 0)
       break;
-    string line = StringSubstr(g_rx, 0, p);
-    g_rx = StringSubstr(g_rx, p + 1);
+    string line = p > 0 ? CharArrayToString(g_rx, 0, p, CP_UTF8) : "";
+    ArrayRemove(g_rx, 0, p + 1);
     StringTrimLeft(line);
     StringTrimRight(line);
     if (line != "")

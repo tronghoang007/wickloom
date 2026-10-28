@@ -8,7 +8,7 @@ import { draftLines } from "@/trading/draft";
 import { useTradeFocus, withAlpha } from "@/trading/focus";
 import { HANDLE_INSET } from "@/trading/lineDrag";
 import { tradeLines, type DragPreview, type LineSpec, type TagOwner } from "@/trading/format";
-import { useQuoteStore } from "@/trading/quote";
+import { quoteOf, useQuoteStore } from "@/trading/quote";
 import { useTradeAccount, useTradeStore } from "@/trading/store";
 import { closeFromTag, placeFromTag } from "@/trading/tagActions";
 import { useTicketStore } from "@/trading/ticket";
@@ -60,7 +60,7 @@ export default function TradeOverlay({ symbol, chartType, replay, preview, getCh
   const tradeData = useTradeStore((s) => s.data);
   const sim = useTradeStore((s) => s.sim);
   const draft = useTicketStore((s) => s.draft);
-  const quote = useQuoteStore((s) => s.quotes[symbol]);
+  const quote = useQuoteStore((s) => quoteOf(s, symbol, replay));
   const account = useTradeAccount();
   const status = useAuthStore((s) => s.status);
   const tool = drawingGlobal((s) => s.tool);

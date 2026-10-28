@@ -7,7 +7,7 @@ import { fmtLot } from "@/trading/format";
 import { tradeBlock } from "@/trading/gate";
 import { currentLot, lotSpec } from "@/trading/lot";
 import { defaultSide, resolveOrderType, snapPrice, type Side } from "@/trading/orderType";
-import { useQuoteStore } from "@/trading/quote";
+import { quoteOf, useQuoteStore } from "@/trading/quote";
 import { SIM_ACCOUNT_ID } from "@/trading/simId";
 import { tradeAccount } from "@/trading/store";
 import { useTicketStore } from "@/trading/ticket";
@@ -17,9 +17,10 @@ import type { MenuItem } from "./ChartContextMenu";
 const px = (v: number, digits: number) => v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 /** Ba dòng giao dịch của menu chuột phải (docs/trade-plan.md mục 4): Limit và Stop tại giá bấm chuột + "Add order". Dòng nào là Limit / Stop do giá bấm so với thị trường:
- *  trên thị trường là Sell limit + Buy stop, dưới thị trường là Buy limit + Sell stop. Chưa gửi được (chưa đăng nhập, real, EA tắt...) thì bấm sẽ nói lý do. */
+ *  trên thị trường là Sell limit + Buy stop, dưới thị trường là Buy limit + Sell stop. Nhãn Limit / Stop của từng dòng lấy đúng loại EA sẽ đặt (Buy so với Ask, Sell so với Bid):
+ *  bấm trong spread thì cả hai dòng đều là Limit, đúng giá thị trường thì dòng đó tắt. Chưa gửi được (chưa đăng nhập, real, EA tắt...) thì bấm sẽ nói lý do. */
 export function tradeMenuItems(symbol: string, price: number | null, digits: number, lastClose: number | undefined, replay: boolean): MenuItem[] {
-  const q = useQuoteStore.getState().quotes[symbol];
+  const q = quoteOf(useQuoteStore.getState(), symbol, replay);
   const mid = q ? (q.bid + q.ask) / 2 : lastClose;
   const above = price !== null && mid !== undefined && price >= mid;
   const sym = chartGlobal.getState().symbols.find((s) => s.name === symbol);
@@ -27,40 +28,51 @@ export function tradeMenuItems(symbol: string, price: number | null, digits: num
   const spec = lotSpec(sym, account?.max_lot);
   const lot = spec ? currentLot(account?.id, symbol, spec) : null;
   const p = price === null ? "" : px(price, digits);
+  const snapped = price === null ? null : snapPrice(price, sym?.tick_size ?? 10 ** -digits, digits);
 
   // Chuột phải đã chọn một giá: dùng giá đó (làm tròn theo tick), lot đã nhớ của account × symbol
   const order = (side: Side) => () => {
-    if (price === null) return;
+    if (snapped === null) return;
     const auth = useAuthStore.getState();
     if (auth.status === "guest" && account?.id !== SIM_ACCOUNT_ID) {
       void auth.requireLogin("Đăng nhập để giao dịch");
       return;
     }
-    const cur = useQuoteStore.getState().quotes[symbol];
+    const cur = quoteOf(useQuoteStore.getState(), symbol, replay);
     const block = tradeBlock({ replay, status: auth.status, loaded: useMt5Store.getState().loaded, account, spec, hasQuote: !!cur });
     if (block || lot === null) {
       toast(block ?? "Chưa có thông số lot của symbol", { ms: 6000 });
       return;
     }
-    const at = snapPrice(price, sym?.tick_size ?? 10 ** -digits, digits);
-    const expectedType = cur ? resolveOrderType(side, at, cur.bid, cur.ask) : null;
-    void placePending({ symbol, side, volume: lot, price: at, expectedType }, digits);
+    const expectedType = cur ? resolveOrderType(side, snapped, cur.bid, cur.ask) : null;
+    void placePending({ symbol, side, volume: lot, price: snapped, expectedType }, digits);
   };
   const lotText = lot === null ? "1" : fmtLot(lot);
   const limitSide: Side = above ? "sell" : "buy";
   const stopSide: Side = above ? "buy" : "sell";
+  // nhãn theo loại sẽ thật sự đặt; chưa có giá thị trường thì theo ý định của dòng
+  const row = (side: Side, intended: "limit" | "stop"): Exclude<MenuItem, "sep"> => {
+    const t = q && snapped !== null ? resolveOrderType(side, snapped, q.bid, q.ask) : undefined;
+    const word = t ? (t.endsWith("limit") ? "limit" : "stop") : intended;
+    return {
+      label: `${side === "sell" ? "Sell" : "Buy"} ${lotText} ${symbol} @ ${p} ${word}`,
+      icon: side === "sell" ? <SellI /> : <BuyI />,
+      disabled: price === null || t === null, // t null = đúng giá thị trường: không đặt lệnh chờ được
+      onSelect: order(side),
+    };
+  };
   return [
-    { label: `${above ? "Sell" : "Buy"} ${lotText} ${symbol} @ ${p} limit`, icon: above ? <SellI /> : <BuyI />, shortcut: "⌥ ⇧ S", disabled: price === null, onSelect: order(limitSide) },
-    { label: `${above ? "Buy" : "Sell"} ${lotText} ${symbol} @ ${p} stop`, icon: above ? <BuyI /> : <SellI />, disabled: price === null, onSelect: order(stopSide) },
+    { ...row(limitSide, "limit"), shortcut: "⌥ ⇧ S" },
+    row(stopSide, "stop"),
     {
       label: `Add order on ${symbol} at ${p}`,
       icon: <AddOrderI />,
       shortcut: "⇧ T",
       disabled: price === null,
       onSelect: () => {
-        if (price === null) return;
-        const cur = useQuoteStore.getState().quotes[symbol];
-        useTicketStore.getState().open({ symbol, price: snapPrice(price, sym?.tick_size ?? 10 ** -digits, digits), digits, mode: "pending", side: cur ? defaultSide(price, cur.bid, cur.ask) : limitSide });
+        if (snapped === null) return;
+        const cur = quoteOf(useQuoteStore.getState(), symbol, replay);
+        useTicketStore.getState().open({ symbol, price: snapped, digits, mode: "pending", side: cur ? defaultSide(snapped, cur.bid, cur.ask) : limitSide });
       },
     },
   ];

@@ -45,8 +45,9 @@ export function barsBetween(bars: Bar[], step: number, t0: number, t1: number): 
 }
 
 // Dịch cả hình: mọi điểm cùng dịch dBars nến và dPrice, nên hình giữ nguyên
-// (chênh giá giữa các điểm và độ rộng tính theo số nến không đổi).
-export function shiftAnchors(bars: Bar[], step: number, pts: Anchor[], dBars: number, dPrice: number): Anchor[] | null {
+// (chênh giá giữa các điểm và độ rộng tính theo số nến không đổi). Trục log: dPrice = 0 và nhân giá với `ratio`
+// (cùng số pixel cho mọi điểm), cộng cùng một khoảng giá sẽ làm hình méo.
+export function shiftAnchors(bars: Bar[], step: number, pts: Anchor[], dBars: number, dPrice: number, ratio = 1): Anchor[] | null {
   const out: Anchor[] = [];
   for (const a of pts) {
     let time = a.time;
@@ -56,7 +57,7 @@ export function shiftAnchors(bars: Bar[], step: number, pts: Anchor[], dBars: nu
       if (t === null) return null;
       time = Math.round(t);
     }
-    out.push({ time, price: a.price + dPrice });
+    out.push({ time, price: a.price * ratio + dPrice });
   }
   return out;
 }

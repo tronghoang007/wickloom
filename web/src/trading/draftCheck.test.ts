@@ -32,6 +32,14 @@ describe("draftError", () => {
     expect(draftError(draft({ mode: "pending", price: "4120", until: true }), env)).toMatch(/hết hạn/);
     expect(draftError(draft({ mode: "pending", price: "4120", until: true, untilText: "1970-01-01T00:00" }), env)).toMatch(/hết hạn/);
   });
+  it("giá có dấu phẩy nghìn đọc đúng; giá vô lý bị chặn; lot lẻ step bị chặn", () => {
+    expect(draftError(draft({ sl: "4,120", tp: "4,140" }), env)).toBeNull(); // 4120 / 4140, không phải 4.12 / 4.14
+    expect(draftError(draft({ mode: "pending", price: "4,120" }), env)).toBeNull();
+    expect(draftError(draft({ sl: "4120,5" }), env)).toBeNull();
+    expect(draftError(draft({ sl: "41.20" }), env)).toMatch(/quá xa/);
+    expect(draftError(draft({ lot: "0.015" }), env)).toMatch(/bội của/);
+    expect(draftError(draft({ lot: "0,02" }), env)).toBeNull(); // dấu phẩy thập phân của lot giữ nguyên
+  });
   it("thiếu thông số lot (EA cũ)", () => {
     expect(draftError(draft(), { ...env, sym: { ...sym, volume_min: null } })).toMatch(/thông số lot/);
   });

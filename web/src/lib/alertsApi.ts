@@ -75,7 +75,7 @@ export type AlertLogRow = {
 
 export type ChannelsInfo = {
   telegram: { configured: boolean; linked: boolean; name: string | null };
-  mt5: { online: boolean; version: string | null; supports: boolean; push_enabled: boolean | null };
+  mt5: { online: boolean; version: string | null; supports: boolean; push_enabled: boolean | null; allowed?: boolean };
 };
 
 /** Quy tắc thông báo theo tài khoản (docs/alerts-plan.md Phase 3). Mặc định tắt. */

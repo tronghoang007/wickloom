@@ -105,8 +105,12 @@ describe("closeLot (lot sẽ đóng ở bảng Modify)", () => {
   it("làm tròn theo step, nhận dấu phẩy, kẹp trong [min, lot của vị thế]", () => {
     expect(closeLot("0,257", 1, spec)).toBe(0.26);
     expect(closeLot("5", 1, spec)).toBe(1);
-    expect(closeLot("0", 1, spec)).toBe(0.01);
-    expect(closeLot("abc", 1, spec)).toBe(0.01);
+    expect(closeLot("0.001", 1, spec)).toBe(0.01);
+  });
+  it("ô nhập không phải số dương → null (không đóng gì), không đổi thành lot tối thiểu", () => {
+    expect(closeLot("0", 1, spec)).toBeNull();
+    expect(closeLot("abc", 1, spec)).toBeNull();
+    expect(closeLot("", 1, spec)).toBeNull();
   });
 });
 

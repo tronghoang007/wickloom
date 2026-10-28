@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "@/store/toast";
 import { useEffect, useRef, useState } from "react";
 import { Close } from "../icons";
 
@@ -42,6 +43,8 @@ export default function PromptDialog({
     setBusy(true);
     try {
       await onSubmit(value.trim());
+    } catch {
+      toast("Không thực hiện được — kiểm tra backend rồi thử lại"); // lỗi mạng / server: không im lặng
     } finally {
       onClose();
     }

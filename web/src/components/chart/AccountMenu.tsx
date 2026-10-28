@@ -47,8 +47,8 @@ export default function AccountMenu() {
     try {
       await useAuthStore.getState().logout();
       setOpen(false);
-    } catch {
-      toast("Không đăng xuất được: backend không trả lời");
+    } catch (err) {
+      toast(`Không đăng xuất được: ${err instanceof Error && err.message ? err.message : "backend không trả lời"}`);
     } finally {
       setBusy(false);
     }

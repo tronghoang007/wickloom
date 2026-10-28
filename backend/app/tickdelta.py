@@ -17,6 +17,7 @@ import itertools
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from .config import round_offset
 from .models import TicksHistIn
 
 TICK_DELTA_TF = "TD"
@@ -86,15 +87,15 @@ def classify(t_msc: List[int], price: List[float], weight: Optional[List[float]]
     return [row for row, _ in acc.closed], acc.prev_price, acc.prev_dir
 
 
-# symbol -> (Acc của phút cuối thông điệp `done`, UTC ms của tick cuối, số thứ tự lúc nhận): gốc cho `Live.seed`
-_tail: Dict[str, Tuple[Acc, int, int]] = {}
+# symbol -> (Acc của phút cuối thông điệp `done`, UTC ms của tick cuối, số thứ tự lúc nhận, UTC ms cuối cửa sổ EA đọc hoặc None): gốc cho `Live.seed`
+_tail: Dict[str, Tuple[Acc, int, int, Optional[int]]] = {}
 _seq = itertools.count(1)  # thứ tự nhận lịch sử tick và thứ tự xin EA: chỉ lịch sử nhận SAU lần xin mới là "tới giờ hiện tại"
 
 
 def ingest(body: TicksHistIn, hist: Optional[Dict[Tuple[int, float], List[float]]] = None) -> List[Dict[str, Any]]:
     """Phân loại một thông điệp `ticks_hist` -> các dòng bars tf "TD" (người gọi ghi vào kho) và, nếu có `hist`, histogram giá theo phút.
     EA thường cắt thông điệp ở ranh giới phút; phút quá nhiều tick bị cắt giữa chừng thì thông điệp `cont` sau cộng tiếp vào phút đó (dòng của phút đó được ghi lại đủ)."""
-    off = body.broker_utc_offset * 1000
+    off = round_offset(body.broker_utc_offset) * 1000
     t = [x - off for x in body.t]
     cont = _carry.get(body.symbol) if body.cont else None
     acc = _copy(cont) if cont else Acc(body.pb, -1 if body.pd < 0 else 1)
@@ -102,7 +103,9 @@ def ingest(body: TicksHistIn, hist: Optional[Dict[Tuple[int, float], List[float]
     _carry[body.symbol] = _copy(acc)
     last = acc.row()
     if body.done and last is not None:
-        _tail[body.symbol] = (_copy(acc), max(t), next(_seq))
+        _tail[body.symbol] = (_copy(acc), max(t), next(_seq), body.end)
+    elif body.done and body.end is not None:  # cửa sổ không có tick nào (EA >= 2.20 vẫn báo xong): gốc rỗng, chỉ có giá / chiều trước cửa sổ
+        _tail[body.symbol] = (_copy(acc), 0, next(_seq), body.end)
     acc.close()
     if hist is not None:
         for row, cells in acc.closed:
@@ -127,6 +130,9 @@ LiveTick = Tuple[int, float, float, bool]  # (UTC ms, giá, trọng số, bỏ n
 SEED_WAIT = 6.0  # giây chờ EA trả lịch sử tick làm gốc; hết hạn thì tính từ tick trực tiếp (EA không có tick nào trước đó)
 SEED_RETRY = 2.0  # giây giữa hai lần xin EA (EA thường trả trong dưới 1 giây, xin lại phòng mất yêu cầu)
 PENDING_MAX = 50_000  # tick giữ lại trong lúc chờ gốc
+# Gốc phải chạm tới gần tick trực tiếp đầu tiên đang giữ (Live xin 2 phút tới giờ hiện tại). Lịch sử dừng sớm hơn thế là trả lời cho một yêu cầu khác
+# (web / GapFill xin một khoảng trong quá khứ, EA trả sau lần xin của Live): nhận làm gốc thì phút đang chạy thiếu tick, và lô ghi đầu tiên trải từ phút cũ đó tới giờ
+SEED_SPAN_MS = 180_000
 
 
 class Update:
@@ -195,9 +201,12 @@ class Live:
         got = _tail.get(symbol)
         if got is None:
             return False
-        acc, last_ms, seq = got
+        acc, last_ms, seq, end = got
         if seq < s.ask_seq:
             return False  # nhận trước lần xin gần nhất: có thể thiếu tick từ lúc đó tới giờ
+        reach = end if end is not None else last_ms  # EA cũ không báo cuối cửa sổ: lấy tick cuối (thị trường im > 3 phút thì đợi SEED_WAIT rồi tính từ tick trực tiếp)
+        if s.pending and reach < s.pending[0][0] - SEED_SPAN_MS:
+            return False  # lịch sử của một khoảng trong quá khứ, không phải gốc tới giờ hiện tại
         del _tail[symbol]
         s.acc, s.last_ms, s.floor = acc, last_ms, last_ms
         return True

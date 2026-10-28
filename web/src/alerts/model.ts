@@ -1,5 +1,6 @@
 import type { Alert, AlertChannels, AlertCond, AlertDrawing, AlertIndicator, AlertInput, AlertTrigger, ChannelsInfo, DeliveryResults } from "@/lib/alertsApi";
 import { TF_SECONDS } from "@/lib/api";
+import { tzOffsetMinutes } from "@/lib/timefmt";
 import { parseNum } from "@/trading/draft";
 import { defaultCondFor, spanText } from "./drawingSpec";
 import { smoothingHint, vsText } from "./indicatorSpec";
@@ -73,7 +74,7 @@ export type AlertForm = {
   trigger: AlertTrigger;
   tf: string;
   expiry: ExpiryChoice;
-  expiresAt: string; // "YYYY-MM-DDTHH:mm" theo giờ máy, chỉ dùng khi expiry = custom
+  expiresAt: string; // "YYYY-MM-DDTHH:mm" theo múi giờ trong Settings (như giờ hiện ở danh sách alert), chỉ dùng khi expiry = custom
   name: string;
   message: string;
   channels: AlertChannels;
@@ -99,12 +100,31 @@ export function defaultForm(symbol: string, price: number | null, tf: string, ch
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const localInput = (ts: number) => {
-  const d = new Date(ts * 1000);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
 
-export function formFromAlert(a: Alert): AlertForm {
+/** Giá trị cho ô datetime-local: giờ treo tường của `ts` theo múi giờ `tz` của Settings ("local" = giờ máy). */
+export function inputAt(ts: number, tz = "local"): string {
+  if (tz === "local") {
+    const d = new Date(ts * 1000);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const d = new Date((ts + tzOffsetMinutes(tz, ts) * 60) * 1000);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+/** Ngược của `inputAt`: "YYYY-MM-DDTHH:mm" theo múi giờ `tz` -> epoch giây; NaN nếu trống / sai. */
+export function parseInputAt(s: string, tz = "local"): number {
+  if (tz === "local") {
+    const t = new Date(s).getTime();
+    return Number.isFinite(t) ? Math.floor(t / 1000) : NaN;
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(s.trim());
+  if (!m) return NaN;
+  const wall = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) / 1000;
+  const guess = wall - tzOffsetMinutes(tz, wall) * 60;
+  return wall - tzOffsetMinutes(tz, guess) * 60; // lấy lệch giờ tại chính thời điểm đó (giờ mùa hè)
+}
+
+export function formFromAlert(a: Alert, tz = "local"): AlertForm {
   return {
     symbol: a.symbol,
     cond: a.cond,
@@ -112,7 +132,7 @@ export function formFromAlert(a: Alert): AlertForm {
     trigger: a.trigger,
     tf: a.tf,
     expiry: a.expires_at === null ? "none" : "custom",
-    expiresAt: a.expires_at === null ? "" : localInput(a.expires_at),
+    expiresAt: a.expires_at === null ? "" : inputAt(a.expires_at, tz),
     name: a.name,
     message: a.message,
     channels: { ...a.channels },
@@ -121,20 +141,17 @@ export function formFromAlert(a: Alert): AlertForm {
   };
 }
 
-/** Hạn của form (epoch giây) tính từ `now`; null = không hạn; NaN = "custom" nhưng ô ngày giờ trống / sai. */
-export function expiryOf(f: Pick<AlertForm, "expiry" | "expiresAt">, now: number): number | null {
+/** Hạn của form (epoch giây) tính từ `now`; null = không hạn; NaN = "custom" nhưng ô ngày giờ trống / sai. `tz` = múi giờ trong Settings mà ô ngày giờ dùng. */
+export function expiryOf(f: Pick<AlertForm, "expiry" | "expiresAt">, now: number, tz = "local"): number | null {
   if (f.expiry === "none") return null;
-  if (f.expiry === "custom") {
-    const t = new Date(f.expiresAt).getTime();
-    return Number.isFinite(t) ? Math.floor(t / 1000) : NaN;
-  }
+  if (f.expiry === "custom") return parseInputAt(f.expiresAt, tz);
   return Math.floor(now) + parseInt(f.expiry, 10) * 86400;
 }
 
 export type FormCheck = { input: AlertInput | null; errors: Partial<Record<"symbol" | "level" | "name" | "message" | "expiry" | "channels" | "drawing" | "indicator", string>> };
 
 /** Kiểm tra form trước khi gửi (backend vẫn kiểm lại). `known` = danh sách symbol của MT5 (rỗng = chưa tải, không chặn); `channelsInfo` null = chưa biết. */
-export function checkForm(f: AlertForm, now: number, known: string[], channelsInfo: ChannelsInfo | null): FormCheck {
+export function checkForm(f: AlertForm, now: number, known: string[], channelsInfo: ChannelsInfo | null, tz = "local"): FormCheck {
   const errors: FormCheck["errors"] = {};
   const symbol = f.symbol.trim();
   if (!symbol) errors.symbol = "Chọn symbol";
@@ -156,16 +173,21 @@ export function checkForm(f: AlertForm, now: number, known: string[], channelsIn
   }
   if (f.name.trim().length > MAX_NAME) errors.name = `Tên tối đa ${MAX_NAME} ký tự`;
   if (f.message.trim().length > MAX_MESSAGE) errors.message = `Nội dung tối đa ${MAX_MESSAGE} ký tự`;
-  const exp = expiryOf(f, now);
+  const exp = expiryOf(f, now, tz);
   if (exp !== null && (!Number.isFinite(exp) || exp <= now)) errors.expiry = Number.isFinite(exp) ? "Hạn phải ở tương lai" : "Chọn ngày giờ hết hạn";
   if (!f.channels.web && !f.channels.telegram && !f.channels.mt5) errors.channels = "Chọn ít nhất một kênh";
   else if (f.channels.telegram && channelsInfo && !channelsInfo.telegram.linked) errors.channels = "Chưa kết nối Telegram (Settings → Alerts)";
+  else if (f.channels.mt5 && mt5Blocked(channelsInfo)) errors.channels = MT5_OWNER_ONLY;
   if (Object.keys(errors).length > 0) return { input: null, errors };
   return {
     errors,
     input: { symbol, cond: f.cond, level, trigger: f.trigger, tf: f.tf, expires_at: exp, name: f.name.trim(), message: f.message.trim(), channels: f.channels, ...(f.drawing ? { drawing: f.drawing } : {}), ...(f.indicator ? { indicator: f.indicator } : {}) },
   };
 }
+
+export const MT5_OWNER_ONLY = "Kênh MT5 chỉ dành cho chủ máy MT5 (tài khoản Wickloom đầu tiên)";
+/** Backend không cho tài khoản này dùng kênh MT5 (tin đẩy lên điện thoại của chủ terminal). Backend cũ không báo `allowed` thì không chặn. */
+export const mt5Blocked = (info: ChannelsInfo | null): boolean => info?.mt5?.allowed === false;
 
 /** Số alert đang chạy hoặc tạm dừng (backend giới hạn 100 mỗi tài khoản). */
 export const liveCount = (alerts: Alert[]) => alerts.filter((a) => a.state === "active" || a.state === "paused").length;

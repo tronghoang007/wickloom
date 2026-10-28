@@ -6,6 +6,7 @@ import { BarHistory, CalendarFeed, HISTORY_BARS } from "./data";
 import { planUpdate, type Snap } from "./diff";
 import { computeExtras, computeInstance, futureTimes, historyTarget, trimPlot } from "./engine";
 import { instanceShown, plotColor, resolveInputs, showsPriceLabel, type IndicatorInstance } from "./instance";
+import { decimalsOfStep, plotPriceFormat } from "./legend";
 import { clampSlot, effectiveScale, otherPaneKeys, paneIndices, paneKeyOf } from "./layout";
 import { LowerFeed, TICK_TF, capBars, eaBackfill } from "./lower";
 import { trimFootprints, trimObjects, trimProfiles } from "./objects";
@@ -48,8 +49,6 @@ export type PlotValue = { id: string; plot: string; title: string; value: number
 
 /** Báo chart chính có indicator footprint đang hiện không (có thì ẩn nến chính đi, footprint tự vẽ nến). */
 export type FootprintSink = (on: boolean) => void;
-
-const DEFAULT_FORMAT = { type: "price" as const, precision: 2, minMove: 0.01 };
 
 // vị trí của `t` trong mảng thời gian tăng dần (-1 nếu không có)
 function indexOfTime(times: number[], t: number): number {
@@ -112,6 +111,7 @@ export class IndicatorManager {
     private getMainSlot: () => number = () => 0, // số pane riêng nằm trên pane chính
     private getMainPane: () => IPaneApi<Time> | null = () => null, // pane chứa nến chính (để đặt vào đúng vị trí sau khi dựng)
     private onFootprint: FootprintSink = () => {},
+    private getDigits: () => number | null = () => null, // số chữ số giá của chart (như legend); null = suy từ kích thước tick
   ) {
     chart.timeScale().subscribeVisibleLogicalRangeChange(this.onRange);
   }
@@ -229,6 +229,12 @@ export class IndicatorManager {
     });
   }
 
+  /** Số chữ số giá của chart: Chart truyền vào thì theo đó, không thì suy từ kích thước tick của symbol. */
+  private symbolDigits(): number {
+    const d = this.getDigits();
+    return d !== null && Number.isInteger(d) && d >= 0 && d <= 8 ? d : decimalsOfStep(this.getTick());
+  }
+
   private schedule() {
     if (this.timer || this.destroyed) return;
     this.timer = setTimeout(() => {
@@ -262,8 +268,7 @@ export class IndicatorManager {
       const series = def.plots.map((p) => addPlotSeries(this.chart, plotStyle(inst, p).type, paneIndex, sid));
       const hasAnchor = !!(def.levels?.length || def.fills?.length || def.objects || def.profiles || def.footprints);
       const anchor = hasAnchor ? addAnchorSeries(this.chart, paneIndex, sid) : null;
-      if (sid === "left") this.chart.priceScale("left", paneIndex).applyOptions({ visible: true });
-      else if (sid !== "right") this.chart.priceScale(sid, paneIndex).applyOptions({ visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } });
+      if (sid !== "left" && sid !== "right") this.chart.priceScale(sid, paneIndex).applyOptions({ visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } });
       const lines = (def.levels ?? []).map((l) =>
         anchor!.createPriceLine({ price: l.value, color: l.color, lineStyle: LWC_LINE_STYLE[l.lineStyle ?? "dashed"], lineWidth: 1, axisLabelVisible: false, title: "" }),
       );
@@ -289,6 +294,13 @@ export class IndicatorManager {
       }
       this.live.push({ inst, def, series, anchor, lines, fills, objects, profiles, footprints, candleColors: null, lastNa: [], snaps: def.plots.map(() => null), data: [], styleKey: "", anchorKey: "", memo: {} });
     });
+    // Thang trái chỉ hiện khi còn indicator ghim vào nó: chuyển về thang phải / gỡ indicator thì phải ẩn lại (không thì còn dải trục trống).
+    // Bật / tắt ĐỒNG LOẠT mọi pane: LWC lấy bề rộng cột trục trái theo pane 0 nhưng mỗi pane chỉ tạo trục trái khi thang trái của chính nó bật,
+    // lệch nhau là adjustSize ném "Value is null" mỗi frame (cột trục trái vốn chung cả chart, như TV).
+    const anyLeft = this.list.some((inst, n) => scaleId(effectiveScale(inst, byId(inst.id), keys[n]), inst.uid) === "left");
+    try {
+      this.chart.panes().forEach((_, i) => this.chart.priceScale("left", i).applyOptions({ visible: anyLeft }));
+    } catch { /* chart đã bị huỷ */ }
     // Series trên được dựng với pane chính ở trên cùng (pane riêng 1..n); đặt pane chính vào đúng chỗ giữa các pane riêng
     const main = this.getMainPane();
     const slot = clampSlot(this.getMainSlot(), otherPaneKeys(keys).length);
@@ -305,18 +317,13 @@ export class IndicatorManager {
     const levels = (def.levels ?? []).map((lv) => levelStyle(inst, lv));
     const inputs = resolveInputs(def, inst.inputs);
     const active = def.plots.map((p) => p.showIf?.(inputs) ?? true);
-    const key = JSON.stringify([shown, plots, levels, active, showsPriceLabel(inst, def), inst.precision ?? null, l.lastNa]);
+    const priceFormat = plotPriceFormat(inst, def, this.symbolDigits());
+    const key = JSON.stringify([shown, plots, levels, active, showsPriceLabel(inst, def), priceFormat, l.lastNa]);
     if (key === l.styleKey) return;
     l.styleKey = key;
     def.plots.forEach((p, k) => {
       const st = plots[k];
-      const opts: Record<string, unknown> = { ...plotOptions(st), visible: shown && st.visible && !p.hidden && active[k], lastValueVisible: showsPriceLabel(inst, def) && !p.hidden && !l.lastNa[k] };
-      if (st.type !== "histogram") {
-        const volume = def.format === "volume";
-        opts.priceFormat = volume
-          ? { type: "volume", ...(inst.precision === undefined ? {} : { precision: inst.precision }) }
-          : inst.precision === undefined ? DEFAULT_FORMAT : { type: "price", precision: inst.precision, minMove: 10 ** -inst.precision };
-      }
+      const opts: Record<string, unknown> = { ...plotOptions(st), visible: shown && st.visible && !p.hidden && active[k], lastValueVisible: showsPriceLabel(inst, def) && !p.hidden && !l.lastNa[k], priceFormat };
       l.series[k].applyOptions(opts);
     });
     l.anchor?.applyOptions({ visible: shown });

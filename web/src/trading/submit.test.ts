@@ -39,6 +39,17 @@ describe("đặt lệnh xong: bảng đặt lệnh ở thanh bên phải KHÔNG 
     expect(useRailStore.getState().open).toBe("order");
   });
 
+  it("giá gõ có dấu phẩy nghìn gửi đúng giá (\"4,100\" là 4100, không phải 4.1); lot lẻ step thì không gửi gì", async () => {
+    useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "pending" });
+    useTicketStore.getState().patch({ price: "4,100", sl: "4,090", tp: "4,150.5" });
+    expect(await submitDraft()).toBe(true);
+    expect(h.placePending.mock.calls[0][0]).toMatchObject({ price: 4100, sl: 4090, tp: 4150.5, expectedType: "buy_limit" });
+    useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "market" });
+    useTicketStore.getState().patch({ lot: "0.015" });
+    expect(await submitDraft()).toBe(false);
+    expect(h.placeMarket).not.toHaveBeenCalled();
+  });
+
   it("lệnh chờ: nhớ loại lệnh chờ", async () => {
     useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "pending", price: 4100 });
     useTicketStore.getState().patch({ price: "4100.000", tp: "4150.000" });

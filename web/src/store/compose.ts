@@ -57,12 +57,17 @@ export function composeStore<G extends object, P extends object, X extends objec
   if (o.extra) extra = o.extra(setState as (patch: Partial<G & P>) => void);
 
   const subscribe = (listener: () => void) => {
-    let offPane = cur().subscribe(listener);
+    let bound = cur();
+    let offPane = bound.subscribe(listener);
     const offGlobal = g.subscribe(listener);
+    // Đổi pane active, HOẶC thay cả bộ pane (mở layout khác / đăng nhập / đăng xuất: pane mới cùng id "p1") → nghe store của pane mới
     const offActive = useLayoutStore.subscribe((s, prev) => {
-      if (s.activeId === prev.activeId) return;
+      if (s.activeId === prev.activeId && s.panes === prev.panes) return;
+      const next = cur();
+      if (next === bound) return;
       offPane();
-      offPane = cur().subscribe(listener);
+      bound = next;
+      offPane = bound.subscribe(listener);
       listener();
     });
     return () => {

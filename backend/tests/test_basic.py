@@ -79,7 +79,7 @@ def test_ticks_aggregate_and_meta():
     c = TestClient(app)
     rows = c.get("/bars", params={"symbol": "XAUUSD", "tf": "M1"}).json()
     assert rows == [{"t": m, "o": 10, "h": 12, "l": 10, "c": 12, "v": 2}]
-    c.put("/settings/a", params={"scope": "x"}, json={"k": 1})
+    state.meta.put("settings", "a", "x", {"k": 1})
     assert c.get("/settings/a").json()["data"] == {"k": 1}
 
 

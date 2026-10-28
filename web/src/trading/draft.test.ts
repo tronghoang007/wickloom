@@ -1,9 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { COLORS } from "./format";
-import { defaultStop, draftLines, parseNum, type Draft } from "./draft";
+import { defaultStop, draftLines, draftPrices, parseNum, parsePrice, type Draft } from "./draft";
 
 const d = (o: Partial<Draft> = {}): Draft => ({ symbol: "XAUUSDm", side: "buy", mode: "pending", price: "4120", sl: "", tp: "", lot: "0.10", until: false, untilText: "", ...o });
 const Q = { bid: 4130, ask: 4130.2 };
+
+describe("parsePrice (giá có dấu phân cách nghìn)", () => {
+  it("một nhóm nghìn: chọn cách đọc gần giá thị trường hơn", () => {
+    expect(parsePrice("4,050", 4100)).toBe(4050); // trước đây 4.05: SL của Buy gần như không có
+    expect(parsePrice("4.050", 4100)).toBe(4050); // kiểu Việt Nam (chấm = nghìn)
+    expect(parsePrice("1,234", 1.1)).toBe(1.234); // EURUSD: dấu phẩy thập phân
+    expect(parsePrice("1.234", 1.1)).toBe(1.234);
+  });
+  it("không có giá thị trường: giữ cách đọc thập phân như parseNum", () => {
+    expect(parsePrice("4,050")).toBe(4.05);
+  });
+  it("hai nhóm nghìn trở lên chắc chắn là nghìn; có cả hai dấu hoặc không phải dạng nghìn thì như parseNum", () => {
+    expect(parsePrice("1,234,567", 5)).toBe(1234567);
+    expect(parsePrice("1.234.567")).toBe(1234567);
+    expect(parsePrice("4,087.44", 4100)).toBe(4087.44);
+    expect(parsePrice("4.087,44", 4100)).toBe(4087.44);
+    expect(parsePrice("4120,5", 4100)).toBe(4120.5);
+    expect(parsePrice("4120.50", 4100)).toBe(4120.5);
+    expect(parsePrice("", 4100)).toBe(0);
+  });
+  it("draftPrices đọc giá vào / SL / TP của bản nháp theo giá thị trường", () => {
+    expect(draftPrices(d({ price: "4,120", sl: "4,100", tp: "4,150.5" }), Q)).toEqual({ price: 4120, sl: 4100, tp: 4150.5 });
+  });
+});
 
 describe("parseNum", () => {
   it("rỗng = 0, dấu phẩy thập phân, chuỗi dở dang", () => {

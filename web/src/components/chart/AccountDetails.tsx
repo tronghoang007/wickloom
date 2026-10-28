@@ -2,7 +2,7 @@
 
 import { fmtMoney } from "@/lib/mt5Format";
 import type { TradeData } from "@/lib/mt5Api";
-import { accountProfit, dealSummary, fmtPnl, pnlClass } from "@/trading/format";
+import { dealSummary, fmtPnl, pnlClass } from "@/trading/format";
 import { webTrading } from "@/trading/gate";
 import type { ReactNode } from "react";
 

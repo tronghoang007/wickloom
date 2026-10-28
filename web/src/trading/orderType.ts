@@ -40,6 +40,22 @@ export function tooClose(type: PendingType, price: number, bid: number, ask: num
   return marketDistance(type, price, bid, ask) < stopsLevel * pointOf(digits) - pointOf(digits) / 2;
 }
 
+/** Giá cách giá thị trường (giữa Bid / Ask) quá tỉ lệ này thì coi là gõ nhầm (vd "4,050" đọc thành 4.05): không gửi. */
+export const MAX_PRICE_DEVIATION = 0.5;
+
+/** Giá vào / SL / TP xa giá thị trường một cách vô lý (gõ nhầm dấu phân cách, thiếu / thừa chữ số). Chưa có giá thị trường thì không xét. */
+export function tooFar(price: number, bid: number, ask: number): boolean {
+  const mid = (bid + ask) / 2;
+  return price > 0 && mid > 0 && Math.abs(price - mid) > mid * MAX_PRICE_DEVIATION;
+}
+
+const farText = (name: string) => `${name} cách giá thị trường quá xa: kiểm tra lại số đã nhập (dấu phân cách, số chữ số)`;
+
+/** Lot có phải bội của step không (sàn từ chối lot lẻ step; làm tròn hộ lúc gửi thì lot gửi đi khác lot đang hiện). */
+const offStep = (lot: number, spec: LotSpec) => Math.abs(lot / spec.step - Math.round(lot / spec.step)) > 1e-6;
+const lotError = (lot: number, spec: LotSpec): string | null =>
+  !(lot >= spec.min - 1e-9) || lot > spec.max + 1e-9 ? `Lot phải trong khoảng ${spec.min}–${spec.max}` : offStep(lot, spec) ? `Lot phải là bội của ${spec.step}` : null;
+
 export type PendingInput = {
   side: Side;
   price: number;
@@ -59,8 +75,12 @@ export type PendingInput = {
 export function validatePending(i: PendingInput): string | null {
   if (!Number.isFinite(i.price) || i.price <= 0) return "Nhập giá vào";
   if (!i.spec) return "Chưa có thông số lot của symbol (cần EA ≥ 2.12)";
-  if (!(i.lot >= i.spec.min - 1e-9) || i.lot > i.spec.max + 1e-9) return `Lot phải trong khoảng ${i.spec.min}–${i.spec.max}`;
+  const badLot = lotError(i.lot, i.spec);
+  if (badLot) return badLot;
   if (!(i.bid > 0) || !(i.ask > 0)) return "Chưa có giá thị trường";
+  if (tooFar(i.price, i.bid, i.ask)) return farText("Giá vào");
+  if (tooFar(i.sl, i.bid, i.ask)) return farText("SL");
+  if (tooFar(i.tp, i.bid, i.ask)) return farText("TP");
   const type = resolveOrderType(i.side, i.price, i.bid, i.ask);
   if (!type) return "Giá vào đang bằng giá thị trường: dùng nút Buy/Sell";
   const level = i.stopsLevel ?? 0;
@@ -95,8 +115,11 @@ export type MarketInput = {
 /** Lệnh market: vì sao chưa gửi được (null = được). SL/TP đo từ giá ĐÓNG vị thế (Buy đóng ở Bid, Sell đóng ở Ask) và phải cách ít nhất stops level. */
 export function validateMarket(i: MarketInput): string | null {
   if (!i.spec) return "Chưa có thông số lot của symbol (cần EA ≥ 2.12)";
-  if (!(i.lot >= i.spec.min - 1e-9) || i.lot > i.spec.max + 1e-9) return `Lot phải trong khoảng ${i.spec.min}–${i.spec.max}`;
+  const badLot = lotError(i.lot, i.spec);
+  if (badLot) return badLot;
   if (!(i.bid > 0) || !(i.ask > 0)) return "Chưa có giá thị trường";
+  if (tooFar(i.sl, i.bid, i.ask)) return farText("SL");
+  if (tooFar(i.tp, i.bid, i.ask)) return farText("TP");
   const level = i.stopsLevel ?? 0;
   const gap = level * pointOf(i.digits) - pointOf(i.digits) / 2;
   const buy = i.side === "buy";
@@ -134,6 +157,7 @@ export function checkStopMove(i: StopMoveInput): string | null {
   const upper = i.kind === "tp" ? buy : !buy; // TP của Buy và SL của Sell nằm trên mức tham chiếu
   const wrong = upper ? i.price <= ref : i.price >= ref;
   const name = i.kind.toUpperCase();
+  if (tooFar(i.price, i.bid, i.ask)) return farText(name);
   const what = position ? "giá thị trường" : "giá vào";
   if (wrong) return `${name} của lệnh ${buy ? "Buy" : "Sell"} phải ${upper ? "cao" : "thấp"} hơn ${what}`;
   const level = i.stopsLevel ?? 0;

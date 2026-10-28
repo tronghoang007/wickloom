@@ -40,7 +40,7 @@ function ColorButton({
 }: {
   title: string;
   color: string;
-  onChange: (c: string) => void;
+  onChange: (c: string, live?: boolean) => void;
   children: ReactNode;
 }) {
   return (
@@ -144,17 +144,17 @@ export default function StylePanel() {
   const token = (t: string): ReactNode => {
     switch (t) {
       case "lc":
-        return <ColorButton title="Line color" color={d.color} onChange={(c) => api.update({ color: c })}><PenI /></ColorButton>;
+        return <ColorButton title="Line color" color={d.color} onChange={(c, live) => api.update({ color: c }, live)}><PenI /></ColorButton>;
       case "fill":
-        return <ColorButton title="Background color" color={d.color} onChange={(c) => api.update({ color: c })}><BucketI /></ColorButton>;
+        return <ColorButton title="Background color" color={d.color} onChange={(c, live) => api.update({ color: c }, live)}><BucketI /></ColorButton>;
       case "bg":
-        return <ColorButton title="Background color" color={bgValue} onChange={(c) => api.update({ opts: { backgroundColor: c } })}><BucketI /></ColorButton>;
+        return <ColorButton title="Background color" color={bgValue} onChange={(c, live) => api.update({ opts: { backgroundColor: c } }, live)}><BucketI /></ColorButton>;
       case "profit":
-        return <ColorButton title="Profit background color" color={po.profit} onChange={(c) => api.update({ opts: { profit: c } })}><BucketI /></ColorButton>;
+        return <ColorButton title="Profit background color" color={po.profit} onChange={(c, live) => api.update({ opts: { profit: c } }, live)}><BucketI /></ColorButton>;
       case "stop":
-        return <ColorButton title="Stop background color" color={po.stop} onChange={(c) => api.update({ opts: { stop: c } })}><BucketI /></ColorButton>;
+        return <ColorButton title="Stop background color" color={po.stop} onChange={(c, live) => api.update({ opts: { stop: c } }, live)}><BucketI /></ColorButton>;
       case "tc":
-        return <ColorButton title="Text color" color={d.textColor ?? textDefault} onChange={(c) => api.update({ textColor: c })}><TextColorI /></ColorButton>;
+        return <ColorButton title="Text color" color={d.textColor ?? textDefault} onChange={(c, live) => api.update({ textColor: c }, live)}><TextColorI /></ColorButton>;
       case "limit":
         // Như TV: mở bảng đặt lệnh với entry / SL / TP của Position (Long = Buy, Short = Sell)
         return <button className={btn} title="Create limit order" onClick={createLimitOrder}><LimitOrderI /></button>;

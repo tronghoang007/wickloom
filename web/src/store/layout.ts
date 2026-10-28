@@ -153,5 +153,7 @@ export const allPanes = (): Pane[] => {
 };
 export const isActivePane = (id: string) => useLayoutStore.getState().activeId === id;
 
-/** Lưu nốt hình vẽ của mọi chart và đợi server trả lời (đăng nhập/đăng xuất đổi nơi lưu). */
-export const flushAllDrawings = () => Promise.all(allPanes().map((p) => p.draw.getState().api?.flushSave())).then(() => {});
+/** Lưu nốt hình vẽ của mọi chart và đợi server trả lời (đăng nhập/đăng xuất đổi nơi lưu). false = có chart chưa lưu được
+ *  (PUT lỗi, doc vẫn tự thử lại): người gọi không được đổi layout / đăng xuất / xoá lúc này. */
+export const flushAllDrawings = (): Promise<boolean> =>
+  Promise.all(allPanes().map((p) => p.draw.getState().api?.flushSave())).then((r) => r.every((ok) => ok !== false));

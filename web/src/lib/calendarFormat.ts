@@ -69,6 +69,14 @@ export function groupByDay(events: readonly CalEvent[], nowSec: number): DayGrou
 /** Sắp tới trong `withinSec` giây (mặc định 30 phút) và chưa có số thực. */
 export const isSoon = (e: Pick<CalEvent, "time" | "actual">, nowSec: number, withinSec = 1800) => e.actual === null && e.time >= nowSec && e.time - nowSec <= withinSec;
 
+const WINDOW_SEC = 30 * 86400; // biểu tượng lịch trên chart: tải quanh hôm nay ±30 ngày (backend giữ ~45 ngày quá khứ, 14 ngày tới), một lần cho mọi chart
+
+/** Cửa sổ lịch của biểu tượng trên chart quanh `nowSec` (giây), neo vào đầu ngày UTC nên cùng một khoá của kho suốt ngày; vẫn phủ ít nhất ±29 ngày quanh hiện tại. */
+export function calendarWindow(nowSec: number): [number, number] {
+  const day = Math.floor(nowSec / 86400) * 86400;
+  return [day - WINDOW_SEC, day + WINDOW_SEC];
+}
+
 export type CalFilter = { minImportance: number; currencies: readonly string[] | null };
 
 export function filterEvents(events: readonly CalEvent[], f: CalFilter): CalEvent[] {

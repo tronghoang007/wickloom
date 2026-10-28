@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, useSettingsStore } from "@/store/settings";
-import { eventClock, filterEvents, fmtEventValue, groupByDay, impactClass, isSoon, mergeWindow, shortEventName, type CalEvent } from "./calendarFormat";
+import { calendarWindow, eventClock, filterEvents, fmtEventValue, groupByDay, impactClass, isSoon, mergeWindow, shortEventName, type CalEvent } from "./calendarFormat";
 
 const ev = (id: number, time: number, o: Partial<CalEvent> = {}): CalEvent => ({
   id, time, event_id: id, country: "US", currency: "USD", name: `E${id}`, importance: 2, unit: 0, multiplier: 0, digits: 1, time_mode: 0, impact: 0, actual: null, forecast: null, previous: null, revised: null, ...o,
@@ -114,5 +114,17 @@ describe("shortEventName (kiểu Forex Factory)", () => {
     expect(shortEventName("Fed Chair Powell Speaks")).toBe("Fed Chair Powell Speaks");
     expect(shortEventName("FOMC Meeting Minutes")).toBe("FOMC Meeting Minutes");
     expect(shortEventName("")).toBe("");
+  });
+});
+
+describe("calendarWindow", () => {
+  it("cùng một khoá suốt ngày (mọi chart / mọi lần làm mới dùng chung lần tải), vẫn phủ ±29 ngày quanh hiện tại", () => {
+    const day = 20_000 * 86400;
+    expect(calendarWindow(day + 5)).toEqual(calendarWindow(day + 86399));
+    const now = day + 86399;
+    const [from, to] = calendarWindow(now);
+    expect(from).toBeLessThanOrEqual(now - 29 * 86400);
+    expect(to).toBeGreaterThanOrEqual(now + 29 * 86400);
+    expect(to - from).toBeLessThanOrEqual(62 * 86400); // backend cắt ở MAX_RANGE_DAYS = 62
   });
 });

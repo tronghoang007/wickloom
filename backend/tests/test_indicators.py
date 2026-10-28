@@ -22,7 +22,7 @@ CASES = [pytest.param(c, id=f"{k}-{c['id']}") for k, c in enumerate(FIXTURE["cas
 def test_defaults_and_coercion_match_the_web(case):
     got = I.resolve(case["id"], case["given"])
     assert {k: v for k, v in case["resolved"].items() if k in got} == got
-    assert set(case["resolved"]) - set(got) <= {"offset"}  # Offset của MA (dịch plot) không có nghĩa với alert nên không port
+    assert set(case["resolved"]) - set(got) <= {"offset"}  # offset chỉ port cho sma/ema/wma/bb (test_indicator_offset.py), indicator khác bỏ qua
     assert I.INDICATORS[case["id"]]["warmup"](case["resolved"]) == case["warmup"]
 
 

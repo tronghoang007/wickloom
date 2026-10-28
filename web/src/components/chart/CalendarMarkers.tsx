@@ -2,7 +2,7 @@
 
 import type { IChartApi, Logical } from "lightweight-charts";
 import { TF_SECONDS } from "@/lib/api";
-import { eventClock, filterEvents, fmtEventValue, IMPORTANCE_COLOR, impactClass, shortEventName, type CalEvent } from "@/lib/calendarFormat";
+import { calendarWindow, eventClock, filterEvents, fmtEventValue, IMPORTANCE_COLOR, impactClass, shortEventName, type CalEvent } from "@/lib/calendarFormat";
 import { CURRENCY_FLAG, symbolCurrencies } from "@/lib/symbolIcon";
 import { chartGlobal } from "@/store/chart";
 import { useCalendarStore } from "@/store/calendar";
@@ -15,7 +15,6 @@ import { FlagBadge } from "../SymbolIcon";
 const SIZE = 18;
 const GAP_PX = 20; // hai biểu tượng gần hơn thế thì gộp thành một (bấm vào thẻ chi tiết liệt kê hết)
 const AXIS_GAP = 6; // cách mép trên của trục thời gian
-const WINDOW_SEC = 30 * 86400; // tải lịch quanh hôm nay ±30 ngày (backend giữ ~45 ngày quá khứ, 14 ngày tới), một lần cho mọi chart
 const REFRESH_MS = 120_000;
 
 /** Toạ độ x của chỉ số logic THỰC: `logicalToCoordinate` của LWC trả 0 cho số không nguyên, nên nội suy giữa hai nến liền kề (sự kiện nằm giữa nến, hoặc sau nến cuối). */
@@ -78,12 +77,14 @@ export default function CalendarMarkers({ symbol, tf, replay, getChart, getBars,
 
   useEffect(() => {
     if (!show) return;
-    const load = (force: boolean) => {
-      const now = Date.now() / 1000;
-      void ensure(now - WINDOW_SEC, now + WINDOW_SEC, force);
+    // Cửa sổ neo theo ngày: mọi chart (và mọi lần làm mới trong ngày) cùng một khoá của kho, nên dùng chung lần tải / bản còn mới
+    // thay vì mỗi chart mỗi 2 phút tải riêng một cửa sổ lệch vài giây (khoá mới mỗi lần, kho nhớ mãi)
+    const load = () => {
+      const [from, to] = calendarWindow(Date.now() / 1000);
+      void ensure(from, to);
     };
-    load(false);
-    const t = setInterval(() => load(true), REFRESH_MS);
+    load();
+    const t = setInterval(load, REFRESH_MS);
     return () => clearInterval(t);
   }, [show, ensure]);
 

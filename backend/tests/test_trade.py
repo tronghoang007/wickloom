@@ -270,6 +270,29 @@ def test_timeout_keeps_unknown_then_late_result_is_recorded():
     asyncio.run(run())
 
 
+def test_close_after_unknown_close_is_blocked_until_late_result():
+    """Đóng (một phần) quá hạn chưa biết kết quả: đóng tiếp CÙNG vị thế bị chặn (có thể thành đóng hai lần); vị thế khác vẫn đóng được; kết quả muộn về thì mở khoá."""
+    async def run():
+        trade.broker.timeout = 0.05
+        ea = FakeEA()  # không trả lời
+        aid = online(ea)
+        close = {"type": "position_close", "ticket": 111, "volume": 0.05}
+        with pytest.raises(Exception) as e:
+            await trade.broker.run(aid, ea, "u1", close, None)
+        assert e.value.status_code == 504
+        req_id = ea.sent[0]["req_id"]
+        with pytest.raises(Exception) as e:
+            await trade.broker.run(aid, ea, "u1", close, None)
+        assert e.value.status_code == 409 and "#111" in e.value.detail and len(ea.sent) == 1
+        ea.answer = lambda m: OK
+        assert (await trade.broker.run(aid, ea, "u1", {**close, "ticket": 222}, None))["ok"] is True  # vị thế khác không bị chặn
+        trade.broker.resolve({**OK, "req_id": req_id}, aid)  # kết quả muộn của lần đóng đầu
+        assert (await trade.broker.run(aid, ea, "u1", close, None))["ok"] is True
+        assert len(ea.sent) == 3
+
+    asyncio.run(run())
+
+
 def test_one_order_at_a_time_per_account():
     async def run():
         ea = FakeEA()
@@ -299,7 +322,10 @@ def test_cancelled_request_releases_the_account():
         with pytest.raises(asyncio.CancelledError):
             await t
         ea.answer = lambda m: OK
-        assert (await trade.broker.run(aid, ea, "u1", cmd, None))["ok"] is True
+        assert (await trade.broker.run(aid, ea, "u1", {**cmd, "ticket": 6}, None))["ok"] is True  # account không bị khoá
+        with pytest.raises(Exception) as e:  # nhưng đóng lại CÙNG vị thế thì chờ kết quả lần trước (có thể đã tới EA)
+            await trade.broker.run(aid, ea, "u1", cmd, None)
+        assert e.value.status_code == 409
 
     asyncio.run(run())
 

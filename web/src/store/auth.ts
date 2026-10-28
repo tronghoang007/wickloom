@@ -139,8 +139,8 @@ export const useAuthStore = create<State>()((set, get) => {
     },
 
     logout: async () => {
-      // Lưu nốt hình vẽ khi còn cookie; cookie xoá trước thì PUT cuối cùng sẽ bị 401.
-      await flushAllDrawings();
+      // Lưu nốt hình vẽ khi còn cookie; cookie xoá trước thì PUT cuối cùng sẽ bị 401. Chưa lưu được thì huỷ đăng xuất (còn cookie để lưu lại).
+      if (!(await flushAllDrawings())) throw new Error("hình vẽ chưa lưu được");
       await authHooks.beforeLogout?.(); // layout chưa lưu được thì huỷ đăng xuất (còn cookie để lưu lại)
       await authLogout(); // lỗi thì ném ra: vẫn đăng nhập, UI báo cho người dùng
       writeHint(null);

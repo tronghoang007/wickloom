@@ -50,9 +50,22 @@ TF_SECONDS = {
 }
 
 
+def tf_step(tf: str) -> int:
+    """Độ dài (giây) một nến của `tf` để đếm số nến: MN1 dài không đều (TF_SECONDS = 0) nên tính 30 ngày. Không bao giờ trả 0 (chia cho nó)."""
+    return TF_SECONDS.get(tf) or 2592000
+
+
+# Lệch giờ broker - UTC luôn là bội 15 phút. EA tính bằng hai lần đọc đồng hồ (TimeTradeServer - TimeGMT) nên có lúc lệch 1s (vd 10799):
+# để nguyên thì giờ nến lệch 1s -> nến đang gom đóng sớm, nến lạc ghi vào DB
+OFFSET_ROUND = 900
+
+
+def round_offset(offset: int) -> int:
+    return int(round(offset / OFFSET_ROUND)) * OFFSET_ROUND
+
+
 def is_stale(last_t: Optional[int], tf: str) -> bool:
     """Cache chưa có bar nào, hoặc bar cuối đã cũ hơn 2x khung tf -> cần top-up."""
     if last_t is None:
         return True
-    step = TF_SECONDS.get(tf) or TF_SECONDS["MN1"] or 2592000
-    return time.time() - last_t > step * 2
+    return time.time() - last_t > tf_step(tf) * 2

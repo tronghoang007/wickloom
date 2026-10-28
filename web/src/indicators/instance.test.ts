@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { byId } from "./catalog";
-import { coerceInput, inputsText, instanceShown, migrateInstance, migrateInstances, newInstance, plotColor, plotShown, resolveInputs, showsPriceLabel, withPlotColor } from "./instance";
+import { coerceInput, inputsText, instanceShown, migrateInstance, migrateInstances, newInstance, plotColor, plotShown, resetInstance, resolveInputs, showsPriceLabel, withPlotColor } from "./instance";
 
 describe("resolveInputs", () => {
   const sma = byId("sma");
@@ -202,5 +202,17 @@ describe("style của items (mức pivot, profile...)", () => {
       style: { items: { R1: { color: "#ff0000", visible: false, width: 3, lineStyle: "dashed" }, S2: { width: 9, lineStyle: "wavy", color: "red" }, ZZ: { color: "#00ff00" } } },
     });
     expect(m?.style).toEqual({ items: { R1: { color: "#ff0000", visible: false, width: 3, lineStyle: "dashed" } } });
+  });
+});
+
+describe("resetInstance", () => {
+  it("bỏ inputs / style / visibility / output về mặc định, giữ uid, ẩn, pane và thang giá", () => {
+    const inst = {
+      ...newInstance("rsi"), inputs: { length: 21 }, style: { plots: { rsi: { color: "#ffffff" } } }, hidden: true, pane: "main", scale: "left" as const,
+      visibility: { minutes: { on: false, from: 1, to: 59 } }, precision: 4, priceLabel: false, statusValues: false,
+    };
+    expect(resetInstance(inst)).toEqual({ v: inst.v, uid: inst.uid, id: "rsi", inputs: {}, hidden: true, pane: "main", scale: "left" });
+    const plain = newInstance("sma");
+    expect(resetInstance({ ...plain, inputs: { length: 50 } })).toEqual({ v: plain.v, uid: plain.uid, id: "sma", inputs: {} });
   });
 });

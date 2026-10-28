@@ -1,6 +1,6 @@
 import type { SymbolInfo } from "@/lib/api";
 import type { Mt5Account } from "@/lib/mt5Api";
-import { parseNum, type Draft } from "./draft";
+import { draftPrices, parseNum, type Draft } from "./draft";
 import { tradeBlock } from "./gate";
 import { lotSpec } from "./lot";
 import { validateMarket, validatePending } from "./orderType";
@@ -22,14 +22,13 @@ export function draftError(d: Draft, e: DraftEnv): string | null {
   if (gate) return gate;
   const digits = e.sym?.digits ?? 5;
   const lot = parseNum(d.lot);
-  const sl = parseNum(d.sl);
-  const tp = parseNum(d.tp);
+  const { price, sl, tp } = draftPrices(d, e.quote);
   const bid = e.quote?.bid ?? 0;
   const ask = e.quote?.ask ?? 0;
   if (d.mode === "market") return validateMarket({ side: d.side, lot, sl, tp, bid, ask, digits, stopsLevel: e.sym?.stops_level, spec });
   const expiration = d.until && d.untilText ? Math.floor(new Date(d.untilText).getTime() / 1000) : 0;
   return (
-    validatePending({ side: d.side, price: parseNum(d.price), lot, sl, tp, expiration, bid, ask, digits, stopsLevel: e.sym?.stops_level, spec, nowSec: e.nowSec }) ??
+    validatePending({ side: d.side, price, lot, sl, tp, expiration, bid, ask, digits, stopsLevel: e.sym?.stops_level, spec, nowSec: e.nowSec }) ??
     (d.until && !expiration ? "Chọn thời điểm hết hạn" : null)
   );
 }

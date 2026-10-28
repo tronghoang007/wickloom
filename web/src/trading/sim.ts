@@ -10,8 +10,8 @@ import { SIM_ACCOUNT_ID } from "./simId";
 // của Strategy Tester (mở → thấp → cao → đóng nếu nến tăng, mở → cao → thấp → đóng nếu nến giảm), nên lệnh chờ khớp rồi chạm SL / TP trong cùng một nến cũng đúng thứ tự. Đi liền thì khớp
 // đúng mức; nhảy giá (từ giá trước tới giá mở của nến mới) thì khớp ở giá mở như sàn thật (Stop trượt, Limit được giá tốt hơn). Hàm thuần, không đụng store.
 
-/** Thông số của symbol mà sàn cần: lãi/lỗi theo tiền account (null = chưa biết, không nhận lệnh), số chữ số, stops level. */
-export type SimSymbol = { spec: PnlSpec | null; digits: number; stopsLevel: number | null };
+/** Thông số của symbol mà sàn cần: lãi/lỗi theo tiền account (null = chưa biết, không nhận lệnh), số chữ số, stops level, lot tối thiểu / step (thiếu = không kiểm, như EA cũ). */
+export type SimSymbol = { spec: PnlSpec | null; digits: number; stopsLevel: number | null; lot?: { min: number; step: number } | null };
 export type SimEnv = (symbol: string) => SimSymbol;
 
 export type SimBar = { t: number; o: number; h: number; l: number; c: number };
@@ -257,7 +257,10 @@ export function closePosition(b: SimBook, ticket: number, volume: number, env: S
   if (!p) return { book: b, result: fail(10036, `Vị thế #${ticket} không còn`) };
   const q = b.quotes[p.symbol];
   if (!q) return { book: b, result: fail(10021, `Chưa có giá replay của ${p.symbol}`) };
-  const vol = volume > 0 ? Math.min(volume, p.volume) : p.volume;
+  const vol = volume > 0 && volume < p.volume ? volume : p.volume;
+  // như EA (HandlePositionClose): lot đóng phải ≥ lot tối thiểu và là bội của step
+  const lot = env(p.symbol).lot;
+  if (lot && lot.step > 0 && (vol < lot.min - EPS || Math.abs(vol / lot.step - Math.round(vol / lot.step)) > 1e-6)) return { book: b, result: fail(10014, "Khối lượng không hợp lệ (min/max/step của symbol)") };
   const price = closeAt(sideOf(p), q);
   const c = closePart(b, p, vol, price, "web", b.time, env);
   return { book: revalue(c.book, env), result: done({ deal: c.deal, price, volume: vol }) };
@@ -347,7 +350,7 @@ function execute(b: SimBook, t: Trigger, price: number, time: number, env: SimEn
     const o = b.orders.find((x) => x.ticket === t.ticket);
     if (!o || !isPendingType(o.type)) return b;
     const side = sideOfType(o.type);
-    const rest = { ...b, orders: b.orders.filter((x) => x.ticket !== o.ticket) };
+    const rest = revalue({ ...b, orders: b.orders.filter((x) => x.ticket !== o.ticket) }, env); // equity theo giá lúc khớp (giá vừa đổi chưa tính lại lãi/lỗi các vị thế)
     const ev = { ticket: o.ticket, symbol: o.symbol, side, volume: o.volume, price, pnl: 0 };
     if (!enoughMoney(rest, o.symbol, side, o.volume, price, env)) return { ...rest, events: [...rest.events, { ...ev, kind: "nomoney", label: o.type }] };
     const f = fill(rest, { symbol: o.symbol, side, volume: o.volume, price, sl: o.sl, tp: o.tp, order: o.ticket, reason: "web", time }, env);

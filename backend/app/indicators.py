@@ -2,7 +2,8 @@
 Stochastic) để backend tính được khi tắt tab. Kết quả PHẢI khớp web: cùng quy ước na / seed của Pine, cùng thứ tự phép tính. `tests/fixtures/indicators.json` do TypeScript sinh ra
 (web/src/indicators/pyFixtures.test.ts) và cả hai phía cùng được kiểm với nó, nên bên nào đổi công thức thì test bên đó vỡ.
 
-Chỉ port phần cần cho alert: các plot cắt / so sánh được. Không port Offset của MA (dịch plot ra tương lai / quá khứ không có nghĩa với alert tại nến hiện tại)."""
+Chỉ port phần cần cho alert: các plot cắt / so sánh được. Offset của MA / Bollinger dịch đường như trên chart (`shift`), nên alert so đúng đường người dùng nhìn thấy: Offset dương
+lấy giá trị của `offset` nến trước, âm thì nến hiện tại chưa có giá trị (như chart) và alert không nổ."""
 import math
 from collections import deque
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
@@ -151,6 +152,14 @@ def stdev(a: Series, n: int) -> Series:
     return out
 
 
+def shift(a: Series, offset: int) -> Series:
+    """Như `shiftBy` của web (engine.ts) nhưng giữ đúng độ dài: phần tử i là a[i - offset], ngoài mảng là NaN (phần tương lai của Offset dương bỏ đi)."""
+    if offset == 0:
+        return a
+    n = len(a)
+    return [a[i - offset] if 0 <= i - offset < n else NAN for i in range(n)]
+
+
 def change(a: Series) -> Series:
     return [NAN if i == 0 else x - a[i - 1] for i, x in enumerate(a)]
 
@@ -236,6 +245,7 @@ def _smooth_inputs(default: str = "None") -> List[Dict[str, Any]]:
 
 
 _SRC = _inp("src", "source", "close")
+_OFFSET = _inp("offset", "int", 0, min=-500, max=500)  # offsetInput() của web (defs/common.ts)
 _SMOOTH_PLOTS = ("sm", "smUpper", "smLower")
 
 
@@ -245,16 +255,16 @@ def _length(default: int, key: str = "length") -> Dict[str, Any]:
 
 def _c_sma(bars: Bars, i: Dict[str, Any]) -> Dict[str, Series]:
     m = sma(source(bars, i["src"]), i["length"])
-    return {"sma": m, **_smoothing(i, m, [b["v"] for b in bars])}
+    return {"sma": shift(m, i["offset"]), **_smoothing(i, m, [b["v"] for b in bars])}  # Smoothing tính trên đường chưa dịch và không dịch (như web)
 
 
 def _c_ema(bars: Bars, i: Dict[str, Any]) -> Dict[str, Series]:
     m = ema(source(bars, i["src"]), i["length"])
-    return {"ema": m, **_smoothing(i, m, [b["v"] for b in bars])}
+    return {"ema": shift(m, i["offset"]), **_smoothing(i, m, [b["v"] for b in bars])}
 
 
 def _c_wma(bars: Bars, i: Dict[str, Any]) -> Dict[str, Series]:
-    return {"wma": wma(source(bars, i["src"]), i["length"])}
+    return {"wma": shift(wma(source(bars, i["src"]), i["length"]), i["offset"])}
 
 
 def _c_rsi(bars: Bars, i: Dict[str, Any]) -> Dict[str, Series]:
@@ -277,7 +287,8 @@ def _c_macd(bars: Bars, i: Dict[str, Any]) -> Dict[str, Series]:
 def _c_bb(bars: Bars, i: Dict[str, Any]) -> Dict[str, Series]:
     s, n, k = source(bars, i["src"]), i["length"], float(i["mult"])
     basis, dev = ma(i["maType"], s, n, [b["v"] for b in bars]), stdev(s, n)
-    return {"basis": basis, "upper": [x + k * dev[j] for j, x in enumerate(basis)], "lower": [x - k * dev[j] for j, x in enumerate(basis)]}
+    off = i["offset"]
+    return {"basis": shift(basis, off), "upper": shift([x + k * dev[j] for j, x in enumerate(basis)], off), "lower": shift([x - k * dev[j] for j, x in enumerate(basis)], off)}
 
 
 def _c_stoch(bars: Bars, i: Dict[str, Any]) -> Dict[str, Series]:
@@ -290,15 +301,15 @@ def _c_stoch(bars: Bars, i: Dict[str, Any]) -> Dict[str, Series]:
 # id -> {inputs, plots (id: tên hiện trong hộp thoại alert), warmup, compute}. Thứ tự input / plot và mặc định đúng như web (defs/overlays.ts, defs/oscillators.ts).
 INDICATORS: Dict[str, Dict[str, Any]] = {
     "sma": {
-        "inputs": [_length(9), _SRC, *_smooth_inputs()], "plots": {"sma": "MA", "sm": "SMA-based MA", "smUpper": "Upper Bollinger Band", "smLower": "Lower Bollinger Band"},
+        "inputs": [_length(9), _SRC, _OFFSET, *_smooth_inputs()], "plots": {"sma": "MA", "sm": "SMA-based MA", "smUpper": "Upper Bollinger Band", "smLower": "Lower Bollinger Band"},
         "warmup": lambda i: i["length"] + _smooth_warmup(i), "compute": _c_sma,
     },
     "ema": {
-        "inputs": [_length(9), _SRC, *_smooth_inputs()], "plots": {"ema": "EMA", "sm": "EMA-based MA", "smUpper": "Upper Bollinger Band", "smLower": "Lower Bollinger Band"},
+        "inputs": [_length(9), _SRC, _OFFSET, *_smooth_inputs()], "plots": {"ema": "EMA", "sm": "EMA-based MA", "smUpper": "Upper Bollinger Band", "smLower": "Lower Bollinger Band"},
         "warmup": lambda i: _warm(4, i["length"]) + _smooth_warmup(i), "compute": _c_ema,
     },
     "wma": {
-        "inputs": [_length(9), _SRC], "plots": {"wma": "WMA"}, "warmup": lambda i: i["length"], "compute": _c_wma,
+        "inputs": [_length(9), _SRC, _OFFSET], "plots": {"wma": "WMA"}, "warmup": lambda i: i["length"], "compute": _c_wma,
     },
     "rsi": {
         "inputs": [_length(14), _SRC, *_smooth_inputs("SMA")], "plots": {"rsi": "RSI", "sm": "RSI-based MA", "smUpper": "Upper Bollinger Band", "smLower": "Lower Bollinger Band"},
@@ -310,7 +321,7 @@ INDICATORS: Dict[str, Dict[str, Any]] = {
         "warmup": lambda i: _ma_warmup(i["oscMa"], max(i["fast"], i["slow"])) + _ma_warmup(i["signalMa"], i["signal"]), "compute": _c_macd,
     },
     "bb": {
-        "inputs": [_length(20), _inp("maType", "select", "SMA", options=MA_TYPES), _SRC, _inp("mult", "float", 2.0, min=0.001)],
+        "inputs": [_length(20), _inp("maType", "select", "SMA", options=MA_TYPES), _SRC, _inp("mult", "float", 2.0, min=0.001), _OFFSET],
         "plots": {"basis": "Basis", "upper": "Upper", "lower": "Lower"}, "warmup": lambda i: _ma_warmup(i["maType"], i["length"]), "compute": _c_bb,
     },
     "stoch": {
@@ -391,8 +402,9 @@ HISTORY_CAP = 3000
 
 
 def history_need(spec: Dict[str, Any]) -> int:
-    """Số nến cần có (đã đóng) để giá trị hội tụ như web: warmup của indicator cộng dư, kẹp vào [HISTORY_FLOOR, HISTORY_CAP]."""
-    return max(HISTORY_FLOOR, min(HISTORY_CAP, warmup(spec) + 100))
+    """Số nến cần có (đã đóng) để giá trị hội tụ như web: warmup của indicator (cộng Offset dương: giá trị ở nến hiện tại là của `offset` nến trước) cộng dư,
+    kẹp vào [HISTORY_FLOOR, HISTORY_CAP]."""
+    return max(HISTORY_FLOOR, min(HISTORY_CAP, warmup(spec) + max(0, int(spec["inputs"].get("offset", 0))) + 100))
 
 
 def compute(spec: Dict[str, Any], bars: Bars) -> Tuple[Series, Optional[Series]]:

@@ -6,7 +6,7 @@ import { chartGlobal, useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { useRailStore } from "@/store/rail";
 import { useOrderState } from "@/trading/actions";
-import { parseNum, type Draft } from "@/trading/draft";
+import { draftPrices, parseNum, parsePrice, type Draft } from "@/trading/draft";
 import { draftError } from "@/trading/draftCheck";
 import { cancelOwnerEdits, clearEdit, confirmOwnerEdits, pendingFor, seedEditStop, setEditPrice, useEditBridge } from "@/trading/editBridge";
 import { filledAs } from "@/trading/filled";
@@ -95,8 +95,8 @@ function ModifyPanel({ owner }: { owner: string }) {
   // đóng một phần: cần biết step và vị thế lớn hơn lot tối thiểu (như tab Positions); thiếu thì chỉ có nút Close đóng hết
   const closeSpec = pos && sym?.volume_min && sym.volume_step && pos.volume > sym.volume_min + 1e-9 ? { min: sym.volume_min, max: pos.volume, step: sym.volume_step } : null;
   const typed = part && pos && part.vol === pos.volume ? part.text : null;
-  const want = pos ? closeLot(typed, pos.volume, closeSpec) : 0;
-  const partial = pos !== undefined && closeSpec !== null && want < pos.volume - 1e-9;
+  const want = pos ? closeLot(typed, pos.volume, closeSpec) : 0; // null = ô lot đang nhập không phải số dương: chưa đóng được
+  const partial = pos !== undefined && closeSpec !== null && want !== null && want < pos.volume - 1e-9;
   const btn = "flex h-11 w-full cursor-pointer items-center justify-center rounded-lg text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55";
   return (
     <div role="dialog" aria-label="Modify order" className="flex min-h-0 flex-1 flex-col text-[var(--fg)]">
@@ -126,7 +126,7 @@ function ModifyPanel({ owner }: { owner: string }) {
           <span className="mb-1.5 block text-xs text-[var(--muted)]">Giá vào</span>
           {ord ? (
             <Cell aria="Entry price" title="Giá vào" value={fmtPx(entryNow, digits)} deferred onCommit={(v) => {
-              const n = parseNum(v);
+              const n = parsePrice(v, entryWas);
               if (n > 0) setEditPrice(`o:${ticket}`, snapPrice(n, tick, digits ?? 5));
             }} />
           ) : (
@@ -163,7 +163,7 @@ function ModifyPanel({ owner }: { owner: string }) {
                     className={`${cellField} text-center`}
                     value={typed ?? fmtLotValue(pos.volume, closeSpec)}
                     onChange={(e) => setPart({ vol: pos.volume, text: e.target.value })}
-                    onBlur={() => typed !== null && setPart({ vol: pos.volume, text: fmtLotValue(want, closeSpec) })}
+                    onBlur={() => typed !== null && want !== null && setPart({ vol: pos.volume, text: fmtLotValue(want, closeSpec) })}
                     onKeyDown={(e) => {
                       e.stopPropagation(); // phím trong ô nhập không phải phím tắt của chart
                       if (e.key === "Enter") e.currentTarget.blur();
@@ -174,7 +174,7 @@ function ModifyPanel({ owner }: { owner: string }) {
               </span>
             </div>
             <div className="mb-5 flex">
-              <LotSlider className="flex-1" spec={closeSpec} value={want} onChange={(lot) => setPart({ vol: pos.volume, text: fmtLotValue(lot, closeSpec) })} />
+              <LotSlider className="flex-1" spec={closeSpec} value={want ?? 0} onChange={(lot) => setPart({ vol: pos.volume, text: fmtLotValue(lot, closeSpec) })} />
             </div>
           </div>
         )}
@@ -187,8 +187,14 @@ function ModifyPanel({ owner }: { owner: string }) {
           <button type="button" disabled={!pending} onClick={() => cancelOwnerEdits(owner)} className={`${btn} border border-[var(--border)] hover:bg-[var(--hover)]`}>
             Discard
           </button>
-          <button type="button" disabled={busy} onClick={() => (pos ? askClosePosition(pos, partial ? want : 0) : askCancelOrder(ord!))} className={`${btn} border border-[#f23645] text-[#f23645] hover:bg-[#f23645]/10`}>
-            {pos ? (partial ? `Close ${fmtLotValue(want, closeSpec!)} lot` : "Close") : "Delete"}
+          <button
+            type="button"
+            disabled={busy || want === null}
+            title={want === null ? "Nhập số lot cần đóng" : undefined}
+            onClick={() => (pos ? want !== null && askClosePosition(pos, partial ? want : 0) : askCancelOrder(ord!))}
+            className={`${btn} border border-[#f23645] text-[#f23645] hover:bg-[#f23645]/10`}
+          >
+            {pos ? (partial && want !== null ? `Close ${fmtLotValue(want, closeSpec!)} lot` : "Close") : "Delete"}
           </button>
         </div>
       </div>
@@ -233,7 +239,7 @@ function ModifyStop({ kind, keyId, was, now, buy, entry, lot, digits, tick, spec
         <span>P/L</span>
       </div>
       <div className={COLS}>
-        <Cell aria={`${name} price`} title="Price" value={on ? fmtPx(now, digits) : ""} disabled={!on} deferred onCommit={(v) => set(parseNum(v))} />
+        <Cell aria={`${name} price`} title="Price" value={on ? fmtPx(now, digits) : ""} disabled={!on} deferred onCommit={(v) => set(parsePrice(v, now > 0 ? now : entry))} />
         <Cell aria={`${name} points`} title="Points" value={points} disabled={!on || !(entry > 0)} deferred onCommit={(v) => {
           const n = signed(v);
           if (n !== null) set(entry + dir * n * 10 ** -digits);
@@ -337,7 +343,7 @@ type StopProps = {
 // Take profit / Stop loss: bật tắt bằng ô tick, ba ô Giá | Điểm | Lãi (Lỗ) liên thông với nhau
 function StopRow({ kind, d, entry, lot, digits, tick, spec, ccy }: StopProps) {
   const patch = useTicketStore.getState().patch;
-  const value = parseNum(d[kind]);
+  const value = parsePrice(d[kind], entry > 0 ? entry : undefined);
   const on = d[kind].trim() !== "";
   const profit = kind === "tp";
   const set = (p: number | null) => patch({ [kind]: p !== null && p > 0 ? snapPrice(p, tick, digits).toFixed(digits) : "" });
@@ -413,7 +419,7 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
 
   const buy = d.side === "buy";
   const market = d.mode === "market";
-  const price = parseNum(d.price);
+  const { price, sl, tp } = draftPrices(d, quote);
   const lot = parseNum(d.lot);
   // Lot ghi vào bản nháp (đã làm tròn theo step) và nhớ cho account × symbol: lần mở bảng sau và lệnh nhanh ở menu chuột phải dùng lot này
   const setLot = (v: number) => {
@@ -421,8 +427,6 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
     patch({ lot: fmtLotValue(v, spec) });
     if (account) writeLot(account.id, d.symbol, v);
   };
-  const sl = parseNum(d.sl);
-  const tp = parseNum(d.tp);
   const bid = quote?.bid ?? 0;
   const ask = quote?.ask ?? 0;
   const type = !market && quote && price > 0 ? resolveOrderType(d.side, price, bid, ask) : null;

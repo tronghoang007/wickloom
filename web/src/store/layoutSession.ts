@@ -47,7 +47,7 @@ const RETRY_MS = 5000;
 
 type KV = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 type Plan = { kind: "open"; id: string } | { kind: "create"; id: string; name: string; announce?: boolean };
-type Pending = { uid: string; entries: Entry[]; plan: Plan };
+type Pending = { uid: string; entries?: Entry[]; plan: Plan };
 
 export function toEntry(row: Row): Entry {
   const p = parseLayoutDoc(row.data);
@@ -177,6 +177,8 @@ export function createLayoutSession(
 
   function leaveUser() {
     clearRetry();
+    if (cacheTimer) clearTimeout(cacheTimer); // bản cache chờ ghi của user cũ: ghi lúc này sẽ vào key của người khác
+    cacheTimer = null;
     sync?.abandon();
     sync = null;
     unwatch?.();
@@ -259,7 +261,9 @@ export function createLayoutSession(
       if (stillUser(user)) mode = "user";
     } catch {
       if (!stillUser(user)) return;
-      // backend lỗi: giữ nguyên màn hình hiện có (cache), tuyệt đối không ghi gì, thử lại
+      // backend lỗi: giữ nguyên màn hình hiện có (cache), tuyệt đối không ghi gì, thử lại. Giữ lại kế hoạch đã chọn lúc đăng nhập
+      // (vd khách bấm Save → lưu chart này thành layout mới), danh sách layout thì đọc lại vì có thể đã đổi.
+      if (mine) pending = { uid: mine.uid, plan: mine.plan };
       set({ saveState: "error" });
       retryTimer = setTimeout(() => {
         if (stillUser(user)) entering = enterUser(user);
@@ -267,40 +271,53 @@ export function createLayoutSession(
     }
   }
 
-  // Auth báo "vừa xác thực, chưa chuyển hình khách": quyết định layout nào sẽ mở để hình khách đi vào đúng layout đó.
-  authHooks.beforeLogin = async (user) => {
-    let entries: Entry[];
-    try {
-      entries = await fetchEntries();
-    } catch {
-      return; // để enterUser tự xử lý lỗi
-    }
-    const intent = saveIntent;
-    saveIntent = false;
-    let plan: Plan;
-    if (entries.filter((e) => e.doc).length === 0) plan = { kind: "create", id: DEFAULT_LAYOUT_ID, name: "Default" };
-    else if (intent)
-      plan = {
-        kind: "create",
-        id: crypto.randomUUID(),
-        name: `Chart ${new Date(now()).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`,
-        announce: true, // không ghi đè layout có sẵn: lưu thành layout mới rồi báo
-      };
-    else plan = decide(entries, user.id);
-    pending = { uid: user.id, entries, plan };
-    return { layoutId: plan.kind === "open" ? plan.id : entries.some((e) => e.id === plan.id) ? undefined : plan.id };
-  };
+  // Đăng ký mỗi lần start() (stop() gỡ chúng; Fast Refresh chạy lại effect: stop rồi start trên cùng phiên).
+  function bindHooks() {
+    // Auth báo "vừa xác thực, chưa chuyển hình khách": quyết định layout nào sẽ mở để hình khách đi vào đúng layout đó.
+    authHooks.beforeLogin = async (user) => {
+      let entries: Entry[];
+      try {
+        entries = await fetchEntries();
+      } catch {
+        return; // để enterUser tự xử lý lỗi
+      }
+      const intent = saveIntent;
+      saveIntent = false;
+      let plan: Plan;
+      if (entries.filter((e) => e.doc).length === 0) plan = { kind: "create", id: DEFAULT_LAYOUT_ID, name: "Default" };
+      else if (intent)
+        plan = {
+          kind: "create",
+          id: crypto.randomUUID(),
+          name: `Chart ${new Date(now()).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`,
+          announce: true, // không ghi đè layout có sẵn: lưu thành layout mới rồi báo
+        };
+      else plan = decide(entries, user.id);
+      pending = { uid: user.id, entries, plan };
+      return { layoutId: plan.kind === "open" ? plan.id : entries.some((e) => e.id === plan.id) ? undefined : plan.id };
+    };
 
-  authHooks.beforeLogout = async () => {
-    if (!sync) return;
-    await sync.flush();
-    if (sync.state === "error") throw new Error("layout chưa lưu được");
-  };
+    authHooks.beforeLogout = async () => {
+      if (!sync) return;
+      await sync.flush();
+      if (sync.state === "error") throw new Error("layout chưa lưu được");
+    };
+  }
 
   function onAuth(s: ReturnType<typeof useAuthStore.getState>, prev?: ReturnType<typeof useAuthStore.getState>) {
-    if (prev?.expired && !s.expired) void sync?.resume(); // đăng nhập lại sau khi hết phiên: ghi tiếp phần đang giữ
+    const sameUser = s.status === "user" && s.user?.id === uid;
+    // đăng nhập lại sau khi hết phiên: ghi tiếp phần đang giữ - CHỈ khi vẫn là user cũ (cookie giờ là của người vừa đăng nhập)
+    if (prev?.expired && !s.expired && sameUser) void sync?.resume();
     if (s.status === "user" && s.user) {
       if (mode === "user" && uid === s.user.id) return;
+      if ((mode === "user" || mode === "optimistic") && uid !== s.user.id) {
+        // đổi thẳng sang tài khoản khác (đăng nhập lại lúc hết phiên bằng email khác...): màn hình đang là layout của user cũ,
+        // không được lưu sang tài khoản mới. Bỏ sync cũ (không PUT), dựng lại màn hình khách rồi mới vào user mới.
+        if (sync && (sync.state === "expired" || sync.state === "error")) toast("Thay đổi chưa lưu của tài khoản trước đã bị bỏ");
+        const keep = pending?.uid === s.user.id ? pending : null; // kế hoạch beforeLogin của chính user mới (đăng ký lúc hết phiên)
+        leaveUser();
+        pending = keep;
+      }
       entering = enterUser(s.user);
     } else if (s.status === "guest" && mode !== "guest") leaveUser();
   }
@@ -316,9 +333,9 @@ export function createLayoutSession(
   async function settleCurrent(): Promise<boolean> {
     if (!sync) return true;
     await sync.flush();
-    await flushAllDrawings();
-    if (sync.state === "error" || sync.state === "expired") {
-      toast("Chưa lưu được layout hiện tại — thử lại sau");
+    const drawn = await flushAllDrawings();
+    if (sync.state === "error" || sync.state === "expired" || !drawn) {
+      toast(drawn ? "Chưa lưu được layout hiện tại — thử lại sau" : "Chưa lưu được hình vẽ của layout hiện tại — thử lại sau");
       return false;
     }
     return true;
@@ -352,6 +369,7 @@ export function createLayoutSession(
         unwatch = watch();
         set({ saveState: "loading" });
       } else enterGuest(true, startOpts.guestInit);
+      bindHooks();
       offAuth = useAuthStore.subscribe(onAuth);
       offUnload = opts.onUnload?.(() => sync?.flushOnUnload()) ?? null;
       onAuth(useAuthStore.getState());
@@ -453,13 +471,26 @@ export function createLayoutSession(
         return;
       }
       const current = id === useLayoutStore.getState().layoutId;
-      if (current) {
-        sync?.abandon(); // flush sẽ tạo lại chính layout đang xoá
-        await flushAllDrawings();
+      const doomed = current ? sync : null;
+      try {
+        if (doomed) {
+          doomed.abandon(); // flush sẽ tạo lại chính layout đang xoá
+          // hình vẽ còn đang thử lưu lại: xoá lúc này thì lần thử sau sẽ tạo lại hàng hình vẽ của layout đã xoá
+          if (!(await flushAllDrawings())) throw new Error("hình vẽ chưa lưu được");
+        }
+        await deleteLayoutDoc(id);
+      } catch {
+        // chưa xoá được: layout vẫn là layout đang mở, autosave phải chạy lại (không thì "Saved" mà không lưu gì)
+        if (doomed && sync === doomed) doomed.revive();
+        toast("Không xoá được layout — thử lại sau");
+        return;
       }
-      await deleteLayoutDoc(id);
       const suffix = `__${id}`;
-      for (const d of await fetchDrawingRows()) if (d.id.endsWith(suffix)) await deleteDrawingDoc(d.id);
+      try {
+        for (const d of await fetchDrawingRows()) if (d.id.endsWith(suffix)) await deleteDrawingDoc(d.id);
+      } catch {
+        /* layout đã xoá: hình vẽ còn sót chỉ là rác trên server, vẫn chuyển sang layout khác */
+      }
       set({ entries: others });
       if (current) {
         const next = others.find((e) => e.doc);

@@ -139,13 +139,17 @@ export async function fetchSymbols(): Promise<SymbolInfo[]> {
 }
 
 // Watchlist của user đăng nhập: 1 document `/me/watchlist` (backend gắn chủ sở hữu theo phiên). Khách không gọi.
+// 404 = chưa có watchlist ([]); lỗi khác (401, 5xx, mạng) thì ném ra - coi là rỗng rồi lưu đè sẽ xoá watchlist thật.
 export async function getWatchlist(): Promise<string[]> {
   const r = await apiFetch("/me/watchlist");
-  if (!r.ok) return [];
+  if (r.status === 404) return [];
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const row = await r.json();
   return Array.isArray(row?.data?.symbols) ? row.data.symbols : [];
 }
 
+/** Ném lỗi khi không lưu được (người gọi báo cho người dùng). */
 export async function saveWatchlist(symbols: string[]): Promise<void> {
-  await apiFetch("/me/watchlist", { method: "PUT", body: JSON.stringify({ symbols }) }).catch(() => {});
+  const r = await apiFetch("/me/watchlist", { method: "PUT", body: JSON.stringify({ symbols }) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }

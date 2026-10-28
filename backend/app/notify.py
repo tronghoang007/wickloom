@@ -368,11 +368,12 @@ class Mt5Push:
 
 
 class Dispatcher:
-    """Nhận các lần nổ, giao qua kênh alert bật, ghi nhật ký kèm kết quả từng kênh. Chạy ở thread nền; `handle` đồng bộ cho test."""
+    """Nhận các lần nổ, giao qua kênh alert bật, ghi nhật ký kèm kết quả từng kênh. Hai thread nền cố định: thread chính ghi nhật ký và giao web ngay, Telegram / MT5 (có thể chờ
+    mạng hàng chục giây khi lỗi hoặc bị giới hạn tốc độ) chuyển sang thread thứ hai, nên một lần gửi Telegram chậm không làm trễ toast của các alert nổ sau. `handle` đồng bộ cho test."""
 
     def __init__(self, *, send_web: Callable[[str, Dict[str, Any]], int], telegram: Telegram, chat_of: Callable[[str], Optional[int]],
                  mt5: Mt5Push, log_add: Callable[[Fired], int], log_set: Callable[[int, Dict[str, str]], None],
-                 coalesce: float = 0.2):
+                 coalesce: float = 0.2, mt5_allowed: Callable[[str], bool] = lambda user_id: True):
         self.send_web = send_web
         self.telegram = telegram
         self.chat_of = chat_of
@@ -380,14 +381,24 @@ class Dispatcher:
         self.log_add = log_add
         self.log_set = log_set
         self.coalesce = coalesce
+        self.mt5_allowed = mt5_allowed
         self._q: "queue.Queue[Fired]" = queue.Queue()
+        self._slow_q: "queue.Queue[List[Tuple[Fired, int, Dict[str, str]]]]" = queue.Queue()
         self._thread: Optional[threading.Thread] = None
+        self._slow_thread: Optional[threading.Thread] = None
 
     def submit(self, f: Fired) -> None:
         self._q.put(f)
 
     def handle(self, batch: List[Fired]) -> None:
-        logs: List[Tuple[Fired, int, Dict[str, str]]] = []
+        self.handle_slow(self.handle_fast(batch))
+
+    def _slow(self, f: Fired) -> bool:
+        return bool(f.alert["channels"].get("telegram") or f.alert["channels"].get("mt5"))
+
+    def handle_fast(self, batch: List[Fired]) -> List[Tuple[Fired, int, Dict[str, str]]]:
+        """Ghi nhật ký + giao web cho cả lô; lần nổ chỉ có web thì xong luôn. Trả các lần nổ còn phải gửi Telegram / MT5."""
+        pending: List[Tuple[Fired, int, Dict[str, str]]] = []
         for f in batch:
             res: Dict[str, str] = {}
             ch = f.alert["channels"]
@@ -400,20 +411,42 @@ class Dispatcher:
                     msg = {"type": "alert_notice", "kind": f.kind, "title": f.alert["name"], "text": f.line, "message": f.alert["message"], "symbol": f.alert["symbol"], "time": f.time, "log_id": log_id}
                 n = self.send_web(f.alert["user_id"], msg)
                 res["web"] = "ok" if n else "không có tab Wickloom nào đang mở"
-            logs.append((f, log_id, res))
+            if self._slow(f):
+                pending.append((f, log_id, res))
+            else:
+                self._done(f, log_id, res)
+        return pending
+
+    def handle_slow(self, logs: List[Tuple[Fired, int, Dict[str, str]]]) -> None:
+        """Telegram rồi MT5 (nhiều alert cùng lô gộp một tin MT5), rồi ghi kết quả từng kênh. Lỗi của một lần nổ không làm mất kết quả các lần khác."""
         for f, _, res in logs:
             if f.alert["channels"].get("telegram"):
                 chat = self.chat_of(f.alert["user_id"])
-                res["telegram"] = "chưa kết nối Telegram" if chat is None else self.telegram.send(chat, telegram_text(f))
-        pushed = [(f, res) for f, _, res in logs if f.alert["channels"].get("mt5")]
+                try:
+                    res["telegram"] = "chưa kết nối Telegram" if chat is None else self.telegram.send(chat, telegram_text(f))
+                except Exception as exc:  # lỗi lạ (không phải lỗi mạng đã bắt trong send): chỉ ghi tên lỗi, không in URL có token
+                    res["telegram"] = f"lỗi ({type(exc).__name__})"
+        pushed = []
+        for f, _, res in logs:
+            if f.alert["channels"].get("mt5"):
+                if self.mt5_allowed(f.alert["user_id"]):
+                    pushed.append((f, res))
+                else:
+                    res["mt5"] = "kênh MT5 chỉ dành cho chủ máy MT5"
         if pushed:
             fs = [f for f, _ in pushed]
-            result = self.mt5.send(push_text(fs[0]) if len(fs) == 1 else push_merged(fs))
+            try:
+                result = self.mt5.send(push_text(fs[0]) if len(fs) == 1 else push_merged(fs))
+            except Exception as exc:
+                result = f"lỗi ({type(exc).__name__})"
             for _, res in pushed:
                 res["mt5"] = result
         for f, log_id, res in logs:
-            self.log_set(log_id, res)
-            self.send_web(f.alert["user_id"], {"type": "alert_delivery", "log_id": log_id, "alert_id": f.alert["id"], "results": res})
+            self._done(f, log_id, res)
+
+    def _done(self, f: Fired, log_id: int, res: Dict[str, str]) -> None:
+        self.log_set(log_id, res)
+        self.send_web(f.alert["user_id"], {"type": "alert_delivery", "log_id": log_id, "alert_id": f.alert["id"], "results": res})
 
     def run(self) -> None:
         while True:
@@ -426,7 +459,22 @@ class Dispatcher:
                 except queue.Empty:
                     break
             try:
-                self.handle(batch)
+                pending = self.handle_fast(batch)
+                if pending:
+                    self._slow_q.put(pending)
+            except Exception as exc:
+                print(f"alert dispatch loi: {type(exc).__name__}: {exc}")
+
+    def run_slow(self) -> None:
+        while True:
+            logs = self._slow_q.get()
+            while len(logs) < 50:  # các lô dồn lại lúc đang chờ Telegram / MT5: gửi gộp một lượt
+                try:
+                    logs = logs + self._slow_q.get_nowait()
+                except queue.Empty:
+                    break
+            try:
+                self.handle_slow(logs)
             except Exception as exc:
                 print(f"alert dispatch loi: {type(exc).__name__}: {exc}")
 
@@ -434,6 +482,9 @@ class Dispatcher:
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(target=self.run, name="alert-dispatch", daemon=True)
             self._thread.start()
+        if self._slow_thread is None or not self._slow_thread.is_alive():
+            self._slow_thread = threading.Thread(target=self.run_slow, name="alert-dispatch-slow", daemon=True)
+            self._slow_thread.start()
 
 
 class Ticker:

@@ -67,8 +67,10 @@ def ingest(msg: Dict[str, Any], now: Optional[float] = None) -> int:
     lo = _int(msg.get("from"), 0) or min(e["time"] for e in evs)
     hi = _int(msg.get("to"), 0) or max(e["time"] for e in evs)
     keep = {e["id"] for e in evs}
+    # Danh sách bị cắt (EA >= 2.20 báo `partial` khi lịch nhiều hơn số nó gửi; backend cũng cắt ở MAX_EVENTS): thiếu sự kiện không có nghĩa là bị huỷ, chỉ ghi thêm / sửa
+    partial = msg.get("partial") is True or (isinstance(raw, list) and len(raw) > MAX_EVENTS)
     with state.meta.tx() as db:
-        for (i,) in db.execute("SELECT id FROM calendar_events WHERE time BETWEEN ? AND ?", (lo, hi)).fetchall():
+        for (i,) in [] if partial else db.execute("SELECT id FROM calendar_events WHERE time BETWEEN ? AND ?", (lo, hi)).fetchall():
             if i not in keep:
                 db.execute("DELETE FROM calendar_events WHERE id=?", (i,))
         db.executemany(

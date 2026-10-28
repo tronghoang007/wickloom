@@ -107,10 +107,17 @@ export class LayoutSync {
     this.clearTimers();
   }
 
-  /** Bỏ sync mà KHÔNG lưu (layout vừa bị xoá: flush sẽ tạo lại nó). */
+  /** Bỏ sync mà KHÔNG lưu (layout vừa bị xoá: flush sẽ tạo lại nó). Sau đó không còn PUT nào, kể cả flush / retry. */
   abandon() {
     this.closed = true;
     this.clearTimers();
+  }
+
+  /** Xoá layout thất bại sau khi đã `abandon()`: nhận lại thay đổi, lưu tiếp phần đang chờ. */
+  revive() {
+    if (!this.closed) return;
+    this.closed = false;
+    this.schedule();
   }
 
   private clearTimers() {
@@ -120,6 +127,7 @@ export class LayoutSync {
   }
 
   private put(): Promise<void> {
+    if (this.closed) return Promise.resolve();
     if (this.inflight) return this.inflight.then(() => (this.closed ? undefined : this.put()));
     const doc: LayoutDoc = { ...this.o.snapshot(), updatedAt: Date.now() };
     const key = docKey(doc);
@@ -137,6 +145,7 @@ export class LayoutSync {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         this.saved = key;
         this.o.onSaved?.(doc);
+        if (this.closed) return; // bị bỏ trong lúc đang ghi: snapshot giờ có thể là layout khác
         if (this.dirty()) {
           this.setState("saving");
           this.timer = setTimeout(() => void this.put(), this.o.saveDelay ?? 1000); // đổi tiếp trong lúc đang ghi

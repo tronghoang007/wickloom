@@ -76,11 +76,11 @@ export function vwma(a: Num, vol: Num, n: number): Num {
   return pv.map((x, i) => x / v[i]);
 }
 
-/** Hull MA: WMA(2·WMA(n/2) − WMA(n), round(√n)). */
+/** Hull MA như script "Hull Moving Average" của TV: WMA(2·WMA(n/2) − WMA(n), floor(√n)). */
 export function hma(a: Num, n: number): Num {
   const half = wma(a, Math.max(1, Math.floor(n / 2)));
   const full = wma(a, n);
-  return wma(half.map((x, i) => 2 * x - full[i]), Math.max(1, Math.round(Math.sqrt(n))));
+  return wma(half.map((x, i) => 2 * x - full[i]), Math.max(1, Math.floor(Math.sqrt(n))));
 }
 
 /** Các loại MA chọn được trong Settings (tên như TV). */

@@ -80,6 +80,11 @@ describe("shiftAnchors (lỗi #4)", () => {
   it("dịch được ra ngoài vùng dữ liệu", () => {
     expect(shiftAnchors(BARS, H, [{ time: MON_15, price: 1 }], 2, 0)).toEqual([{ time: MON_15 + 2 * H, price: 1 }]);
   });
+
+  it("trục log: nhân giá theo tỉ lệ, tỉ lệ giữa các điểm giữ nguyên", () => {
+    const out = shiftAnchors(BARS, H, [{ time: MON_15, price: 100 }, { time: MON_15, price: 400 }], 0, 0, 0.25)!;
+    expect(out.map((q) => q.price)).toEqual([25, 100]);
+  });
 });
 
 describe("snapAngle (Shift)", () => {

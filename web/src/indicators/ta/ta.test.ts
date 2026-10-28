@@ -105,11 +105,11 @@ describe("vwma / hma", () => {
     expect(out[3]).toBeCloseTo((12 * 3 + 13 * 4) / 7);
   });
 
-  it("hma = wma(2·wma(n/2) − wma(n), round(√n))", () => {
+  it("hma như TV: wma(2·wma(n/2) − wma(n), floor(√n)), kể cả độ dài mà √n lẻ ≥ .5 (8 → 2, 14 → 3)", () => {
     const a = wave(120);
-    for (const n of [9, 16, 21]) {
-      const half = wma(a, Math.floor(n / 2)), full = wma(a, n);
-      close(hma(a, n), wma(half.map((x, i) => 2 * x - full[i]), Math.round(Math.sqrt(n))));
+    for (const [n, half, last] of [[9, 4, 3], [8, 4, 2], [14, 7, 3], [15, 7, 3], [16, 8, 4], [21, 10, 4]]) {
+      const h = wma(a, half), full = wma(a, n);
+      close(hma(a, n), wma(h.map((x, i) => 2 * x - full[i]), last));
     }
   });
 });

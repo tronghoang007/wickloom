@@ -64,6 +64,11 @@ const snapshot = (): Synced => {
   return { toolDefaults: s.toolDefaults, favorites: s.favorites, showFavs: s.showFavs, magnet: s.magnet, magnetMode: s.magnetMode, stay: s.stay, lastTool: s.lastTool, cursor: s.cursor };
 };
 const keyOf = (d: Partial<Synced>) => JSON.stringify(SYNCED_KEYS.map((k) => d[k] ?? null));
+/** Mặc định của app (chưa nạp localStorage): khi không biết khách đã có gì trước lúc đăng nhập. */
+const defaults = (): Synced => {
+  const s = drawingGlobal.getInitialState();
+  return { toolDefaults: s.toolDefaults, favorites: s.favorites, showFavs: s.showFavs, magnet: s.magnet, magnetMode: s.magnetMode, stay: s.stay, lastTool: s.lastTool, cursor: s.cursor };
+};
 
 type Opts = { fetch?: typeof fetch; delay?: number; retryMs?: number };
 
@@ -76,6 +81,8 @@ export class PrefsSync {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private offs: (() => void)[] = [];
+  private lastStatus: string | null = null;
+  private guestSnap: Synced | null = null; // tuỳ chọn của khách lúc đăng nhập: đăng xuất / đổi tài khoản thì trả lại, không để lại tuỳ chọn của tài khoản
 
   constructor(private o: Opts = {}) {}
 
@@ -105,12 +112,25 @@ export class PrefsSync {
   }
 
   private onAuth = (s: ReturnType<typeof useAuthStore.getState>) => {
+    const prevStatus = this.lastStatus;
+    this.lastStatus = s.status;
     if (s.status === "user" && s.user) {
-      if (this.uid === s.user.id) return;
+      if (this.uid === s.user.id) {
+        // đăng nhập lại sau khi hết phiên: lần PUT bị 401 chưa lưu được thì đưa lên lại
+        if (this.loaded && !s.expired && !this.timer && keyOf(snapshot()) !== this.saved) this.schedule();
+        return;
+      }
+      if (this.uid !== null) this.apply(this.guestSnap ?? defaults()); // đổi thẳng sang tài khoản khác: không mang tuỳ chọn của người trước sang
+      else if (prevStatus === "guest") this.guestSnap = snapshot();
       this.reset();
       this.uid = s.user.id;
       void this.load();
-    } else if (s.status === "guest") this.reset(); // khách: localStorage như cũ (bản đang có giữ nguyên)
+    } else if (s.status === "guest") {
+      // đăng xuất: trả lại tuỳ chọn của khách (localStorage là của máy, không giữ tuỳ chọn của tài khoản vừa rời)
+      if (this.uid !== null) this.apply(this.guestSnap ?? defaults());
+      this.guestSnap = null;
+      this.reset();
+    }
   };
 
   private onDrawing = (s: DrawingGlobal, prev: DrawingGlobal) => {

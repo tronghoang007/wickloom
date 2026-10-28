@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultSide, isPendingType, marketDistance, pendingLabel, resolveOrderType, sideOfType, snapPrice, tooClose, checkStopMove, validateMarket, validatePending, type MarketInput, type StopMoveInput, type PendingInput } from "./orderType";
+import { defaultSide, isPendingType, marketDistance, pendingLabel, resolveOrderType, sideOfType, snapPrice, tooClose, tooFar, checkStopMove, validateMarket, validatePending, type MarketInput, type StopMoveInput, type PendingInput } from "./orderType";
 
 const BID = 4130;
 const ASK = 4130.2;
@@ -165,5 +165,34 @@ describe("checkStopMove", () => {
   });
   it("chưa có giá để so thì để EA quyết", () => {
     expect(mv({ bid: 0, ask: 0, price: 1 })).toBeNull();
+  });
+});
+
+describe("giá xa thị trường vô lý (gõ nhầm dấu phân cách) và lot lẻ step", () => {
+  const spec = { min: 0.01, max: 100, step: 0.01 };
+  it("tooFar: quá 50% so với giữa Bid / Ask; chưa có giá thì không xét", () => {
+    expect(tooFar(4.05, BID, ASK)).toBe(true);
+    expect(tooFar(41300, BID, ASK)).toBe(true);
+    expect(tooFar(3000, BID, ASK)).toBe(false);
+    expect(tooFar(0, BID, ASK)).toBe(false);
+    expect(tooFar(4.05, 0, 0)).toBe(false);
+  });
+  it("market: SL của Buy ở 4.05 (\"4,050\" đọc nhầm) bị chặn dù đúng phía", () => {
+    expect(validateMarket({ side: "buy", lot: 0.1, sl: 4.05, tp: 0, bid: BID, ask: ASK, digits: 3, spec })).toMatch(/quá xa/);
+    expect(validateMarket({ side: "sell", lot: 0.1, sl: 0, tp: 4.05, bid: BID, ask: ASK, digits: 3, spec })).toMatch(/TP cách giá thị trường quá xa/);
+  });
+  it("lệnh chờ: giá vào / SL / TP quá xa bị chặn", () => {
+    const base = { side: "buy" as const, price: 4120, lot: 0.1, sl: 0, tp: 0, expiration: 0, bid: BID, ask: ASK, digits: 3, spec, nowSec: 0 };
+    expect(validatePending({ ...base, price: 4.12 })).toMatch(/Giá vào cách/);
+    expect(validatePending({ ...base, sl: 4.1 })).toMatch(/SL cách/);
+    expect(validatePending(base)).toBeNull();
+  });
+  it("kéo / sửa SL vị thế tới giá vô lý bị chặn", () => {
+    expect(checkStopMove({ target: "position", side: "buy", kind: "sl", price: 4.1, entry: 4125, bid: BID, ask: ASK, digits: 3 })).toMatch(/quá xa/);
+  });
+  it("lot không phải bội của step bị chặn (trước đây kiểm lot gõ rồi lúc gửi làm tròn lên: hiện 0.015 mà gửi 0.02)", () => {
+    expect(validateMarket({ side: "buy", lot: 0.015, sl: 0, tp: 0, bid: BID, ask: ASK, digits: 3, spec })).toMatch(/bội của 0.01/);
+    expect(validatePending({ side: "buy", price: 4120, lot: 0.015, sl: 0, tp: 0, expiration: 0, bid: BID, ask: ASK, digits: 3, spec, nowSec: 0 })).toMatch(/bội của 0.01/);
+    expect(validateMarket({ side: "buy", lot: 0.07, sl: 0, tp: 0, bid: BID, ask: ASK, digits: 3, spec })).toBeNull(); // 0.07 / 0.01 không tròn tuyệt đối trong float
   });
 });

@@ -1,10 +1,11 @@
 "use client";
 
-import { WS_URL, fetchBars, getWatchlist, saveWatchlist, type Bar } from "@/lib/api";
+import { WS_URL, fetchBars, type Bar } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
 import { useSettingsStore } from "@/store/settings";
-import { useEffect, useRef, useState } from "react";
+import { editWatchlist, loadWatchlist, resetWatchlist, stopWatchlistRetry, useWatchlistStore } from "@/store/watchlist";
+import { useEffect, useState } from "react";
 import EmptyState from "../EmptyState";
 import { Chevron, Close, EmptyWatchlistI, Plus } from "../icons";
 import { SymbolBadge } from "../SymbolIcon";
@@ -89,6 +90,8 @@ function useQuotes(symbols: string[]) {
   return quotes;
 }
 
+const NONE: string[] = [];
+
 const fmt = (n: number, d: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const sign = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "");
@@ -126,33 +129,29 @@ export default function WatchlistPanel() {
   const info = useChartStore((s) => s.symbols);
   const up = useSettingsStore((s) => s.s.bodyUp);
   const down = useSettingsStore((s) => s.s.bodyDown);
-  const [symbols, setSymbols] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const quotes = useQuotes(symbols);
   const status = useAuthStore((s) => s.status);
   const userId = useAuthStore((s) => s.user?.id);
+  const listUid = useWatchlistStore((s) => s.uid);
+  const listStatus = useWatchlistStore((s) => s.status);
+  const stored = useWatchlistStore((s) => s.symbols);
+  const symbols = status === "user" && listUid === userId ? stored : NONE;
+  const ready = symbols === stored && listStatus === "ready";
+  const quotes = useQuotes(symbols);
 
-  // Watchlist thuộc tài khoản: đổi user / đăng xuất thì nạp lại (khách không có watchlist, không gọi server)
+  // Watchlist thuộc tài khoản: đổi user thì nạp lại, đăng xuất thì bỏ (khách không có watchlist, không gọi server).
+  // Chưa đọc được bản trên server thì không cho sửa (store/watchlist.ts).
   useEffect(() => {
-    if (status !== "user") return;
-    let alive = true;
-    getWatchlist().then((s) => alive && setSymbols(s));
-    return () => {
-      alive = false;
-      setSymbols([]);
-    };
+    if (status === "guest") resetWatchlist();
+    if (status !== "user" || !userId) return;
+    void loadWatchlist(userId);
+    return stopWatchlistRetry;
   }, [status, userId]);
 
-  const persist = (next: string[]) => {
-    setSymbols(next);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => saveWatchlist(next), 500);
-  };
   const add = (name: string) => {
-    if (!symbols.includes(name)) persist([...symbols, name]);
+    if (!symbols.includes(name)) editWatchlist([...symbols, name]);
   };
-  const remove = (name: string) => persist(symbols.filter((s) => s !== name));
+  const remove = (name: string) => editWatchlist(symbols.filter((s) => s !== name));
 
   const meta = (name: string) => info.find((x) => x.name === name);
   const digits = (name: string) => meta(name)?.digits ?? 2;
@@ -169,7 +168,7 @@ export default function WatchlistPanel() {
         Watchlist
         <Chevron size={14} />
       </span>
-      {status === "user" && (
+      {status === "user" && ready && (
         <button
           className="flex h-7 w-7 items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)]"
           title="Add symbol"
@@ -202,7 +201,11 @@ export default function WatchlistPanel() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
-        {symbols.length === 0 && (
+        {!ready && listStatus === "error" && (
+          <div className="px-2 py-3 text-[13px] text-[var(--muted)]">Không tải được watchlist — đang thử lại…</div>
+        )}
+        {!ready && listStatus !== "error" && <WatchlistGate status="loading" />}
+        {ready && symbols.length === 0 && (
           <EmptyState icon={<EmptyWatchlistI />} className="h-full min-h-[200px]">
             Chưa có symbol trong watchlist. Bấm &quot;+&quot; để thêm.
           </EmptyState>

@@ -154,12 +154,17 @@ class TradeBroker:
         self._busy: Dict[str, str] = {}  # account_id -> req_id đang chờ EA (một lệnh một lúc)
         self._seen: Dict[Tuple[str, str], Dict[str, Any]] = {}  # (account_id, client_id) -> {at, status, result}
         self._sent: Dict[Tuple[str, bool], Deque[float]] = {}  # (account_id, là lệnh mới?) -> thời điểm gửi trong 60s qua
+        # (account_id, ticket) -> req_id của lệnh đóng vị thế đã quá hạn chưa biết kết quả: đóng tiếp cùng vị thế có thể thành đóng hai lần (đóng một phần
+        # 0.05 hai lần = 0.10), nên chặn tới khi kết quả muộn về hoặc hết DEDUPE_TTL
+        self._closing: Dict[Tuple[str, int], str] = {}
 
     def _purge(self, now: float) -> None:
         for k in [k for k, v in self._seen.items() if now - v["at"] > DEDUPE_TTL]:
             del self._seen[k]
         for r in [r for r, m in self._meta.items() if now - m[2] > DEDUPE_TTL and r not in self._wait]:
             del self._meta[r]  # quá hạn từ lâu mà EA không bao giờ trả lời
+        for k in [k for k, r in self._closing.items() if r not in self._meta]:
+            del self._closing[k]
 
     async def run(self, aid: str, writer: Any, user_id: str, cmd: Dict[str, Any], client_id: Optional[str]) -> Dict[str, Any]:
         now = self.clock()
@@ -172,6 +177,8 @@ class TradeBroker:
                 raise HTTPException(409, "Lệnh này đã gửi nhưng chưa biết kết quả: xem tab Positions trước khi gửi lại")
         if aid in self._busy:
             raise HTTPException(409, "Đang xử lý lệnh trước, đợi vài giây")
+        if cmd["type"] == "position_close" and (aid, cmd.get("ticket")) in self._closing:
+            raise HTTPException(409, f"Lệnh đóng trước của vị thế #{cmd.get('ticket')} chưa biết kết quả: xem tab Positions, đợi kết quả rồi mới đóng tiếp")
         opening = cmd["type"] in OPENING
         limit = MAX_PER_MINUTE if opening else MAX_MANAGE_PER_MINUTE
         sent = self._sent.setdefault((aid, opening), deque())
@@ -191,7 +198,7 @@ class TradeBroker:
         self.log.add(req_id, aid, user_id, cmd["type"], client_id, cmd)
         try:
             writer.write((json.dumps({**cmd, "req_id": req_id}, separators=(",", ":")) + "\n").encode("utf-8"))
-            await writer.drain()
+            await state.ea_hub.drain(writer)
         except Exception:
             self._forget(req_id, aid, drop_seen=True)
             self.log.finish(req_id, "send_failed", None)
@@ -204,6 +211,8 @@ class TradeBroker:
             self._wait.pop(req_id, None)
             if self._busy.get(aid) == req_id:
                 del self._busy[aid]
+            if cmd["type"] == "position_close":
+                self._closing[(aid, cmd.get("ticket"))] = req_id
             self.log.finish(req_id, "unknown", None)
             if isinstance(exc, asyncio.CancelledError):
                 raise
@@ -227,6 +236,8 @@ class TradeBroker:
             self._seen[(aid, cid)] = {"at": self.clock(), "status": "done", "result": {**res, "req_id": req_id}}
         if self._busy.get(aid) == req_id:
             del self._busy[aid]
+        for k in [k for k, r in self._closing.items() if r == req_id]:
+            del self._closing[k]  # kết quả muộn đã về: vị thế EA báo tiếp theo là đúng, đóng tiếp được
         self._meta.pop(req_id, None)
 
     def resolve(self, msg: Dict[str, Any], from_account: Optional[str]) -> None:

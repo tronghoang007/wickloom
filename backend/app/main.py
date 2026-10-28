@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
@@ -118,6 +118,8 @@ def backfill(symbol: str, tf: str, count: int = 500, pos: int = 0, before: int =
 
 
 def _crud(table: str) -> APIRouter:
+    """Chỉ đọc. Ghi qua đây không cần đăng nhập (OriginGuard cho qua request không có Origin, vd tiến trình bất kỳ trên máy): `settings` giữ trạng thái của backend
+    (server MT5 đang cấp dữ liệu - sửa thì lần EA nối sau bị coi là đổi broker, archive + xoá cache bar; cờ đã nhận dữ liệu cũ...), `symbols` do EA ghi. Web không ghi các bảng này."""
     r = APIRouter(prefix=f"/{table}")
 
     @r.get("")
@@ -130,16 +132,6 @@ def _crud(table: str) -> APIRouter:
         if not row:
             raise HTTPException(404)
         return row
-
-    @r.put("/{id}")
-    def put_(id: str, body: Dict[str, Any], scope: str = ""):
-        state.meta.put(table, id, scope, body)
-        return {"ok": True}
-
-    @r.delete("/{id}")
-    def delete_(id: str):
-        state.meta.delete(table, id)
-        return {"ok": True}
 
     return r
 
@@ -162,6 +154,12 @@ def _ws_user_id(ws: WebSocket) -> Optional[str]:
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    # WebSocket không bị CORS chặn: trang web bất kỳ người dùng đang mở cũng nối được tới 127.0.0.1:8000 và subscribe hàng loạt symbol / TF
+    # (EA nạp tới 100000 nến mỗi cặp, OnTimer đứng -> tick đứt). Trình duyệt luôn gửi Origin; không có Origin = client không phải trình duyệt (test, script)
+    origin = ws.headers.get("origin")
+    if origin is not None and origin not in ALLOWED_ORIGINS:
+        await ws.close(code=1008)
+        return
     await ws.accept()
     state.hub.clients[ws] = set()
     try:

@@ -5,6 +5,7 @@ import type { CalendarOpts } from "./calendar";
 
 export const HISTORY_BARS = 5000;
 const RETRY_MS = 10_000;
+const CALENDAR_RETRY_MS = 30_000;
 
 type FetchBars = (symbol: string, tf: string, to: number | undefined, limit: number) => Promise<Bar[]>;
 
@@ -86,16 +87,19 @@ type CalendarDeps = {
   dayOpens: (symbol: string) => Promise<number[]>;
 };
 
-/** Offset broker + mốc ngày thật, nạp lười theo symbol; chưa nạp xong thì `get` trả null (indicator cần lịch thì chưa vẽ, tránh nháy sai). */
+/** Offset broker + mốc ngày thật, nạp lười theo symbol; chưa nạp xong thì `get` trả null (indicator cần lịch thì chưa vẽ, tránh nháy sai).
+ *  Nạp lỗi (backend chưa lên) hoặc chưa có mốc D1 thì tạm dùng bản đang có (offset 0 nếu chưa có gì) và nạp lại sau CALENDAR_RETRY_MS, không giữ lịch sai tới khi đổi symbol. */
 export class CalendarFeed {
   private symbol = "";
   private cal: CalendarOpts | null = null;
   private loading = false;
   private gen = 0;
+  private retryAt = Infinity; // lần nạp lại kế tiếp khi bản đang giữ chưa đủ (Infinity = đủ rồi)
 
   constructor(
     private deps: CalendarDeps,
     private onChange: () => void,
+    private now: () => number = Date.now,
   ) {}
 
   get(symbol: string): CalendarOpts | null {
@@ -103,17 +107,21 @@ export class CalendarFeed {
       this.symbol = symbol;
       this.cal = null;
       this.loading = false;
+      this.retryAt = Infinity;
     }
-    if (!this.cal && !this.loading) {
+    if ((!this.cal || this.now() >= this.retryAt) && !this.loading) {
       this.loading = true;
       const gen = this.gen;
       Promise.all([this.deps.offset(), this.deps.dayOpens(symbol)])
-        .then(([offset, dayOpens]) => ({ offset, dayOpens }))
-        .catch(() => ({ offset: 0, dayOpens: [] as number[] }))
+        .then(([offset, dayOpens]) => ({ offset, dayOpens, ok: true }))
+        .catch(() => ({ offset: 0, dayOpens: [] as number[], ok: false }))
         .then((cal) => {
           if (symbol !== this.symbol || gen !== this.gen) return;
-          this.cal = { offset: cal.offset, ...(cal.dayOpens.length ? { dayOpens: cal.dayOpens } : {}) };
           this.loading = false;
+          const full = cal.ok && cal.dayOpens.length > 0;
+          this.retryAt = full ? Infinity : this.now() + CALENDAR_RETRY_MS;
+          if (!cal.ok && this.cal) return; // lỗi mạng: giữ bản đã có
+          this.cal = { offset: cal.offset, ...(cal.dayOpens.length ? { dayOpens: cal.dayOpens } : {}) };
           this.onChange();
         });
     }
@@ -126,5 +134,6 @@ export class CalendarFeed {
     this.symbol = "";
     this.cal = null;
     this.loading = false;
+    this.retryAt = Infinity;
   }
 }

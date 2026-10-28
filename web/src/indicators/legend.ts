@@ -22,3 +22,18 @@ export function fmtPlotValue(v: number, digits: number, volume = false): string 
 /** Các giá trị hiện trên legend: bỏ plot đã tắt trong Style. Chưa có dữ liệu thì rỗng. */
 export const visiblePlotValues = (inst: IndicatorInstance, values: PlotValue[] | undefined): PlotValue[] =>
   (values ?? []).filter((v) => plotShown(inst, v.plot));
+
+/** Số chữ số thập phân của bước giá `tick` (0.001 -> 3, 0.25 -> 2), tối đa 8. */
+export function decimalsOfStep(tick: number): number {
+  if (!(tick > 0)) return 2;
+  for (let d = 0; d < 8; d++) if (Math.abs(Math.round(tick * 10 ** d) - tick * 10 ** d) < 1e-9 * 10 ** d) return d;
+  return 8;
+}
+
+/** priceFormat LWC của mọi plot (kể cả histogram: thang giá của pane lấy format của series đầu tiên, MACD có histogram đứng đầu) theo cùng số chữ số với legend:
+ *  indicator dạng volume (CVD, OBV) theo kiểu volume; còn lại `legendDigits` (user đặt, hoặc chữ số của symbol với indicator trên chart chính, 2 với pane riêng như TV). */
+export function plotPriceFormat(inst: IndicatorInstance, def: IndicatorDef, symbolDigits: number): Record<string, unknown> {
+  if (def.format === "volume") return { type: "volume", ...(inst.precision === undefined ? {} : { precision: inst.precision }) };
+  const precision = legendDigits(inst, def, symbolDigits);
+  return { type: "price", precision, minMove: 10 ** -precision };
+}

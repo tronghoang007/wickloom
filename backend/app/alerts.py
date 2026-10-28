@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from . import config, geometry, indicators, mt5, notify, state
+from . import accounts, config, geometry, indicators, mt5, notify, state
 from .aggregator import bar_open
 from .auth import current_user
 from .config import TF_SECONDS
@@ -37,7 +37,8 @@ IND_EVERY = 2.0  # alert theo indicator được xét chừng này giây một l
 CHECKPOINT_EVERY = 5.0  # ghi mốc "đã đánh giá tới đâu" của alert xuống DB nhiều nhất chừng này giây một lần
 TEST_GAP = 3.0  # nút "Gửi thử": giãn cách giữa hai lần của cùng user + kênh
 
-COLS = ("id", "user_id", "symbol", "cond", "level", "trig", "tf", "expires_at", "name", "message", "channels", "state", "created_at", "fired_at", "fire_count", "drawing", "checked_at", "indicator", "on_chart")
+COLS = ("id", "user_id", "symbol", "cond", "level", "trig", "tf", "expires_at", "name", "message", "channels", "state", "created_at", "fired_at", "fire_count", "drawing", "checked_at", "indicator", "on_chart",
+        "checked_price")
 
 with state.meta.tx() as _db:
     _db.execute(
@@ -61,6 +62,8 @@ with state.meta.tx() as _db:
     if "on_chart" not in {r[1] for r in _db.execute("PRAGMA table_info(alerts)")}:  # 1 = chart vẽ đường giá của alert; 0 (mặc định) = chỉ nằm trong danh sách alert
         _db.execute("ALTER TABLE alerts ADD COLUMN on_chart INTEGER NOT NULL DEFAULT 0")
         _db.execute("UPDATE alerts SET on_chart=1")  # alert có từ trước giữ nguyên đường trên chart
+    if "checked_price" not in {r[1] for r in _db.execute("PRAGMA table_info(alerts)")}:  # giá của tick ở `checked_at`: khởi động lại thì làm mốc cắt cho tick đầu
+        _db.execute("ALTER TABLE alerts ADD COLUMN checked_price REAL")
     if "label" not in {r[1] for r in _db.execute("PRAGMA table_info(alert_log)")}:
         _db.execute("ALTER TABLE alert_log ADD COLUMN label TEXT NOT NULL DEFAULT ''")
     # Cột thêm ở Phase 3: loại tin (alert giá / tin kinh tế / giao dịch), nội dung của tin không phải alert giá, cờ báo bù
@@ -92,18 +95,23 @@ class Alert:
     checked_at: Optional[int] = None  # giờ (UTC giây) của tick cuối đã đánh giá, hoặc lúc tạo / sửa: mốc đầu của đoạn cần báo bù
     indicator: Optional[Dict[str, Any]] = None  # alert theo indicator (indicators.clean_spec): so một đường của indicator với `level` / giá / đường khác; None = alert giá
     on_chart: bool = False  # True = chart vẽ đường giá của alert; False = chỉ nằm trong danh sách alert
+    checked_price: Optional[float] = None  # giá của tick ở `checked_at` (None = chưa có / vừa tạo, sửa): khởi động lại thì là mốc `ref` của tick đầu, khỏi mất lần cắt lúc backend tắt
     # Chỉ trong bộ nhớ: backend khởi động lại thì đặt lại, nên không bao giờ bắn nhầm vì một mốc cũ.
     ref: Optional[float] = field(default=None, repr=False)  # giá tick trước, mốc để phát hiện cắt
     ref_close: Optional[float] = field(default=None, repr=False)  # giá đóng nến trước ("once_per_bar_close")
     last_bar: Optional[int] = field(default=None, repr=False)  # nến đã nổ ("once_per_bar")
     last_fire: float = field(default=0.0, repr=False)
-    flushed: Optional[int] = field(default=None, repr=False)  # `checked_at` đã ghi xuống DB
+    flushed: Optional[Tuple[Optional[int], Optional[float]]] = field(default=None, repr=False)  # (`checked_at`, `checked_price`) đã ghi xuống DB
+    resumed: bool = field(default=False, repr=False)  # vừa nạp lại từ DB lúc backend khởi động: lần đánh giá đầu dựng lại các mốc chỉ có trong bộ nhớ
+    seed_close: bool = field(default=False, repr=False)  # như `resumed` cho lần đóng nến đầu ("đóng nến"): mốc là giá đóng của nến trước trong DB
+    dropped: bool = field(default=False, repr=False)  # đã bị thay / bỏ khỏi engine (sửa, tạm dừng, xoá): thread nền đang cầm bản cũ thì không được nổ
     catch: Optional[Tuple[int, int, float]] = field(default=None, repr=False)  # đang chờ báo bù: (đầu khoảng đứt, giờ tick đầu sau khoảng đứt, giờ phát hiện)
     # Alert theo indicator, chỉ trong bộ nhớ: mốc nến đã đóng đã xét ("đóng nến"), `checked_at` lúc nạp (chưa bị tick mới ghi đè), giá trị lần xét trước (đường, thứ được so) và khoá để khỏi tính lại khi chưa gì đổi
     ind_bar: Optional[int] = field(default=None, repr=False)
     ind_since: Optional[int] = field(default=None, repr=False)
     ind_ref_b: Optional[float] = field(default=None, repr=False)
     ind_key: Optional[Tuple[float, int]] = field(default=None, repr=False)
+    ind_seed: Optional[float] = field(default=None, repr=False)  # vừa khởi động lại: giá đã ghi lúc đánh giá cuối (`checked_price` lúc nạp), dựng lại giá trị lần xét trước
     # Alert trên hình vẽ, chỉ trong bộ nhớ: dải giá [lo, hi] của hình ở nến hiện tại (tính lại mỗi nến), trạng thái hình học ("ok" / "wait" / "done") và mốc trước đó
     geo_bar: Optional[int] = field(default=None, repr=False)
     geo_state: str = field(default="wait", repr=False)
@@ -155,22 +163,23 @@ def db_live_count(user_id: str) -> int:
 
 def db_save(a: Alert) -> None:
     vals = (a.id, a.user_id, a.symbol, a.cond, a.level, a.trigger, a.tf, a.expires_at, a.name, a.message, json.dumps(a.channels), a.state, a.created_at, a.fired_at, a.fire_count,
-            json.dumps(a.drawing) if a.drawing else None, a.checked_at, json.dumps(a.indicator) if a.indicator else None, int(a.on_chart))
+            json.dumps(a.drawing) if a.drawing else None, a.checked_at, json.dumps(a.indicator) if a.indicator else None, int(a.on_chart), a.checked_price)
     with state.meta.tx() as db:
         db.execute(f"INSERT INTO alerts ({','.join(COLS)}) VALUES ({','.join('?' * len(COLS))}) ON CONFLICT(id) DO UPDATE SET "
                    + ",".join(f"{c}=excluded.{c}" for c in COLS[1:]), vals)
 
 
 def db_persist_fire(a: Alert) -> None:
-    """Engine chỉ ghi các cột nó đổi: sửa alert từ API cùng lúc không bị đè."""
+    """Engine chỉ ghi các cột nó đổi: sửa alert từ API cùng lúc không bị đè. Ghi cả mốc đã đánh giá (giá lúc nổ): khởi động lại ngay sau đó không coi lần cắt vừa báo là cắt mới."""
     with state.meta.tx() as db:
-        db.execute("UPDATE alerts SET state=?, fired_at=?, fire_count=? WHERE id=?", (a.state, a.fired_at, a.fire_count, a.id))
+        db.execute("UPDATE alerts SET state=?, fired_at=?, fire_count=?, checked_at=COALESCE(?, checked_at), checked_price=COALESCE(?, checked_price) WHERE id=?",
+                   (a.state, a.fired_at, a.fire_count, a.checked_at, a.checked_price, a.id))
 
 
-def db_checkpoint(rows: List[Tuple[int, str]]) -> None:
-    """(checked_at, id) của các alert vừa được đánh giá tiếp: ghi gộp một lần."""
+def db_checkpoint(rows: List[Tuple[int, Optional[float], str]]) -> None:
+    """(checked_at, checked_price, id) của các alert vừa được đánh giá tiếp: ghi gộp một lần."""
     with state.meta.tx() as db:
-        db.executemany("UPDATE alerts SET checked_at=? WHERE id=? AND state='active'", rows)
+        db.executemany("UPDATE alerts SET checked_at=?, checked_price=? WHERE id=? AND state='active'", rows)
 
 
 def db_delete(user_id: str, alert_id: str) -> bool:
@@ -265,6 +274,7 @@ class Engine:
         self._by_symbol: Dict[str, List[Alert]] = {}
         self._bars_seen: Dict[str, float] = {}  # symbol -> lúc nhận thông điệp nến M1 gần nhất từ EA
         self._last: Dict[str, Tuple[int, float]] = {}  # symbol -> (giờ, giá) của tick mới nhất: alert theo indicator xét theo giá này
+        self._late: List[Alert] = []  # alert đã hết hạn nhưng còn khoảng đứt (trước giờ hết hạn) chưa soát: báo bù xong mới bỏ
 
     def symbols(self) -> Set[str]:
         return {s for s, lst in list(self._by_symbol.items()) if lst}
@@ -285,18 +295,31 @@ class Engine:
     def sync(self, alert_id: str, new: Optional[Alert]) -> None:
         """Thay alert `alert_id` trong bộ nhớ bằng `new` (None = bỏ). Chỉ alert active mới ở lại; mốc giá đặt lại."""
         with self._lock:
-            for lst in self._by_symbol.values():
+            for lst in [*self._by_symbol.values(), self._late]:
+                for a in lst:
+                    if a.id == alert_id and a is not new:
+                        a.dropped = True  # thread nền (indicator, báo bù) có thể còn cầm bản này
                 lst[:] = [a for a in lst if a.id != alert_id]
             if new is not None and new.state == "active":
-                new.flushed = new.checked_at
+                new.dropped = False
+                new.flushed = (new.checked_at, new.checked_price)
                 new.ind_since = new.checked_at
                 self._by_symbol.setdefault(new.symbol, []).append(new)
                 if new.trigger == "once_per_bar_close" or new.drawing or new.indicator:
                     state.aggregator.watch(new.symbol, new.tf)  # nến đóng của TF này phải được dựng dù không chart nào xem
 
     def load(self, alerts: Iterable[Alert]) -> None:
+        """Nạp alert đang chạy từ DB (backend khởi động). Mốc giá chỉ có trong bộ nhớ được dựng lại từ mốc đã ghi (`checked_price`, `fired_at`), không thì lần cắt xảy ra lúc
+        backend tắt (ngắn hơn CATCHUP_GAP, vd --reload) bị mất: tick đầu không có giá trước để so."""
         for a in alerts:
             self.sync(a.id, a)
+            a.resumed = a.seed_close = True
+            if a.indicator is None:
+                a.ref = a.checked_price
+            else:
+                a.ind_seed = a.checked_price
+            if a.fired_at is not None:
+                a.last_fire = float(a.fired_at)  # "every_time": giữ giãn cách REFIRE_GAP qua lúc khởi động lại
 
     def _finish(self, a: Alert, new_state: str) -> None:
         a.state = new_state
@@ -358,15 +381,18 @@ class Engine:
         gapped = False
         with self._lock:
             for a in list(self._by_symbol.get(symbol, ())):
-                gapped = self._note_tick(a, t_msc // 1000, now) or gapped
+                gapped = self._note_tick(a, t_msc // 1000, price, now) or gapped
                 if a.indicator:  # xét ở thread nền (eval_indicators), không trên event loop của tick
                     continue
+                resumed, a.resumed = a.resumed, False
                 if a.drawing and a.geo_bar != bar_open(t_msc // 1000, a.tf, offset):
                     self._refresh_geo(a, bar_open(t_msc // 1000, a.tf, offset))
                 prev, a.ref = a.ref, price
                 prev_band, a.ref_band = a.ref_band, a.band
+                if resumed and prev is not None and prev_band is None:
+                    prev_band = a.band  # vừa khởi động lại: dải của hình lúc tick trước không còn, lấy dải hiện tại (chỉ đổi theo nến)
                 if a.expires_at and now >= a.expires_at:
-                    self._finish(a, "expired")
+                    gapped = self._expire(a, now) or gapped
                     changed.append(a)
                     continue
                 if a.drawing and a.geo_state == "done":  # hình đã kết thúc và không kéo dài sang phải
@@ -377,6 +403,8 @@ class Engine:
                     continue
                 if a.trigger == "once_per_bar":
                     bar = bar_open(t_msc // 1000, a.tf, offset)
+                    if resumed and a.last_bar is None and a.fired_at is not None and a.fired_at >= bar:
+                        a.last_bar = bar  # đã nổ trong nến này trước lúc khởi động lại
                     if a.last_bar == bar:
                         continue
                     a.last_bar = bar
@@ -384,7 +412,8 @@ class Engine:
                     continue
                 fired.append(self._fired(a, price, now))
                 changed.append(a)
-        self._emit(fired, changed)
+            self._persist(changed)
+        self._send(fired)
         if gapped:
             self.request(symbol)  # ngoài khoá: gửi lệnh xuống EA
 
@@ -398,19 +427,32 @@ class Engine:
         close = float(bar["c"])
         fired: List[Fired] = []
         changed: List[Alert] = []
+        gapped = False
         with self._lock:
             for a in list(self._by_symbol.get(symbol, ())):
                 if a.trigger != "once_per_bar_close" or a.tf != tf or a.indicator:
                     continue
+                if a.seed_close and a.ref_close is None:
+                    a.ref_close = self._close_before(symbol, tf, bar["t"])  # vừa khởi động lại: giá đóng của nến trước trong DB
+                    a.ref_close_band = a.band if a.drawing and a.ref_close is not None else None
+                a.seed_close = False
                 prev, a.ref_close = a.ref_close, close
                 prev_band, a.ref_close_band = a.ref_close_band, a.band if a.geo_bar == bar["t"] else None  # dải của chính nến vừa đóng
                 if a.expires_at and now >= a.expires_at:
-                    self._finish(a, "expired")
+                    gapped = self._expire(a, now) or gapped
                     changed.append(a)
                 elif self._hit_close(a, prev, prev_band, close, bar["t"]):
                     fired.append(self._fired(a, close, now))
                     changed.append(a)
-        self._emit(fired, changed)
+            self._persist(changed)
+        self._send(fired)
+        if gapped:
+            self.request(symbol)
+
+    def _close_before(self, symbol: str, tf: str, bar_t: int) -> Optional[float]:
+        """Giá đóng của nến liền trước nến `bar_t` trong DB (None nếu không có)."""
+        rows = [b for b in self.history(symbol, tf, 3) if b["t"] < bar_t]
+        return float(rows[-1]["c"]) if rows else None
 
     def _hit_close(self, a: Alert, prev: Optional[float], prev_band: Optional[Tuple[float, float]], close: float, bar_t: int) -> bool:
         if a.drawing is None:
@@ -419,27 +461,50 @@ class Engine:
 
     # --- báo bù lần giá chạm lúc không có tick -------------------------------------------------------------------------------------------------------------
 
-    def _note_tick(self, a: Alert, t: int, now: float) -> bool:
-        """Tick giờ `t` tới alert `a`: cập nhật mốc đã đánh giá. True nếu vừa hết một khoảng đứt dài (cần soát nến M1 của khoảng đó). Chỉ alert theo mức giá cố định
-        và không phải "đóng nến" mới báo bù bằng nến M1 được (đường trên hình vẽ đổi mức theo từng nến, "đóng nến" xét giá đóng của khung riêng, indicator tự bù theo nến đóng)."""
-        gap = a.checked_at is not None and t - a.checked_at > CATCHUP_GAP and a.catch is None and a.drawing is None and a.indicator is None and a.trigger != "once_per_bar_close"
+    @staticmethod
+    def _catchable(a: Alert) -> bool:
+        """Chỉ alert theo mức giá cố định và không phải "đóng nến" mới báo bù bằng nến M1 được (đường trên hình vẽ đổi mức theo từng nến, "đóng nến" xét giá đóng của khung
+        riêng, indicator tự bù theo nến đóng)."""
+        return a.drawing is None and a.indicator is None and a.trigger != "once_per_bar_close"
+
+    def _note_tick(self, a: Alert, t: int, price: float, now: float) -> bool:
+        """Tick giờ `t` giá `price` tới alert `a`: cập nhật mốc đã đánh giá. True nếu vừa hết một khoảng đứt dài (cần soát nến M1 của khoảng đó)."""
+        gap = a.checked_at is not None and t - a.checked_at > CATCHUP_GAP and a.catch is None and self._catchable(a)
         if gap:
-            a.catch = (a.checked_at, t, now)
-        if a.checked_at is None or t > a.checked_at:
-            a.checked_at = t
+            a.catch = (a.checked_at, t, now)  # type: ignore[assignment]
+        if a.checked_at is None or t >= a.checked_at:
+            a.checked_at, a.checked_price = t, price
+        return gap
+
+    def _expire(self, a: Alert, now: float) -> bool:
+        """Alert tới hạn: thôi đánh giá, nhưng khoảng chưa được đánh giá trước giờ hết hạn (backend / EA tắt, tick đứt) vẫn được soát nến M1 rồi mới bỏ hẳn.
+        True nếu vừa phát hiện khoảng đó (cần xin EA nạp nến)."""
+        self._finish(a, "expired")
+        gap = False
+        if a.catch is None and self._catchable(a) and a.checked_at is not None and a.expires_at is not None and a.expires_at - a.checked_at > CATCHUP_GAP:
+            a.catch = (a.checked_at, a.expires_at + 59, now)  # tới hết nến M1 chứa giờ hết hạn (nến từ giờ hết hạn trở đi bị `_catch_up` bỏ)
+            gap = True
+        if a.catch is not None:
+            self._late.append(a)
         return gap
 
     def on_bars(self, symbol: str) -> None:
         """EA vừa gửi nến M1 của `symbol` (tcp_server): ghi giờ để biết khi nào việc nạp bù đã lắng xuống."""
         self._bars_seen[symbol] = self.clock()
 
+    def _covered(self, a: Alert) -> bool:
+        """DB đã có nến M1 sát cuối khoảng đứt (nến ngay trước hoặc chính nến của tick đầu sau khoảng đứt): nến của khoảng đứt đã về, không chỉ vài nến lẻ do việc khác xin."""
+        end = a.catch[1] // 60 * 60  # type: ignore[index]
+        return bool(self.bars(a.symbol, end - 60, end + 60))
+
     def _catch_up(self, a: Alert, now: float) -> Optional[Fired]:
         """Soát nến M1 của khoảng đứt xem giá có chạm mức của `a` không; nổ tối đa một lần (giờ nến chạm đầu tiên). Bắt đầu từ nến SAU nến của lần đánh giá cuối (nến đó phần lớn đã được
-        đánh giá trực tiếp nên soát lại sẽ báo trùng) và dừng trước nến chứa tick đầu tiên sau khoảng đứt (các tick từ đó đánh giá trực tiếp). Alert đã nổ từ lúc đó thì thôi."""
+        đánh giá trực tiếp nên soát lại sẽ báo trùng) và dừng trước nến chứa tick đầu tiên sau khoảng đứt (các tick từ đó đánh giá trực tiếp). Alert đã nổ từ lúc đó thì thôi.
+        Alert vừa hết hạn (trong `_late`) vẫn được soát phần trước giờ hết hạn."""
         assert a.catch is not None
         since, until, _ = a.catch
         a.catch = None
-        if a.state != "active" or (a.fired_at is not None and a.fired_at >= since):
+        if a.dropped or a.state not in ("active", "expired") or (a.fired_at is not None and a.fired_at >= since):
             return None
         first, end = since // 60 * 60, until // 60 * 60
         prev: Optional[float] = None
@@ -455,29 +520,32 @@ class Engine:
         return None
 
     def run_catchups(self) -> None:
-        """Soát các alert đã phát hiện khoảng đứt mà EA đã nạp xong nến M1 (lắng CATCHUP_SETTLE giây) hoặc đã chờ quá CATCHUP_WAIT."""
+        """Soát các alert đã phát hiện khoảng đứt mà EA đã nạp xong nến M1 (lắng CATCHUP_SETTLE giây và DB đã có nến sát cuối khoảng đứt) hoặc đã chờ quá CATCHUP_WAIT."""
         now = self.clock()
         fired: List[Fired] = []
         changed: List[Alert] = []
         with self._lock:
-            for a in [a for lst in self._by_symbol.values() for a in lst if a.catch is not None]:
+            self._late = [a for a in self._late if a.catch is not None and not a.dropped]
+            for a in [a for lst in self._by_symbol.values() for a in lst if a.catch is not None] + list(self._late):
                 started = a.catch[2]  # type: ignore[index]
                 seen = self._bars_seen.get(a.symbol, 0.0)
-                if not ((seen >= started and now - seen >= CATCHUP_SETTLE) or now - started >= CATCHUP_WAIT):
+                if not ((seen >= started and now - seen >= CATCHUP_SETTLE and self._covered(a)) or now - started >= CATCHUP_WAIT):
                     continue
                 f = self._catch_up(a, now)
                 if f is not None:
                     fired.append(f)
                     changed.append(a)
-        self._emit(fired, changed)
+            self._late = [a for a in self._late if a.catch is not None]
+            self._persist(changed)
+        self._send(fired)
 
     def flush(self) -> None:
-        """Ghi mốc `checked_at` mới xuống DB (không ghi mỗi tick): khởi động lại thì biết đã đánh giá tới đâu."""
+        """Ghi mốc `checked_at` / `checked_price` mới xuống DB (không ghi mỗi tick): khởi động lại thì biết đã đánh giá tới đâu và giá lúc đó."""
         with self._lock:
-            rows = [(a.checked_at, a.id) for lst in self._by_symbol.values() for a in lst if a.checked_at is not None and a.checked_at != a.flushed]
-            for lst in self._by_symbol.values():
-                for a in lst:
-                    a.flushed = a.checked_at
+            live = [a for lst in self._by_symbol.values() for a in lst if a.checked_at is not None and (a.checked_at, a.checked_price) != a.flushed]
+            rows = [(a.checked_at, a.checked_price, a.id) for a in live]
+            for a in live:
+                a.flushed = (a.checked_at, a.checked_price)
         if rows:
             self.checkpoint(rows)  # type: ignore[arg-type]
 
@@ -510,7 +578,7 @@ class Engine:
         else:
             fired = self._eval_live(a, closed, step, now)
         if fired is not None:
-            self._emit([fired], [a])
+            self._send([fired])
 
     @staticmethod
     def _ind_pair(a: Alert, line: List[float], other: Optional[List[float]], i: int) -> Tuple[float, float, Optional[float], Optional[float]]:
@@ -529,7 +597,7 @@ class Engine:
     def _eval_closed(self, a: Alert, closed: List[Dict[str, Any]], step: int, now: float) -> Optional[Fired]:
         line, other = indicators.compute(a.indicator, closed)  # type: ignore[arg-type]
         with self._lock:
-            if a.state != "active":
+            if a.state != "active" or a.dropped:  # bị tạm dừng / xoá / sửa trong lúc tính
                 return None
             last_t = closed[-1]["t"]
             if a.ind_bar is None:  # lần xét đầu: mốc là nến cuối đã đóng lúc alert được tạo / lần cuối được đánh giá (bắt đầu bù từ đó)
@@ -547,7 +615,9 @@ class Engine:
                 return None
             i, vals = found
             late = i != len(closed) - 1
-            return self._fired(a, closed[i]["c"], now, late_at=closed[i]["t"] + step if late else None, values=vals)
+            f = self._fired(a, closed[i]["c"], now, late_at=closed[i]["t"] + step if late else None, values=vals)
+            self._persist([a])
+            return f
 
     def _eval_live(self, a: Alert, closed: List[Dict[str, Any]], step: int, now: float) -> Optional[Fired]:
         last = self._last.get(a.symbol)
@@ -558,6 +628,8 @@ class Engine:
         with self._lock:
             if a.ind_key == key:
                 return None  # giá và nến đã đóng đều chưa đổi từ lần xét trước
+            resumed, a.resumed = a.resumed, False
+            p0, a.ind_seed = a.ind_seed, None
         fb = self.live(a.symbol, a.tf)
         if fb is not None and fb["t"] > closed[-1]["t"]:
             forming = {**fb, "c": price}
@@ -566,9 +638,16 @@ class Engine:
         line, other = indicators.compute(a.indicator, closed + [forming])  # type: ignore[arg-type]
         i = len(line) - 1
         v, lv = self._ind_pair(a, line, other, i)[:2]
+        seed: Optional[Tuple[float, float]] = None
+        if p0 is not None and a.ref is None:
+            # vừa khởi động lại: giá trị lần xét trước không còn, dựng lại bằng giá đã ghi lúc đó (`checked_price`) trên nến đang chạy
+            line0, other0 = indicators.compute(a.indicator, closed + [{**forming, "c": p0, "h": max(forming["h"], p0), "l": min(forming["l"], p0)}])  # type: ignore[arg-type]
+            seed = self._ind_pair(a, line0, other0, i)[:2]
         with self._lock:
-            if a.state != "active":
+            if a.state != "active" or a.dropped:  # bị tạm dừng / xoá / sửa trong lúc tính
                 return None
+            if seed is not None and a.ref is None:
+                a.ref, a.ind_ref_b = (None if math.isnan(seed[0]) else seed[0]), (None if math.isnan(seed[1]) else seed[1])
             prev, prev_b = a.ref, a.ind_ref_b
             a.ref, a.ind_ref_b, a.ind_key = (None if math.isnan(v) else v), (None if math.isnan(lv) else lv), key
             if math.isnan(v) or math.isnan(lv):
@@ -576,12 +655,16 @@ class Engine:
             if not hit(a.cond, lv, prev, v, prev_b if other is not None else None):
                 return None
             if a.trigger == "once_per_bar":
+                if resumed and a.last_bar is None and a.fired_at is not None and a.fired_at >= forming["t"]:
+                    a.last_bar = forming["t"]  # đã nổ trong nến này trước lúc khởi động lại
                 if a.last_bar == forming["t"]:
                     return None
                 a.last_bar = forming["t"]
             elif a.trigger == "every_time" and now - a.last_fire < REFIRE_GAP:
                 return None
-            return self._fired(a, price, now, values=(v, lv))
+            f = self._fired(a, price, now, values=(v, lv))
+            self._persist([a])
+            return f
 
     def housekeeping(self) -> None:
         """Việc định kỳ ở thread nền: hết hạn alert, báo bù, ghi mốc."""
@@ -593,17 +676,24 @@ class Engine:
         """Hết hạn cho alert quá `expires_at` (kể cả symbol đang không có tick, vd cuối tuần)."""
         now = self.clock()
         changed: List[Alert] = []
+        gapped: Set[str] = set()
         with self._lock:
             for lst in list(self._by_symbol.values()):
                 for a in list(lst):
                     if a.expires_at and now >= a.expires_at:
-                        self._finish(a, "expired")
+                        if self._expire(a, now):
+                            gapped.add(a.symbol)
                         changed.append(a)
-        self._emit([], changed)
+            self._persist(changed)
+        for symbol in sorted(gapped):
+            self.request(symbol)
 
-    def _emit(self, fired: List[Fired], changed: List[Alert]) -> None:
+    def _persist(self, changed: List[Alert]) -> None:
+        """Ghi trạng thái mới xuống DB NGAY TRONG khoá của engine: API sửa alert cũng đọc-ghi DB trong khoá này (patch_alert), nên không đọc được bản cũ rồi ghi đè lần nổ vừa xong."""
         for a in changed:
             self.persist(a)
+
+    def _send(self, fired: List[Fired]) -> None:
         for f in fired:
             self.fire(f)
 
@@ -622,9 +712,30 @@ def chat_of(user_id: str) -> Optional[int]:
     return cfg["chat_id"] if cfg and isinstance(cfg.get("chat_id"), int) else None
 
 
+def mt5_owner() -> Optional[str]:
+    """User được dùng kênh MT5 (đẩy tin ra điện thoại qua EA): tin đi tới MetaQuotes ID của MỘT terminal và MT5 chỉ cho vài tin mỗi phút, nên chỉ chủ của terminal được dùng,
+    không thì user khác đăng ký vào đẩy được tin lên điện thoại chủ máy và tiêu hết hạn mức. Chủ = người đã nhận dữ liệu cũ lúc tạo tài khoản đầu tiên, không có thì tài khoản tạo sớm nhất."""
+    rows = _query("SELECT data FROM settings WHERE id=?", (accounts.LEGACY_FLAG,))
+    if rows:
+        try:
+            uid = json.loads(rows[0][0]).get("user_id")
+        except (ValueError, AttributeError):
+            uid = None
+        if isinstance(uid, str) and uid:
+            return uid
+    rows = _query("SELECT id FROM users ORDER BY created_at, rowid LIMIT 1")
+    return rows[0][0] if rows else None
+
+
+def mt5_allowed(user_id: str) -> bool:
+    return user_id == mt5_owner()
+
+
+MT5_OWNER_ONLY = "Kênh MT5 chỉ dành cho chủ máy MT5 (tài khoản Wickloom đầu tiên)"
+
 linker = notify.TelegramLinker(telegram, _on_link)
 mt5push = notify.Mt5Push(state.ea_hub, mt5.registry.snapshot)
-dispatcher = notify.Dispatcher(send_web=state.hub.send_user, telegram=telegram, chat_of=chat_of, mt5=mt5push, log_add=log_add, log_set=log_set)
+dispatcher = notify.Dispatcher(send_web=state.hub.send_user, telegram=telegram, chat_of=chat_of, mt5=mt5push, log_add=log_add, log_set=log_set, mt5_allowed=mt5_allowed)
 engine = Engine(dispatcher.submit, db_persist_fire)
 state.bar_close_hooks.append(engine.on_bar_close)
 state.symbol_sources.append(engine.symbols)
@@ -715,6 +826,8 @@ def check_channels(user: Dict[str, Any], ch: Dict[str, bool]) -> Dict[str, bool]
         raise _bad("Chọn ít nhất một kênh thông báo")
     if out["telegram"] and chat_of(user["id"]) is None:
         raise _bad("Chưa kết nối Telegram (Settings → Alerts)")
+    if out["mt5"] and not mt5_allowed(user["id"]):
+        raise _bad(MT5_OWNER_ONLY)
     return out
 
 
@@ -747,12 +860,23 @@ def _check_enums(cond: str, trigger: str, tf: str, drawing: Optional[Dict[str, A
         raise _bad("Khung thời gian không hợp lệ")
 
 
-def _apply(a: Alert) -> Alert:
-    """Ghi DB rồi đồng bộ engine (đặt lại mốc giá) và báo EA stream tick của symbol này. Tạo / sửa alert đặt lại mốc báo bù: không soát ngược về trước lúc này."""
+def _store(a: Alert) -> None:
+    """Ghi DB rồi đồng bộ engine (đặt lại mốc giá). Tạo / sửa alert đặt lại mốc báo bù: không soát ngược về trước lúc này. Gọi trong `engine._lock` khi bản `a` được đọc từ DB."""
     a.checked_at = int(time.time())
+    a.checked_price = None
     a.catch = None
-    db_save(a)
-    engine.sync(a.id, a)
+    with engine._lock:
+        db_save(a)
+        engine.sync(a.id, a)
+
+
+def _apply(a: Alert) -> Alert:
+    """`_store` rồi báo EA stream tick của symbol này / xin nến cần cho alert."""
+    _store(a)
+    return _apply_side(a)
+
+
+def _apply_side(a: Alert) -> Alert:
     state.push_subscribe()
     if a.indicator and a.state == "active":
         state.ensure_history(a.symbol, a.tf, indicators.history_need(a.indicator))  # indicator cần đủ lịch sử nến đã đóng để giá trị hội tụ
@@ -793,7 +917,7 @@ def get_channels(user: Dict[str, Any] = Depends(current_user)):
     return {
         "web": {},
         "telegram": {"configured": telegram.configured, "linked": tg is not None, "name": tg.get("name") if tg else None},
-        "mt5": mt5push.status(),
+        "mt5": {**mt5push.status(), "allowed": mt5_allowed(user["id"])},
     }
 
 
@@ -822,6 +946,8 @@ def test_channel(kind: str, user: Dict[str, Any] = Depends(current_user)):
     if time.time() - _last_test.get(key, 0) < TEST_GAP:
         raise HTTPException(429, "Chờ vài giây rồi gửi thử lại", headers={"Retry-After": str(int(TEST_GAP))})
     _last_test[key] = time.time()
+    if kind == "mt5" and not mt5_allowed(user["id"]):
+        raise HTTPException(403, MT5_OWNER_ONLY)
     if kind == "web":
         n = state.hub.send_user(user["id"], {"type": "alert_test", "text": "Tin thử từ Wickloom"})
         return {"ok": n > 0, "detail": "ok" if n else "không có tab Wickloom nào đang mở"}
@@ -835,6 +961,14 @@ def test_channel(kind: str, user: Dict[str, Any] = Depends(current_user)):
 
 @router.patch("/{alert_id}")
 def patch_alert(alert_id: str, body: AlertPatch, user: Dict[str, Any] = Depends(current_user)):
+    # Đọc - sửa - ghi trong khoá của engine (engine ghi lần nổ trong cùng khoá): alert vừa nổ "once" không bị bản đọc trước đó ghi đè về active rồi nổ lần nữa
+    with engine._lock:
+        a = _patched(alert_id, body, user)
+        _store(a)
+    return _apply_side(a).public()
+
+
+def _patched(alert_id: str, body: AlertPatch, user: Dict[str, Any]) -> Alert:
     a = db_get(user["id"], alert_id)
     if a is None:
         raise HTTPException(404)
@@ -878,18 +1012,19 @@ def patch_alert(alert_id: str, body: AlertPatch, user: Dict[str, Any] = Depends(
     if body.on_chart is not None:
         a.on_chart = body.on_chart
     if body.state is not None:
-        if body.state == "active" and a.state in ("triggered", "expired"):
-            if db_live_count(user["id"]) >= MAX_LIVE:
-                raise HTTPException(409, f"Tối đa {MAX_LIVE} alert mỗi tài khoản")
+        if a.state in ("triggered", "expired") and db_live_count(user["id"]) >= MAX_LIVE:  # bật lại (chạy hay tạm dừng) đều tính vào số alert đang sống
+            raise HTTPException(409, f"Tối đa {MAX_LIVE} alert mỗi tài khoản")
+        if body.state == "active" and a.state != "active":
             _check_expiry(a.expires_at)
         a.state = body.state
-    return _apply(a).public()
+    return a
 
 
 @router.delete("/{alert_id}")
 def delete_alert(alert_id: str, user: Dict[str, Any] = Depends(current_user)):
-    if not db_delete(user["id"], alert_id):
-        raise HTTPException(404)
-    engine.sync(alert_id, None)
+    with engine._lock:
+        if not db_delete(user["id"], alert_id):
+            raise HTTPException(404)
+        engine.sync(alert_id, None)
     state.push_subscribe()
     return {"ok": True}

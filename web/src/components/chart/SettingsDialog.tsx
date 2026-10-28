@@ -3,6 +3,7 @@ import { useAlertPrefs, useAlertStore, useSettingsTab, type AlertSound } from "@
 import { playAlertSound, unlockAudio } from "@/alerts/sound";
 import { useRulesStore } from "@/alerts/rules";
 import { IMPORTANCE_CHOICES, LEAD_CHOICES, MAX_LEADS, currencyChoices, leadLabel, ruleProblem, toggleCurrency, toggleLead } from "@/alerts/rulesModel";
+import { MT5_OWNER_ONLY } from "@/alerts/model";
 import { linkTelegram, testChannel, unlinkTelegram, type AlertChannels, type ChannelKind, type NewsRule, type Rules, type TradeRule } from "@/lib/alertsApi";
 import { useAuthStore } from "@/store/auth";
 import { toast } from "@/store/toast";
@@ -660,6 +661,7 @@ function AlertsTab() {
             <p className="text-[var(--muted)]">Đang tải…</p>
           ) : (
             <>
+              {m.allowed === false && <p className="mb-1 text-[#ff9800]">{MT5_OWNER_ONLY}</p>}
               <Row label="EA">
                 <span className={m.online ? "" : "text-[#ff9800]"}>{m.online ? `Online${m.version ? ` (v${m.version})` : ""}` : "Offline"}</span>
               </Row>
@@ -667,7 +669,7 @@ function AlertsTab() {
                 <span className={m.push_enabled === false ? "text-[#ff9800]" : ""}>{m.push_enabled === null ? "Chưa biết (EA chưa báo)" : m.push_enabled ? "Enabled in MT5" : "Disabled in MT5"}</span>
               </Row>
               <Row label="Test">
-                <TestButton kind="mt5" disabled={!m.online} />
+                <TestButton kind="mt5" disabled={!m.online || m.allowed === false} />
               </Row>
               <p className="mt-1 max-w-[420px] text-[12px] leading-relaxed text-[var(--muted)]">
                 Cài MetaTrader 5 trên điện thoại, lấy MetaQuotes ID (Settings → Messages) và nhập vào MT5 trên máy này: Tools → Options → Notifications, tick Enable Push Notifications. Điện thoại nhận theo

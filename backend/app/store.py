@@ -43,11 +43,15 @@ class BarStore:
         self.rdb = sqlite3.connect(path, check_same_thread=False)
         self._rlock = threading.Lock()
 
-    def put_tickvp(self, symbol: str, t0: int, t1: int, rows: List[Tuple[int, float, float, float]]) -> None:
+    def put_tickvp(self, symbol: str, t0: int, t1: int, rows: List[Tuple[int, float, float, float]], minutes: Optional[List[int]] = None) -> None:
         """Ghi histogram các phút [t0, t1] (UTC giây): xoá phút cũ trong khoảng rồi ghi `rows` (t, giá, volume lên, volume xuống), vì bản mới của một phút
-        (EA tính lại phút đang chạy) có thể thiếu giá mà bản cũ có. Dọn dữ liệu cũ hơn `TICK_KEEP` so với phút mới nhất."""
+        (EA tính lại phút đang chạy) có thể thiếu giá mà bản cũ có. `minutes`: chỉ xoá đúng các phút này thay vì cả khoảng (delta realtime: các phút
+        của một lô không liền nhau thì phần giữa không phải của lô này). Dọn dữ liệu cũ hơn `TICK_KEEP` so với phút mới nhất."""
         with self._lock:
-            self.db.execute("DELETE FROM tickvp WHERE symbol=? AND t>=? AND t<=?", (symbol, t0, t1))
+            if minutes is None:
+                self.db.execute("DELETE FROM tickvp WHERE symbol=? AND t>=? AND t<=?", (symbol, t0, t1))
+            else:
+                self.db.executemany("DELETE FROM tickvp WHERE symbol=? AND t=?", [(symbol, m) for m in set(minutes)])
             self.db.executemany("INSERT INTO tickvp VALUES (?,?,?,?,?)", [(symbol, t, p, u, d) for t, p, u, d in rows])
             row = self.db.execute("SELECT t FROM tickvp WHERE symbol=? ORDER BY t DESC LIMIT 1", (symbol,)).fetchone()
             if row:

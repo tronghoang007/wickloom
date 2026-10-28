@@ -9,10 +9,10 @@ import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
 import { askCancelAll, askCloseAll, askClosePosition } from "@/trading/tagActions";
-import { accountProfit, closedPositions, dealNet, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, REASON_LABEL, sideLabel } from "@/trading/format";
+import { accountProfit, closedPositions, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, REASON_LABEL, sideLabel } from "@/trading/format";
 import { useTradeFocus } from "@/trading/focus";
 import { tradeBlock } from "@/trading/gate";
-import { normalizeLot } from "@/trading/lot";
+import { closeLot } from "@/trading/lot";
 import { resetSim } from "@/trading/simStore";
 import { startTradePolling, useTradeStore, type TradeTab } from "@/trading/store";
 import { useTicketStore } from "@/trading/ticket";
@@ -248,9 +248,10 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
   const sym = useChartStore.getState().symbols.find((s) => s.name === p.symbol);
   const spec = sym?.volume_min && sym.volume_step ? { min: sym.volume_min, max: p.volume, step: sym.volume_step } : null;
   const canPartial = spec !== null && p.volume > spec.min + 1e-9; // lot lớn hơn lot tối thiểu thì mới đóng một phần được
-  const want0 = spec ? normalizeLot(parseFloat(text.replace(",", ".")), spec) : p.volume;
+  const want0 = closeLot(text, p.volume, spec); // null = ô lot không phải số dương
   const close = () => {
-    const want = spec ? normalizeLot(parseFloat(text.replace(",", ".")), spec) : p.volume;
+    const want = want0;
+    if (want === null) return; // gõ sai: không đóng gì (trước đây thành lot tối thiểu), giữ ô nhập để sửa
     setEditing(false);
     askClosePosition(p, want >= p.volume - 1e-9 ? 0 : want); // hộp thoại xác nhận rồi mới gửi; 0 = đóng hết
   };
@@ -282,7 +283,7 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
         {editing && (
           // nổi lên trên hàng (không đẩy các cột khác), cao đúng bằng hàng, neo bên phải
           <span className="absolute inset-y-0 right-0 z-10 flex items-center justify-center gap-3 border-l border-[var(--border)] bg-[var(--bg)] px-3 shadow-lg">
-            {spec && <LotSlider spec={spec} value={Number.isFinite(want0) ? want0 : spec.max} onChange={(lot) => setText(fmtLot(lot))} />}
+            {spec && <LotSlider spec={spec} value={want0 ?? spec.max} onChange={(lot) => setText(fmtLot(lot))} />}
             <input
               autoFocus
               aria-label="Close lot"
@@ -296,7 +297,7 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
               }}
               className="w-16 rounded border border-[var(--border)] bg-transparent px-1.5 py-1 text-center"
             />
-            <button className="cursor-pointer rounded bg-[#f23645] px-3 py-1 text-white hover:brightness-110" onClick={close}>OK</button>
+            <button className="cursor-pointer rounded bg-[#f23645] px-3 py-1 text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55" disabled={want0 === null} onClick={close}>OK</button>
             <button className="cursor-pointer px-1.5 text-sm text-[var(--muted)] hover:text-[var(--fg)]" aria-label="Cancel" onClick={() => setEditing(false)}>✕</button>
           </span>
         )}

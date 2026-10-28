@@ -22,8 +22,9 @@ const toastMock = vi.fn();
 vi.mock("@/store/toast", () => ({ toast: (...a: unknown[]) => toastMock(...a) }));
 const refresh = vi.fn();
 const simAcc = { current: null as Mt5Account | null }; // đang Replay: account giả lập
+const tradeData = { current: null as { positions: { ticket: number }[] } | null }; // dữ liệu EA báo sau khi làm mới
 vi.mock("./store", () => ({
-  useTradeStore: { getState: () => ({ refresh }) },
+  useTradeStore: { getState: () => ({ refresh, data: tradeData.current }) },
   tradeAccount: () => simAcc.current ?? useMt5Store.getState().accounts.find((a) => a.active),
 }));
 const simMarket = vi.fn();
@@ -44,6 +45,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   for (const m of [sendOrder, sendClose, sendPending, sendModify, sendCancel, sendModifyPos, requireLogin, toastMock, refresh, simMarket]) m.mockReset();
   simAcc.current = null;
+  tradeData.current = null;
   useQuoteStore.setState({ quotes: { XAUUSDm: { bid: 4130, ask: 4130.2 } } });
   requireLogin.mockResolvedValue(true);
   useMt5Store.setState({ accounts: [acc], loaded: true });
@@ -256,7 +258,24 @@ describe("moveOrder", () => {
     sendPending.mockResolvedValue(done({ orderType: "buy_stop" }));
     sendCancel.mockResolvedValue({ kind: "error", status: 504, message: "EA không trả lời", unknown: true } satisfies TradeOutcome);
     expect(await moveOrder(ord(), 4150, 3)).toBe(true);
-    expect(toastMock).toHaveBeenLastCalledWith(expect.stringMatching(/chưa xoá được lệnh cũ #222/), expect.objectContaining({ ms: 12_000, kind: "error" }));
+    expect(toastMock).toHaveBeenLastCalledWith(expect.stringMatching(/chưa xoá được lệnh cũ #222/), expect.objectContaining({ kind: "error" }));
+    expect(refresh).toHaveBeenCalled(); // hỏi lại EA xem lệnh cũ có khớp chưa
+  });
+
+  it("xoá cũ lỗi vì lệnh cũ đã KHỚP (vị thế cùng ticket): nói rõ đang có cả vị thế lẫn lệnh mới, nút huỷ lệnh mới", async () => {
+    sendPending.mockResolvedValue({ kind: "done", result: { ...(done({ orderType: "buy_stop" }) as { result: object }).result, order: 333 } } as TradeOutcome);
+    sendCancel.mockResolvedValueOnce(done({ ok: false, message: "Không còn lệnh chờ này" }));
+    refresh.mockImplementation(async () => {
+      tradeData.current = { positions: [{ ticket: 222 }] };
+    });
+    expect(await moveOrder(ord(), 4150, 3)).toBe(true);
+    const [text, opts] = toastMock.mock.calls[toastMock.mock.calls.length - 1];
+    expect(text).toMatch(/#222 đã khớp thành vị thế.*#333 vẫn đang chờ/);
+    expect(opts.action.label).toBe("Huỷ lệnh mới");
+    sendCancel.mockResolvedValue(done());
+    opts.action.run();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendCancel).toHaveBeenLastCalledWith("S:1", 333);
   });
 
   it("sell stop kéo lên trên Bid → sell limit mới", async () => {

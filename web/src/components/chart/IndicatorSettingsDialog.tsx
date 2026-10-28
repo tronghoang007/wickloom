@@ -1,7 +1,7 @@
 "use client";
 
 import { byId } from "@/indicators/catalog";
-import { resolveInputs, showsPriceLabel, type IndicatorInstance } from "@/indicators/instance";
+import { resetInstance, resolveInputs, showsPriceLabel, type IndicatorInstance } from "@/indicators/instance";
 import type { InputDef, LineStyleName, PlotType } from "@/indicators/schema";
 import { LINE_STYLES, PLOT_TYPES, WIDTHS, fillStyle, itemStyle, levelStyle, plotStyle } from "@/indicators/style";
 import { SOURCES } from "@/indicators/ta";
@@ -81,8 +81,7 @@ function Dialog({ uid }: { uid: string }) {
       width={480}
       onCancel={cancel}
       onOk={close}
-      // trả về mặc định nhưng giữ trạng thái ẩn
-      onReset={() => useIndicatorStore.getState().replace({ v: inst.v, uid, id: inst.id, inputs: {}, ...(inst.hidden ? { hidden: true } : {}) })}
+      onReset={() => useIndicatorStore.getState().replace(resetInstance(inst))}
     >
       {(tab) => (
         <>

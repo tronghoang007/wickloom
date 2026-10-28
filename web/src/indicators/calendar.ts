@@ -86,19 +86,33 @@ function anyIn(times: number[], a: number, b: number): boolean {
 }
 
 const BREAK_LOOK_DAYS = 7;
+const BREAK_AROUND = 3 * 3600; // ngày khác chỉ dùng để so nếu có nến trong chừng này trước và sau cửa sổ (đang giao dịch quanh giờ đó)
 
-/** Khoảng trống trước nến `i` (bắt đầu ở `from`) có phải giờ nghỉ thật không: giờ nghỉ lặp lại mỗi ngày, nên ở các ngày khác trong dữ liệu cùng giờ đó cũng trống
- *  (hoặc là cuối tuần). Mọi ngày khác xem được đều có nến ở giờ đó thì đây là lỗ dữ liệu (BTC mất feed, bảo trì): không cắt phiên. Không có ngày nào để so thì tin là giờ nghỉ. */
-function isBreak(times: number[], from: number, minGap: number): boolean {
-  const first = times[0];
-  const last = times[times.length - 1];
+/** Cửa sổ [a, a + minGap) có phải giờ nghỉ lặp lại hằng ngày không: ở các ngày khác ĐANG GIAO DỊCH quanh giờ đó (có nến trước và sau cửa sổ) mà cửa sổ trống thì là giờ nghỉ.
+ *  Ngày không có nến quanh giờ đó (cuối tuần của vàng, ngoài dữ liệu) không dùng để so: nếu không, ngày thứ Bảy trống làm mọi lỗ dữ liệu giữa phiên thành "giờ nghỉ".
+ *  Mọi ngày so được đều có nến trong cửa sổ = lỗ dữ liệu (mất feed, bảo trì). Không có ngày nào để so thì tin là giờ nghỉ. */
+function breakWindow(times: number[], a0: number, minGap: number, around: number): boolean | null {
   let seen = false;
   for (let k = -BREAK_LOOK_DAYS; k <= BREAK_LOOK_DAYS; k++) {
     if (k === 0) continue;
-    const a = from + k * DAY;
-    if (a < first || a + minGap > last) continue;
+    const a = a0 + k * DAY;
+    if (!anyIn(times, a - around, a) || !anyIn(times, a + minGap, a + minGap + around)) continue;
     if (!anyIn(times, a, a + minGap)) return true;
     seen = true;
+  }
+  return seen ? false : null;
+}
+
+/** Khoảng trống [from, to) (không có nến) có chứa giờ nghỉ thật không: xét từng cửa sổ `minGap` trong khoảng đó (lỗ dữ liệu dính liền giờ nghỉ vẫn cắt phiên ở giờ nghỉ);
+ *  cuối tuần được nhận ra nhờ cửa sổ đầu (giờ đóng cửa chiều thứ Sáu = giờ nghỉ hằng ngày). Không cửa sổ nào so được với ngày khác thì tin là giờ nghỉ. */
+function isBreak(times: number[], from: number, to: number, minGap: number, step: number): boolean {
+  const around = Math.max(BREAK_AROUND, 2 * step);
+  const inc = step > 0 ? step * Math.max(1, Math.floor(minGap / (2 * step))) : 60; // cửa sổ bám lưới nến: ngày khác có nến đúng ở các mốc này
+  let seen = false;
+  for (let a = from; a + minGap <= to; a += inc) {
+    const r = breakWindow(times, a, minGap, around);
+    if (r) return true;
+    if (r === false) seen = true;
   }
   return !seen;
 }
@@ -110,7 +124,7 @@ function breakKeys(times: number[], day: number[], tod: number[], period: Period
   if (n === 0) return [];
   let step = Infinity;
   for (let i = 1; i < n; i++) step = Math.min(step, times[i] - times[i - 1]);
-  const breaks = times.map((t, i) => i > 0 && t - times[i - 1] - step >= minGap && isBreak(times, times[i - 1] + step, minGap));
+  const breaks = times.map((t, i) => i > 0 && t - times[i - 1] - step >= minGap && isBreak(times, times[i - 1] + step, t, minGap, step));
   const tradingDay = (i: number) => day[i] + (tod[i] >= EVENING ? 1 : 0);
   let id = 0;
   let label = tradingDay(0);

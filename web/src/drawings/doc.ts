@@ -4,7 +4,7 @@ import { DEFAULT_LAYOUT_ID } from "@/store/layout";
 import { drawingsFetch } from "./storage";
 import { DrawingSync } from "./sync";
 import { SPEC } from "./tools";
-import type { Drawing } from "./types";
+import type { Anchor, Drawing } from "./types";
 
 // Hình vẽ của MỘT symbol trong MỘT layout, dùng chung cho mọi chart (pane) đang mở symbol đó. Nếu mỗi DrawingManager giữ
 // danh sách + DrawingSync riêng thì hai ô cùng symbol sẽ PUT đè nhau và mất hình. Doc sở hữu: danh sách hình, hình server
@@ -38,15 +38,21 @@ export class DrawingDoc {
   undoStack: string[] = [];
   redoStack: string[] = [];
   readonly views = new Set<DocView>();
+  /** Đổi mỗi lần danh sách hình bị thay từ ngoài (bản server về / nạp lại): ảnh chụp undo chụp trước đó (kéo đang dở) không còn đúng. */
+  gen = 0;
+  /** Hình đang xem trước (Settings, kéo bảng màu): bản đã chốt của nó. Lưu và undo dùng bản chốt, chart vẽ bản xem trước. */
+  readonly previewOf = new Map<string, Drawing>();
+  readonly retryDelay: number;
   private sync: DrawingSync | null;
 
   /** `symbol = null`: doc rỗng chưa gắn symbol nào, không lưu/đọc gì (trạng thái đầu của DrawingManager). */
   constructor(readonly symbol: string | null, readonly layoutId = DEFAULT_LAYOUT_ID, o: DocOpts = {}) {
+    this.retryDelay = o.retryDelay ?? 5000;
     this.sync = symbol
       ? new DrawingSync({
           url: o.url ?? ((s) => `${API}/me/drawings/${encodeURIComponent(s)}__${layoutId}`),
           fetch: o.fetch ?? drawingsFetch,
-          items: () => [...this.kept, ...this.drawings.filter((d) => !SPEC[d.type]?.ephemeral)],
+          items: () => [...this.kept, ...this.committed().filter((d) => !SPEC[d.type]?.ephemeral)],
           onLoad: (items) => this.loaded(items),
           saveDelay: o.saveDelay,
           retryDelay: o.retryDelay,
@@ -63,6 +69,12 @@ export class DrawingDoc {
     return this.sync?.state === "ready" || this.sync?.state === "readonly";
   }
 
+  /** Danh sách hình đã chốt: hình đang xem trước thay bằng bản chốt của nó (không lưu / không chụp undo bản chưa bấm Ok). */
+  committed(): Drawing[] {
+    if (this.previewOf.size === 0) return this.drawings;
+    return this.drawings.map((d) => this.previewOf.get(d.id) ?? d);
+  }
+
   /** Một view vừa sửa: lên lịch lưu và báo các view khác. */
   changed(origin: DocView | null) {
     this.sync?.schedule();
@@ -70,9 +82,9 @@ export class DrawingDoc {
     for (const fn of [...changeListeners]) fn(this);
   }
 
-  /** Lưu ngay và đợi server trả lời. */
-  flush(): Promise<void> {
-    return this.sync?.flush() ?? Promise.resolve();
+  /** Lưu ngay và đợi server trả lời: true = đã lưu (hoặc không có gì để lưu), false = lỗi (sẽ tự thử lại). */
+  flush(): Promise<boolean> {
+    return this.sync?.flush() ?? Promise.resolve(true);
   }
 
   /** Bỏ hình đang giữ (thuộc nơi lưu cũ, không lưu sang nơi mới) rồi nạp lại. */
@@ -83,6 +95,8 @@ export class DrawingDoc {
     this.kept = [];
     this.undoStack = [];
     this.redoStack = [];
+    this.previewOf.clear();
+    this.gen++;
     for (const v of [...this.views]) v.docReset();
     this.sync.open(this.symbol);
   }
@@ -98,13 +112,17 @@ export class DrawingDoc {
     for (const it of items) {
       const d = it as Drawing;
       const spec = d && SPEC[d.type];
-      if (spec && Array.isArray(d.points) && d.points.length >= spec.n) known.push(d);
+      // n = 0 (nhiều điểm) / -1 (vẽ tay) cần ít nhất 2 điểm mới vẽ được; điểm hỏng (không phải số) thì không hiện, chỉ giữ nguyên khi lưu
+      const need = spec ? (spec.n > 0 ? spec.n : 2) : Infinity;
+      const ok = (q: unknown) => Number.isFinite((q as Anchor)?.time) && Number.isFinite((q as Anchor)?.price);
+      if (spec && Array.isArray(d.points) && d.points.length >= need && d.points.every(ok)) known.push(d);
       else this.kept.push(it);
     }
     this.drawings = [...known, ...this.drawings];
     // ảnh chụp undo cũ chưa có bản server: undo về đó sẽ xóa mất drawings
     this.undoStack = [];
     this.redoStack = [];
+    this.gen++;
     for (const v of [...this.views]) v.docLoaded(known);
   }
 }
@@ -133,9 +151,22 @@ export function releaseDoc(doc: DrawingDoc, view: DocView) {
   const key = keyOf(doc.layoutId, doc.symbol);
   const e = docs.get(key);
   if (!e || e.doc !== doc || !doc.views.delete(view)) return;
-  if (--e.refs <= 0) {
-    docs.delete(key);
-    doc.close();
+  if (--e.refs <= 0) void closeWhenSaved(key, e);
+}
+
+/** Lưu nốt rồi mới bỏ doc khỏi registry. PUT cuối lỗi (mạng chớp lúc đổi symbol / layout) thì giữ doc lại và thử tiếp tới khi
+ *  lưu được: trước đây doc bị bỏ ngay, sửa đổi cuối mất hẳn. Mở lại symbol trong lúc đó thì dùng chính doc này (không đọc bản cũ trên server). */
+async function closeWhenSaved(key: string, e: { doc: DrawingDoc; refs: number }) {
+  for (;;) {
+    const ok = await e.doc.flush();
+    if (docs.get(key) !== e || e.refs > 0) return; // đã mở lại (doc sống tiếp) hoặc đã bị đóng nơi khác
+    if (ok) {
+      docs.delete(key);
+      e.doc.close();
+      return;
+    }
+    await new Promise((r) => setTimeout(r, e.doc.retryDelay));
+    if (docs.get(key) !== e || e.refs > 0) return;
   }
 }
 

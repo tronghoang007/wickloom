@@ -12,7 +12,7 @@ import { useTradeFocus } from "./focus";
 import { fmtLot, isStale, orderLabel, type DragPreview, type StopTitleFn, type TagOwner } from "./format";
 import { tradeBlock } from "./gate";
 import { LineDrag, type DragTarget } from "./lineDrag";
-import { checkStopMove, isPendingType, pendingLabel, resolveOrderType, sideOfType, tooClose } from "./orderType";
+import { checkStopMove, isPendingType, pendingLabel, resolveOrderType, sideOfType, tooClose, tooFar } from "./orderType";
 import { estimatePnl, fmtPnlCcy, pnlSpec, stopTitle } from "./pnl";
 import { useQuoteStore } from "./quote";
 import { SIM_ACCOUNT_ID } from "./simId";
@@ -211,6 +211,10 @@ export function createLineDrag(o: Opts): ChartDrag {
     if (!order) return publish();
     const t = isPendingType(order.type) && q ? resolveOrderType(sideOfType(order.type), price, q.bid, q.ask) : null;
     const level = symbolInfo()?.stops_level;
+    if (q && tooFar(price, q.bid, q.ask)) {
+      toast("Giá vào cách giá thị trường quá xa: kiểm tra lại số đã nhập (dấu phân cách, số chữ số)", { ms: 6000 });
+      return publish();
+    }
     if (t && q && tooClose(t, price, q.bid, q.ask, level, digits)) {
       toast(`Quá gần giá thị trường (tối thiểu ${level} điểm)`, { ms: 6000 }); // không âm thầm đổi sang market
       return publish();

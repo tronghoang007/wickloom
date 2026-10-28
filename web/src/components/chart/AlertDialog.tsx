@@ -16,6 +16,8 @@ import {
   fmtLevel,
   formFromAlert,
   liveCount,
+  MT5_OWNER_ONLY,
+  mt5Blocked,
   needsTf,
   type AlertForm,
 } from "@/alerts/model";
@@ -23,7 +25,9 @@ import { condsFor, spanText } from "@/alerts/drawingSpec";
 import { alertPlots, levelChoices, vsOptions, withChoice } from "@/alerts/indicatorSpec";
 import { digitsOf, openAlertSettings, useAlertDialog, useAlertPrefs, useAlertStore } from "@/alerts/store";
 import type { AlertChannels, AlertPatch, ChannelsInfo } from "@/lib/alertsApi";
+import { tzOffsetLabel } from "@/lib/timefmt";
 import { chartGlobal } from "@/store/chart";
+import { useSettingsStore } from "@/store/settings";
 import { toast } from "@/store/toast";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Close } from "../icons";
@@ -51,6 +55,7 @@ function channelNote(kind: keyof AlertChannels, info: ChannelsInfo | null): { no
     return { note: info.telegram.name ? `Đã kết nối (${info.telegram.name}).` : "Đã kết nối.", blocked: false, warn: false };
   }
   const m = info.mt5;
+  if (mt5Blocked(info)) return { note: `${MT5_OWNER_ONLY}.`, blocked: true, warn: true };
   if (!m.online) return { note: "EA đang offline: tin sẽ bị bỏ nếu lúc nổ vẫn offline.", blocked: false, warn: true };
   if (!m.supports) return { note: "EA cần bản 2.19 trở lên (biên dịch lại TVBridge bằng F7).", blocked: false, warn: true };
   if (m.push_enabled === false) return { note: "MT5 chưa bật Push Notifications (Tools → Options → Notifications).", blocked: false, warn: true };
@@ -73,7 +78,8 @@ function Form() {
   const alerts = useAlertStore((s) => s.alerts);
   const symbols = chartGlobal((s) => s.symbols);
   const prefs = useAlertPrefs((s) => s.channels);
-  const [f, setF] = useState<AlertForm>(() => (editing ? formFromAlert(editing) : defaultForm(seed!.symbol, seed!.price, seed!.tf, prefs, digitsOf(seed!.symbol), seed!.drawing ?? null, seed!.indicator ?? null)));
+  const tz = useSettingsStore((s) => s.s.timezone); // ô hạn "Custom" theo múi giờ của Settings, như giờ hiện ở danh sách alert
+  const [f, setF] = useState<AlertForm>(() => (editing ? formFromAlert(editing, tz) : defaultForm(seed!.symbol, seed!.price, seed!.tf, prefs, digitsOf(seed!.symbol), seed!.drawing ?? null, seed!.indicator ?? null)));
   const now = seed?.now ?? null; // mức / dải giá hiện tại của hình (chỉ có khi vừa mở từ hình vẽ)
   const conds = COND_OPTIONS.filter((o) => condsFor(f.drawing).includes(o.value));
   const ind = f.indicator; // alert theo indicator: chọn đường, điều kiện và thứ được so thay cho mức giá
@@ -83,7 +89,7 @@ function Form() {
   const levelRef = useRef<HTMLInputElement>(null);
   const names = useMemo(() => symbols.map((s) => s.name), [symbols]);
   const [openedAt] = useState(() => Date.now() / 1000); // mốc để báo lỗi hạn trong lúc nhập; lúc bấm Create tính lại bằng giờ thật
-  const check = checkForm(f, openedAt, names, info);
+  const check = checkForm(f, openedAt, names, info, tz);
   const set = (p: Partial<AlertForm>) => {
     setServerError(null);
     setF((cur) => ({ ...cur, ...p }));
@@ -98,7 +104,7 @@ function Form() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTried(true);
-    const final = checkForm(f, Date.now() / 1000, names, info);
+    const final = checkForm(f, Date.now() / 1000, names, info, tz);
     if (busy || !final.input) return;
     setBusy(true);
     const store = useAlertStore.getState();
@@ -264,7 +270,7 @@ function Form() {
               </div>
             )}
           </div>
-          <Field label="Expiration" error={err.expiry}>
+          <Field label={f.expiry === "custom" ? `Expiration (${tzOffsetLabel(tz)})` : "Expiration"} error={err.expiry}>
             <div className="flex gap-3">
               <select value={f.expiry} onChange={(ev) => set({ expiry: ev.target.value as AlertForm["expiry"] })} className={`${input} bg-[var(--bg)] ${f.expiry === "custom" ? "w-1/2" : ""}`}>
                 {EXPIRY_OPTIONS.map((o) => (

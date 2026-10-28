@@ -4,7 +4,7 @@ import time
 from typing import Any, Dict, List, Tuple
 
 from . import alerts, economic, mt5, state, tickdelta, trade
-from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN
+from .config import EA_TCP_HOST, EA_TCP_PORT, EA_TOKEN, round_offset
 from .models import BarsIn, SymbolsIn, TicksHistIn, TicksIn
 
 # Tick chỉ dùng cho realtime: tick cũ hơn mức này (EA gửi lại lịch sử tick, vd
@@ -23,7 +23,7 @@ STREAM_LIMIT = 4 * 1024 * 1024
 def _handle_symbols(body: SymbolsIn) -> None:
     """EA luôn gửi TOÀN BỘ symbol của account -> thay hẳn danh sách cũ (đổi account/loại
     account thì symbol không còn giao dịch được phải biến mất khỏi ô tìm kiếm)."""
-    state.broker_offset["value"] = body.broker_utc_offset
+    state.broker_offset["value"] = round_offset(body.broker_utc_offset)
     fresh = {s.name: s.model_dump() for s in body.symbols}
     for name in [n for n in state.symbols if n not in fresh]:
         del state.symbols[name]
@@ -33,7 +33,7 @@ def _handle_symbols(body: SymbolsIn) -> None:
 
 
 def _handle_ticks(body: TicksIn) -> None:
-    offset = body.broker_utc_offset
+    offset = round_offset(body.broker_utc_offset)
     state.broker_offset["value"] = offset
     floor = time.time() * 1000 - MAX_TICK_AGE_MS
     fresh = [t for t in body.ticks if t.t_msc - offset * 1000 >= floor]
@@ -61,7 +61,7 @@ def _handle_ticks(body: TicksIn) -> None:
 def _live_ticks(body: TicksIn, fresh: List[Any]) -> List[tickdelta.LiveTick]:
     """Tick trực tiếp -> (UTC ms, giá, trọng số, bỏ nếu giá không đổi) theo cùng quy tắc `TickPrice` của EA khi tính lịch sử tick: nến theo Last thì tick giao dịch
     (trọng số = volume), nến theo Bid thì tick đổi Bid (trọng số 1). EA cũ không gửi cờ tick: tick không đổi Bid được nhận biết bằng giá (`bỏ nếu giá không đổi`)."""
-    off = body.broker_utc_offset * 1000
+    off = round_offset(body.broker_utc_offset) * 1000
     out: List[tickdelta.LiveTick] = []
     for t in fresh:
         if body.lm:
@@ -79,7 +79,7 @@ def _publish_delta(symbol: str, upd: tickdelta.Update) -> None:
         return
     rows = [r for r, _ in minutes]
     state.bars.upsert(symbol, tickdelta.TICK_DELTA_TF, rows)
-    state.bars.put_tickvp(symbol, rows[0]["t"], rows[-1]["t"], [(r["t"], p, u, d) for r, cells in minutes for p, (u, d) in cells.items()])
+    state.bars.put_tickvp(symbol, rows[0]["t"], rows[-1]["t"], [(r["t"], p, u, d) for r, cells in minutes for p, (u, d) in cells.items()], minutes=[r["t"] for r in rows])
     state.hub.publish(symbol, "", {
         "type": "tick_delta", "symbol": symbol, "bars": rows,
         "cells": [[p, u, d] for p, (u, d) in upd.cells.items()] if upd.row is not None else [],
@@ -87,8 +87,11 @@ def _publish_delta(symbol: str, upd: tickdelta.Update) -> None:
 
 
 def _handle_bars(body: BarsIn) -> None:
-    state.broker_offset["value"] = body.broker_utc_offset
-    rows = [b.model_dump() for b in body.bars]
+    offset = round_offset(body.broker_utc_offset)
+    state.broker_offset["value"] = offset
+    # EA đã trừ lệch giờ chưa làm tròn (t = giờ server - lệch giờ thô): sửa lại theo lệch giờ đã làm tròn để giờ nến khớp nến gom từ tick
+    fix = body.broker_utc_offset - offset
+    rows = [{**b.model_dump(), "t": b.t + fix} for b in body.bars]
     state.bars.upsert(body.symbol, body.tf, rows)
     if body.tf == "M1" and rows:
         alerts.engine.on_bars(body.symbol)  # nến M1 đang đổ về: alert báo bù chờ nó lắng xuống rồi mới soát
@@ -100,7 +103,7 @@ def _handle_bars(body: BarsIn) -> None:
 
 
 def _handle_ticks_hist(body: TicksHistIn) -> None:
-    state.broker_offset["value"] = body.broker_utc_offset
+    state.broker_offset["value"] = round_offset(body.broker_utc_offset)
     hist: Dict[Tuple[int, float], List[float]] = {}
     rows = tickdelta.ingest(body, hist)
     if rows:
@@ -117,7 +120,7 @@ def _handle_ticks_hist(body: TicksHistIn) -> None:
 
 async def _write(writer: asyncio.StreamWriter, msg: Dict[str, Any]) -> None:
     writer.write((json.dumps(msg, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8"))
-    await writer.drain()
+    await state.ea_hub.drain(writer)
 
 
 async def _reject(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, message: str) -> None:
@@ -219,8 +222,8 @@ async def handle_ea(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
     except (asyncio.IncompleteReadError, ConnectionResetError):
         pass
     finally:
+        state.ea_hub.remove(writer)  # cả kết nối bị từ chối: bỏ khoá drain đã tạo lúc gửi lỗi
         if registered:
-            state.ea_hub.remove(writer)
             mt5.registry.remove(writer)
         writer.close()
         print(f"TVBridge disconnected: {peer}")

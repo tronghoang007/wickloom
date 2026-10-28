@@ -27,6 +27,24 @@ export const parseNum = (t: string): number => {
   return parseFloat(s.replace(",", "."));
 };
 
+/** Giá người dùng gõ: như `parseNum`, thêm dấu phân cách nghìn mà chart / bảng hiện ("4,087.44"). Hai nhóm nghìn trở lên ("1,234,567" / "1.234.567") chắc chắn là nghìn.
+ *  Đúng một nhóm 3 chữ số ("4,050" / "4.050") thì có thể là 4.05 hoặc 4050: chọn cách đọc gần `ref` (giá thị trường) hơn; không có `ref` thì giữ cách đọc thập phân như `parseNum`. */
+export const parsePrice = (t: string, ref?: number): number => {
+  const s = t.trim();
+  const m = /^[+-]?\d{1,3}([,.])\d{3}(?:\1\d{3})*$/.exec(s);
+  if (!m) return parseNum(s);
+  const thousands = parseFloat(s.split(m[1]).join(""));
+  if (s.split(m[1]).length > 2) return thousands;
+  const decimal = parseFloat(s.replace(m[1], "."));
+  return ref && ref > 0 && Math.abs(thousands - ref) < Math.abs(decimal - ref) ? thousands : decimal;
+};
+
+/** Giá vào / SL / TP của bản nháp (đọc theo giá thị trường `quote` để hiểu đúng dấu phân cách nghìn). */
+export function draftPrices(d: Draft, quote: { bid: number; ask: number } | undefined): { price: number; sl: number; tp: number } {
+  const ref = quote ? (quote.bid + quote.ask) / 2 : undefined;
+  return { price: parsePrice(d.price, ref), sl: parsePrice(d.sl, ref), tp: parsePrice(d.tp, ref) };
+}
+
 export type DraftField = "price" | "sl" | "tp";
 export const DRAFT_IDS: Record<string, DraftField> = { "d:entry": "price", "d:sl": "sl", "d:tp": "tp" };
 
@@ -36,11 +54,9 @@ export function draftLines(d: Draft | null, symbol: string, quote: { bid: number
   if (!d || d.symbol !== symbol) return [];
   const out: LineSpec[] = [];
   const pending = d.mode === "pending";
-  const price = parseNum(d.price);
+  const { price, sl, tp } = draftPrices(d, quote);
   // giá vào dùng để vẽ và tính lãi/lỗi: giá vào của lệnh chờ, hoặc giá khớp market (Buy mua ở Ask, Sell bán ở Bid)
   const entry = pending ? price : quote ? (d.side === "buy" ? quote.ask : quote.bid) : 0;
-  const sl = parseNum(d.sl);
-  const tp = parseNum(d.tp);
   const lot = parseNum(d.lot);
   const sideName = d.side === "buy" ? "Buy" : "Sell";
   if (entry > 0) {

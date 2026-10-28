@@ -47,9 +47,10 @@ type Mode =
   | { k: "idle" }
   // pressed: đang giữ chuột vẽ tay. downAt: chỗ nhấn điểm đầu, nhả xa chỗ đó = đặt điểm 2 (nhấn-kéo-thả)
   | { k: "drafting"; d: Drawing; placed: number; pressed: boolean; downAt: Pt | null }
-  | { k: "dragPoint"; id: string; index: number; before: string; moved: boolean }
+  // gen: DrawingDoc.gen lúc chụp `before`; bản server về giữa lúc kéo thì `before` thiếu hình server, không đưa vào undo
+  | { k: "dragPoint"; id: string; index: number; before: string; gen: number; moved: boolean }
   // a0: vị trí (tỉ lệ khung) của hình đang ghim; hint: nhấn trúng nhãn "+ Add text" (nhả không kéo = mở ô gõ chữ)
-  | { k: "dragBody"; id: string; start: Pt; orig: Anchor[]; before: string; moved: boolean; a0?: Pt; hint?: boolean };
+  | { k: "dragBody"; id: string; start: Pt; orig: Anchor[]; before: string; gen: number; moved: boolean; a0?: Pt; hint?: boolean };
 
 // Khung nhìn hiện tại; key đổi khi cuộn/zoom/đổi trục giá/có nến mới. `lastKey` = giá cao / thấp / đóng của nến cuối (đổi theo từng tick giá): chỉ hình có đọc `c.bars` mới phụ thuộc.
 type View = { w: number; h: number; bars: Bar[]; step: number; key: string; lastKey: string };
@@ -98,6 +99,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private symbol = "";
   private unsub: () => void;
   private stCache: { g: unknown; p: unknown; v: DrawingGlobal & DrawPane } | null = null;
+  private destroyed = false; // chart đã gỡ: tải nến / tick còn dở về sau thì bỏ, không vẽ / tải tiếp
 
   // Trạng thái công cụ dùng chung (tool, magnet...) gộp với trạng thái của pane này (hình đang chọn...): cùng hình dạng
   // với store trước khi tách theo pane. Cache theo tham chiếu nên gọi trong pointermove không cấp phát lại.
@@ -135,6 +137,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   }
 
   destroy() {
+    this.destroyed = true;
     this.o.container.removeEventListener("pointerdown", this.onDown, true);
     this.o.container.removeEventListener("pointermove", this.onMove, true);
     this.o.container.removeEventListener("pointerleave", this.onLeave);
@@ -144,6 +147,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     window.removeEventListener("keydown", this.onKey);
     this.unsub();
     this.unlockChart();
+    this.tickCover.clear();
+    this.tickProfiles.clear();
     releaseDoc(this.doc, this);
     this.o.pane.draw.setState({ api: null, drawings: [], selectedId: null });
   }
@@ -291,6 +296,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     };
   }
   refresh() {
+    if (this.destroyed) return;
     // VP cần nến khung nhỏ: tải lại khi đổi khung chart, bật Extend Right, hoặc có nến mới (tự bỏ qua nếu không đổi)
     for (const d of this.drawings) this.prefetchProfileBars(d);
     this.redraw?.();
@@ -557,17 +563,25 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     }
   }
 
-  /** Mép trên pane chính trong khung chart (px). */
-  private mainTop(): number {
-    const el = this.mainPane()?.getHTMLElement();
-    return el ? el.getBoundingClientRect().top - this.o.container.getBoundingClientRect().top : 0;
+  /** Góc trên-trái vùng vẽ của pane chính trong khung chart (px). Hàng của pane (getHTMLElement) gồm cả trục giá trái: vùng vẽ
+   *  bắt đầu sau trục đó (hiện khi có indicator ghim vào "Left scale", bề rộng đổi theo nhãn giá), toạ độ thời gian của LWC tính từ đó. */
+  private paneOrigin(): Pt {
+    const box = this.o.container.getBoundingClientRect();
+    const row = this.mainPane()?.getHTMLElement()?.getBoundingClientRect();
+    let left = 0;
+    try {
+      left = this.o.chart.priceScale("left").width();
+    } catch {
+      /* chart vừa bị huỷ */
+    }
+    return { x: (row ? row.left - box.left : 0) + left, y: row ? row.top - box.top : 0 };
   }
 
-  // Toạ độ chuột theo pane chính (x theo khung chart, y theo mép trên pane chính)
+  // Toạ độ chuột theo vùng vẽ của pane chính (cùng hệ với timeScale / priceToCoordinate và canvas của primitive)
   private rel(e: PointerEvent | MouseEvent): Pt {
     const r = this.o.container.getBoundingClientRect();
-    const top = this.mainPane()?.getHTMLElement()?.getBoundingClientRect().top ?? r.top;
-    return { x: e.clientX - r.left, y: e.clientY - top };
+    const o = this.paneOrigin();
+    return { x: e.clientX - r.left - o.x, y: e.clientY - r.top - o.y };
   }
 
   private paneSize() {
@@ -675,11 +689,11 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       this.consume(e);
       this.lockChart();
       const { d, hit } = found;
-      const before = this.snapshot();
+      const before = this.snapshot(), gen = this.doc.gen;
       const pin = this.pinned(d);
       this.mode = hit.kind === "point" && !pin
-        ? { k: "dragPoint", id: d.id, index: hit.index, before, moved: false }
-        : { k: "dragBody", id: d.id, start: p, orig: d.points.map((q) => ({ ...q })), before, moved: false, a0: pin ?? undefined, hint: wasSelected && this.onHint(d, p) };
+        ? { k: "dragPoint", id: d.id, index: hit.index, before, gen, moved: false }
+        : { k: "dragBody", id: d.id, start: p, orig: d.points.map((q) => ({ ...q })), before, gen, moved: false, a0: pin ?? undefined, hint: wasSelected && this.onHint(d, p) };
     }
   };
 
@@ -836,7 +850,9 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
         const l0 = ts.coordinateToLogical(m.start.x), l1 = ts.coordinateToLogical(p.x);
         const p0 = this.series?.coordinateToPrice(m.start.y), p1 = this.series?.coordinateToPrice(p.y);
         if (l0 === null || l1 === null || p0 == null || p1 == null) return;
-        const pts = shiftAnchors(this.o.getBars(), this.step(), m.orig, Math.round(l1 - l0), p1 - p0);
+        // Trục log: dịch theo tỉ lệ giá (cùng số pixel cho mọi điểm), không cộng cùng một khoảng giá - hình sẽ méo, điểm dưới có thể xuống ≤ 0 và biến mất
+        const log = this.series?.priceScale().options().mode === PriceScaleMode.Logarithmic && p0 > 0 && p1 > 0;
+        const pts = shiftAnchors(this.o.getBars(), this.step(), m.orig, Math.round(l1 - l0), log ? 0 : p1 - p0, log ? p1 / p0 : 1);
         if (pts && SPEC[d.type].inBars && pts.some((q) => this.fit(d.type, q).time !== q.time)) return; // ra ngoài khoảng nến: giữ vị trí cũ
         if (pts) this.moveTo(m, d, pts);
       }
@@ -889,7 +905,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     }
     const d = this.drawings.find((x) => x.id === m.id);
     if (d) this.prefetchProfileBars(d);
-    this.pushUndo(m.before);
+    if (m.gen === this.doc.gen) this.pushUndo(m.before); // không thì undo về `before` sẽ xoá mất các hình server vừa nạp (rồi lưu luôn)
     this.commit();
   };
 
@@ -897,6 +913,11 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     if (!isActivePane(this.o.pane.id)) return; // phím tắt chỉ tác động chart đang active
     const el = e.target as HTMLElement;
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return;
+    // Settings đang mở (modal): Del / ⌘Z không được tác động hình phía sau (undo lúc đang xem trước làm lệch hình với bản lưu); Esc chỉ đóng hộp
+    if (this.st.settingsOpen) {
+      if (e.key === "Escape") this.setSt({ settingsOpen: false });
+      return;
+    }
     const mod = e.metaKey || e.ctrlKey;
     const m = this.mode;
     if (e.key === "Escape") {
@@ -956,12 +977,15 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.refresh();
   }
 
-  update(patch: Partial<Pick<Drawing, "color" | "width" | "dash" | "textColor" | "locked" | "hidden" | "text" | "visibility">> & { opts?: Drawing["opts"] }) {
+  /** `live`: đang kéo (bảng màu, thanh opacity) - chỉ xem trước trên chart; lần gọi không `live` cuối cùng mới vào undo (một bước cho cả lần kéo), lưu và làm mặc định. */
+  update(patch: Partial<Pick<Drawing, "color" | "width" | "dash" | "textColor" | "locked" | "hidden" | "text" | "visibility">> & { opts?: Drawing["opts"] }, live = false) {
     const d = this.selected();
     if (!d) return;
-    this.pushUndo();
     const { opts, ...rest } = patch;
     const next: Drawing = { ...d, ...rest, opts: opts ? { ...d.opts, ...opts } : d.opts };
+    if (live) return this.preview(next);
+    this.pushUndo(); // snapshot dùng bản chốt (trước lúc kéo) nhờ doc.previewOf
+    this.doc.previewOf.delete(next.id);
     this.put(next);
     this.commit();
 
@@ -980,7 +1004,12 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
 
   // Xem trước từ Settings: chart đổi ngay nhưng không vào undo, không lưu; Ok chốt (replaceSelected), đóng thì trả lại bản gốc
   preview(next: Drawing) {
-    if (!this.drawings.some((x) => x.id === next.id)) return;
+    const cur = this.drawings.find((x) => x.id === next.id);
+    if (!cur) return;
+    // bản chốt giữ trong doc: lưu / undo không dính bản xem trước; xem trước quay về đúng bản chốt (Cancel) thì hết xem trước
+    const base = this.doc.previewOf.get(next.id) ?? cur;
+    if (JSON.stringify(base) === JSON.stringify(next)) this.doc.previewOf.delete(next.id);
+    else this.doc.previewOf.set(next.id, base);
     this.put(next);
     this.setSt({ drawings: [...this.drawings] });
     this.refresh();
@@ -989,6 +1018,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   /** `orig`: bản trước khi mở Settings; trả về trước khi ghi undo để Ctrl+Z quay về đúng bản đó, không phải bản xem trước. */
   replaceSelected(next: Drawing, orig?: Drawing) {
     if (!this.drawings.some((x) => x.id === next.id)) return;
+    this.doc.previewOf.delete(next.id);
     if (orig) this.put(orig);
     // Position: lúc gõ trong Settings không kẹp; bấm Ok mới kẹp target/stop về đúng phía + tròn tick
     const spec = SPEC[next.type];
@@ -1074,17 +1104,18 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     const d = this.drawings.find((x) => x.id === id);
     const b = d && this.built(d, this.view());
     if (!d || !b) return null;
+    const at = this.paneOrigin(); // ô sửa text nằm trong khung chart, không phải trong vùng vẽ của pane
     if (this.st.editing?.label) {
       const hint = this.shapes(d, { ...b.c, hovered: true, selected: true, dragging: false, editing: false }).find((s) => s.k === "text" && s.hint);
-      return hint?.k === "text" ? { x: hint.at.x, y: hint.at.y + this.mainTop(), angle: hint.angle } : null;
+      return hint?.k === "text" ? { x: hint.at.x + at.x, y: hint.at.y + at.y, angle: hint.angle } : null;
     }
     const cell = this.st.editing?.cell;
     if (cell) {
       const rh = tableRowH(d), o = b.c.p[0];
-      return { x: o.x + TABLE_COL_W * cell[1] + 4, y: o.y + rh * cell[0] + rh / 2 + this.mainTop() };
+      return { x: o.x + TABLE_COL_W * cell[1] + 4 + at.x, y: o.y + rh * cell[0] + rh / 2 + at.y };
     }
     const p = SPEC[d.type].n === 2 ? b.c.p[1] : b.c.p[0];
-    return { x: p.x, y: p.y + this.mainTop() }; // theo khung chart (ô sửa text nằm trong khung chart, không phải trong pane)
+    return { x: p.x + at.x, y: p.y + at.y };
   }
 
   // text = null: hủy (Esc). Hình mới tạo mà hủy / để trống thì bỏ luôn, kể cả bước undo lúc tạo.
@@ -1176,7 +1207,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
 
   // Measure (ephemeral) không thuộc lịch sử undo
   private snapshot() {
-    return JSON.stringify(this.drawings.filter((d) => !SPEC[d.type]?.ephemeral));
+    return JSON.stringify(this.doc.committed().filter((d) => !SPEC[d.type]?.ephemeral));
   }
 
   private pushUndo(snap = this.snapshot()) {
@@ -1185,6 +1216,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.redoStack = [];
   }
   private restore(json: string) {
+    this.doc.previewOf.clear();
     this.drawings = JSON.parse(json);
     if (!this.selected()) this.setSt({ selectedId: null });
     this.commit();
@@ -1215,8 +1247,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     noteGuestDrawing();
   }
 
-  /** Lưu ngay và đợi server trả lời (dùng trước khi đổi/đóng phiên đăng nhập). */
-  flushSave(): Promise<void> {
+  /** Lưu ngay và đợi server trả lời (dùng trước khi đổi/đóng phiên đăng nhập): true = đã lưu, false = lỗi (sẽ tự thử lại). */
+  flushSave(): Promise<boolean> {
     return this.doc.flush();
   }
 
@@ -1248,6 +1280,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   }
 
   private tickChanged() {
+    if (this.destroyed) return;
     this.profileVer++; // khoá vẽ lại đổi: hình dựng lại với dữ liệu tick mới
     this.refresh();
   }
@@ -1255,7 +1288,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   /** Delta tick realtime từ backend (`tick_delta`, như `IndicatorManager.onTickDelta`): nến delta vào cache nến phủ tick, ô giá của phút đang chạy cộng vào histogram của FRVP / AVP.
    *  Chỉ vẽ lại khi có profile 1 tick đang hiện mà khoảng của nó gồm một trong các phút vừa đổi. */
   onTickDelta(m: { symbol: string; bars: Bar[]; cells: [number, number, number][] }) {
-    if (m.bars.length === 0) return;
+    if (m.bars.length === 0 || this.destroyed) return;
     const last = m.bars[m.bars.length - 1];
     this.liveMinute.set(m.symbol, appendLive(this.liveMinute.get(m.symbol) ?? [], { t: last.t, cells: m.cells }));
     this.tickCover.push(m.symbol, TICK_TF, m.bars);
@@ -1327,7 +1360,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   // đó có dưới 5000 nến. Không có thì dùng nến của chart (tools.profileSource lo phần ghép). Neo trước nến chart đầu tiên đã nạp thì khung bằng hoặc lớn hơn
   // khung chart cũng được (chart M1 không có khung nhỏ hơn, AVP vài ngày trên M1 quá 5000 nến): vẫn cần phần nến chart chưa nạp, ít nhất cho vùng giá.
   private prefetchProfileBars(d: Drawing) {
-    if (!this.symbol || this.dragging(d)) return; // đang kéo: chỉ có vạch dọc, thả ra mới tải
+    if (this.destroyed || !this.symbol || this.dragging(d)) return; // đang kéo: chỉ có vạch dọc, thả ra mới tải
     const symbol = this.symbol;
     const bars = this.o.getBars();
     const chartStep = this.step();
@@ -1348,7 +1381,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       for (const tf of LOWER_TFS) {
         if (TF_SECONDS[tf] >= chartStep && span.t0 >= (bars[0]?.t ?? span.t0)) break;
         const got = await fetchBars(symbol, tf, to, 5000, span.t0);
-        if (this.profileKeys.get(d.id) !== key) return;
+        if (this.destroyed || this.profileKeys.get(d.id) !== key) return;
         if (got.length > 0 && got.length < 5000) {
           fine = { bars: got, step: TF_SECONDS[tf] };
           break;
@@ -1359,7 +1392,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       else this.setProfileBars(d.id, undefined);
       this.refresh();
     })().catch(() => {
-      if (this.profileKeys.get(d.id) !== key) return;
+      if (this.destroyed || this.profileKeys.get(d.id) !== key) return;
       // Bỏ khoá để lần refresh sau (hết PROFILE_RETRY_MS) tải lại; không thì khoá cũ chặn mãi tới khi reload / đổi khung
       this.profileKeys.delete(d.id);
       this.profileFailed.set(d.id, { key, at: Date.now() });

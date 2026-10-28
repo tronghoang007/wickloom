@@ -22,7 +22,7 @@ import { useAlertLines } from "@/alerts/useAlertLines";
 import { createLineDrag, type ChartDrag } from "@/trading/chartOrders";
 import type { DragPreview } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
-import { parseNum } from "@/trading/draft";
+import { parsePrice } from "@/trading/draft";
 import { useTicketStore } from "@/trading/ticket";
 import type { SimBar } from "@/trading/sim";
 import { enterSim, feedSim, leaveSim, restartSim, seedSim } from "@/trading/simStore";
@@ -71,7 +71,7 @@ import { tradeMenuItems } from "./tradeMenu";
 import IndicatorLegend from "./IndicatorLegend";
 import { indicatorMenuItems } from "./indicatorMenu";
 import VolumeLegend, { volumeMenuItems } from "./VolumeLegend";
-import { heikinAshi } from "./transform";
+import { heikinAshi, mergeBars, priceExtent, tickInBar } from "./transform";
 
 
 type Fmt = { precision: number };
@@ -108,13 +108,14 @@ function createSeries(
   type: ChartType,
   f: Fmt,
   paneIndex = 0, // pane chính có thể đã bị dời khỏi vị trí 0
+  hideCandles = false, // Volume footprint đang hiện: series mới cũng phải trong suốt như series nó thay
 ): ISeriesApi<SeriesType> {
   const priceFormat = {
     type: "price" as const,
     precision: f.precision,
     minMove: 10 ** -f.precision,
   };
-  const style = seriesStyle(useSettingsStore.getState().s, type);
+  const style = seriesStyle(useSettingsStore.getState().s, type, hideCandles);
   switch (type) {
     case "bars":
       return chart.addSeries(BarSeries, { ...style, priceFormat }, paneIndex);
@@ -263,14 +264,6 @@ function setTabTitle(title: string) {
   if (document.title !== title) document.title = title;
 }
 
-// Nến mới nạp (từ DB) ghi đè nến cũ cùng mốc - trừ nến cuối `liveT` đang chạy realtime
-// (WS mới là nguồn đúng nhất của nó). Nến trước đó có thể là bản gom dở đã được EA sửa lại.
-function mergeBars(cur: Bar[], add: Bar[], liveT: number) {
-  const m = new Map(cur.map((b) => [b.t, b]));
-  for (const b of add) if (!m.has(b.t) || b.t < liveT) m.set(b.t, b);
-  return [...m.values()].sort((a, b) => a.t - b.t);
-}
-
 export default function Chart({ paneId }: { paneId: string }) {
   // Chart gắn thẳng vào store của pane mình (không qua facade "pane đang active" của UI ngoài)
   const pane = useLayoutStore((s) => s.panes[paneId]);
@@ -300,6 +293,9 @@ export default function Chart({ paneId }: { paneId: string }) {
   const typeRef = useRef<ChartType>(chartType);
   const digitsRef = useRef(digits);
   const loadingRef = useRef(false);
+  // Tăng mỗi lần effect dữ liệu chạy lại (đổi symbol / TF, thoát Replay): kết quả async của lần nạp trước (cuộn-lùi, chọn nến Replay...) thì bỏ
+  const loadGenRef = useRef(0);
+  const replaySeqRef = useRef(0); // tăng mỗi lần chọn nến Replay / đổi bước cập nhật: lần tải M1 cũ hơn về sau thì bỏ
   const exhaustedRef = useRef(false);
   const backfillRef = useRef<{ t: number; at: number; done: boolean } | null>(null);
   const prevCloseRef = useRef<number | null>(null);
@@ -362,6 +358,10 @@ export default function Chart({ paneId }: { paneId: string }) {
   const [indVer, setIndVer] = useState(0); // indicator vừa tính lại: render lại để legend đọc giá trị mới
   const [autoOn, setAutoOn] = useState(true); // thang giá pane chính đang tự co giãn (nút "auto" ở thanh dưới)
   const [fpOn, setFpOn] = useState(false); // có Volume footprint đang hiện: nến chính trong suốt (footprint tự vẽ nến)
+  // Chiều cao trục thời gian / bề rộng trục giá pane chính cho các lớp phủ (logo, vùng chọn nến Replay): đo trong vòng khung hình của nhãn giá cuối,
+  // vì render không được đọc chartRef (react-hooks/refs) và LWC không báo khi trục giá đổi bề rộng
+  const [axes, setAxes] = useState({ timeH: 28, priceW: 70 });
+  const axesRef = useRef(axes);
   const [hover, setHover] = useState<{
     x: number;
     y: number;
@@ -578,10 +578,20 @@ export default function Chart({ paneId }: { paneId: string }) {
     return out;
   };
 
-  const loadM1 = async (from: number) => {
+  /** `valid`: kiểm lại sau khi tải xong (người dùng có thể đã thoát Replay / đổi symbol / chọn nến khác trong lúc chờ); false = bỏ kết quả. */
+  const loadM1 = async (from: number, valid: () => boolean = () => true): Promise<boolean> => {
     const r = await fetchAhead(pane.chart.getState().symbol, "M1", from, 50000);
+    if (!valid()) return false;
     m1Ref.current = r.bars;
     m1EndRef.current = r.end;
+    return true;
+  };
+
+  /** Kết quả async của Replay còn dùng được: vẫn đang Replay, dữ liệu chart chưa nạp lại, và không có lần chọn nến / đổi bước nào mới hơn. */
+  const replayStillValid = () => {
+    const gen = loadGenRef.current;
+    const seq = ++replaySeqRef.current;
+    return () => pane.replay.getState().active && loadGenRef.current === gen && replaySeqRef.current === seq;
   };
 
   // Phát hết phần đã tải mà phía trước còn dữ liệu: tải cửa sổ kế tiếp rồi chạy luôn bước đang chờ (bấm Forward lúc đang tải
@@ -671,7 +681,10 @@ export default function Chart({ paneId }: { paneId: string }) {
     const view = chartRef.current?.timeScale().getVisibleLogicalRange();
     pane.replay.setState({ selecting: false, active: true, playing: false });
     setHover(null);
-    if (needM1()) await loadM1(b.t);
+    // Thoát Replay / đổi symbol trong lúc tải M1: dữ liệu live đã nạp lại, áp đoạn replay cũ lên sẽ thành nến ma
+    const valid = replayStillValid();
+    if (needM1() && !(await loadM1(b.t, valid))) return;
+    if (!valid()) return;
     applyVisible(buildVisible(cursorRef.current));
     if (view) chartRef.current?.timeScale().setVisibleLogicalRange(view);
   };
@@ -769,8 +782,9 @@ export default function Chart({ paneId }: { paneId: string }) {
         e.preventDefault();
         e.stopPropagation();
         const span = top - bottom;
-        const dataLow = Math.min(...bars.map((bar) => bar.l));
-        const dataHigh = Math.max(...bars.map((bar) => bar.h));
+        const ext = priceExtent(bars)!; // bars không rỗng (đã kiểm ở trên)
+        const dataLow = ext.lo;
+        const dataHigh = ext.hi;
         const symbolInfo = useChartStore
           .getState()
           .symbols.find(
@@ -911,6 +925,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       () => pane.indicators.getState().mainSlot,
       mainPane,
       (on) => setFpOn(on),
+      () => digitsRef.current,
     );
     drawRef.current = new DrawingManager({
       pane,
@@ -1075,6 +1090,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       const first = barsRef.current[0];
       if (!first) return;
       loadingRef.current = true;
+      const gen = loadGenRef.current; // đổi symbol / TF trong lúc chờ: bỏ kết quả, không đụng cờ của dữ liệu mới
       const curSym = pane.chart.getState().symbol;
       const curTf = pane.chart.getState().tf;
       const key = `${curSym}|${curTf}`;
@@ -1086,6 +1102,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       )
         .then(async (older) => {
           if (
+            gen !== loadGenRef.current ||
             key !==
               `${pane.chart.getState().symbol}|${pane.chart.getState().tf}` ||
             barsRef.current[0] !== first // "bars_loaded" đã ghép đoạn này trước
@@ -1109,18 +1126,18 @@ export default function Chart({ paneId }: { paneId: string }) {
             const pending = backfillRef.current;
             if (pending && pending.t === first.t && Date.now() - pending.at < 30000) return;
             backfillRef.current = { t: first.t, at: Date.now(), done: false };
+            let ok = false;
             try {
-              const res = await triggerBackfillAt(curSym, curTf, 500, first.t);
-              if (!res.ok) {
-                exhaustedRef.current = true;
-              }
+              ok = (await triggerBackfillAt(curSym, curTf, 500, first.t)).ok;
             } catch {
-              exhaustedRef.current = true;
+              ok = false;
             }
+            if (!ok && gen === loadGenRef.current) exhaustedRef.current = true;
           }
         })
+        .catch(() => {}) // lỗi mạng: lần cuộn sau thử lại
         .finally(() => {
-          loadingRef.current = false;
+          if (gen === loadGenRef.current) loadingRef.current = false;
         });
     });
 
@@ -1260,9 +1277,11 @@ export default function Chart({ paneId }: { paneId: string }) {
       chartType,
       { precision: digitsRef.current },
       volRef.current?.getPane().paneIndex() ?? 0, // vào đúng pane chính (đã chứa series volume)
+      fpOn,
     );
     drawRef.current?.attachTo(seriesRef.current);
     render();
+    updateLines(); // dựng lại đường giá phụ (đóng cửa phiên trước, cao / thấp, bid / ask) trên series mới
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartType]);
 
@@ -1343,13 +1362,11 @@ export default function Chart({ paneId }: { paneId: string }) {
   // changing the update interval
   useEffect(() => {
     if (!pane.replay.getState().active) return;
+    const valid = replayStillValid();
     (async () => {
-      if (needM1())
-        await loadM1(
-          cursorRef.current - TF_SECONDS[pane.chart.getState().tf],
-        );
-      applyVisible(buildVisible(cursorRef.current));
-    })();
+      if (needM1() && !(await loadM1(cursorRef.current - TF_SECONDS[pane.chart.getState().tf], valid))) return;
+      if (valid()) applyVisible(buildVisible(cursorRef.current));
+    })().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interval]);
 
@@ -1361,7 +1378,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return;
       if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.code === "KeyR") {
         e.preventDefault();
-        resetChartView(chartRef.current, barsRef.current.length);
+        resetChartView(chartRef.current, barsRef.current.length, mainIndex()); // pane chính có thể đã bị dời khỏi vị trí 0
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1434,6 +1451,8 @@ export default function Chart({ paneId }: { paneId: string }) {
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout>;
     let pollTimer: ReturnType<typeof setTimeout>;
+    loadGenRef.current++;
+    loadingRef.current = false; // cuộn-lùi của symbol / TF cũ còn treo thì bỏ, đừng chặn cuộn-lùi của dữ liệu mới
     barsRef.current = [];
     exhaustedRef.current = false;
     backfillRef.current = null;
@@ -1442,7 +1461,7 @@ export default function Chart({ paneId }: { paneId: string }) {
     drawRef.current?.setSymbol(symbol);
     refreshExtras();
 
-    const load = async () => {
+    const loadOnce = async () => {
       const replayActiveNow = pane.replay.getState().active;
       // Đang replay (đã "cắt" tại 1 mốc thời gian) -> đổi symbol/tf vẫn phải neo đúng
       // mốc đó, không load "mới nhất" của tf mới.
@@ -1463,7 +1482,7 @@ export default function Chart({ paneId }: { paneId: string }) {
         // Mốc cắt nằm giữa một nến của TF mới (vd 1h -> 4h): cần M1 để dựng nến đó tới con trỏ
         const tfs = TF_SECONDS[tf];
         const midBar = bars.some((b) => b.t + tfs > anchor);
-        if (needM1() || midBar) await loadM1(anchor - tfs);
+        if (needM1() || midBar) await loadM1(anchor - tfs, () => alive);
         if (!alive) return;
         applyVisible(buildVisible(anchor), true);
         // giữ góc nhìn qua lần đổi TF như lúc không replay (keepView.ts)
@@ -1482,6 +1501,10 @@ export default function Chart({ paneId }: { paneId: string }) {
         if (!alive) return;
         if (wide.length > bars.length && wide.length < 50000 && !hasHole(wide, tf)) bars = wide;
       }
+      // Nến WS đẩy tới trong lúc chờ tải (upsert lên mảng rỗng) mới hơn bản trong DB: giữ, không thì nến đang chạy mất tới bar_update sau
+      // và tick kế tiếp đẩy giá vào nến DB cuối (đã đóng)
+      const live = barsRef.current;
+      if (live.length && bars.length) bars = mergeBars(bars, live, Infinity);
       barsRef.current = bars;
       setLegend(legendAt(bars.length - 1));
       // Đổi account/loại account (vd Standard "XAUUSDm" -> Pro "XAUUSD"): symbol không còn
@@ -1512,6 +1535,14 @@ export default function Chart({ paneId }: { paneId: string }) {
         pollTimer = setTimeout(load, missing ? 5000 : 800);
       }
     };
+    // Lỗi mạng (backend đang khởi động lại...) không được làm chết vòng tải: thử lại, kể cả khi EA offline vẫn hiện được nến đã cache
+    const load = () =>
+      loadOnce().catch(() => {
+        if (!alive) return;
+        if (!barsRef.current.length) setStatus("Không kết nối được backend - đang thử lại…");
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(load, 2000);
+      });
     load();
 
     const upsert = (b: Bar) => {
@@ -1600,7 +1631,7 @@ export default function Chart({ paneId }: { paneId: string }) {
                   to: vis.to + older.length,
                 });
               }
-            });
+            }).catch(() => {}); // lỗi mạng: bỏ, lần bars_loaded / cuộn-lùi sau lấy lại
           }
         }
         else if (pane.replay.getState().active) {
@@ -1622,7 +1653,8 @@ export default function Chart({ paneId }: { paneId: string }) {
           const price = m.bid || m.last;
           if (price > 0 && barsRef.current.length > 0) {
             const last = barsRef.current[barsRef.current.length - 1];
-            if (last) {
+            // tick của nến sau (bar_update của nến mới chưa tới) hoặc tick cũ: không đẩy vào nến cuối, kẻo nến đã đóng thành nến ma
+            if (last && tickInBar(last, tf, typeof m.t_msc === "number" ? m.t_msc / 1000 : undefined)) {
               const updated = {
                 ...last,
                 c: price,
@@ -1661,7 +1693,7 @@ export default function Chart({ paneId }: { paneId: string }) {
     const d = useTicketStore.getState().draft;
     if (!d || d.symbol !== pane.chart.getState().symbol || pane.replay.getState().active) return null;
     const q = useQuoteStore.getState().quotes[d.symbol];
-    const p = d.mode === "pending" ? parseNum(d.price) : q ? (d.side === "buy" ? q.ask : q.bid) : 0;
+    const p = d.mode === "pending" ? parsePrice(d.price, q ? (q.bid + q.ask) / 2 : undefined) : q ? (d.side === "buy" ? q.ask : q.bid) : 0;
     return p > 0 ? p : null;
   };
 
@@ -1675,6 +1707,11 @@ export default function Chart({ paneId }: { paneId: string }) {
     let raf = 0;
     const frame = () => {
       raf = requestAnimationFrame(frame);
+      if (chartRef.current) {
+        const timeH = chartRef.current.timeScale().height();
+        const priceW = chartRef.current.priceScale("right", mainIndex()).width();
+        if (timeH !== axesRef.current.timeH || priceW !== axesRef.current.priceW) setAxes((axesRef.current = { timeH, priceW }));
+      }
       const el = lblRef.current;
       const box = lblBoxRef.current;
       const txt = lblPriceRef.current;
@@ -1890,7 +1927,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           onCancelEdit={(owner) => lineDragRef.current?.cancelEdit(owner)}
         />
         {/* Logo Wickloom mờ ở góc trái-dưới pane cuối, ngay trên trục thời gian: chỗ logo TV trước đây (đã tắt, xem attributionLogo) */}
-        <div className="pointer-events-none absolute left-3 z-[3]" style={{ bottom: (chartRef.current?.timeScale().height() ?? 28) + 10 }}>
+        <div className="pointer-events-none absolute left-3 z-[3]" style={{ bottom: axes.timeH + 10 }}>
           <BrandLogo size={30} watermark />
         </div>
         <CalendarMarkers symbol={symbol} tf={tf} replay={replayActive} getChart={getChart} getBars={getBars} getReplayEnd={getReplayEnd} />
@@ -2038,7 +2075,7 @@ export default function Chart({ paneId }: { paneId: string }) {
         {selecting && (
           <div
             className="absolute inset-y-0 left-0 z-30 cursor-pointer"
-            style={{ right: chartRef.current?.priceScale("right", mainPaneIdx).width() ?? 70 }}
+            style={{ right: axes.priceW }}
             onMouseMove={onSelectMove}
             onMouseLeave={() => setHover(null)}
             onClick={() => hover && startReplay(hover.idx)}
@@ -2051,13 +2088,13 @@ export default function Chart({ paneId }: { paneId: string }) {
                   className="absolute right-0 top-0"
                   style={{
                     left: hover.x + 1,
-                    bottom: chartRef.current?.timeScale().height() ?? 0,
+                    bottom: axes.timeH,
                     background: `color-mix(in srgb, ${cs.bg ?? CHART_THEMES[theme].bg} 70%, transparent)`,
                   }}
                 />
                 <div
                   className="absolute top-0 w-[2px] bg-[#2962ff]"
-                  style={{ left: hover.x - 1, bottom: chartRef.current?.timeScale().height() ?? 0 }}
+                  style={{ left: hover.x - 1, bottom: axes.timeH }}
                 />
                 <svg
                   className="absolute text-[#2962ff]"

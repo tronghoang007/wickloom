@@ -134,4 +134,44 @@ describe("CalendarFeed", () => {
     await flush();
     expect(f.get("A")).toEqual({ offset: 0 });
   });
+
+  it("lỗi mạng / chưa có mốc D1: nạp lại sau 30 giây thay vì giữ lịch tạm tới khi đổi symbol", async () => {
+    let now = 0;
+    let up = false;
+    const dayOpens = vi.fn(async () => {
+      if (!up) throw new Error("backend chưa lên");
+      return [100, 200];
+    });
+    const onChange = vi.fn();
+    const f = new CalendarFeed({ offset: async () => (up ? 7200 : 0), dayOpens }, onChange, () => now);
+    f.get("A");
+    await flush();
+    expect(f.get("A")).toEqual({ offset: 0 });
+    expect(dayOpens).toHaveBeenCalledTimes(1);
+    up = true;
+    now = 29_000;
+    f.get("A");
+    expect(dayOpens).toHaveBeenCalledTimes(1); // chưa tới hạn
+    now = 30_000;
+    f.get("A");
+    await flush();
+    expect(f.get("A")).toEqual({ offset: 7200, dayOpens: [100, 200] });
+    now = 1e9;
+    f.get("A");
+    expect(dayOpens).toHaveBeenCalledTimes(2); // đủ rồi: không nạp lại nữa
+  });
+
+  it("đã có lịch mà lần nạp lại lỗi: giữ bản đã có", async () => {
+    let now = 0;
+    let fail = false;
+    const f = new CalendarFeed({ offset: async () => 7200, dayOpens: async () => (fail ? Promise.reject(new Error("x")) : []) }, () => {}, () => now);
+    f.get("A");
+    await flush();
+    expect(f.get("A")).toEqual({ offset: 7200 }); // chưa có D1: hẹn nạp lại
+    fail = true;
+    now = 30_000;
+    f.get("A");
+    await flush();
+    expect(f.get("A")).toEqual({ offset: 7200 });
+  });
 });

@@ -261,6 +261,55 @@ describe("autosave", () => {
     expect((be.layouts.get("default") as LayoutDoc).panes.p1.chart.symbol).toBe("EURGBP");
   });
 
+  it("hết phiên rồi đăng nhập bằng TÀI KHOẢN KHÁC: không PUT layout của user cũ bằng cookie mới, mở layout của user mới", async () => {
+    startSession();
+    await loginAs();
+    be.mode.putLayoutStatus = 401;
+    getPane(PRIMARY_PANE_ID).chart.setState({ symbol: "A_EDIT" });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(useSessionStore.getState().saveState).toBe("expired");
+    useAuthStore.setState({ expired: true });
+    // backend giả giờ là của user 2 (cookie đã đổi): có layout "default" riêng
+    be.layouts.clear();
+    be.layouts.set("default", docOf("Của B", "BBBUSD", 50));
+    be.mode.putLayoutStatus = 0;
+    const before = be.puts().length;
+    await loginAs({ id: "u2", email: "b@b.co", name: "Bình" });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(be.puts()).toHaveLength(before); // không ghi gì của user cũ sang tài khoản mới
+    expect((be.layouts.get("default") as LayoutDoc).name).toBe("Của B");
+    expect(getPane(PRIMARY_PANE_ID).chart.getState().symbol).toBe("BBBUSD");
+    expect(session.mode).toBe("user");
+    expect(useToastStore.getState().items.some((t) => /tài khoản trước/.test(t.text))).toBe(true);
+    // sync mới thuộc user mới
+    getPane(PRIMARY_PANE_ID).chart.setState({ tf: "H1" });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect((be.layouts.get("default") as LayoutDoc).panes.p1.chart).toMatchObject({ symbol: "BBBUSD", tf: "H1" });
+  });
+
+  it("khách bấm Save, lần tạo layout đầu lỗi: lần thử lại vẫn lưu chart của khách thành layout mới (không mở layout cũ)", async () => {
+    be.layouts.set("old", docOf("Cũ", "GBPUSD", 100));
+    startSession();
+    getPane(PRIMARY_PANE_ID).chart.setState({ symbol: "GUESTX" });
+    be.mode.putLayoutStatus = 500;
+    vi.mocked(authApi.authLogin).mockResolvedValueOnce({ user: me });
+    const p = session.save();
+    await settle();
+    await useAuthStore.getState().login(me.email, "pw-pw-pw-1");
+    await p;
+    await settle();
+    expect(useSessionStore.getState().saveState).toBe("error");
+    be.mode.putLayoutStatus = 0;
+    await vi.advanceTimersByTimeAsync(5000);
+    await session.ready();
+    await settle();
+    const saved = [...be.layouts.entries()].find(([, d]) => (d as LayoutDoc).panes.p1.chart.symbol === "GUESTX");
+    expect(saved).toBeDefined();
+    expect(L().layoutId).toBe(saved![0]);
+    expect(getPane(PRIMARY_PANE_ID).chart.getState().symbol).toBe("GUESTX");
+    expect(session.mode).toBe("user");
+  });
+
   it("Ctrl+S / Save: lưu ngay không chờ debounce; đang lỗi thì thử lại ngay", async () => {
     startSession();
     await loginAs();
@@ -349,6 +398,39 @@ describe("mở / tạo / sao chép / xoá", () => {
     expect(be.layouts.has("default")).toBe(false);
     expect(be.drawings.has("XAUUSDm__default")).toBe(false);
     expect(L().layoutId).toBe("other");
+  });
+
+  it("xoá layout đang mở bị lỗi: vẫn ở layout đó và autosave chạy lại (không 'Saved' giả)", async () => {
+    await seed();
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) =>
+      init?.method === "DELETE" ? Promise.resolve(new Response("", { status: 500 })) : be.impl(input, init),
+    );
+    await session.remove("default");
+    expect(be.layouts.has("default")).toBe(true);
+    expect(L().layoutId).toBe("default");
+    expect(useToastStore.getState().items.at(-1)!.text).toMatch(/Không xoá được/);
+    getPane(PRIMARY_PANE_ID).chart.setState({ symbol: "AFTERDEL" });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect((be.layouts.get("default") as LayoutDoc).panes.p1.chart.symbol).toBe("AFTERDEL");
+    expect(useSessionStore.getState().saveState).toBe("saved");
+  });
+
+  it("hình vẽ chưa lưu được (flushSave → false): không mở layout khác, không xoá layout đang mở", async () => {
+    await seed();
+    getPane(PRIMARY_PANE_ID).draw.setState({ api: { flushSave: () => Promise.resolve(false) } as never });
+    await session.open("other");
+    expect(L().layoutId).toBe("default");
+    expect(useToastStore.getState().items.at(-1)!.text).toMatch(/hình vẽ/);
+    await session.remove("default");
+    expect(be.layouts.has("default")).toBe(true);
+    expect(be.drawings.has("XAUUSDm__default")).toBe(true);
+    expect(L().layoutId).toBe("default");
+    expect(be.log.some((l) => l.startsWith("DELETE"))).toBe(false);
+    // autosave vẫn chạy
+    getPane(PRIMARY_PANE_ID).chart.setState({ symbol: "KEEPME" });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect((be.layouts.get("default") as LayoutDoc).panes.p1.chart.symbol).toBe("KEEPME");
+    getPane(PRIMARY_PANE_ID).draw.setState({ api: null });
   });
 
   it("không xoá layout cuối cùng", async () => {
@@ -482,6 +564,16 @@ describe("đăng xuất", () => {
     expect(useAuthStore.getState().status).toBe("user");
     expect(authApi.authLogout).not.toHaveBeenCalled();
   });
+
+  it("hình vẽ chưa lưu được (flushSave → false) → huỷ đăng xuất, vẫn đăng nhập", async () => {
+    startSession();
+    await loginAs();
+    getPane(PRIMARY_PANE_ID).draw.setState({ api: { flushSave: () => Promise.resolve(false) } as never });
+    await expect(useAuthStore.getState().logout()).rejects.toThrow(/hình vẽ/);
+    expect(useAuthStore.getState().status).toBe("user");
+    expect(authApi.authLogout).not.toHaveBeenCalled();
+    getPane(PRIMARY_PANE_ID).draw.setState({ api: null });
+  });
 });
 
 describe("hook auth", () => {
@@ -493,6 +585,14 @@ describe("hook auth", () => {
     useAuthStore.setState({ status: "user", user: me });
     await settle();
     expect(be.log).toEqual([]);
+  });
+
+  it("stop() rồi start() lại (Fast Refresh): hook được đăng ký lại", async () => {
+    startSession();
+    session.stop();
+    session.start();
+    expect(authHooks.beforeLogin).toBeTypeOf("function");
+    expect(authHooks.beforeLogout).toBeTypeOf("function");
   });
 
   it("snapshotLayout phản ánh màn hình (dùng làm bản lưu)", async () => {

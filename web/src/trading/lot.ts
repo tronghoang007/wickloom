@@ -62,10 +62,12 @@ export function writeLot(accountId: string, symbol: string, lot: number): void {
 export const currentLot = (accountId: string | undefined, symbol: string, spec: LotSpec): number =>
   normalizeLot((accountId ? readLot(accountId, symbol) : null) ?? spec.min, spec);
 
-/** Lot sẽ đóng của vị thế `total` lot theo ô đang nhập (thanh kéo ở bảng Modify): chưa nhập hoặc không biết step = đóng hết; còn lại làm tròn theo step, kẹp [min, total]. `spec.max` là `total`. */
-export function closeLot(text: string | null, total: number, spec: LotSpec | null): number {
+/** Lot sẽ đóng của vị thế `total` lot theo ô đang nhập (thanh kéo ở bảng Modify): chưa nhập hoặc không biết step = đóng hết; còn lại làm tròn theo step, kẹp [min, total]. `spec.max` là `total`.
+ *  Ô nhập không phải số dương ("", "0", "abc") thì null: không đóng gì, KHÔNG tự đổi thành lot tối thiểu. */
+export function closeLot(text: string | null, total: number, spec: LotSpec | null): number | null {
   if (text === null || !spec) return total;
-  return normalizeLot(parseFloat(text.replace(",", ".")), spec);
+  const v = parseFloat(text.replace(",", "."));
+  return v > 0 ? normalizeLot(v, spec) : null;
 }
 
 /** Các mốc trên thanh kéo đóng một phần, tính theo LOT của vị thế (spec.max): ít bước (≤ 6) thì mỗi step một mốc; nhiều hơn thì chia theo khoảng "tròn" (1 / 2 / 2.5 / 5 × 10^n lot, là bội của step)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { byId } from "./catalog";
 import { newInstance } from "./instance";
-import { fmtPlotValue, legendDigits, visiblePlotValues } from "./legend";
+import { decimalsOfStep, fmtPlotValue, legendDigits, plotPriceFormat, visiblePlotValues } from "./legend";
 
 describe("legend", () => {
   it("số chữ số: overlay theo giá, pane riêng 2, user đặt thì thắng", () => {
@@ -39,5 +39,30 @@ describe("legend", () => {
     const noHist = { ...inst, style: { plots: { hist: { visible: false as const } } } };
     expect(visiblePlotValues(noHist, vals).map((v) => v.id)).toEqual(["macd", "signal"]); // plot candles: 4 giá trị cùng ẩn/hiện
     expect(visiblePlotValues(inst, undefined)).toEqual([]);
+  });
+});
+
+describe("priceFormat của plot (nhãn / thang giá)", () => {
+  it("số chữ số từ bước giá", () => {
+    expect(decimalsOfStep(0.001)).toBe(3);
+    expect(decimalsOfStep(0.01)).toBe(2);
+    expect(decimalsOfStep(0.00001)).toBe(5);
+    expect(decimalsOfStep(0.25)).toBe(2);
+    expect(decimalsOfStep(1)).toBe(0);
+    expect(decimalsOfStep(0)).toBe(2);
+  });
+
+  it("overlay theo chữ số của symbol (không cố định 2), pane riêng 2, user đặt thì thắng: giống legend", () => {
+    expect(plotPriceFormat(newInstance("sma"), byId("sma"), 3)).toEqual({ type: "price", precision: 3, minMove: 0.001 });
+    expect(plotPriceFormat(newInstance("sma"), byId("sma"), 5)).toMatchObject({ precision: 5 });
+    expect(plotPriceFormat(newInstance("rsi"), byId("rsi"), 5)).toMatchObject({ type: "price", precision: 2 });
+    expect(plotPriceFormat({ ...newInstance("sma"), precision: 1 }, byId("sma"), 3)).toMatchObject({ precision: 1 });
+  });
+
+  it("MACD (histogram đứng đầu pane) dùng kiểu price, không phải volume (1.23K); CVD / OBV giữ volume", () => {
+    expect(plotPriceFormat(newInstance("macd"), byId("macd"), 2)).toMatchObject({ type: "price" });
+    expect(plotPriceFormat(newInstance("ao"), byId("ao"), 2)).toMatchObject({ type: "price" });
+    expect(plotPriceFormat(newInstance("obv"), byId("obv"), 2)).toEqual({ type: "volume" });
+    expect(plotPriceFormat({ ...newInstance("cvd"), precision: 0 }, byId("cvd"), 2)).toEqual({ type: "volume", precision: 0 });
   });
 });

@@ -209,6 +209,47 @@ describe("DrawingSync (lỗi #1)", () => {
     expect(be.puts()).toHaveLength(1);
   });
 
+  it("flush báo PUT lỗi (false) và tự thử lại tới khi lưu được", async () => {
+    const be = backend();
+    const { sync, edit } = setup(be);
+    sync.open("XAU");
+    await tick();
+    edit("a");
+    be.state.putFails = true;
+    await expect(sync.flush()).resolves.toBe(false);
+    be.state.putFails = false;
+    await tick(5000);
+    expect(be.puts()).toHaveLength(2);
+    expect(be.rows["/drawings/XAU"]).toEqual({ version: 1, items: ["a"] });
+    await expect(sync.flush()).resolves.toBe(true);
+  });
+
+  it("PUT xếp hàng: PUT sau chỉ gửi khi PUT trước đã trả lời, flush cùng nội dung đợi PUT đang chờ", async () => {
+    const order: string[] = [];
+    let release: (() => void) | null = null;
+    const fetch = (async (_u: string, init?: RequestInit) => {
+      if (init?.method !== "PUT") return new Response("", { status: 404 });
+      const items = JSON.parse(String(init.body)).items.join(",");
+      order.push(`start ${items}`);
+      if (items === "a") await new Promise<void>((r) => { release = r; });
+      order.push(`end ${items}`);
+      return new Response("{}");
+    }) as typeof globalThis.fetch;
+    const { sync, edit } = setup({ ...backend(), fetch });
+    sync.open("XAU");
+    await tick();
+    edit("a");
+    const p1 = sync.flush();
+    const same = sync.flush(); // chưa đổi gì: đợi đúng PUT đang chờ
+    edit("b");
+    const p2 = sync.flush();
+    await tick();
+    expect(order).toEqual(["start a"]);
+    release!();
+    await expect(Promise.all([p1, same, p2])).resolves.toEqual([true, true, true]);
+    expect(order).toEqual(["start a", "end a", "start a,b", "end a,b"]);
+  });
+
   it("close() lưu nốt rồi ngừng", async () => {
     const be = backend();
     const { sync, edit } = setup(be);

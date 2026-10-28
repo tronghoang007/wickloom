@@ -20,6 +20,9 @@ type State = {
   clear: () => void;
 };
 
+let asked = 0; // số thứ tự lần hỏi /trade gần nhất
+let applied = 0; // số thứ tự của lần hỏi đã ghi vào store
+
 export const useTradeStore = create<State>()((set, get) => ({
   data: null,
   real: null,
@@ -32,13 +35,30 @@ export const useTradeStore = create<State>()((set, get) => ({
   refresh: async () => {
     const active = useMt5Store.getState().accounts.find((a) => a.active);
     const put = (real: TradeData | null) => set(get().sim ? { real } : { real, data: real });
+    const seq = ++asked;
     if (!active) {
+      applied = seq;
       put(null);
       return;
     }
+    // vừa đổi account MT5: bỏ ngay vị thế của account cũ (bấm Close trên đó sẽ gửi ticket cũ tới account mới)
+    if (get().real && get().real!.account.id !== active.id) put(null);
     const { data, unauthorized, gone } = await fetchTrade(active.id);
-    if (data) put(data);
-    else if (unauthorized || gone) put(null); // hết phiên / account biến mất: không giữ vị thế cũ
+    // Nhiều lần hỏi chồng nhau (nhịp poll 2s + hỏi sớm sau khi đặt lệnh): trả lời về muộn của lần hỏi cũ hơn không được đè bản mới hơn (vị thế vừa đóng hiện lại),
+    // và account đã đổi trong lúc chờ thì bỏ trả lời của account cũ
+    const nowId = useMt5Store.getState().accounts.find((a) => a.active)?.id;
+    if (nowId !== active.id) {
+      if (get().real && get().real!.account.id !== nowId) put(null);
+      return;
+    }
+    if (seq < applied) return;
+    if (data) {
+      applied = seq;
+      put(data);
+    } else if (unauthorized || gone) {
+      applied = seq;
+      put(null); // hết phiên / account biến mất: không giữ vị thế cũ
+    }
     // lỗi mạng: giữ bản cũ (isStale() sẽ làm mờ khi quá 15s)
   },
   clear: () => set(get().sim ? { real: null } : { real: null, data: null }),

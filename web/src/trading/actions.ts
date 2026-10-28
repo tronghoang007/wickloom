@@ -110,10 +110,10 @@ export function cancelAllOrders(tickets: number[]): Promise<void> {
 
 export type PendingParams = Omit<PendingRequest, "clientId">;
 
-// Một lần đặt lệnh chờ (đã ở trong run). Giá nhảy làm EA chọn loại khác loại web hiển thị thì vẫn đặt (demo) và nói rõ trong toast.
-async function pendingCall(accountId: string, r: PendingParams, digits: number | undefined, quiet = false): Promise<boolean> {
+// Một lần đặt lệnh chờ (đã ở trong run). Giá nhảy làm EA chọn loại khác loại web hiển thị thì vẫn đặt (demo) và nói rõ trong toast. Trả ticket lệnh mới (0 = không đặt được).
+async function pendingCall(accountId: string, r: PendingParams, digits: number | undefined, quiet = false): Promise<number> {
   const o = await api(accountId).pending(accountId, { ...r, clientId: newClientId() });
-  return report(
+  const ok = report(
     o,
     (res) => {
       const label = isPendingType(res.orderType) ? pendingLabel(res.orderType) : "Lệnh chờ";
@@ -123,11 +123,12 @@ async function pendingCall(accountId: string, r: PendingParams, digits: number |
     quiet,
     "Pending order placed",
   );
+  return ok && o.kind === "done" ? o.result.order || -1 : 0; // -1: sàn nhận nhưng không báo ticket
 }
 
 /** Đặt lệnh chờ: người dùng chỉ chọn hướng + giá, EA quyết Limit/Stop. Trả true nếu sàn đã nhận lệnh. */
 export async function placePending(r: PendingParams, digits?: number): Promise<boolean> {
-  return (await run("Đăng nhập để giao dịch", (accountId) => pendingCall(accountId, r, digits))) === true;
+  return ((await run("Đăng nhập để giao dịch", (accountId) => pendingCall(accountId, r, digits))) ?? 0) !== 0;
 }
 
 /** Huỷ lệnh chờ `ticket`. */
@@ -163,7 +164,16 @@ export async function moveOrder(order: PendingOrder, price: number, digits?: num
     if (del.kind === "done" && del.result.ok) {
       toast(`Đã chuyển lệnh #${order.ticket} thành ${pendingLabel(resolved)} ${fmtLot(order.volume)} ${order.symbol} @ ${fmtPx(price, digits)}`, { ms: 5000, title: "Pending order placed", kind: "success" });
     } else {
-      toast(`Đã đặt ${pendingLabel(resolved)} mới nhưng chưa xoá được lệnh cũ #${order.ticket}: xoá tay ở tab Orders`, { ms: 12_000, title: "Old order not removed", kind: "error" });
+      // Xoá lỗi: lệnh cũ có thể đã KHỚP trong lúc đặt lệnh mới (MT5 giữ ticket cho vị thế mở ra từ lệnh chờ) - khi đó đang có cả vị thế lẫn lệnh mới, vào gấp đôi nếu lệnh mới cũng khớp
+      if (accountId !== SIM_ACCOUNT_ID) await useTradeStore.getState().refresh(); // giả lập: sổ lệnh đã cập nhật ngay
+      const filled = useTradeStore.getState().data?.positions.some((p) => p.ticket === order.ticket) ?? false;
+      const undoNew = placed > 0 ? { label: "Huỷ lệnh mới", run: () => void cancelOrder(placed, order.symbol) } : undefined;
+      toast(
+        filled
+          ? `Lệnh cũ #${order.ticket} đã khớp thành vị thế trước khi kịp xoá, và ${pendingLabel(resolved)} mới${placed > 0 ? ` #${placed}` : ""} vẫn đang chờ: huỷ lệnh mới nếu không muốn vào thêm`
+          : `Đã đặt ${pendingLabel(resolved)} mới${placed > 0 ? ` #${placed}` : ""} nhưng chưa xoá được lệnh cũ #${order.ticket}: kiểm tra tab Positions / Orders`,
+        { ms: 15_000, title: filled ? "Old order filled" : "Old order not removed", kind: "error", action: undoNew },
+      );
     }
     refreshSoon();
     return true;

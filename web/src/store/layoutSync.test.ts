@@ -213,4 +213,33 @@ describe("LayoutSync", () => {
     void s.flush();
     expect(be.puts()[0].url).toBe("/me/layouts/a%2Fb%20c");
   });
+
+  it("abandon() lúc đang PUT: xong PUT không hẹn PUT tiếp (snapshot giờ là layout khác); flush sau abandon không ghi", async () => {
+    const t = make();
+    let release!: () => void;
+    t.be.mode.hold = new Promise<void>((r) => (release = r));
+    t.cur.symbol = "EURUSD";
+    const p = t.sync.flush();
+    t.sync.abandon();
+    t.cur.symbol = "OTHER_LAYOUT"; // màn hình đã sang layout khác
+    release();
+    await p;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(t.be.puts()).toHaveLength(1);
+    await t.sync.flush();
+    expect(t.be.puts()).toHaveLength(1);
+  });
+
+  it("revive() sau abandon: nhận lại thay đổi và lưu tiếp", async () => {
+    const t = make();
+    t.sync.abandon();
+    t.cur.symbol = "EURUSD";
+    t.sync.schedule();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(t.be.puts()).toHaveLength(0);
+    t.sync.revive();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(t.be.puts()).toHaveLength(1);
+    expect(t.sync.state).toBe("saved");
+  });
 });

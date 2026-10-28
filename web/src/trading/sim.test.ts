@@ -166,6 +166,33 @@ describe("spread", () => {
   });
 });
 
+describe("đóng một phần: lot như EA", () => {
+  const lotEnv: sim.SimEnv = () => ({ spec: GOLD, digits: 3, stopsLevel: 0, lot: { min: 0.01, step: 0.01 } });
+  it("lot đóng dưới lot tối thiểu hoặc lẻ step → từ chối (như EA), sổ không đổi; đúng step thì đóng", () => {
+    const b = ok(sim.marketOrder(start(), { symbol: S, side: "buy", volume: 1 }, lotEnv));
+    const t = b.positions[0].ticket;
+    for (const v of [0.005, 0.015]) {
+      const r = sim.closePosition(b, t, v, lotEnv);
+      expect(r.result).toMatchObject({ ok: false, retcode: 10014 });
+      expect(r.book).toBe(b);
+    }
+    expect(ok(sim.closePosition(b, t, 0.25, lotEnv)).positions[0].volume).toBe(0.75);
+    expect(ok(sim.closePosition(b, t, 5, lotEnv)).positions).toHaveLength(0); // quá lot của vị thế = đóng hết
+  });
+});
+
+describe("lệnh chờ khớp: đủ tiền tính theo giá lúc khớp", () => {
+  it("vị thế đang lỗ thêm trên đường giá tới mức khớp: equity tính lại ở giá khớp, thiếu margin thì lệnh bị huỷ", () => {
+    // Buy 1 lot @4000.2 (margin ~4000); Buy limit 0.3 @3990 cần thêm ~1197 margin. Tới 3989.8 (Bid) vị thế lỗ ~1040 → equity ~4960 < margin ~5197
+    let b = ok(sim.marketOrder(start(true, 4000, 6000), { symbol: S, side: "buy", volume: 1 }, env));
+    b = ok(sim.pendingOrder(b, { symbol: S, side: "buy", volume: 0.3, price: 3990 }, env));
+    b = sim.feed(b, S, [bar(1060, 4000, 4000, 3980, 3980)], 1120, env);
+    expect(b.events.map((e) => e.kind)).toEqual(["nomoney"]);
+    expect(b.positions).toHaveLength(1);
+    expect(b.orders).toHaveLength(0);
+  });
+});
+
 describe("margin hedging", () => {
   it("Buy + Sell khoá nhau cùng khối lượng: chỉ phần lệch tính margin (HEDGED_MARGIN_RATE = 0); khoá vị thế luôn được dù thiếu tiền", () => {
     expect(sim.HEDGED_MARGIN_RATE).toBe(0);

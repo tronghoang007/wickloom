@@ -20,7 +20,7 @@ function backend(rows: Record<string, unknown> = {}) {
 }
 
 const opts = (be: ReturnType<typeof backend>) => ({ fetch: be.fetch, url: (s: string) => `/d/${s}`, saveDelay: 500, retryDelay: 5000 });
-const line = (id: string): Drawing => ({ id, type: "trendline", points: [{}, {}] as never, color: "#fff", width: 1, locked: false, hidden: false });
+const line = (id: string): Drawing => ({ id, type: "trendline", points: [{ time: 1, price: 1 }, { time: 2, price: 2 }], color: "#fff", width: 1, locked: false, hidden: false });
 
 function view() {
   return { docChanged: vi.fn(), docLoaded: vi.fn(), docReset: vi.fn() } satisfies DocView;
@@ -63,6 +63,33 @@ describe("registry: một doc cho mỗi symbol, đếm tham chiếu", () => {
     await settle();
     expect(be.puts()).toHaveLength(1);
     expect((be.puts()[0].body!.items[0] as Drawing).id).toBe("d1");
+    expect(openDocCount()).toBe(0);
+  });
+
+  it("PUT cuối lỗi: doc giữ lại và thử tiếp tới khi lưu được; mở lại lúc đó dùng chính doc này (không đọc bản cũ)", async () => {
+    const be = backend();
+    let down = false;
+    const f = (async (u: string | URL | Request, i?: RequestInit) => {
+      if (down && i?.method === "PUT") throw new TypeError("Failed to fetch");
+      return be.fetch(u, i);
+    }) as typeof globalThis.fetch;
+    const o = { ...opts(be), fetch: f };
+    const a = view();
+    const doc = acquireDoc("NZD", a, "L", o);
+    await settle();
+    doc.drawings = [line("d1")];
+    doc.changed(a);
+    down = true;
+    releaseDoc(doc, a); // đổi symbol lúc mạng chớp
+    await settle();
+    expect(openDocCount()).toBe(1); // trước đây: doc bỏ ngay, d1 mất
+    const b = view();
+    expect(acquireDoc("NZD", b, "L", o)).toBe(doc);
+    expect(be.gets()).toHaveLength(1);
+    releaseDoc(doc, b);
+    down = false;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect((be.rows["/d/NZD"] as { items: Drawing[] }).items.map((x) => x.id)).toEqual(["d1"]);
     expect(openDocCount()).toBe(0);
   });
 
@@ -167,13 +194,46 @@ describe("đổi nơi lưu (đăng nhập / đăng xuất)", () => {
   });
 });
 
+describe("bản server / bản xem trước", () => {
+  it("hình nhiều điểm thiếu điểm hoặc điểm hỏng: không hiện, giữ nguyên khi lưu", async () => {
+    const bad = [
+      { ...line("path1"), type: "path", points: [{ time: 1, price: 1 }] },
+      { ...line("nan"), points: [{ time: 1, price: 1 }, { time: "x", price: 2 }] },
+    ];
+    const be = backend({ "/d/CHF": { version: 1, items: [...bad, line("ok")] } });
+    const a = view();
+    const doc = acquireDoc("CHF", a, "L", opts(be));
+    await settle();
+    expect(doc.drawings.map((x) => x.id)).toEqual(["ok"]);
+    expect(doc.kept).toEqual(bad);
+    releaseDoc(doc, a);
+  });
+
+  it("hình đang xem trước: lưu bản chốt, không lưu bản xem trước", async () => {
+    const be = backend();
+    const a = view();
+    const doc = acquireDoc("JPY", a, "L", opts(be));
+    await settle();
+    const d = line("d1");
+    doc.drawings = [d];
+    doc.changed(a);
+    await vi.advanceTimersByTimeAsync(500);
+    doc.previewOf.set("d1", d);
+    doc.drawings = [{ ...d, color: "#f00" }];
+    doc.changed(a); // chart khác sửa hình khác trong lúc đang xem trước
+    await vi.advanceTimersByTimeAsync(500);
+    expect(be.puts()).toHaveLength(1); // bản chốt không đổi: không PUT
+    releaseDoc(doc, a);
+  });
+});
+
 describe("doc rỗng (chưa mở symbol)", () => {
   it("không lưu, không đọc, mọi thao tác an toàn", async () => {
     const doc = new DrawingDoc(null);
     doc.open();
     doc.changed(null);
     doc.reload();
-    await expect(doc.flush()).resolves.toBeUndefined();
+    await expect(doc.flush()).resolves.toBe(true);
     doc.close();
   });
 });

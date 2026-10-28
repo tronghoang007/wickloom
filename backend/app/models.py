@@ -71,3 +71,4 @@ class TicksHistIn(BaseModel):
     pd: int = 1  # chiều (1 lên / -1 xuống) của tick đó
     cont: bool = False  # tiếp nối thông điệp trước của cùng yêu cầu
     done: Optional[bool] = None
+    end: Optional[int] = None  # UTC ms cuối cửa sổ EA đã đọc (EA >= 2.20; None = EA cũ): biết lịch sử này có tới giờ hiện tại không, kể cả khi cửa sổ không có tick

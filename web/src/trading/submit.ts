@@ -3,7 +3,7 @@ import { useAuthStore } from "@/store/auth";
 import { useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
 import { placeMarket, placePending, useOrderState } from "./actions";
-import { defaultStop, parseNum, type TicketMode } from "./draft";
+import { defaultStop, draftPrices, parseNum, parsePrice, type TicketMode } from "./draft";
 import { draftError, type DraftEnv } from "./draftCheck";
 import { lotSpec, normalizeLot, writeLot } from "./lot";
 import { resolveOrderType, snapPrice, type Side } from "./orderType";
@@ -56,13 +56,14 @@ export async function submitDraft(): Promise<boolean> {
   const volume = normalizeLot(parseNum(d.lot), spec);
   if (e.account) writeLot(e.account.id, d.symbol, volume); // nhớ lot vừa dùng cho account × symbol
   const snap = (v: number) => (v > 0 ? snapPrice(v, tick, digits) : 0);
-  const sl = snap(parseNum(d.sl));
-  const tp = snap(parseNum(d.tp));
+  const typed = draftPrices(d, e.quote); // cùng cách đọc với lúc kiểm tra (draftError)
+  const sl = snap(typed.sl);
+  const tp = snap(typed.tp);
   let ok: boolean;
   if (d.mode === "market") {
     ok = await placeMarket(d.side, d.symbol, volume, digits, { sl, tp });
   } else {
-    const price = snapPrice(parseNum(d.price), tick, digits);
+    const price = snapPrice(typed.price, tick, digits);
     const expiration = d.until && d.untilText ? Math.floor(new Date(d.untilText).getTime() / 1000) : 0;
     const expectedType = e.quote ? resolveOrderType(d.side, price, e.quote.bid, e.quote.ask) : null;
     ok = await placePending({ symbol: d.symbol, side: d.side, volume, price, sl, tp, expiration, expectedType }, digits);
@@ -87,7 +88,7 @@ export function seedDraftStop(kind: "sl" | "tp"): void {
   const q = e.quote;
   const digits = e.sym?.digits ?? 5;
   const tick = e.sym?.tick_size || 10 ** -digits;
-  const ref = draft.mode === "market" ? (q ? (draft.side === "buy" ? q.bid : q.ask) : 0) : parseNum(draft.price);
+  const ref = draft.mode === "market" ? (q ? (draft.side === "buy" ? q.bid : q.ask) : 0) : parsePrice(draft.price, q ? (q.bid + q.ask) / 2 : undefined);
   if (!(ref > 0)) return;
   patch({ [kind]: defaultStop(kind, draft.side, ref, tick, digits, e.sym?.stops_level).toFixed(digits) });
 }

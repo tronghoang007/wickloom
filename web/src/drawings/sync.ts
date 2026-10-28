@@ -19,6 +19,8 @@ export class DrawingSync {
   private status: Status = "idle";
   private seq = 0;
   private saved: string | null = null; // JSON items đang có trên server
+  // PUT gần nhất (đang chờ hoặc đã xong): PUT sau xếp hàng sau nó để server nhận đúng thứ tự (PUT cũ về sau sẽ đè bản mới)
+  private inflight: Promise<boolean> | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -38,8 +40,9 @@ export class DrawingSync {
     void this.load(++this.seq);
   }
 
+  /** Đóng hẳn: PUT trong lúc đóng mà lỗi thì KHÔNG thử lại. releaseDoc chỉ gọi sau khi `flush()` đã trả true (lỗi thì giữ sync mở để thử tiếp). */
   close() {
-    this.flush();
+    void this.flush();
     this.clearTimers();
     this.seq++;
     this.symbol = "";
@@ -53,26 +56,35 @@ export class DrawingSync {
   }
 
   /** Lưu ngay nếu có thay đổi. Promise xong khi PUT trả lời (hoặc ngay nếu không có gì để lưu) - logout đợi nó
-   *  để PUT cuối còn cookie. Lỗi PUT không ném ra: sync tự thử lại. */
-  flush(): Promise<void> {
+   *  để PUT cuối còn cookie. Không ném lỗi: trả true = server đã có bản hiện tại (hoặc không có gì để lưu), false = PUT lỗi
+   *  (sync tự thử lại sau retryDelay). */
+  flush(): Promise<boolean> {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
-    if (this.status !== "ready" || !this.symbol) return Promise.resolve();
+    if (this.status !== "ready" || !this.symbol) return Promise.resolve(true);
     const items = this.o.items();
     const json = JSON.stringify(items);
-    if (json === this.saved) return Promise.resolve();
+    // đã gửi đúng bản này: đợi PUT đó (đang chờ thì chưa chắc đã lưu)
+    if (json === this.saved) return this.inflight ?? Promise.resolve(true);
     this.saved = json;
     const { symbol, seq } = this;
-    return this.f(`${this.o.url(symbol)}?scope=${encodeURIComponent(symbol)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version: DRAWINGS_VERSION, items }),
-    })
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
+    const put = () =>
+      this.f(`${this.o.url(symbol)}?scope=${encodeURIComponent(symbol)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: DRAWINGS_VERSION, items }),
+      }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); });
+    const p: Promise<boolean> = (this.inflight ?? Promise.resolve(true))
+      .then(put)
+      .then(() => true)
       .catch(() => {
-        if (seq !== this.seq || this.saved !== json) return;
+        if (seq !== this.seq || this.saved !== json) return false;
         this.saved = null; // lần sau sẽ ghi lại
         this.retryLater(() => void this.flush());
-      });
+        return false;
+      })
+      .finally(() => { if (this.inflight === p) this.inflight = null; });
+    this.inflight = p;
+    return p;
   }
 
   /** Bỏ trạng thái hiện tại mà KHÔNG lưu - khi đổi nơi lưu (đăng nhập/đăng xuất) thì nội dung đang giữ thuộc về
@@ -83,6 +95,7 @@ export class DrawingSync {
     this.symbol = "";
     this.status = "idle";
     this.saved = null;
+    this.inflight = null;
   }
 
   private async load(seq: number) {

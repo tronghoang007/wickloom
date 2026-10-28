@@ -159,17 +159,54 @@ describe("PrefsSync", () => {
     expect(be.doc().toolDefaults).toMatchObject({ avp: { color: "#abc" } });
   });
 
-  it("đăng xuất: ngừng lưu lên server, tuỳ chọn trên máy giữ nguyên", async () => {
-    const be = makeBackend({ v: 1, toolDefaults: { frvp: { opts: { rows: 240 } } } });
+  it("đăng xuất: ngừng lưu lên server, tuỳ chọn trở về bản của khách lúc đăng nhập (không giữ của tài khoản)", async () => {
+    const be = makeBackend({ v: 1, toolDefaults: { frvp: { opts: { rows: 240 } } }, magnet: true });
     start(be);
+    g().setToolDefault("trend", { color: "#111" }); // khách tự chỉnh trước khi đăng nhập
     await login();
     await vi.advanceTimersByTimeAsync(500);
+    expect(g().magnet).toBe(true);
     const puts = be.puts();
     useAuthStore.setState({ status: "guest", user: null });
     await settle();
+    expect(Object.keys(tools())).toEqual(["trend"]);
+    expect(tools().trend.color).toBe("#111");
+    expect(g().magnet).toBe(INITIAL.magnet);
     g().setToolDefault("avp", { color: "#abc" });
     await vi.advanceTimersByTimeAsync(2000);
     expect(be.puts()).toBe(puts);
-    expect(tools()).toMatchObject({ frvp: { opts: { rows: 240 } }, avp: { color: "#abc" } });
+    expect(tools()).toMatchObject({ trend: { color: "#111" }, avp: { color: "#abc" } });
+  });
+
+  it("đổi thẳng sang tài khoản khác: tuỳ chọn của người trước không được đưa lên tài khoản mới", async () => {
+    const be = makeBackend({ v: 1, toolDefaults: { frvp: { color: "#a00" } }, magnet: true, favorites: ["frvp"] });
+    start(be);
+    await login();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(g().magnet).toBe(true);
+    be.state.doc = null; // tài khoản 2 chưa có gì
+    useAuthStore.setState({ status: "user", user: { id: "u2", email: "b@b.co", name: "B" } });
+    await settle();
+    await vi.advanceTimersByTimeAsync(500);
+    const doc = be.doc();
+    expect(doc.magnet).toBe(INITIAL.magnet);
+    expect(doc.favorites).toEqual(INITIAL.favorites);
+    expect(doc.toolDefaults).toEqual(INITIAL.toolDefaults);
+  });
+
+  it("PUT bị 401 (hết phiên), đăng nhập lại cùng tài khoản: lưu lại phần chưa lưu", async () => {
+    const be = makeBackend({ v: 1, magnet: false });
+    start(be);
+    await login();
+    await vi.advanceTimersByTimeAsync(500);
+    be.state.putStatus = 401;
+    drawingGlobal.setState({ magnet: true });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(be.doc().magnet).toBe(false);
+    useAuthStore.setState({ expired: true });
+    be.state.putStatus = 0;
+    useAuthStore.setState({ expired: false });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(be.doc().magnet).toBe(true);
   });
 });

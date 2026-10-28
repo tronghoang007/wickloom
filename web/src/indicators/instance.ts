@@ -102,6 +102,16 @@ export function newInstance(defId: string): IndicatorInstance {
   return { v: INSTANCE_V, uid: crypto.randomUUID(), id: defId, inputs: {} };
 }
 
+/** "Reset settings" của dialog: Inputs / Style / Visibility về mặc định nhưng giữ trạng thái ẩn và chỗ đặt (pane, thang giá), không kéo indicator về pane mặc định. */
+export function resetInstance(inst: IndicatorInstance): IndicatorInstance {
+  return {
+    v: inst.v, uid: inst.uid, id: inst.id, inputs: {},
+    ...(inst.hidden ? { hidden: true } : {}),
+    ...(inst.pane !== undefined ? { pane: inst.pane } : {}),
+    ...(inst.scale !== undefined ? { scale: inst.scale } : {}),
+  };
+}
+
 export function plotColor(inst: IndicatorInstance, def: IndicatorDef, plotId: string): string {
   return inst.style?.plots?.[plotId]?.color ?? def.plots.find((p) => p.id === plotId)?.color ?? "#888888";
 }

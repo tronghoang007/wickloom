@@ -197,3 +197,49 @@ describe("session start (mốc đổi phiên)", () => {
     expect(w[3]).toBe(w[1]);
   });
 });
+
+describe("break: giờ nghỉ thật vs lỗ dữ liệu trên M1 nhiều ngày", () => {
+  const M = 60;
+  // M1 kiểu vàng: nghỉ 21:00–22:00 UTC mỗi ngày, đóng từ thứ Sáu 21:00 tới Chủ nhật 22:00 UTC; `skip` = các khoảng [a, b) mất dữ liệu
+  function goldM1(skip: [number, number][] = []): number[] {
+    const out: number[] = [];
+    for (let t = utc("2026-10-04T22:00:00"); t < utc("2026-10-17T00:00:00"); t += M) {
+      const d = new Date(t * 1000);
+      const dow = d.getUTCDay(), h = d.getUTCHours();
+      if (dow === 6 || (dow === 0 && h < 22) || (dow === 5 && h >= 21) || h === 21) continue;
+      if (skip.some(([a, b]) => t >= a && t < b)) continue;
+      out.push(t);
+    }
+    return out;
+  }
+  const btcM1 = (skip: [number, number][] = []): number[] => {
+    const out: number[] = [];
+    for (let t = utc("2026-10-05T00:00:00"); t < utc("2026-10-17T00:00:00"); t += M) if (!skip.some(([a, b]) => t >= a && t < b)) out.push(t);
+    return out;
+  };
+  const opts = { offset: 0, session: { mode: "break", minutes: 30 } } as const;
+  const startsAt = (t: number[]) => periodStarts(t, "day", opts).slice(1).map((i) => new Date(t[i] * 1000).toISOString().slice(0, 16));
+
+  it("vàng: cắt đúng sau giờ nghỉ 21–22 UTC và sau cuối tuần", () => {
+    expect(startsAt(goldM1())).toEqual([
+      "2026-10-05T22:00", "2026-10-06T22:00", "2026-10-07T22:00", "2026-10-08T22:00", "2026-10-11T22:00",
+      "2026-10-12T22:00", "2026-10-13T22:00", "2026-10-14T22:00", "2026-10-15T22:00",
+    ]);
+  });
+
+  it("vàng: lỗ dữ liệu 45 phút giữa phiên (thứ Tư 10:00) không cắt phiên dù cuối tuần trống", () => {
+    const hole: [number, number] = [utc("2026-10-07T10:00:00"), utc("2026-10-07T10:45:00")];
+    expect(startsAt(goldM1([hole]))).toEqual(startsAt(goldM1()));
+  });
+
+  it("vàng: lỗ dữ liệu dính liền giờ nghỉ vẫn cắt phiên ở nến đầu sau khoảng trống", () => {
+    const hole: [number, number] = [utc("2026-10-07T20:15:00"), utc("2026-10-07T21:00:00")];
+    expect(startsAt(goldM1([hole]))).toEqual(startsAt(goldM1()));
+  });
+
+  it("BTC 24/7: không giờ nghỉ thì cắt 00:00, lỗ dữ liệu giữa ngày không cắt", () => {
+    const days = ["06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16"].map((d) => `2026-10-${d}T00:00`);
+    expect(startsAt(btcM1())).toEqual(days);
+    expect(startsAt(btcM1([[utc("2026-10-08T10:00:00"), utc("2026-10-08T11:30:00")]]))).toEqual(days);
+  });
+});

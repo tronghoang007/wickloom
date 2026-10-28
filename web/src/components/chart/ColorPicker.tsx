@@ -94,29 +94,36 @@ function saveCustom(list: string[]) {
   }
 }
 
-/** Kéo trên 1 vùng: gọi `on(x, y)` với toạ độ 0..1 trong vùng, cả lúc nhấn xuống lẫn khi kéo. */
-function useDrag(on: (x: number, y: number) => void) {
-  const move = (e: RPointerEvent<HTMLDivElement>) => {
+/** Kéo trên 1 vùng: gọi `on(x, y, live)` với toạ độ 0..1 trong vùng, cả lúc nhấn xuống lẫn khi kéo (`live` = true: đang kéo,
+ *  chỉ để xem trước) và một lần `live` = false lúc nhả (chốt: hình vẽ ghi một bước undo cho cả lần kéo). */
+function useDrag(on: (x: number, y: number, live: boolean) => void) {
+  const move = (e: RPointerEvent<HTMLDivElement>, live: boolean) => {
     const r = e.currentTarget.getBoundingClientRect();
     on(
       Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
       Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+      live,
     );
+  };
+  const end = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) move(e, false);
   };
   return {
     onPointerDown: (e: RPointerEvent<HTMLDivElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
-      move(e);
+      move(e, true);
     },
     onPointerMove: (e: RPointerEvent<HTMLDivElement>) => {
-      if (e.buttons) move(e);
+      if (e.buttons) move(e, true);
     },
+    onPointerUp: end,
+    onPointerCancel: end,
   };
 }
 
 /** Thanh Opacity như TV: nền caro + dải từ trong suốt tới màu hiện tại, kéo được, kèm ô nhập %. */
-function OpacityRow({ base, alpha, onAlpha }: { base: string; alpha: number; onAlpha: (a: number) => void }) {
-  const drag = useDrag((x) => onAlpha(Math.round(x * 100) / 100));
+function OpacityRow({ base, alpha, onAlpha }: { base: string; alpha: number; onAlpha: (a: number, live?: boolean) => void }) {
+  const drag = useDrag((x, _, live) => onAlpha(Math.round(x * 100) / 100, live));
   return (
     <div>
       <div className="mb-1.5 text-[12px] text-[var(--muted)]">Opacity</div>
@@ -154,22 +161,22 @@ function Editor({
 }: {
   value: string;
   alpha: number;
-  onLive: (hex: string) => void;
-  onAlpha: (a: number) => void;
+  onLive: (hex: string, live?: boolean) => void;
+  onAlpha: (a: number, live?: boolean) => void;
   onAdd: (hex: string) => void;
 }) {
   const [hsv, setHsv] = useState<HSV>(() => rgbToHsv(parseHex(value) ?? [0, 0, 0]));
   const [text, setText] = useState(() => value.toUpperCase());
   const hex = toHex(hsvToRgb(hsv));
 
-  const apply = (next: HSV) => {
+  const apply = (next: HSV, live: boolean) => {
     setHsv(next);
     const h = toHex(hsvToRgb(next));
     setText(h.toUpperCase());
-    onLive(h);
+    onLive(h, live);
   };
-  const sv = useDrag((x, y) => apply([hsv[0], x, 1 - y]));
-  const hue = useDrag((_, y) => apply([y * 360, hsv[1], hsv[2]]));
+  const sv = useDrag((x, y, live) => apply([hsv[0], x, 1 - y], live));
+  const hue = useDrag((_, y, live) => apply([y * 360, hsv[1], hsv[2]], live));
   const commitText = (t: string) => {
     setText(t);
     const rgb = parseHex(t);
@@ -254,7 +261,8 @@ export default function ColorPicker({
   children,
 }: {
   value: string;
-  onChange: (hex: string) => void;
+  /** `live` = true: đang kéo (vùng màu / hue / opacity), chỉ để xem trước; nhả chuột gọi thêm một lần không `live`. */
+  onChange: (hex: string, live?: boolean) => void;
   title?: string;
   disabled?: boolean;
   className?: string;
@@ -354,8 +362,8 @@ export default function ColorPicker({
               <Editor
                 value={cur}
                 alpha={alpha}
-                onLive={(hex) => onChange(joinColor(hex, alpha))}
-                onAlpha={(a) => onChange(joinColor(cur, a))}
+                onLive={(hex, live) => onChange(joinColor(hex, alpha), live)}
+                onAlpha={(a, live) => onChange(joinColor(cur, a), live)}
                 onAdd={add}
               />
             ) : (
@@ -388,7 +396,7 @@ export default function ColorPicker({
                   </div>
                 </div>
                 <div className="mt-2.5 border-t border-[var(--border)] pt-2.5">
-                  <OpacityRow base={cur} alpha={alpha} onAlpha={(a) => onChange(joinColor(cur, a))} />
+                  <OpacityRow base={cur} alpha={alpha} onAlpha={(a, live) => onChange(joinColor(cur, a), live)} />
                 </div>
               </div>
             )}

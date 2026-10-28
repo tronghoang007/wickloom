@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from . import tickdelta
 from .aggregator import Aggregator
-from .config import BARS_DB, BARS_DIR, TF_SECONDS, is_stale
+from .config import BARS_DB, BARS_DIR, is_stale, tf_step
 from .store import BarStore, MetaStore
 from .ws import Hub
 
@@ -75,7 +75,7 @@ def _on_gap(symbol: str, gap_seconds: int) -> None:
         if now - _gap_seeding.get((symbol, tf), 0) < 30:
             continue
         _gap_seeding[(symbol, tf)] = now
-        request_backfill(symbol, tf, min(500, gap_seconds // TF_SECONDS[tf] + 3))
+        request_backfill(symbol, tf, min(500, gap_seconds // tf_step(tf) + 3))
     tick_live.reset(symbol)  # delta theo tick mất tick trong khoảng đứt: tính lại từ lịch sử tick của EA
     _backfill_tick_gap(symbol, gap_seconds, now)
 
@@ -103,6 +103,9 @@ class EaHub:
         self.writers: set = set()
         self.idents: Dict[Any, str] = {}  # writer -> server MT5 của EA đó
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # Python 3.9: hai coroutine cùng `drain()` một writer đang nghẽn -> AssertionError (bị coi như mất kết nối, EA sống mà bị bỏ khỏi `writers`).
+        # Mọi chỗ ghi xuống EA (push, tcp_server, lệnh giao dịch) drain qua `drain()` để lần lượt
+        self._locks: Dict[Any, asyncio.Lock] = {}
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
@@ -114,6 +117,15 @@ class EaHub:
     def remove(self, writer: Any) -> None:
         self.writers.discard(writer)
         self.idents.pop(writer, None)
+        self._locks.pop(writer, None)
+
+    async def drain(self, writer: Any) -> None:
+        """`writer.drain()` lần lượt từng coroutine một cho cùng writer (xem `_locks`)."""
+        lock = self._locks.get(writer)
+        if lock is None:
+            lock = self._locks[writer] = asyncio.Lock()  # tạo trong event loop (Python 3.9 gắn Lock với loop lúc tạo)
+        async with lock:
+            await writer.drain()
 
     def active_ident(self) -> Optional[str]:
         """Server của EA đang kết nối (None nếu chưa có EA nào / EA cũ không báo server)."""
@@ -131,7 +143,7 @@ class EaHub:
     async def _send(self, writer: Any, msg: Dict[str, Any]) -> None:
         try:
             writer.write((json.dumps(msg, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8"))
-            await writer.drain()
+            await self.drain(writer)
         except Exception:
             self.writers.discard(writer)
 
@@ -179,7 +191,7 @@ def request_catchup(symbol: str, tf: str) -> None:
         return
     count = 500
     if last_t is not None:
-        gap = int((time.time() - last_t) / TF_SECONDS[tf]) + 10
+        gap = int((time.time() - last_t) / tf_step(tf)) + 10
         count = max(count, min(MAX_CATCHUP_BARS, gap))
     request_backfill(symbol, tf, count)
 
