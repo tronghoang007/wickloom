@@ -721,7 +721,7 @@ def mt5_owner() -> Optional[str]:
             uid = json.loads(rows[0][0]).get("user_id")
         except (ValueError, AttributeError):
             uid = None
-        if isinstance(uid, str) and uid:
+        if isinstance(uid, str) and uid and _query("SELECT 1 FROM users WHERE id=?", (uid,)):  # tài khoản đã nhận dữ liệu cũ có thể đã bị xoá
             return uid
     rows = _query("SELECT id FROM users ORDER BY created_at, rowid LIMIT 1")
     return rows[0][0] if rows else None

@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,9 @@ def load_env_file(path: Path) -> None:
 load_env_file(Path(__file__).resolve().parent.parent / ".env")
 
 DATA_DIR = Path(os.environ.get("TV_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
+# Test chạy ngoài backend/tests (không có conftest đặt TV_DATA_DIR) sẽ ghi vào DB thật: fixture dọn bảng từng xoá sạch users/sessions/alerts của user (2026-10-28)
+if "pytest" in sys.modules and "TV_DATA_DIR" not in os.environ:
+    raise RuntimeError("pytest mà chưa đặt TV_DATA_DIR: chạy test trong backend/tests (conftest.py) hoặc tự đặt TV_DATA_DIR về thư mục tạm")
 EA_TOKEN = os.environ.get("TV_TOKEN", "dev-token")
 BARS_DIR = DATA_DIR / "bars"  # cache parquet cũ (trước khi chuyển sang SQLite) - dời đi khi đổi broker
 BARS_DB = DATA_DIR / "bars.sqlite"

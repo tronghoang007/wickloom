@@ -1,13 +1,14 @@
 """Hồi quy cho các lỗi của alert tìm thấy khi review (2026-10-28): khởi động lại mất lần cắt, bản cũ của alert indicator vẫn nổ sau khi tạm dừng, sửa alert ghi đè lần nổ,
 hết hạn trong khoảng đứt bỏ mất báo bù, báo bù chạy khi nến chưa về, Telegram chậm làm trễ web, kênh MT5 chỉ cho chủ máy, giới hạn số alert khi bật lại."""
 import dataclasses
+import json
 import threading
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import alerts, indicators, notify, state
+from app import accounts, alerts, indicators, notify, state
 from app.alerts import CATCHUP_GAP, CATCHUP_SETTLE, CATCHUP_WAIT, Engine
 from app.main import app
 from app.notify import Fired
@@ -240,6 +241,17 @@ def test_only_the_terminal_owner_may_use_the_mt5_channel():
     assert r.status_code == 422 and "chủ máy" in r.json()["detail"]
     assert other.get("/alerts/channels").json()["mt5"]["allowed"] is False
     assert other.post("/alerts/channels/mt5/test").status_code == 403
+
+
+def test_mt5_owner_falls_back_when_the_legacy_owner_account_is_gone():
+    _, first_id = _user("first@example.com")
+    with state.meta.tx() as db:
+        db.execute("INSERT OR REPLACE INTO settings (id, scope, data) VALUES (?,?,?)", (accounts.LEGACY_FLAG, "", json.dumps({"user_id": "f" * 32, "rows": 1, "at": 1})))
+    try:
+        assert alerts.mt5_owner() == first_id  # cờ trỏ vào tài khoản đã xoá -> tài khoản tạo sớm nhất
+    finally:
+        with state.meta.tx() as db:
+            db.execute("DELETE FROM settings WHERE id=?", (accounts.LEGACY_FLAG,))
 
 
 def test_reactivating_as_paused_counts_toward_the_live_limit(monkeypatch):
