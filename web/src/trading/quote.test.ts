@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { spreadPips, splitPrice, useQuoteStore } from "./quote";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { spreadPips, splitPrice, typicalSpread, useQuoteStore } from "./quote";
 
 beforeEach(() => useQuoteStore.setState({ quotes: {} }));
 
@@ -23,6 +23,23 @@ describe("useQuoteStore", () => {
     expect(useQuoteStore.getState().quotes).toBe(before);
     useQuoteStore.getState().set("X", 1, 3);
     expect(useQuoteStore.getState().quotes).not.toBe(before);
+  });
+});
+
+describe("typicalSpread", () => {
+  afterEach(() => vi.useRealTimers());
+  it("trung vị các mẫu (mỗi 30 giây một mẫu): spread giãn lúc rollover không kéo theo; chưa thấy tick thì null", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    expect(typicalSpread("SPR")).toBeNull();
+    const { set } = useQuoteStore.getState();
+    set("SPR", 100, 100.2);
+    set("SPR", 100, 100.9); // trong 30 giây: không lấy mẫu
+    vi.setSystemTime(1_031_000);
+    set("SPR", 100.1, 100.3);
+    vi.setSystemTime(1_062_000);
+    set("SPR", 100, 101.5); // giãn
+    expect(typicalSpread("SPR")).toBeCloseTo(0.2, 9);
   });
 });
 

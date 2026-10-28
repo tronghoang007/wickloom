@@ -57,6 +57,25 @@ const opposite = (s: Side): Side => (s === "buy" ? "sell" : "buy");
 const marginOf = (volume: number, price: number, spec: PnlSpec | null, leverage: number | null) =>
   spec ? (volume * price * (spec.tickValue / spec.tickSize)) / (leverage && leverage > 0 ? leverage : DEFAULT_LEVERAGE) : 0;
 
+/** Phần Buy / Sell khoá nhau của cùng symbol (hedging) tính bằng tỉ lệ này của margin hai chân. 0 theo các nguồn (không chính thức) nói Exness không lấy margin cho vị thế khoá đủ
+ *  khối lượng; CHƯA xác minh, EA cũng chưa báo SYMBOL_MARGIN_HEDGED của từng symbol. Mặc định MT5 là 0.5 nếu cần đổi. */
+export const HEDGED_MARGIN_RATE = 0;
+
+type Leg = { side: Side; volume: number; price: number };
+
+/** Margin các vị thế của một symbol: phần lệch giữa tổng Buy và tổng Sell tính đủ (giá vào trung bình của phía lớn hơn), phần khoá nhau theo HEDGED_MARGIN_RATE.
+ *  Netting chỉ có một vị thế mỗi symbol nên là margin của chính nó. */
+function symbolMargin(legs: Leg[], spec: PnlSpec | null, leverage: number | null): number {
+  const sum = (s: Side) => legs.filter((l) => l.side === s).reduce((a, l) => ({ v: a.v + l.volume, pv: a.pv + l.volume * l.price }), { v: 0, pv: 0 });
+  const buy = sum("buy");
+  const sell = sum("sell");
+  const [big, small] = buy.v >= sell.v ? [buy, sell] : [sell, buy];
+  if (big.v <= EPS) return 0;
+  const net = marginOf(big.v - small.v, big.pv / big.v, spec, leverage);
+  if (small.v <= EPS || HEDGED_MARGIN_RATE === 0) return net;
+  return net + HEDGED_MARGIN_RATE * (marginOf(small.v, big.pv / big.v, spec, leverage) + marginOf(small.v, small.pv / small.v, spec, leverage));
+}
+
 /** Tính lại giá hiện tại + lãi/lỗi của các vị thế theo giá đang có. */
 function revalue(b: SimBook, env: SimEnv): SimBook {
   return {
@@ -75,8 +94,15 @@ function revalue(b: SimBook, env: SimEnv): SimBook {
 export function equityOf(b: SimBook): number {
   return b.balance + b.positions.reduce((s, p) => s + p.profit + p.swap, 0);
 }
-export function marginUsed(b: SimBook, env: SimEnv): number {
-  return b.positions.reduce((s, p) => s + marginOf(p.volume, p.price_open, env(p.symbol).spec, b.info.leverage), 0);
+/** Margin đang dùng; `extra` = thêm một lệnh giả định (kiểm đủ tiền trước khi vào lệnh). */
+export function marginUsed(b: SimBook, env: SimEnv, extra?: Leg & { symbol: string }): number {
+  const by = new Map<string, Leg[]>();
+  const add = (symbol: string, l: Leg) => by.set(symbol, [...(by.get(symbol) ?? []), l]);
+  for (const p of b.positions) add(p.symbol, { side: sideOf(p), volume: p.volume, price: p.price_open });
+  if (extra) add(extra.symbol, extra);
+  let m = 0;
+  for (const [symbol, legs] of by) m += symbolMargin(legs, env(symbol).spec, b.info.leverage);
+  return m;
 }
 
 /** Dữ liệu đúng khuôn GET /accounts/{id}/trade để giao diện thật đọc. `nowSec` = giờ thật (để không bị coi là dữ liệu cũ). */
@@ -92,12 +118,20 @@ export function snapshot(b: SimBook, env: SimEnv, nowSec: number): TradeData {
   return { account, positions: b.positions, orders: b.orders, deals: b.deals, updated_at: nowSec };
 }
 
-/** Giá của symbol (nến replay) mà không xét lệnh: lúc vào Replay / đổi timeframe. Lần đầu thấy symbol thì giữ spread `spread` cho nó. */
+/** Giá của symbol (nến replay) mà không xét lệnh: lúc vào Replay / đổi timeframe. Symbol chưa có spread thì giữ `spread` cho nó (0 = chưa biết, lần sau còn nhận spread khác). */
 export function seed(b: SimBook, symbol: string, bid: number, time: number, spread: number, env: SimEnv): SimBook {
-  const sp = b.spreads[symbol] ?? Math.max(0, spread);
+  const sp = (b.spreads[symbol] ?? 0) > 0 ? b.spreads[symbol] : Math.max(0, spread);
   const book = { ...b, time, spreads: { ...b.spreads, [symbol]: sp }, quotes: { ...b.quotes, [symbol]: { bid, ask: round(bid + sp) } } };
   if (book.deals[0]?.type === "balance" && book.deals[0].time === 0) book.deals = [{ ...book.deals[0], time }, ...book.deals.slice(1)];
   return revalue(book, env);
+}
+
+/** Symbol chưa biết spread (vào Replay lúc chưa có giá thật: cuối tuần, trang vừa mở) mà giờ đã biết: dùng từ đây. Đã có spread thì giữ nguyên (cố định trong phiên). */
+export function fillSpread(b: SimBook, symbol: string, spread: number, env: SimEnv): SimBook {
+  if ((b.spreads[symbol] ?? 0) > 0 || !(spread > 0)) return b;
+  const book = { ...b, spreads: { ...b.spreads, [symbol]: spread } };
+  const q = book.quotes[symbol];
+  return q ? revalue(setQuote(book, symbol, q.bid), env) : book;
 }
 
 // --- khớp / đóng ---
@@ -156,20 +190,11 @@ function fill(b: SimBook, o: { symbol: string; side: Side; volume: number; price
   return { book: revalue({ ...r.book, positions: [...r.book.positions, { ...pos, volume: rest }] }, env), deal: r.deal };
 }
 
-/** Đủ tiền cho thêm `volume` lot `side` ở `price` không (free margin sau lệnh ≥ 0). Netting: lệnh ngược hướng chỉ tốn margin cho phần vượt vị thế đang có. */
+/** Đủ tiền cho thêm `volume` lot `side` ở `price` không (free margin sau lệnh ≥ 0). Lệnh không làm tăng margin (netting đóng bớt, hedging khoá vị thế) thì luôn được. */
 function enoughMoney(b: SimBook, symbol: string, side: Side, volume: number, price: number, env: SimEnv): boolean {
-  const spec = env(symbol).spec;
-  let add = volume;
-  let freed = 0;
-  if (!b.info.hedging) {
-    const net = b.positions.find((p) => p.symbol === symbol);
-    if (net && sideOf(net) !== side) {
-      add = Math.max(0, volume - net.volume);
-      freed = marginOf(Math.min(volume, net.volume), net.price_open, spec, b.info.leverage);
-    }
-  }
-  if (add <= EPS) return true; // chỉ đóng bớt: không cần thêm margin
-  return equityOf(b) - (marginUsed(b, env) - freed) - marginOf(add, price, spec, b.info.leverage) >= -EPS;
+  const after = marginUsed(b, env, { symbol, side, volume, price });
+  if (after <= marginUsed(b, env) + EPS) return true;
+  return equityOf(b) - after >= -EPS;
 }
 
 // --- lệnh của người dùng (cùng các trường hợp sàn từ chối như EA báo) ---
@@ -334,11 +359,11 @@ function execute(b: SimBook, t: Trigger, price: number, time: number, env: SimEn
   return { ...c.book, events: [...c.book.events, { kind: t.kind, ticket: p.ticket, symbol: p.symbol, side: sideOf(p), volume: p.volume, price, pnl: c.pnl, label: "" }] };
 }
 
-/** Equity ≤ 0 (stop out 0% như Exness): đóng mọi vị thế ở giá hiện tại. */
-function stopOut(b: SimBook, time: number, env: SimEnv): SimBook {
+/** Equity ≤ 0 (stop out 0% như Exness; `force` = đã biết là chạm): đóng mọi vị thế ở giá hiện tại. Còn âm thì bù số dư về 0 (bảo vệ số dư âm), không thì account kẹt "không đủ tiền". */
+function stopOut(b: SimBook, time: number, env: SimEnv, force = false): SimBook {
   if (b.positions.length === 0) return b;
   const v = revalue(b, env);
-  if (equityOf(v) > 0) return v;
+  if (!force && equityOf(v) > 0) return v;
   let book = v;
   for (const p of v.positions) {
     const q = book.quotes[p.symbol];
@@ -347,10 +372,32 @@ function stopOut(b: SimBook, time: number, env: SimEnv): SimBook {
     const c = closePart(book, p, p.volume, price, "so", time, env);
     book = { ...c.book, events: [...c.book.events, { kind: "so", ticket: p.ticket, symbol: p.symbol, side: sideOf(p), volume: p.volume, price, pnl: c.pnl, label: "" }] };
   }
+  if (book.balance < 0) {
+    const fix: Deal = { ticket: book.nextDeal, order: 0, symbol: "", type: "balance", entry: "", volume: 0, price: 0, profit: -book.balance, commission: 0, swap: 0, time, magic: 0, comment: "Negative balance protection", position: 0 };
+    book = { ...book, balance: 0, deals: [...book.deals, fix], nextDeal: book.nextDeal + 1 };
+  }
   return revalue(book, env);
 }
 
+/** Giá Bid trên đoạn `a` → `b` mà equity chạm 0, null nếu tới `b` equity vẫn dương. Lãi/lỗi đơn điệu theo giá nên chia đôi là đủ; làm tròn theo số chữ số về phía `b`. */
+function stopOutLevel(bk: SimBook, symbol: string, a: number, b: number, env: SimEnv): number | null {
+  if (!bk.positions.some((p) => p.symbol === symbol)) return null;
+  const eq = (x: number) => equityOf(revalue(setQuote(bk, symbol, x), env));
+  if (eq(b) > 0) return null;
+  if (eq(a) <= 0) return a;
+  let lo = a;
+  let hi = b;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (eq(mid) > 0) lo = mid;
+    else hi = mid;
+  }
+  const f = 10 ** env(symbol).digits;
+  return b > a ? Math.min(b, Math.ceil(hi * f - 1e-6) / f) : Math.max(b, Math.floor(hi * f + 1e-6) / f);
+}
+
 /** Giá Bid đi thẳng từ `a` tới `b`. Mỗi vòng lấy mức gần `a` nhất mà đoạn này chạm, thực hiện, rồi đi tiếp từ mức đó (vị thế vừa khớp có SL / TP xa hơn trên đoạn vẫn được xét).
+ *  Equity chạm 0 trước mức đó thì stop out ngay tại giá chạm (đoạn dài như cả nến H4 không làm lỗ vượt quá số dư).
  *  `gap` = nhảy giá: mọi mức nằm giữa khớp ở giá `b`. Mức đã bị vượt từ trước (giá đang ở bên kia) khớp ngay ở giá hiện tại. */
 function walk(book: SimBook, symbol: string, a: number, b: number, gap: boolean, time: number, env: SimEnv): SimBook {
   let cur = a;
@@ -368,9 +415,15 @@ function walk(book: SimBook, symbol: string, a: number, b: number, gap: boolean,
         bestD = d;
       }
     }
+    const at = !best || gap ? b : bestD === 0 ? cur : best.bidLevel;
+    const so = gap ? null : stopOutLevel(bk, symbol, cur, at, env); // nhảy giá: SL / TP khớp trước, stop out (nếu còn âm) xét ở cuối
+    if (so !== null) {
+      bk = stopOut(setQuote(bk, symbol, so), time, env, true);
+      cur = so;
+      continue;
+    }
     if (!best) break;
     const beyond = bestD === 0 && Math.abs(cur - best.bidLevel) > EPS; // đã ở bên kia mức từ trước
-    const at = gap ? b : bestD === 0 ? cur : best.bidLevel;
     bk = setQuote(bk, symbol, at);
     const q = bk.quotes[symbol];
     // giá khớp: đúng mức khi giá đi liền tới đó, còn lại là giá thị trường theo phía của lệnh

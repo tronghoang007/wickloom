@@ -129,6 +129,56 @@ describe("feed: giá replay chạy", () => {
     expect(b.events.some((e) => e.kind === "so")).toBe(true);
     expect(b.balance).toBeLessThanOrEqual(0.01);
   });
+
+  it("stop out ngay tại giá equity chạm 0 trên đường đi, không đợi hết đoạn giá (số dư không âm sâu)", () => {
+    // 1 lot Buy ở Ask 4000.2, số dư 5000: equity = 0 khi Bid = 3950.2; nến xuống tận 3900
+    let b = ok(sim.marketOrder(start(true, 4000, 5000), { symbol: S, side: "buy", volume: 1 }, env));
+    b = sim.feed(b, S, [bar(1060, 4000, 4000, 3900, 3905)], 1120, env);
+    const so = b.events.find((e) => e.kind === "so");
+    expect(so?.price).toBeCloseTo(3950.2, 3);
+    expect(b.balance).toBeGreaterThanOrEqual(0);
+    expect(b.balance).toBeLessThan(0.2);
+  });
+
+  it("nhảy giá qua mức stop out: đóng ở giá mở rồi bù số dư âm về 0 (deal balance)", () => {
+    let b = ok(sim.marketOrder(start(true, 4000, 5000), { symbol: S, side: "buy", volume: 1 }, env));
+    b = sim.feed(b, S, [bar(1060, 3900, 3910, 3895, 3905)], 1120, env);
+    expect(b.positions).toHaveLength(0);
+    expect(b.balance).toBe(0);
+    const fix = b.deals[b.deals.length - 1];
+    expect(fix).toMatchObject({ type: "balance", comment: "Negative balance protection" });
+    expect(fix.profit).toBeCloseTo(100.2 * 100 - 5000, 4);
+    // sau đó vẫn vào lệnh được nếu số dư > 0: ở đây số dư 0 nên bị từ chối vì thiếu tiền, không phải vì số dư âm
+    expect(sim.marketOrder(b, { symbol: S, side: "buy", volume: 0.01 }, env).result.retcode).toBe(10019);
+  });
+});
+
+describe("spread", () => {
+  it("vào Replay lúc chưa biết spread (0) không khoá 0: lần sau biết spread thì dùng, đã có thì giữ cố định", () => {
+    let b = sim.seed(sim.newBook(INFO, 1000), S, 4000, 1000, 0, env);
+    expect(b.quotes[S]).toEqual({ bid: 4000, ask: 4000 });
+    b = sim.fillSpread(b, S, 0.2, env);
+    expect(b.quotes[S].ask).toBeCloseTo(4000.2, 6);
+    b = sim.fillSpread(b, S, 0.5, env);
+    b = sim.seed(b, S, 4001, 1060, 0.9, env);
+    expect(b.spreads[S]).toBeCloseTo(0.2, 9);
+    expect(b.quotes[S].ask).toBeCloseTo(4001.2, 6);
+  });
+});
+
+describe("margin hedging", () => {
+  it("Buy + Sell khoá nhau cùng khối lượng: chỉ phần lệch tính margin (HEDGED_MARGIN_RATE = 0); khoá vị thế luôn được dù thiếu tiền", () => {
+    expect(sim.HEDGED_MARGIN_RATE).toBe(0);
+    let b = ok(sim.marketOrder(start(true, 4000, 5000), { symbol: S, side: "buy", volume: 1 }, env));
+    expect(sim.marginUsed(b, env)).toBeCloseTo(4000.2, 4);
+    // thêm Buy 1 lot nữa không đủ tiền (cần 8000), nhưng Sell khoá lại thì được và margin về 0
+    expect(sim.marketOrder(b, { symbol: S, side: "buy", volume: 1 }, env).result.retcode).toBe(10019);
+    b = ok(sim.marketOrder(b, { symbol: S, side: "sell", volume: 1 }, env));
+    expect(sim.marginUsed(b, env)).toBeCloseTo(0, 6);
+    // Sell thêm 0.5: phần lệch 0.5 lot phía Sell, giá trung bình của phía Sell
+    b = ok(sim.marketOrder(b, { symbol: S, side: "sell", volume: 0.5 }, env));
+    expect(sim.marginUsed(b, env)).toBeCloseTo(0.5 * 4000 * 100 / 100, 4);
+  });
 });
 
 describe("snapshot / closeAll", () => {

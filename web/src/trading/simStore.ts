@@ -9,7 +9,7 @@ import { useTradeFocus } from "./focus";
 import { fmtLot, fmtPnl, fmtPx } from "./format";
 import { isPendingType, pendingLabel } from "./orderType";
 import { pnlSpec } from "./pnl";
-import { useQuoteStore } from "./quote";
+import { typicalSpread, useQuoteStore } from "./quote";
 import * as sim from "./sim";
 import { useTradeStore } from "./store";
 import { useTicketStore } from "./ticket";
@@ -115,17 +115,22 @@ export function resetSim() {
   publish(old ? { ...b, quotes: old.quotes, spreads: old.spreads, time: old.time, deals: b.deals.map((d) => ({ ...d, time: old.time })) } : b);
 }
 
-/** Giá replay của `symbol` mà không xét lệnh (vào Replay, đổi timeframe). Spread lấy từ giá thật đang có của symbol, lần đầu thấy symbol. */
-export function seedSim(symbol: string, bid: number, time: number) {
-  if (!useSimStore.getState().on) return;
+/** Spread cho sàn giả lập: spread điển hình đã thấy của symbol (nhớ qua lần tải trang), chưa có thì spread thật đang có, 0 = chưa biết. */
+function spreadOf(symbol: string): number {
   const q = useQuoteStore.getState().real[symbol];
-  publish(sim.seed(book(), symbol, bid, time, q ? q.ask - q.bid : 0, env));
+  return typicalSpread(symbol) ?? (q ? q.ask - q.bid : 0);
 }
 
-/** Bước replay: các nến vừa chạy qua (xem `sim.feed`). */
+/** Giá replay của `symbol` mà không xét lệnh (vào Replay, đổi timeframe). Spread giữ cố định từ lần đầu biết được (xem `spreadOf`). */
+export function seedSim(symbol: string, bid: number, time: number) {
+  if (!useSimStore.getState().on) return;
+  publish(sim.seed(book(), symbol, bid, time, spreadOf(symbol), env));
+}
+
+/** Bước replay: các nến vừa chạy qua (xem `sim.feed`). Vào Replay lúc chưa biết spread thì nhận spread ngay khi có tick thật đầu tiên. */
 export function feedSim(symbol: string, bars: sim.SimBar[], now: number) {
   if (!useSimStore.getState().on) return;
-  const b = book();
+  const b = sim.fillSpread(book(), symbol, spreadOf(symbol), env);
   if (!b.quotes[symbol]) return seedSim(symbol, bars[bars.length - 1]?.c ?? 0, now);
   publish(sim.feed(b, symbol, bars, now, env));
 }

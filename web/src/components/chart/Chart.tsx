@@ -24,6 +24,7 @@ import type { DragPreview } from "@/trading/format";
 import { useQuoteStore } from "@/trading/quote";
 import { parseNum } from "@/trading/draft";
 import { useTicketStore } from "@/trading/ticket";
+import type { SimBar } from "@/trading/sim";
 import { enterSim, feedSim, leaveSim, restartSim, seedSim } from "@/trading/simStore";
 import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
@@ -551,7 +552,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       const cursor = cursorRef.current;
       const from = simFedRef.current;
       if (seed || from === null || cursor <= from) seedSim(sym, last.c, cursor);
-      else feedSim(sym, (wantM1() && m1Ref.current.length > 0 ? m1Ref.current : fullRef.current).filter((b) => b.t >= from && b.t < cursor), cursor);
+      else feedSim(sym, simBars(from, cursor), cursor);
       simFedRef.current = cursor;
     }
   };
@@ -559,6 +560,22 @@ export default function Chart({ paneId }: { paneId: string }) {
   const wantM1 = () => {
     const iv = pane.replay.getState().interval;
     return !!iv && TF_SECONDS[iv] < TF_SECONDS[pane.chart.getState().tf];
+  };
+  // Sàn giả lập cần M1 cả khi Replay bước theo nến (chart lớn hơn M1): lệnh chờ / SL / TP trong một nến lớn khớp theo đường giá từng phút, không đoán thứ tự cao / thấp của cả nến
+  const needM1 = () => wantM1() || TF_SECONDS[pane.chart.getState().tf] > 60;
+
+  /** Nến cho sàn giả lập từ `from` tới con trỏ: M1 trong từng nến của chart, nến nào chưa có M1 thì dùng chính nó (chỉ khi nó đã đóng trước con trỏ). */
+  const simBars = (from: number, cursor: number): SimBar[] => {
+    const tfs = TF_SECONDS[pane.chart.getState().tf];
+    const m1 = tfs > 60 ? m1Ref.current.filter((x) => x.t >= from && x.t < cursor) : [];
+    const out: SimBar[] = [];
+    for (const b of fullRef.current) {
+      if (b.t + tfs <= from || b.t >= cursor) continue;
+      const ms = m1.filter((x) => x.t >= b.t && x.t < b.t + tfs);
+      if (ms.length) out.push(...ms);
+      else if (b.t >= from && b.t + tfs <= cursor) out.push(b);
+    }
+    return out;
   };
 
   const loadM1 = async (from: number) => {
@@ -622,6 +639,11 @@ export default function Chart({ paneId }: { paneId: string }) {
     if (!useM1) {
       if (!next) return false;
       t = next.t + tfs;
+      // sàn giả lập cần M1 tới con trỏ mới: cửa sổ M1 đã tải kết thúc trước đó thì tải cửa sổ kế rồi bước lại (cửa sổ rỗng vẫn tính là đã phủ: dùng nến chart)
+      if (needM1() && m1EndRef.current < t) {
+        loadAhead(false, true);
+        return true;
+      }
     } else {
       if (!m) return false;
       t = Math.max(t, m.t) + TF_SECONDS[st.interval];
@@ -649,7 +671,7 @@ export default function Chart({ paneId }: { paneId: string }) {
     const view = chartRef.current?.timeScale().getVisibleLogicalRange();
     pane.replay.setState({ selecting: false, active: true, playing: false });
     setHover(null);
-    if (wantM1()) await loadM1(b.t);
+    if (needM1()) await loadM1(b.t);
     applyVisible(buildVisible(cursorRef.current));
     if (view) chartRef.current?.timeScale().setVisibleLogicalRange(view);
   };
@@ -1322,7 +1344,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   useEffect(() => {
     if (!pane.replay.getState().active) return;
     (async () => {
-      if (wantM1())
+      if (needM1())
         await loadM1(
           cursorRef.current - TF_SECONDS[pane.chart.getState().tf],
         );
@@ -1441,7 +1463,7 @@ export default function Chart({ paneId }: { paneId: string }) {
         // Mốc cắt nằm giữa một nến của TF mới (vd 1h -> 4h): cần M1 để dựng nến đó tới con trỏ
         const tfs = TF_SECONDS[tf];
         const midBar = bars.some((b) => b.t + tfs > anchor);
-        if (wantM1() || midBar) await loadM1(anchor - tfs);
+        if (needM1() || midBar) await loadM1(anchor - tfs);
         if (!alive) return;
         applyVisible(buildVisible(anchor), true);
         // giữ góc nhìn qua lần đổi TF như lúc không replay (keepView.ts)
