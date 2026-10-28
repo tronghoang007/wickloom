@@ -566,7 +566,7 @@ describe("LowerFeed xin EA nạp thêm", () => {
     const need = { tfs: [TICK_TF], from: 0 };
     feed.get("X", need, 660);
     await flush();
-    feed.push("X", TICK_TF, [bar(600, 3)]);
+    feed.push("X", TICK_TF, [bar(540, 2), bar(600, 3)]); // lô chốt phút 540 + phút đang chạy 600
     clock.now = 16_000; // quá 15 giây làm mới đuôi nhưng vừa nhận push
     feed.get("X", need, 660);
     await flush();
@@ -576,5 +576,42 @@ describe("LowerFeed xin EA nạp thêm", () => {
     feed.get("X", need, 660);
     await flush();
     expect(calls).toEqual([3]);
+  });
+
+  it("lỡ lô đẩy chốt một phút (lô sau bắt đầu muộn hơn phút cuối đang giữ): đọc lại đuôi DB từ phút đó dù live đang chạy, không nhờ EA", async () => {
+    const db = fakeDb({ TD: run("M1", 0, 10) }); // phút 0..540, 540 đang chạy lúc đọc
+    const calls: number[] = [];
+    const feed = new LowerFeed(db.fetch, () => {}, { now: () => 0, backfill: async (_s, _tf, count) => (calls.push(count), true), sleep: async () => {} });
+    const need = { tfs: [TICK_TF], from: 0 };
+    feed.get("X", need, 720);
+    await flush();
+    db.data.TD[9] = bar(540, 10); // phút 540 chốt +10 trong DB, lô đẩy dòng chốt đó bị lỡ (WS nối lại)
+    db.data.TD.push(bar(600, 1), bar(660, 2));
+    feed.push("X", TICK_TF, [bar(660, 2)]);
+    feed.get("X", need, 720);
+    await flush();
+    expect(feed.get("X", need, 720).slice(-3).map((b) => [b.t, b.c])).toEqual([[540, 10], [600, 1], [660, 2]]);
+    expect(db.calls.filter((c) => c.tf === TICK_TF).at(-1)?.from).toBe(540);
+    expect(calls).toEqual([]);
+  });
+
+  it("phút được đẩy tới trong lúc đang đọc đuôi DB không bị bản DB (cũ hơn) ghi đè", async () => {
+    const db = fakeDb({ TD: run("M1", 0, 10) });
+    let release: (() => void) | null = null;
+    const slow: typeof db.fetch = (symbol, tf, from, to, limit) => {
+      const got = db.fetch(symbol, tf, from, to, limit);
+      return release === null && from > 0 ? new Promise((r) => (release = () => r(got))) : got;
+    };
+    const feed = new LowerFeed(slow, () => {}, { now: () => 0, sleep: async () => {} });
+    const need = { tfs: [TICK_TF], from: 0 };
+    feed.get("X", need, 720);
+    await flush();
+    feed.push("X", TICK_TF, [bar(660, 1)]); // lỡ phút 540: đọc lại đuôi
+    feed.get("X", need, 720); // bắt đầu đọc, DB lúc này: 540 dở (giá trị cũ), chưa có 600 / 660
+    await flush();
+    feed.push("X", TICK_TF, [bar(660, 4), bar(720, 1)]); // trong lúc đọc: 660 chốt +4, 720 đang chạy
+    release!();
+    await flush();
+    expect(feed.get("X", need, 780).slice(-2).map((b) => [b.t, b.c])).toEqual([[660, 4], [720, 1]]);
   });
 });

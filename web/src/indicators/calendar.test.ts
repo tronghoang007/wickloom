@@ -81,6 +81,16 @@ describe("dayOpens (mốc D1 thật) sửa lệch DST", () => {
     expect(Number.isFinite(k[0])).toBe(true);
   });
 
+  it("nến mới hơn mốc D1 cuối cùng một ngày trở lên (mốc chưa nạp lại): tính theo offset, vẫn sang ngày mới", () => {
+    const opens = [utc("2026-10-19T00:00:00"), utc("2026-10-20T00:00:00")]; // trang mở từ 20/10, giờ đã là 22/10
+    const t = [utc("2026-10-20T23:00:00"), utc("2026-10-21T01:00:00"), utc("2026-10-22T01:00:00")];
+    const k = periodKeys(t, "day", { offset: 0, dayOpens: opens });
+    expect(k).toEqual(periodKeys(t, "day", { offset: 0 }));
+    expect([k[1] - k[0], k[2] - k[1]]).toEqual([1, 1]);
+    const custom = periodKeys(t, "day", { offset: 0, dayOpens: opens, session: { mode: "hour", hour: 7 } });
+    expect([custom[1], custom[2]]).toEqual([custom[0], custom[1] + 1]); // 21/10 01:00 còn phiên 20/10, 22/10 01:00 là phiên 21/10
+  });
+
   it("tuần/tháng theo ngày của mốc D1", () => {
     const opens = [utc("2026-02-28T22:00:00"), utc("2026-03-01T22:00:00")]; // ngày broker 01/03 và 02/03 (UTC+2)
     const t = [utc("2026-02-28T22:00:00"), utc("2026-03-01T21:00:00"), utc("2026-03-01T22:00:00")];
@@ -171,6 +181,12 @@ describe("session start (mốc đổi phiên)", () => {
     const k = periodKeys(part, "day", { offset: 0, session: { mode: "break", minutes: 30 } });
     expect(k[part.indexOf(utc("2026-10-20T00:00:00"))]).toBe(k[0]);
     expect(k[part.indexOf(utc("2026-10-20T22:00:00"))]).toBe(k[0] + 1);
+  });
+
+  it("break: lỗ dữ liệu (các ngày khác cùng giờ có nến) không phải giờ nghỉ: không cắt, vẫn cắt lúc 00:00", () => {
+    const btc = Array.from({ length: 96 }, (_, i) => utc("2026-10-19T00:00:00") + i * H).filter((t) => t !== utc("2026-10-20T15:00:00"));
+    const starts = periodStarts(btc, "day", { offset: 0, session: { mode: "break", minutes: 30 } });
+    expect(starts.map((i) => btc[i])).toEqual(["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22"].map((d) => utc(`${d}T00:00:00`)));
   });
 
   it("break: tuần theo ngày giao dịch của phiên", () => {

@@ -459,7 +459,8 @@ export default function Chart({ paneId }: { paneId: string }) {
 
   const refreshExtras = () => {
     const { symbol, tf } = pane.chart.getState();
-    indRef.current?.update(pane.indicators.getState().list, barsRef.current, { symbol, tf });
+    const end = replayEnd();
+    indRef.current?.update(pane.indicators.getState().list, barsRef.current, { symbol, tf, ...(end === undefined ? {} : { end }) });
     drawRef.current?.refresh();
   };
 
@@ -483,6 +484,9 @@ export default function Chart({ paneId }: { paneId: string }) {
   };
 
   // --- replay ---
+  // Replay: dữ liệu dừng ở con trỏ (nến cuối có thể mới chạy dở tới đó); tick / nến khung nhỏ sau mốc này là tương lai
+  const replayEnd = () => (pane.replay.getState().active ? cursorRef.current : undefined);
+
   const buildVisible = (cursorT: number): Bar[] => {
     const full = fullRef.current;
     const tfs = TF_SECONDS[pane.chart.getState().tf];
@@ -822,6 +826,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       getBars: () => barsRef.current,
       getDisplayBars: display,
       getTf: () => pane.chart.getState().tf,
+      getEnd: replayEnd,
       getDigits: () => digitsRef.current,
       getTickSize: () =>
         useChartStore
@@ -1430,6 +1435,8 @@ export default function Chart({ paneId }: { paneId: string }) {
           barsRef.current = [];
           exhaustedRef.current = false;
           backfillRef.current = null;
+          indRef.current?.resetSource();
+          drawRef.current?.resetSource();
           render();
           refreshExtras();
           fetchSymbols()

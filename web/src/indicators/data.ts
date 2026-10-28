@@ -15,6 +15,7 @@ export class BarHistory {
   private exhausted = false;
   private loading = false;
   private retryAt = 0;
+  private gen = 0; // tăng khi bỏ hết (đổi broker): lần nạp đang chạy của nguồn cũ không được ghép vào
 
   constructor(
     private fetch: FetchBars,
@@ -50,11 +51,12 @@ export class BarHistory {
     const need = target - (k + bars.length);
     if (need <= 0) return;
     const key = this.key;
+    const gen = this.gen;
     const earliest = k > 0 ? this.older[0].t : bars[0].t;
     this.loading = true;
     this.fetch(symbol, tf, earliest, need)
       .then((got) => {
-        if (key !== this.key) return; // đã đổi symbol/khung trong lúc chờ
+        if (key !== this.key || gen !== this.gen) return; // đã đổi symbol/khung (hoặc broker) trong lúc chờ
         this.loading = false;
         if (got.length < need) this.exhausted = true; // DB hết (chưa backfill thêm từ MT5)
         if (got.length > 0) {
@@ -63,10 +65,18 @@ export class BarHistory {
         }
       })
       .catch(() => {
-        if (key !== this.key) return;
+        if (key !== this.key || gen !== this.gen) return;
         this.loading = false;
         this.retryAt = this.now() + RETRY_MS;
       });
+  }
+
+  /** Bỏ lịch sử đã nạp (backend đổi sang broker khác: nến cũ là của nguồn cũ). */
+  reset() {
+    this.gen++;
+    this.key = "";
+    this.older = [];
+    this.loading = false;
   }
 }
 
@@ -81,6 +91,7 @@ export class CalendarFeed {
   private symbol = "";
   private cal: CalendarOpts | null = null;
   private loading = false;
+  private gen = 0;
 
   constructor(
     private deps: CalendarDeps,
@@ -95,16 +106,25 @@ export class CalendarFeed {
     }
     if (!this.cal && !this.loading) {
       this.loading = true;
+      const gen = this.gen;
       Promise.all([this.deps.offset(), this.deps.dayOpens(symbol)])
         .then(([offset, dayOpens]) => ({ offset, dayOpens }))
         .catch(() => ({ offset: 0, dayOpens: [] as number[] }))
         .then((cal) => {
-          if (symbol !== this.symbol) return;
+          if (symbol !== this.symbol || gen !== this.gen) return;
           this.cal = { offset: cal.offset, ...(cal.dayOpens.length ? { dayOpens: cal.dayOpens } : {}) };
           this.loading = false;
           this.onChange();
         });
     }
     return this.cal;
+  }
+
+  /** Bỏ lịch đã nạp (đổi broker: offset và mốc D1 khác), lần `get` sau nạp lại. */
+  reset() {
+    this.gen++;
+    this.symbol = "";
+    this.cal = null;
+    this.loading = false;
   }
 }

@@ -231,8 +231,23 @@ describe("Big Trades", () => {
     const { ticks, calls } = source(pool, exact, STAT);
     const b = run(ticks, { sigma: 0.2, text: true }, 0, {}, { from: 11, to: 19 }).bubbles!; // ngưỡng 5 + 0,2 × 10 = 7
     expect(calls).toHaveLength(2);
-    expect(calls[1].slice(0, 4)).toEqual([bars[0].t, bars[19].t + M5, 7, MAX_SHOWN]); // vùng nhìn nới ra theo khối 30 000 s (cắt ở đầu tick / hết nến cuối): ô >= ngưỡng; pool không có ô nào ở đó nên hỏi riêng
+    expect(calls[1].slice(0, 4)).toEqual([bars[0].t, bars[19].t + M5, 7, MAX_SHOWN * 4]); // vùng nhìn nới ra theo khối 30 000 s (cắt ở đầu tick / hết nến cuối): ô >= ngưỡng; pool không có ô nào ở đó nên hỏi riêng
+    // (hỏi gấp 4 số ô: phần nới thêm không chiếm hết chỗ của vùng nhìn)
     expect(b.map((x) => x.text)).toEqual(["40", "8", "7"]);
+  });
+
+  it("phần nới thêm có nhiều ô lớn hơn chiếm hết kết quả: hỏi lại đúng vùng nhìn", () => {
+    const pool = Array.from({ length: BIG_POOL }, (_, i) => cell(bars[i % 8].t, 100 + i, 100 + i, 0));
+    // nến 0..7 (phần nới, ngoài vùng nhìn 11..19): rất nhiều ô 50; vùng nhìn: vài ô 8..9
+    const margin = Array.from({ length: MAX_SHOWN * 4 }, (_, i) => cell(bars[i % 8].t, 200 + i, 50, 0));
+    const view = [cell(bars[12].t, 100, 9, 0), cell(bars[14].t, 100, 8, 0)];
+    const all = [...margin, ...view];
+    const exact = (t0: number, t1: number, min: number, limit: number) => all.filter((k) => k.t >= t0 && k.t < t1 && k.up >= min).sort((a, b) => b.up - a.up).slice(0, limit);
+    const { ticks, calls } = source(pool, exact, STAT);
+    const b = run(ticks, { sigma: 0.2, text: true }, 0, {}, { from: 11, to: 19 }).bubbles!;
+    expect(calls).toHaveLength(3);
+    expect(calls[2].slice(0, 2)).toEqual([bars[11].t, bars[19].t + M5]);
+    expect(b.map((x) => x.text)).toEqual(["9", "8"]);
   });
 
   it("đang chờ kết quả hỏi riêng thì vẫn hiện bubble lấy từ pool (không nhấp nháy)", () => {

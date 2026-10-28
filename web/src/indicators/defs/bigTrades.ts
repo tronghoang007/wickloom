@@ -210,10 +210,16 @@ export const bigTrades: IndicatorDef = {
       const got = topInRange(pool, from, to, limit).filter((k) => vol(k) >= minVol);
       const exact = pool.length < BIG_POOL || (got.length >= limit ? vol(got[limit - 1]) : minVol) > poolMin;
       if (exact || !ready) return got; // cặp cũ đang dùng tạm: không hỏi thêm theo row giá mới
-      const asked = big(Math.max(t0, Math.floor(from / block) * block), Math.min(end, Math.ceil(to / block) * block), minVol, limit, size);
-      return asked ? topInRange(asked, from, to, limit) : got;
+      const ask = Math.min(BIG_POOL, limit * 4); // khoảng nới rộng: các ô lớn ở phần nới thêm không được chiếm hết chỗ của vùng nhìn
+      const asked = big(Math.max(t0, Math.floor(from / block) * block), Math.min(end, Math.ceil(to / block) * block), minVol, ask, size);
+      if (!asked) return got;
+      const inView = topInRange(asked, from, to, limit);
+      // đủ `limit` ô trong vùng (ô vùng nhìn không có trong kết quả đều nhỏ hơn) hoặc kết quả không bị cắt: đúng. Không thì hỏi đúng vùng nhìn
+      if (inView.length >= limit || asked.length < ask) return inView;
+      const own = big(from, to, minVol, limit, size);
+      return own ? topInRange(own, from, to, limit) : inView;
     };
-    const v0 = Math.max(t0, bars[Math.max(c.cut, c.range?.from ?? c.cut)].t); // chưa biết vùng nhìn thì cả chart
+    const v0 = Math.max(t0, bars[Math.min(bars.length - 1, Math.max(c.cut, c.range?.from ?? c.cut))].t); // chưa biết vùng nhìn thì cả chart
     const v1 = bars[last].t + step;
     if (v1 <= v0) return empty;
     // Thang cỡ và ngưỡng tính trên các ô quanh mép phải vùng nhìn chứ không trên các ô đang hiện: zoom giữ mép phải thì cả cỡ lẫn tập bubble không đổi, zoom chỉ cắt bớt / thêm vào phần thấy được
@@ -223,7 +229,8 @@ export const bigTrades: IndicatorDef = {
     if (minIn === 0) {
       if (!stat) return empty;
       const sd = stat.n > 0 ? Math.sqrt(Math.max(0, stat.sumsq / stat.n - (stat.sum / stat.n) ** 2)) : 0;
-      thr = stat.n > 0 ? Math.max(min, stat.sum / stat.n + num(c.inputs, "sigma") * sd) : min;
+      // volume của ô là số tick (nguyên): làm tròn lên không đổi tập ô >= ngưỡng, nhưng thống kê nạp lại mỗi phút chỉ nhích ngưỡng lẻ một chút thì khoá hỏi backend không đổi
+      thr = stat.n > 0 ? Math.max(min, Math.ceil(stat.sum / stat.n + num(c.inputs, "sigma") * sd - 1e-9)) : min;
     }
     const cells = top(v0, v1, thr, MAX_SHOWN);
     // Cỡ và độ đậm tính trên các bubble (ô >= ngưỡng) quanh mép phải, không theo riêng các ô đang hiện

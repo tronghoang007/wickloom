@@ -1,6 +1,6 @@
 import type { Bar, TickCell } from "@/lib/api";
 import { describe, expect, it } from "vitest";
-import { LIVE_KEEP, TickBigFeed, TickProfileFeed, TickStatFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, overlapRatio, rebin, type LiveMinute, type TickHist } from "./tickProfile";
+import { LIVE_KEEP, TickBigFeed, TickFpFeed, TickProfileFeed, TickStatFeed, addLiveHist, appendLive, coverSig, coversFrom, liveCut, liveFrom, liveHist, mergeLiveBig, overlapRatio, rebin, type LiveMinute, type TickHist } from "./tickProfile";
 
 const td = (t: number, c = 1, v = 1): Bar => ({ t, o: 0, h: 0, l: 0, c, v });
 const lay = { lo: 100, hi: 110, size: 5, N: 2 };
@@ -146,7 +146,7 @@ describe("TickBigFeed", () => {
     expect(feed.get("S", 10, 20, 3, 100, 0.5, "b")).not.toBeNull();
     await settle();
     expect(calls).toHaveLength(2);
-    expect(feed.get("S", 10, 20, 4, 100, 0.5, "b")).toBeNull();
+    expect(feed.get("S", 10, 20, 4, 100, 0.5, "b")!.every((c) => c.up + c.dn >= 4)).toBe(true); // khoá khác (vẫn nạp), trong lúc chờ mượn bản ngưỡng 3 lọc lại
     expect(feed.get("S", 10, 20, 3, 50, 0.5, "b")).toBeNull();
     expect(feed.get("S", 10, 20, 3, 100, 1, "b")).toBeNull(); // row giá khác
     await settle();
@@ -170,10 +170,13 @@ describe("TickBigFeed", () => {
     // mốc lùi về sớm hơn: mượn bản gần nhất (t1 = 600) nhưng bỏ ô từ 500 trở đi
     expect(feed.get("S", 0, 500, 3, 100, 0.5, "c")!.map((c) => c.t)).toEqual([0]);
     await settle();
-    // đầu, ngưỡng khác hoặc t1 quá xa thì không mượn
-    expect(feed.get("S", 60, 660, 3, 100, 0.5, "d")).toBeNull();
-    expect(feed.get("S", 0, 660, 4, 100, 0.5, "d")).toBeNull();
+    // đầu dời (độ sâu tick trôi theo nến mới): mượn, bỏ ô trước đầu mới; ngưỡng cao hơn (sigma nạp lại): mượn, bỏ ô dưới ngưỡng
+    expect(feed.get("S", 60, 660, 3, 100, 0.5, "d")!.map((c) => c.t)).toEqual([600]);
+    expect(feed.get("S", 0, 660, 4, 100, 0.5, "d")).toEqual([]); // ô của bản mượn có volume 3 < 4
+    // khoảng trùng ít, số ô hoặc row khác thì không mượn
     expect(feed.get("S", 0, 5000, 3, 100, 0.5, "d")).toBeNull();
+    expect(feed.get("S", 0, 660, 3, 200, 0.5, "d")).toBeNull();
+    expect(feed.get("S", 0, 660, 3, 100, 1, "d")).toBeNull();
     await settle();
   });
 
@@ -409,6 +412,16 @@ describe("TickProfileFeed: dùng tạm bản của profile gần giống", () =>
     expect(feed.get("S", 0, 1000, wide, "a")).not.toBeNull();
   });
 
+  it("strict (Replay): không mượn bản của khoảng dài quá t1 (sẽ lộ tick tương lai), vẫn mượn bản ngắn hơn", async () => {
+    const { feed, flush } = mk();
+    feed.get("S", 0, 1000, wide, "a");
+    await flush();
+    expect(feed.get("S", 0, 900, wide, "a")).not.toBeNull(); // bình thường (Visible Range thu hẹp): dùng tạm
+    expect(feed.get("S", 0, 850, wide, "a", 850, true)).toBeNull(); // Replay lùi mốc: chờ backend
+    expect(feed.heldUpTo("S", 0, 850, wide, true)).toBeUndefined();
+    expect(feed.get("S", 0, 1100, wide, "a", 1100, true)).not.toBeNull(); // Replay bước tới: bản cũ ngắn hơn, không có tương lai
+  });
+
   it("lần nạp của khoá mới lỗi thì thôi dùng tạm (rơi về nến) tới khi thử lại", async () => {
     let fail = false;
     let clock = 0;
@@ -430,5 +443,16 @@ describe("TickProfileFeed: dùng tạm bản của profile gần giống", () =>
     expect(feed.get("S", 0, 1000, wide, "a")).toBeNull(); // lỗi
     clock += 11_000;
     expect(feed.get("S", 0, 1000, wide, "a")).not.toBeNull(); // thử lại: lại dùng tạm
+  });
+});
+
+describe("TickFpFeed", () => {
+  it("khoá theo khung chart: cửa sổ khung lớn bắt đầu đúng giờ một cửa sổ khung nhỏ đã nạp không dùng ô của khung nhỏ", async () => {
+    const feed = new TickFpFeed(async (_s, bars) => [[0, bars.length, 1, 0]], () => {});
+    const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    feed.get("S", [0, 300], 600, 1, "a", 600, 300); // M5
+    await settle();
+    expect(feed.get("S", [0, 300], 600, 1, "a", 600, 300)).toEqual([[0, 2, 1, 0]]);
+    expect(feed.get("S", [0, 3600], 7200, 1, "a", 7200, 3600)).toBeNull(); // H1 cùng nến đầu, cùng row: khoá khác
   });
 });

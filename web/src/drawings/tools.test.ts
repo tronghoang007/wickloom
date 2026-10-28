@@ -266,6 +266,11 @@ describe("profileSource: ghép nến khung nhỏ với nến chart", () => {
     const fine = [900, 1200, 1500].map((t) => mk(t));
     expect(ts(profileSource(base(fine), 0, 3600))).toEqual([0, 900, 1200, 1500, 1800, 2700]);
   });
+
+  it("nến 'khung nhỏ' thô hơn khung chart (neo trước lịch sử chart đã nạp): chỉ dùng phần trước nến chart đầu tiên", () => {
+    const coarse = [-3600, -1800, 0].map((t) => mk(t)); // 1800s, nến 0 trùng nến chart
+    expect(ts(profileSource({ ...base(coarse), profileStep: 1800 } as Ctx, -3600, 3600))).toEqual([-3600, -1800, 0, 900, 1800, 2700]);
+  });
 });
 
 describe("volume profile vẽ dạng thanh", () => {
@@ -438,6 +443,23 @@ describe("volume profile vẽ dạng thanh", () => {
         expect(profileSpan(c.d, 20, snapTo(coarse, 10))).toEqual({ t0: 0, t1: 20 });
         expect(profileSpan(c.d, 20)).toEqual({ t0: 5, t1: 25 });
         expect(profileSpan({ ...c.d, type: "avp", points: [{ time: 17, price: 0 }] }, 20, snapTo(coarse, 10))).toEqual({ t0: 10, t1: 20 });
+      });
+
+      it("neo trước nến chart đầu tiên đã nạp: vùng giá chia row lấy cả nến khung nhỏ phủ tới neo; chưa phủ tới thì không dùng tick", () => {
+        let asked: { t0: number; lay: { lo: number; hi: number } } | null = null;
+        const ticks: TickSource = { covered: () => true, hist: (t0, _t1, lay) => ((asked = { t0, lay }), null) };
+        const early = (profileBars?: Bar[]): Ctx => {
+          const c = mid();
+          return { ...c, d: { ...c.d, type: "avp", points: [{ time: -20, price: 0 }] }, ticks, ...(profileBars ? { profileBars, profileStep: 5 } : {}) };
+        };
+        // nến khung nhỏ trước lịch sử chart có giá 200..210: ngoài vùng 0..100 của các nến chart
+        const fine: Bar[] = [-20, -15, -10, -5].map((t) => ({ t, o: 205, h: 210, l: 200, c: 205, v: 1 }));
+        SPEC.avp.build(early(fine));
+        expect(asked).toMatchObject({ t0: -20, lay: { lo: 0, hi: 210 } });
+        expect(profileRange(early(fine))).toEqual({ hi: 210, lo: 0 });
+        asked = null;
+        SPEC.avp.build(early()); // chưa nạp nến khung nhỏ: không đoán vùng giá từ nến chart (tick cũ sẽ dồn vào row mép)
+        expect(asked).toBeNull();
       });
 
       it("barOpen: nến cuối cùng mở không muộn hơn t; ngoài dải nến thì giữ nguyên", () => {

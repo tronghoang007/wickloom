@@ -116,9 +116,13 @@ describe("Session Volume Profile", () => {
   });
 
   it("Session start = After break: cắt sau khoảng trống; không có khoảng trống thì như Broker midnight", () => {
-    const gap = [...chart(20, 96).filter((b) => b.t < 20 * DAY + 21 * 3600 || b.t >= 20 * DAY + 22 * 3600), ...chart(21, 96)]; // nghỉ 21:00–22:00 ngày 20
+    const gap = [...chart(20, 96), ...chart(21, 96)].filter((b) => b.t % DAY < 21 * 3600 || b.t % DAY >= 22 * 3600); // nghỉ 21:00–22:00 mỗi ngày
     const p = run({ sessionStart: "After break" }, 0, gap, []);
-    expect(p.profiles.map((x) => x.x1)).toEqual([0, gap.findIndex((b) => b.t === 20 * DAY + 22 * 3600)]); // phiên mở 22:00 chạy qua 00:00, không cắt
+    const at = (t: number) => gap.findIndex((b) => b.t === t);
+    expect(p.profiles.map((x) => x.x1)).toEqual([0, at(20 * DAY + 22 * 3600), at(21 * DAY + 22 * 3600)]); // phiên mở 22:00 chạy qua 00:00, không cắt
+    // một lỗ dữ liệu (ngày khác cùng giờ vẫn có nến) không phải giờ nghỉ: không cắt, vẫn đổi phiên lúc 00:00
+    const hole = chart(20, 288).filter((b) => b.t < 21 * DAY + 15 * 3600 || b.t >= 21 * DAY + 15 * 3600 + 45 * 60);
+    expect(run({ sessionStart: "After break" }, 0, hole, []).profiles.map((x) => x.x1)).toEqual([0, 96, hole.findIndex((b) => b.t === 22 * DAY)]);
     expect(run({ sessionStart: "After break" }).profiles.map((x) => [x.x1, x.x2])).toEqual([[0, 95], [96, 191], [192, 287]]);
   });
 

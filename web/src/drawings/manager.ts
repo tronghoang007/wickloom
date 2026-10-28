@@ -33,6 +33,7 @@ type Opts = {
   getBars: () => Bar[];
   getDisplayBars?: () => Bar[]; // nến đang vẽ trên chart (Heikin Ashi...) cho magnet; mặc định = getBars
   getTf: () => string;
+  getEnd?: () => number | undefined; // Replay: mốc con trỏ (nến cuối có thể mới chạy dở), tick sau đó là tương lai
   getDigits: () => number;
   getTickSize: () => number;
   getMinQty?: () => number | undefined; // lượng nhỏ nhất của symbol, cho QTY precision mặc định của Position
@@ -456,7 +457,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       w, h, r?.from, r?.to, s?.coordinateToPrice(0), s?.coordinateToPrice(h / 2), s?.coordinateToPrice(h),
       bars.length, bars[0]?.t, last?.t, step, this.o.getDigits(), this.o.getTickSize(),
     ].join("|");
-    return { w, h, bars, step, key, lastKey: `${last?.h}|${last?.l}|${last?.c}` };
+    return { w, h, bars, step, key, lastKey: `${last?.h}|${last?.l}|${last?.c}|${last?.v}` }; // v: tick cùng giá vẫn thêm volume cho FRVP / AVP
   }
 
   private ctx(d: Drawing, v: View, pad = false): Ctx | null {
@@ -1291,7 +1292,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
         return ok;
       },
       hist: (t0, t1, lay) => {
-        const h = liveHist(this.tickProfiles, symbol, cover, this.liveMinute.get(symbol) ?? [], t0, t1, lay);
+        const end = this.o.getEnd?.();
+        const h = liveHist(this.tickProfiles, symbol, cover, this.liveMinute.get(symbol) ?? [], t0, end === undefined ? t1 : Math.min(t1, end), lay, end !== undefined);
         this.markFine(d, !h);
         return h;
       },
@@ -1307,11 +1309,13 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     } else this.fineNeeded.delete(d.id);
   }
 
-  /** Nến khung nhỏ có cần cho `d` không: Time thì luôn; 1 tick thì chỉ khi tick không dùng được (ngoài độ sâu tick, hoặc lần dựng gần nhất phải rơi về nến). */
+  /** Nến khung nhỏ có cần cho `d` không: Time thì luôn; 1 tick thì khi tick không dùng được (ngoài độ sâu tick, hoặc lần dựng gần nhất phải rơi về nến),
+   *  hoặc neo nằm trước nến chart đầu tiên đã nạp (vùng giá chia row phải lấy từ nến khung nhỏ, xem tools.layoutBars). */
   private needsFine(d: Drawing, lastT: number): boolean {
     if (({ ...VP_BY[d.type], ...d.opts }).agg !== "ticks") return true;
-    const span = profileSpan(d, lastT, snapTo(this.o.getBars(), this.step()));
-    return !span || lastT + this.step() - span.t0 > TICK_DEPTH || this.fineNeeded.has(d.id);
+    const bars = this.o.getBars();
+    const span = profileSpan(d, lastT, snapTo(bars, this.step()));
+    return !span || lastT + this.step() - span.t0 > TICK_DEPTH || this.fineNeeded.has(d.id) || span.t0 < (bars[0]?.t ?? span.t0);
   }
 
   private setProfileBars(id: string, bars: Bar[] | undefined, step = 0) {
@@ -1320,7 +1324,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   }
 
   // FRVP / AVP chia volume theo nến khung nhỏ như TV: khung đầu tiên trong M1…D1 (nhỏ hơn khung chart) mà khoảng
-  // đó có dưới 5000 nến. Không có thì dùng nến của chart (tools.profileSource lo phần ghép).
+  // đó có dưới 5000 nến. Không có thì dùng nến của chart (tools.profileSource lo phần ghép). Neo trước nến chart đầu tiên đã nạp thì khung bằng hoặc lớn hơn
+  // khung chart cũng được (chart M1 không có khung nhỏ hơn, AVP vài ngày trên M1 quá 5000 nến): vẫn cần phần nến chart chưa nạp, ít nhất cho vùng giá.
   private prefetchProfileBars(d: Drawing) {
     if (!this.symbol || this.dragging(d)) return; // đang kéo: chỉ có vạch dọc, thả ra mới tải
     const symbol = this.symbol;
@@ -1341,7 +1346,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     void (async () => {
       let fine: { bars: Bar[]; step: number } | null = null;
       for (const tf of LOWER_TFS) {
-        if (TF_SECONDS[tf] >= chartStep) break;
+        if (TF_SECONDS[tf] >= chartStep && span.t0 >= (bars[0]?.t ?? span.t0)) break;
         const got = await fetchBars(symbol, tf, to, 5000, span.t0);
         if (this.profileKeys.get(d.id) !== key) return;
         if (got.length > 0 && got.length < 5000) {
@@ -1360,6 +1365,19 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       this.profileFailed.set(d.id, { key, at: Date.now() });
       this.refresh();
     });
+  }
+
+  /** Backend đổi sang broker / server MT5 khác: bỏ nến khung nhỏ và tick của nguồn cũ rồi nạp lại. */
+  resetSource() {
+    this.tickCover.clear();
+    this.tickProfiles.clear();
+    this.liveMinute.clear();
+    this.profileBars.clear();
+    this.profileKeys.clear();
+    this.profileFailed.clear();
+    this.fineNeeded.clear();
+    this.profileVer++;
+    this.refresh(); // nạp lại nến khung nhỏ (refresh gọi prefetchProfileBars)
   }
 
   setSymbol(symbol: string) {

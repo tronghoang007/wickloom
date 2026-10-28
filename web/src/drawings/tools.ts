@@ -533,6 +533,11 @@ export function profileSource(c: Ctx, from: number, to: number): Bar[] {
   const live = c.bars[c.bars.length - 1]?.t ?? Infinity;
   const fine = c.profileStep ? (c.profileBars ?? []).filter((b) => inRange(b) && b.t < live) : [];
   if (!fine.length || !c.profileStep) return c.bars.filter(inRange);
+  // nến "khung nhỏ" không nhỏ hơn khung chart (neo trước lịch sử chart đã nạp): chỉ lấy phần trước nến chart đầu tiên, còn lại nến chart chi tiết hơn
+  if (c.profileStep > c.step) {
+    const first = c.bars[0]?.t ?? Infinity;
+    return [...fine.filter((b) => b.t + c.profileStep! <= first), ...c.bars.filter(inRange)];
+  }
   const start = fine[0].t, end = fine[fine.length - 1].t + c.profileStep;
   return [
     ...c.bars.filter((b) => inRange(b) && b.t + c.step <= start),
@@ -582,13 +587,22 @@ function barWidth(c: Ctx): number {
 /** Nến chart chạm vào [t0, t1): gồm cả nến chứa `t0` khi neo nằm giữa nến (đổi sang khung lớn hơn khung lúc vẽ), vì tick từ `t0` vẫn nằm trong vùng giá của nến đó. */
 const barsIn = (c: Ctx, t0: number, t1: number) => c.bars.filter((b) => b.t + c.step > t0 && b.t < t1);
 
+/** Nến cho vùng giá chia row của profile [t0, t1). Neo nằm trước nến chart đầu tiên đã nạp (AVP từ đầu phiên trên M1 / M5): ghép nến khung nhỏ của profile phủ tới `t0`,
+ *  nếu không tick trước lịch sử chart rơi ngoài vùng giá và dồn hết vào row đầu / cuối. Nến khung nhỏ chưa phủ tới `t0` thì null (chưa biết đủ vùng giá). */
+function layoutBars(c: Ctx, t0: number, t1: number): Bar[] | null {
+  const chart = barsIn(c, t0, t1);
+  if (!(t0 < (c.bars[0]?.t ?? t0))) return chart;
+  const fine = (c.profileBars ?? []).filter((b) => b.t + (c.profileStep ?? 0) > t0 && b.t < t1);
+  return fine.length > 0 && fine[0].t <= t0 + c.step ? [...fine, ...chart] : null;
+}
+
 /** Giá cao nhất / thấp nhất của các nến mà profile gom (cả phần Extend Right): hai đầu dọc của hộp, nơi TV đặt handle và nhãn trục giá. */
 export function profileRange(c: Ctx): { hi: number; lo: number } | null {
   const lastT = c.bars[c.bars.length - 1]?.t ?? 0;
   const span = profileSpan(c.d, lastT, snapTo(c.bars, c.step));
   if (!span) return null;
   let hi = -Infinity, lo = Infinity;
-  for (const b of barsIn(c, span.t0, span.t1 + c.step)) {
+  for (const b of layoutBars(c, span.t0, span.t1 + c.step) ?? barsIn(c, span.t0, span.t1 + c.step)) {
     hi = Math.max(hi, b.h);
     lo = Math.min(lo, b.l);
   }
@@ -625,9 +639,10 @@ function volumeProfile(c: Ctx, t0: number, t1: number, anchored = false): Shape[
   const lastT = c.bars[c.bars.length - 1]?.t ?? t1;
   const toLast = anchored || o.extend;
   const end = (toLast ? Math.max(t1, lastT) : t1) + c.step;
-  // "1 tick": mỗi tick rơi đúng row chứa giá của nó; chưa có tick (ngoài độ sâu, chưa nạp xong) thì nến khung nhỏ như Time
+  // "1 tick": mỗi tick rơi đúng row chứa giá của nó; chưa có tick (ngoài độ sâu, chưa nạp xong) hoặc chưa biết đủ vùng giá thì nến khung nhỏ như Time
+  const lay = o.agg === "ticks" && c.ticks ? layoutBars(c, t0, end) : null;
   const vp =
-    (o.agg === "ticks" && c.ticks ? computeTickProfile(c.ticks, barsIn(c, t0, end), t0, end, tick, o.rows, o.va, o.layout) : null) ??
+    (lay && c.ticks ? computeTickProfile(c.ticks, lay, t0, end, tick, o.rows, o.va, o.layout) : null) ??
     computeProfile(profileSource(c, t0, end), tick, o.rows, o.va, o.layout);
   if (!vp) return [];
   const { lo, hi, size, N, up, dn, total, mv, vl, vh } = vp;

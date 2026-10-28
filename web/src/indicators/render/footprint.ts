@@ -250,7 +250,7 @@ function drawBar(ctx: CanvasRenderingContext2D, series: ISeriesApi<SeriesType>, 
   // Info box dưới nến: tổng volume và delta
   if (st.summary && spacing >= 36) {
     const yl = price(b.l);
-    const low = Math.max(...b.rows.map((r) => price(r.p) ?? 0), yl ?? 0);
+    const low = b.rows.reduce((m, r) => Math.max(m, price(r.p) ?? 0), yl ?? 0);
     if (yl !== null) {
       const { total, delta } = fpTotals(b.rows);
       const px = Math.max(7, Math.min(st.textSize, 11));

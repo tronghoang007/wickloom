@@ -37,7 +37,8 @@ type Live = {
   memo: Record<string, unknown>; // chỗ indicator nhớ giữa các lần tính (Ctx.memo)
 };
 
-export type FeedKey = { symbol: string; tf: string };
+/** `end`: Replay đang chạy thì là mốc con trỏ (nến cuối có thể mới chạy dở tới đó): tick / nến khung nhỏ sau mốc này là tương lai, không được tính. */
+export type FeedKey = { symbol: string; tf: string; end?: number };
 
 /** Màu ghi đè nến chart chính theo thời gian nến ("" / vắng = màu mặc định) và, nếu chỉ đổi phần cuối, nến đầu tiên cần vẽ lại; `from` null = vẽ lại tất cả. */
 export type CandleColorSink = (colors: Map<number, string> | null, from: number | null) => void;
@@ -172,9 +173,25 @@ export class IndicatorManager {
     for (const l of this.live) {
       for (const s of l.series) s.setData([] as never);
       l.anchor?.setData([] as never);
+      // primitive (bubble, profile, footprint) vẫn vẽ dù series rỗng: dữ liệu của khung / symbol cũ không được hiện trên trục mới
+      l.objects?.set(null);
+      l.profiles?.set(null);
+      l.footprints?.set(null);
       l.snaps = l.def.plots.map(() => null);
       l.anchorKey = "";
     }
+  }
+
+  /** Backend đổi sang broker / server MT5 khác: bỏ mọi dữ liệu đã nạp (lịch sử nến, lịch, nến khung nhỏ, tick) của nguồn cũ. */
+  resetSource() {
+    this.history.reset();
+    this.calendar.reset();
+    this.lower.clear();
+    for (const f of [this.tickProfiles, this.tickBig, this.tickFp, this.tickStat]) f.clear();
+    this.liveMinute.clear();
+    this.wipe();
+    for (const l of this.live) l.memo = {};
+    this.schedule();
   }
 
   /** Delta tick realtime từ backend (`tick_delta`): `bars` = nến delta các phút vừa đổi (tăng dần, cuối là phút đang chạy), `cells` = [giá, lên, xuống] của phút đang chạy.
@@ -418,7 +435,15 @@ export class IndicatorManager {
     const r = this.chart.timeScale().getVisibleLogicalRange();
     if (!r || this.bars.length === 0) return undefined;
     const n = this.bars.length;
-    return { from: cut + Math.max(0, Math.floor(r.from)), to: cut + Math.min(n - 1, Math.ceil(r.to)) };
+    // vùng nhìn có thể nằm hẳn trong phần tương lai (plot có offset dương / Ichimoku thêm điểm sau nến cuối): kẹp cả hai đầu vào các nến
+    const to = Math.max(0, Math.min(n - 1, Math.ceil(r.to)));
+    return { from: cut + Math.min(to, Math.max(0, Math.floor(r.from))), to: cut + to };
+  }
+
+  /** Hết dữ liệu ở đâu: cuối nến chart cuối, hoặc mốc con trỏ Replay nếu sớm hơn (nến cuối mới chạy dở). */
+  private dataEnd(step: number): number {
+    const end = this.bars[this.bars.length - 1].t + step;
+    return this.feed.end === undefined ? end : Math.min(end, this.feed.end);
   }
 
   /** Nến khung nhỏ mà indicator cần (đã nạp tới đâu có tới đó; phần còn lại nạp ngầm rồi tính lại). */
@@ -427,7 +452,7 @@ export class IndicatorManager {
     const need = l.def.lower(resolveInputs(l.def, l.inst.inputs), { bars: all, cut, step, calendar, ...(range ? { range } : {}) });
     if (!need) return [];
     const to = this.bars[this.bars.length - 1].t + step;
-    return capBars(this.lower.get(this.feed.symbol, need, to), to);
+    return capBars(this.lower.get(this.feed.symbol, need, to), this.dataEnd(step));
   }
 
   /** Tick cho volume profile "1 tick": nạp nến delta tick (EA gửi lịch sử tick) rồi cấp histogram giá theo row cho từng profile. */
@@ -439,22 +464,30 @@ export class IndicatorManager {
     const cover = this.lower.get(symbol, { tfs: [TICK_TF], from: need.from }, this.bars[this.bars.length - 1].t + step);
     const lives = this.liveMinute.get(symbol) ?? [];
     const newest = lives[lives.length - 1];
+    // Replay: mọi khoảng hỏi tick dừng ở con trỏ (indicator tự tính tới cuối nến cuối, hoặc xa hơn như khối thống kê của Big Trades)
+    const replay = this.feed.end !== undefined;
+    const E = replay ? this.dataEnd(step) : Infinity;
     return {
       covered: (t0) => coversFrom(cover, t0),
-      hist: (t0, t1, lay) => liveHist(this.tickProfiles, symbol, cover, lives, t0, t1, lay),
+      hist: (t0, t1, lay) => liveHist(this.tickProfiles, symbol, cover, lives, t0, Math.min(t1, E), lay, replay),
       big: (t0, t1, min, limit, size) => {
+        t1 = Math.min(t1, E);
+        if (t1 <= t0) return [];
         const cut = liveCut(newest, t0, t1);
         const cells = this.tickBig.get(symbol, t0, t1, min, limit, size, `${cut}:${coverSig(cover, t0, cut)}`, cut);
         return cells && mergeLiveBig(cells, liveFrom(lives, this.tickBig.heldUpTo(symbol, t0, t1, min, limit, size) ?? cut, t0, t1), min, limit, size);
       },
       stat: (t0, t1, size) => {
+        t1 = Math.min(t1, E);
+        if (t1 <= t0) return { n: 0, sum: 0, sumsq: 0 };
         const cut = liveCut(newest, t0, t1);
-        return this.tickStat.get(symbol, t0, t1, size, `${cut}:${coverSig(cover, t0, cut)}`, cut);
+        return this.tickStat.get(symbol, t0, t1, size, `${cut}:${coverSig(cover, t0, cut)}`, cut, replay);
       },
       fp: (bars, end, size) => {
+        end = Math.min(end, E);
         const cut = liveCut(newest, bars[0], end);
-        const cells = this.tickFp.get(symbol, bars, end, size, `${cut}:${bars.length}:${coverSig(cover, bars[0], cut)}`, cut);
-        return cells && mergeLiveFp(cells, liveFrom(lives, this.tickFp.heldUpTo(symbol, bars, size) ?? cut, bars[0], end), bars, end, size);
+        const cells = this.tickFp.get(symbol, bars, end, size, `${cut}:${bars.length}:${coverSig(cover, bars[0], cut)}`, cut, step);
+        return cells && mergeLiveFp(cells, liveFrom(lives, this.tickFp.heldUpTo(symbol, bars, size, step) ?? cut, bars[0], end), bars, end, size);
       },
     };
   }

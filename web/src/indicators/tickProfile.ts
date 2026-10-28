@@ -164,8 +164,8 @@ export class TickProfileFeed {
   }
 
   /** Histogram đã nạp của profile [t0, t1) chia theo `lay`; chưa có thì nạp ngầm rồi gọi `onChange`, trong lúc chờ trả bản của profile gần giống (xem `borrow`) hoặc null. `sig` đổi (dữ liệu đổi) thì nạp lại nhưng vẫn trả bản cũ trong lúc chờ.
-   *  `upTo` (< t1): chỉ đọc DB tới đó (phần còn lại là phút đang chạy, xem `liveCut`). */
-  get(symbol: string, t0: number, t1: number, lay: Layout, sig: string, upTo = t1): TickHist | null {
+   *  `upTo` (< t1): chỉ đọc DB tới đó (phần còn lại là phút đang chạy, xem `liveCut`). `strict` (Replay): không mượn bản của khoảng dài quá `t1` (histogram không cắt theo thời gian được, sẽ lộ tick tương lai). */
+  get(symbol: string, t0: number, t1: number, lay: Layout, sig: string, upTo = t1, strict = false): TickHist | null {
     const key = this.key(symbol, t0, t1, lay);
     const h = this.feed.get(key, sig, async () => {
       const h = await this.fetch(symbol, t0, upTo, lay);
@@ -175,14 +175,14 @@ export class TickProfileFeed {
       this.borrowed.delete(key);
       return h;
     }
-    return this.borrow(key, symbol, t0, t1, lay)?.out ?? null;
+    return this.borrow(key, symbol, t0, t1, lay, strict)?.out ?? null;
   }
 
   /** Chưa có bản của khoá này (phiên dài thêm một nến, thêm đỉnh / đáy làm đổi row, kéo / zoom Visible Range): thay vì để profile rơi về nến cho tới khi backend trả,
    *  dùng tạm histogram đã nạp của một profile cùng symbol phủ gần như cùng khoảng thời gian (chia lại sang row mới), cùng mốc DB `upTo` của chính bản đó. Lần nạp trước đó lỗi thì không dùng. */
-  private borrow(key: string, symbol: string, t0: number, t1: number, lay: Layout): { out: TickHist; upTo: number } | null {
+  private borrow(key: string, symbol: string, t0: number, t1: number, lay: Layout, strict: boolean): { out: TickHist; upTo: number } | null {
     if (this.feed.failed(key)) return null;
-    const near = this.feed.nearest<Win>(key, (w) => (w.symbol === symbol ? overlapRatio(w.t0, w.t1, t0, t1) : 0), NEAR);
+    const near = this.feed.nearest<Win>(key, (w) => (w.symbol === symbol && !(strict && w.t1 > t1) ? overlapRatio(w.t0, w.t1, t0, t1) : 0), NEAR);
     if (!near) {
       this.borrowed.delete(key);
       return null;
@@ -199,9 +199,9 @@ export class TickProfileFeed {
 
   /** Bản đang giữ của `get` cùng đối số đọc DB tới đâu; chưa có bản của khoá này mà đang dùng tạm bản của profile khác thì là mốc của bản mượn
    *  (phút live cộng theo mốc đó: tính theo mốc khoá mới thì phút nằm giữa hai mốc mất, hoặc phút đang chạy đã nằm trong DB bị cộng hai lần). */
-  heldUpTo(symbol: string, t0: number, t1: number, lay: Layout): number | undefined {
+  heldUpTo(symbol: string, t0: number, t1: number, lay: Layout, strict = false): number | undefined {
     const key = this.key(symbol, t0, t1, lay);
-    return this.feed.heldUpTo(key) ?? this.borrow(key, symbol, t0, t1, lay)?.upTo;
+    return this.feed.heldUpTo(key) ?? this.borrow(key, symbol, t0, t1, lay, strict)?.upTo;
   }
 
   private key = (symbol: string, t0: number, t1: number, lay: Layout) => `${symbol}|${t0}|${t1}|${lay.lo}|${lay.size}|${lay.N}`;
@@ -234,17 +234,20 @@ export class TickBigFeed {
     return this.feed.heldUpTo(key) ?? this.borrow(key, { symbol, t0, t1, min, limit, size })?.upTo;
   }
 
-  /** `t1` đổi (Replay bước thêm một nến, nến mới nối đuôi, kéo mốc cắt) là khoá mới chưa có gì để vẽ, bubble biến mất tới khi backend trả. Thay vào đó dùng tạm các ô đã nạp của khoảng
-   *  cùng symbol / đầu / ngưỡng / số ô / row có `t1` gần nhất, bỏ các ô từ `t1` trở đi (mốc cắt lùi về sớm hơn thì không lộ ô của phía sau). Lần nạp trước của khoá này lỗi thì không dùng. */
+  /** Khoảng hay ngưỡng đổi (Replay bước thêm một nến, nến mới nối đuôi, đầu khoảng trôi theo độ sâu tick, ngưỡng sigma đổi khi thống kê nạp lại mỗi phút) là khoá mới chưa có gì để vẽ,
+   *  bubble biến mất tới khi backend trả. Thay vào đó dùng tạm các ô đã nạp của khoảng cùng symbol / số ô / row trùng nhiều nhất (ưu tiên cùng ngưỡng), bỏ các ô ngoài [t0, t1)
+   *  (mốc cắt lùi về sớm hơn thì không lộ ô của phía sau) và nhỏ hơn ngưỡng mới. Ngưỡng mới thấp hơn thì tạm thiếu các ô nhỏ. Lần nạp trước của khoá này lỗi thì không dùng. */
   private borrow(key: string, w: BigWin): { cells: TickCell[]; upTo: number } | null {
     if (this.feed.failed(key)) return null;
     const near = this.feed.nearest<BigWin>(
       key,
-      (m) => (m.symbol === w.symbol && m.t0 === w.t0 && m.min === w.min && m.limit === w.limit && m.size === w.size ? 1 - Math.min(1, Math.abs(m.t1 - w.t1) / Math.max(1, w.t1 - w.t0)) : -1),
+      (m) => (m.symbol === w.symbol && m.limit === w.limit && m.size === w.size ? overlapRatio(m.t0, m.t1, w.t0, w.t1) * (m.min === w.min ? 1 : 0.99) : -1),
       BIG_NEAR,
     );
     if (!near) return null;
-    return { cells: near.meta.t1 > w.t1 ? near.data.filter((c) => c.t < w.t1) : near.data, upTo: Math.min(near.upTo, w.t1) };
+    const m = near.meta;
+    const cells = m.t1 > w.t1 || m.t0 < w.t0 || m.min < w.min ? near.data.filter((c) => c.t >= w.t0 && c.t < w.t1 && c.up + c.dn >= w.min) : near.data;
+    return { cells, upTo: Math.min(near.upTo, w.t1) };
   }
 
   private key = (symbol: string, t0: number, t1: number, min: number, limit: number, size: number) => `${symbol}|${t0}|${t1}|${min}|${limit}|${size}`;
@@ -265,13 +268,13 @@ export class TickStatFeed {
   }
 
   /** Khoảng thống kê dịch theo khối cố định: sang khối mới chưa có bản của khoá này thì dùng tạm bản của khoảng cùng symbol / row trùng nhiều nhất (ngưỡng chỉ lệch nhẹ), không để bubble biến mất. */
-  get(symbol: string, t0: number, t1: number, size: number, sig: string, upTo = t1): TickStat | null {
+  get(symbol: string, t0: number, t1: number, size: number, sig: string, upTo = t1, strict = false): TickStat | null {
     const key = `${symbol}|${t0}|${t1}|${size}`;
     const w: StatWin = { symbol, t0, t1, size };
     const got = this.feed.get(key, sig, () => this.fetch(symbol, t0, upTo, size), upTo, w);
     if (got) return got;
     if (this.feed.failed(key)) return null;
-    return this.feed.nearest<StatWin>(key, (m) => (m.symbol === symbol && m.size === size ? overlapRatio(m.t0, m.t1, t0, t1) : 0), STAT_NEAR)?.data ?? null;
+    return this.feed.nearest<StatWin>(key, (m) => (m.symbol === symbol && m.size === size && !(strict && m.t1 > t1) ? overlapRatio(m.t0, m.t1, t0, t1) : 0), STAT_NEAR)?.data ?? null;
   }
 
   clear() {
@@ -288,15 +291,16 @@ export class TickFpFeed {
     this.feed = new SigFeed(onChange, now);
   }
 
-  get(symbol: string, bars: number[], end: number, size: number, sig: string, upTo = end): FpCell[] | null {
-    return this.feed.get(this.key(symbol, bars, size), sig, () => this.fetch(symbol, bars, upTo, size), upTo);
+  /** `step`: giây mỗi nến chart, thuộc khoá (cửa sổ của khung lớn hay bắt đầu đúng giờ của một cửa sổ khung nhỏ: không được dùng ô theo nến của khung kia). */
+  get(symbol: string, bars: number[], end: number, size: number, sig: string, upTo = end, step = 0): FpCell[] | null {
+    return this.feed.get(this.key(symbol, bars, size, step), sig, () => this.fetch(symbol, bars, upTo, size), upTo);
   }
 
-  heldUpTo(symbol: string, bars: number[], size: number): number | undefined {
-    return this.feed.heldUpTo(this.key(symbol, bars, size));
+  heldUpTo(symbol: string, bars: number[], size: number, step = 0): number | undefined {
+    return this.feed.heldUpTo(this.key(symbol, bars, size, step));
   }
 
-  private key = (symbol: string, bars: number[], size: number) => `${symbol}|${bars[0]}|${size}`;
+  private key = (symbol: string, bars: number[], size: number, step: number) => `${symbol}|${step}|${bars[0]}|${size}`;
 
   clear() {
     this.feed.clear();
@@ -317,10 +321,10 @@ export const LIVE_KEEP = 3;
 export const appendLive = (lives: LiveMinute[], live: LiveMinute): LiveMinute[] => [...lives.filter((l) => l.t < live.t), live].slice(-LIVE_KEEP);
 
 /** Histogram của profile [t0, t1) = bản DB (tới đầu phút đang chạy) + các phút `lives` mà bản đó chưa có. null = DB chưa nạp xong. */
-export function liveHist(feed: TickProfileFeed, symbol: string, cover: Bar[], lives: LiveMinute[], t0: number, t1: number, lay: Layout): TickHist | null {
+export function liveHist(feed: TickProfileFeed, symbol: string, cover: Bar[], lives: LiveMinute[], t0: number, t1: number, lay: Layout, strict = false): TickHist | null {
   const cut = liveCut(lives[lives.length - 1], t0, t1);
-  const h = feed.get(symbol, t0, t1, lay, `${cut}:${coverSig(cover, t0, cut)}`, cut);
-  return h && addLiveHist(h, lay, liveFrom(lives, feed.heldUpTo(symbol, t0, t1, lay) ?? cut, t0, t1));
+  const h = feed.get(symbol, t0, t1, lay, `${cut}:${coverSig(cover, t0, cut)}`, cut, strict);
+  return h && addLiveHist(h, lay, liveFrom(lives, feed.heldUpTo(symbol, t0, t1, lay, strict) ?? cut, t0, t1));
 }
 
 /** Cộng các phút `lives` vào histogram `h` của profile: tick ở giá `p` vào row `floor((p - lo) / size)` (như backend), giá ngoài khoảng dồn vào row đầu / cuối. */

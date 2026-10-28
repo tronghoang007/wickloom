@@ -136,6 +136,8 @@ type Opts = { now?: () => number; pageSize?: number; backfill?: Backfill; sleep?
 type Entry = {
   bars: Bar[]; lo: number; hi: number; busy: boolean; retryAt: number; tailAt: number;
   tries: Map<string, number>; readyAt: number; holes: { sig: string; gaps: Gap[] } | null; liveAt: number;
+  resyncFrom: number; // phút cũ nhất có thể đã lỡ dòng chốt do backend đẩy (Infinity = không): đọc lại đuôi DB từ đó dù live vẫn đang chạy
+  pushedFrom: number; // phút sớm nhất được đẩy tới trong lúc đọc đuôi DB (Infinity = không): các dòng đó mới hơn bản DB vừa đọc
 };
 
 export class LowerFeed {
@@ -179,6 +181,11 @@ export class LowerFeed {
   push(symbol: string, tf: string, rows: Bar[]): boolean {
     const e = this.cache.get(`${symbol}|${tf}`);
     if (!e || e.lo === Infinity || rows.length === 0) return false;
+    // backend gửi dòng chốt của một phút đúng một lần, trong lô mở đầu bằng chính phút đó: lô này bắt đầu sau phút cuối đang giữ thì đã lỡ lô đó
+    // (WS nối lại khi đổi khung, backend khởi động lại, Replay...) và phút đó còn giá trị dở: đọc lại đuôi từ DB (backend ghi DB trước khi đẩy)
+    const last = e.bars[e.bars.length - 1];
+    if (last && rows[0].t > last.t) e.resyncFrom = Math.min(e.resyncFrom, last.t);
+    e.pushedFrom = Math.min(e.pushedFrom, rows[0].t);
     let i = e.bars.length;
     while (i > 0 && e.bars[i - 1].t >= rows[0].t) i--;
     e.bars = e.bars.slice(0, i).concat(rows);
@@ -198,12 +205,12 @@ export class LowerFeed {
   private ensure(symbol: string, tf: string, from: number, to: number) {
     const key = `${symbol}|${tf}`;
     let e = this.cache.get(key);
-    if (!e) this.cache.set(key, (e = { bars: [], lo: Infinity, hi: -Infinity, busy: false, retryAt: 0, tailAt: 0, tries: new Map(), readyAt: 0, holes: null, liveAt: -Infinity }));
+    if (!e) this.cache.set(key, (e = { bars: [], lo: Infinity, hi: -Infinity, busy: false, retryAt: 0, tailAt: 0, tries: new Map(), readyAt: 0, holes: null, liveAt: -Infinity, resyncFrom: Infinity, pushedFrom: Infinity }));
     if (e.busy || this.now() < e.retryAt) return;
     const entry = e;
     const first = entry.lo === Infinity;
     const wantOlder = first || from < entry.lo;
-    const wantNewer = !first && (to > entry.hi || (this.now() - entry.tailAt >= TAIL_MS && to * 1000 + TAIL_REACH_MS > this.now()));
+    const wantNewer = !first && (to > entry.hi || entry.resyncFrom < Infinity || (this.now() - entry.tailAt >= TAIL_MS && to * 1000 + TAIL_REACH_MS > this.now()));
     if (!wantOlder && !wantNewer) return;
     entry.busy = true;
     const job = wantOlder
@@ -328,17 +335,20 @@ export class LowerFeed {
 
   /** Làm mới đuôi: nạp lại từ nến khung nhỏ cuối cùng (có thể mới chỉ chạy dở) tới `to`. Trả về có đổi gì không. */
   private async tail(symbol: string, tf: string, e: Entry, to: number): Promise<boolean> {
-    if (tf === TICK_TF && this.now() - e.liveAt < LIVE_FRESH_MS) {
+    const resync = e.resyncFrom;
+    if (tf === TICK_TF && resync === Infinity && this.now() - e.liveAt < LIVE_FRESH_MS) {
       e.tailAt = this.now(); // backend đang tự cập nhật đuôi theo từng tick
       e.hi = Math.max(to, e.hi);
       return false;
     }
-    if (tf === TICK_TF && this.backfill) {
+    e.resyncFrom = Infinity;
+    e.pushedFrom = Infinity;
+    if (tf === TICK_TF && this.backfill && resync === Infinity) {
       // delta theo tick chỉ có khi EA tính: nhờ EA gửi lại vài phút gần nhất (phút đang chạy dở được ghi đè), đợi một chút rồi đọc
       await this.backfill(symbol, tf, TICK_TAIL_BARS, Math.max(to, e.hi)).catch(() => false);
       await this.sleep(TICK_TAIL_WAIT_MS);
     }
-    const start = e.bars.length > 0 ? e.bars[e.bars.length - 1].t : e.lo;
+    const start = Math.min(resync, e.bars.length > 0 ? e.bars[e.bars.length - 1].t : e.lo);
     const got = await this.fetch(symbol, tf, start, Math.max(to, e.hi), this.pageSize);
     e.tailAt = this.now();
     e.hi = Math.max(to, e.hi);
@@ -346,7 +356,9 @@ export class LowerFeed {
     const last = e.bars[e.bars.length - 1];
     const same = got.length === 1 && last && last.t === got[0].t && last.c === got[0].c && last.h === got[0].h && last.l === got[0].l && last.v === got[0].v;
     if (same) return false;
-    e.bars = e.bars.filter((b) => b.t < got[0].t).concat(got);
+    // phút được đẩy tới trong lúc đọc mới hơn bản DB: giữ bản đẩy, không thì phút vừa chốt bị ghi đè bằng giá trị dở và không có lô nào sửa lại
+    const fresh = Math.max(e.pushedFrom, got[0].t);
+    e.bars = [...e.bars.filter((b) => b.t < got[0].t), ...got.filter((b) => b.t < fresh), ...e.bars.filter((b) => b.t >= fresh)];
     return true;
   }
 }

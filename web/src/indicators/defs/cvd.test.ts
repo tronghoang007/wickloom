@@ -81,6 +81,20 @@ describe("def CVD", () => {
     expect(d.candle!.o[95]).not.toBe(0);
   });
 
+  it("nến đầu mảng giữa kỳ: mở ở delta từ đầu kỳ (phút trước nến đầu cùng ngày), không nuốt phút của các ngày trước", () => {
+    const ones = (from: number, n: number) => Array.from({ length: n }, (_, i) => step1(from + i * 60, 1));
+    const noon = chart(t0 + 12 * 3600, 48); // 12:00 ngày 100 tới hết ngày
+    const d = run({ sessionStart: "Broker midnight" }, ones(t0 - 2 * DAY, 3 * 1440), noon); // tick từ ngày 98, +1 mỗi phút
+    expect([d.candle!.o[0], d.values[0]]).toEqual([720, 735]); // 12 giờ × 60 phút từ 00:00 ngày 100
+    // tick không phủ tới đầu ngày: không biết delta đầu kỳ, ngày đó để trống thay vì bắt đầu giữa chừng
+    const late = run({ sessionStart: "Broker midnight" }, ones(t0 + 6 * 3600, 1440), noon);
+    expect(late.values.every(Number.isNaN)).toBe(true);
+    // lower: nến đầu giữa kỳ thì xin tick từ sớm hơn để thấy đầu kỳ; nến đầu mở đầu kỳ thì từ chính nó
+    const info = { cut: 0, step: M15, calendar: { offset: 0 } };
+    expect(cvd.lower!(resolveInputs(cvd, { anchor: "1D", sessionStart: "Broker midnight" }), { ...info, bars: noon })!.from).toBeLessThan(t0);
+    expect(cvd.lower!(resolveInputs(cvd, { anchor: "1D", sessionStart: "Broker midnight" }), { ...info, bars: chart(t0, 48) })!.from).toBe(t0);
+  });
+
   it("Session start = Custom hour: về 0 lúc 22:00 broker, không về 0 lúc 00:00", () => {
     const d = run({ sessionStart: "Custom hour", sessionHour: 22 }, minutes(t0, 192 * 15));
     expect(d.candle!.o[88]).toBe(0); // 22:00 ngày đầu
@@ -90,7 +104,7 @@ describe("def CVD", () => {
   });
 
   it("Session start = After break (mặc định): về 0 ở nến đầu tiên sau khoảng trống", () => {
-    const gap = bars.filter((b) => b.t < t0 + 21 * 3600 || b.t >= t0 + 22 * 3600); // nghỉ 21:00–22:00 ngày đầu
+    const gap = bars.filter((b) => (b.t - t0) % DAY < 21 * 3600 || (b.t - t0) % DAY >= 22 * 3600); // nghỉ 21:00–22:00 mỗi ngày (giờ nghỉ thật lặp lại hằng ngày)
     const d = run({}, minutes(t0, 192 * 15), gap);
     const i = gap.findIndex((b) => b.t === t0 + 22 * 3600);
     expect(d.candle!.o[i]).toBe(0);
@@ -126,7 +140,8 @@ describe("def CVD", () => {
   it("instance cũ đã lưu Data aggregation / Use custom timeframe / Timeframe: bỏ các ô đó, giữ Anchor, vẫn tính bằng tick", () => {
     const inst = migrateInstance({ v: 2, uid: "u1", id: "cvd", inputs: { anchor: "1W", agg: "Time", custom: true, tf: "5" } })!;
     expect(inst.inputs).toEqual({ anchor: "1W" });
-    const d = computeInstance(byId("cvd"), inst, bars, { offset: 0 }, minutes(t0, 192 * 15)).cvd;
+    const monday = 102 * DAY; // tuần mở ở nến đầu (1970-01-05 là thứ Hai)
+    const d = computeInstance(byId("cvd"), inst, chart(monday, 192), { offset: 0 }, minutes(monday, 192 * 15)).cvd;
     expect(d.candle!.o[0]).toBe(0);
     expect(d.values.some((x) => !Number.isNaN(x))).toBe(true);
   });

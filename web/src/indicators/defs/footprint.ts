@@ -17,6 +17,8 @@ const PAD = 40;
 const WINDOW_BARS = 64;
 /** Vùng nhìn rộng hơn chừng này nến thì chỉ vẽ nến (không xin tick): ô quá bé để đọc. */
 const MAX_BARS = 150;
+/** Trần số row của một nến: Ticks per row nhỏ trên khung lớn (BTC D1, 1 tick / row) cho hàng chục nghìn row, vừa không đọc được vừa nặng: row cao thêm cho vừa. */
+export const MAX_FP_ROWS = 1000;
 
 const TYPES: Record<string, FpType> = { "Bid x Ask": "bidask", Delta: "delta", Volume: "volume", "Delta + Volume": "deltavol" };
 
@@ -59,14 +61,17 @@ const AUTO_WINDOW = 50;
 /** Cao (giá) của một row: Manual = số tick user đặt, Auto = 0.2 × ATR làm tròn nấc 1 / 2 / 5 (không nhỏ hơn 1 tick).
  *  ATR của nến đang chạy đổi theo từng tick và đổi row size làm mọi nến regroup + tải lại, nên Auto bỏ nến cuối và lấy trung vị `AUTO_WINDOW` ATR gần nhất. */
 export function fpRowSize(bars: Bar[], tick: number, inputs: Ctx["inputs"]): number {
-  if (str(inputs, "rowMode") === "Manual") return Math.max(1, Math.round(num(inputs, "ticks"))) * tick;
+  let range = 0;
+  for (const b of bars) range = Math.max(range, b.h - b.l);
+  const floor = Math.ceil(range / MAX_FP_ROWS / tick - 1e-9); // số tick mỗi row tối thiểu để nến cao nhất không quá MAX_FP_ROWS row
+  if (str(inputs, "rowMode") === "Manual") return Math.max(1, floor, Math.round(num(inputs, "ticks"))) * tick;
   const a = atr(bars, num(inputs, "atrLen"));
   const valid = (xs: number[]) => xs.filter((v) => !Number.isNaN(v));
   const done = valid(a.slice(0, -1)).slice(-AUTO_WINDOW);
   const recent = done.length > 0 ? done : valid(a).slice(-1); // chỉ có một nến: dùng luôn nó
   const med = recent.length > 0 ? [...recent].sort((x, y) => x - y)[recent.length >> 1] : NaN;
   const ticks = Number.isFinite(med) && med > 0 ? niceStep((0.2 * med) / tick) : 1;
-  return Math.max(1, Math.round(ticks)) * tick;
+  return Math.max(1, floor, Math.round(ticks)) * tick;
 }
 
 export type ImbalanceOpts = { enabled: boolean; pct: number; minDiff: number; zero: boolean; stacked: boolean; stackN: number };
@@ -99,8 +104,12 @@ export function stackedRuns(flags: boolean[], n: number): boolean[] {
 export function fpBar(x: number, b: Bar, cells: [number, number, number][], size: number, va: number, imb: ImbalanceOpts): FpBar {
   const bar: FpBar = { x, o: b.o, h: b.h, l: b.l, c: b.c, size, rows: [], poc: -1, vl: -1, vh: -1, buyImb: [], sellImb: [], stackBuy: [], stackSell: [] };
   if (cells.length === 0) return bar;
-  const minRow = Math.min(...cells.map((c) => c[0]));
-  const maxRow = Math.max(...cells.map((c) => c[0]));
+  let minRow = Infinity;
+  let maxRow = -Infinity;
+  for (const [row] of cells) {
+    minRow = Math.min(minRow, row);
+    maxRow = Math.max(maxRow, row);
+  }
   const N = maxRow - minRow + 1;
   const up = new Array<number>(N).fill(0);
   const dn = new Array<number>(N).fill(0);
@@ -193,7 +202,7 @@ export const footprint: IndicatorDef = {
       enabled: !!inputs.imb, pct: num(inputs, "imbPct"), minDiff: num(inputs, "imbMin"), zero: !!inputs.imbZero, stacked: !!inputs.stacked, stackN: num(inputs, "stackN"),
     };
     const va = inputs.va ? num(inputs, "vaPct") : 100;
-    const rowsOn = !!c.ticks?.fp && i1 - i0 + 1 <= MAX_BARS;
+    const rowsOn = !!c.ticks?.fp && c.range.to - c.range.from + 1 <= MAX_BARS; // theo vùng nhìn (zoom), không tính phần đệm: ở mép phải không có đệm phải
     const W = step * WINDOW_BARS;
     const out: FpBar[] = [];
     let i = i0;

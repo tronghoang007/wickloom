@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { computeExtras } from "../engine";
 import { newInstance } from "../instance";
 import type { TickSource } from "../schema";
-import { fpBar, fpPair, fpRowSize, fpText, footprint, isImbalance, stackedRuns, type ImbalanceOpts } from "./footprint";
+import { MAX_FP_ROWS, fpBar, fpPair, fpRowSize, fpText, footprint, isImbalance, stackedRuns, type ImbalanceOpts } from "./footprint";
 
 const M5 = 300;
 const W = M5 * 64; // cửa sổ xin tick
@@ -40,6 +40,15 @@ describe("fpRowSize", () => {
     const wild = [...calm, ...flat(60, 60).map((b, i) => ({ ...b, t: T0 + (60 + i) * M5 }))];
     expect(fpRowSize(wild, 0.01, inputs())).toBeCloseTo(10, 9);
   });
+  it("nến quá cao so với row (1 tick / row trên khung lớn): row cao thêm để mỗi nến không quá MAX_FP_ROWS row", () => {
+    const tall = flat(5000); // biên độ 5000 giá, tick 0.01 = 500 000 tick
+    const size = fpRowSize(tall, 0.01, inputs({ rowMode: "Manual", ticks: 1 }));
+    expect(5000 / size).toBeLessThanOrEqual(MAX_FP_ROWS + 1e-6);
+    expect(fpRowSize(flat(1), 0.01, inputs({ rowMode: "Manual", ticks: 1 }))).toBeCloseTo(0.01, 12); // nến thường: đúng như user đặt
+    const rows = Array.from({ length: 200_000 }, (_, i): [number, number, number] => [i, 1, 0]);
+    expect(() => fpBar(0, tall[0], rows, 0.01, 70, { enabled: true, pct: 300, minDiff: 0, zero: false, stacked: false, stackN: 3 })).not.toThrow(); // không spread hàng trăm nghìn phần tử
+  });
+
   it("Auto: chỉ có một nến thì dùng nến đó", () => {
     expect(fpRowSize(flat(10, 1), 0.01, inputs({ atrLen: 1 }))).toBeCloseTo(2, 9);
   });
@@ -167,10 +176,12 @@ describe("footprint.footprints", () => {
     expect(noTicks.bars.every((b) => b.rows.length === 0)).toBe(true);
   });
 
-  it("vùng nhìn quá rộng (> 150 nến): không xin tick", () => {
+  it("vùng nhìn quá rộng (> 150 nến): không xin tick; giới hạn theo vùng nhìn, không tính phần đệm (cùng mức zoom ở mép phải hay giữa lịch sử như nhau)", () => {
     const fp = vi.fn<Fp>(() => []);
     run(fp, { from: 0, to: 199 });
     expect(fp).not.toHaveBeenCalled();
+    run(fp, { from: 50, to: 179 }); // 130 nến, cả hai bên có đệm 40
+    expect(fp).toHaveBeenCalled();
   });
 
   it("cỡ chữ mặc định 14 (như ATAS), user đặt thì theo user", () => {

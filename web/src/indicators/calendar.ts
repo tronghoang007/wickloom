@@ -55,8 +55,9 @@ function brokerDays(times: number[], opts: CalendarOpts): { day: number[]; tod: 
   const tod: number[] = [];
   let d = 0; // con trỏ vào `opens` (times tăng dần nên chỉ tiến)
   for (const t of times) {
-    if (opens && opens.length > 0 && t >= opens[0]) {
-      while (d + 1 < opens.length && opens[d + 1] <= t) d++;
+    if (opens && opens.length > 0 && t >= opens[0]) while (d + 1 < opens.length && opens[d + 1] <= t) d++;
+    // mốc D1 chỉ dùng cho nến trong ngày của nó: nến mới hơn mốc cuối cùng một ngày trở lên (trang mở qua 00:00 / cuối tuần, mốc D1 chưa nạp lại) tính theo offset
+    if (opens && opens.length > 0 && t >= opens[0] && t - opens[d] < DAY) {
       // làm tròn thay vì cắt: mốc mở D1 lệch ±1 giờ so với offset hiện tại vẫn rơi đúng ngày broker
       day.push(Math.round((opens[d] + opts.offset) / DAY));
       tod.push(t - opens[d]);
@@ -72,21 +73,52 @@ function brokerDays(times: number[], opts: CalendarOpts): { day: number[]; tod: 
 
 const EVENING = 12 * 3600;
 
-/** Khoá phiên theo khoảng trống: mỗi lần nến cách nến trước ≥ `minGap` giây (không tính bước nến) là phiên mới. Nếu cả một ngày broker trôi qua mà không có khoảng trống nào
- *  (khung H4 trở lên không thấy giờ nghỉ, BTC không nghỉ) thì phiên đổi lúc 00:00 broker như mặc định. */
+/** Có nến nào trong [a, b) không (`times` tăng dần). */
+function anyIn(times: number[], a: number, b: number): boolean {
+  let lo = 0;
+  let hi = times.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid] < a) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < times.length && times[lo] < b;
+}
+
+const BREAK_LOOK_DAYS = 7;
+
+/** Khoảng trống trước nến `i` (bắt đầu ở `from`) có phải giờ nghỉ thật không: giờ nghỉ lặp lại mỗi ngày, nên ở các ngày khác trong dữ liệu cùng giờ đó cũng trống
+ *  (hoặc là cuối tuần). Mọi ngày khác xem được đều có nến ở giờ đó thì đây là lỗ dữ liệu (BTC mất feed, bảo trì): không cắt phiên. Không có ngày nào để so thì tin là giờ nghỉ. */
+function isBreak(times: number[], from: number, minGap: number): boolean {
+  const first = times[0];
+  const last = times[times.length - 1];
+  let seen = false;
+  for (let k = -BREAK_LOOK_DAYS; k <= BREAK_LOOK_DAYS; k++) {
+    if (k === 0) continue;
+    const a = from + k * DAY;
+    if (a < first || a + minGap > last) continue;
+    if (!anyIn(times, a, a + minGap)) return true;
+    seen = true;
+  }
+  return !seen;
+}
+
+/** Khoá phiên theo khoảng trống: mỗi lần nến cách nến trước ≥ `minGap` giây (không tính bước nến) và khoảng đó là giờ nghỉ (`isBreak`) là phiên mới. Nếu cả một ngày broker trôi qua mà không có
+ *  giờ nghỉ nào (khung H4 trở lên không thấy giờ nghỉ, BTC không nghỉ) thì phiên đổi lúc 00:00 broker như mặc định. */
 function breakKeys(times: number[], day: number[], tod: number[], period: Period, minGap: number): number[] {
   const n = times.length;
   if (n === 0) return [];
   let step = Infinity;
   for (let i = 1; i < n; i++) step = Math.min(step, times[i] - times[i - 1]);
+  const breaks = times.map((t, i) => i > 0 && t - times[i - 1] - step >= minGap && isBreak(times, times[i - 1] + step, minGap));
   const tradingDay = (i: number) => day[i] + (tod[i] >= EVENING ? 1 : 0);
   let id = 0;
   let label = tradingDay(0);
-  // ngày broker có khoảng trống gần nhất. Phiên đầu mảng bị cắt nên chưa biết nó đã qua giờ nghỉ chưa: nếu dữ liệu có khoảng trống thì coi như rồi (không cắt lúc 00:00 đầu tiên)
-  let lastBreak = times.some((t, i) => i > 0 && t - times[i - 1] - step >= minGap) ? day[0] : -Infinity;
+  // ngày broker có giờ nghỉ gần nhất. Phiên đầu mảng bị cắt nên chưa biết nó đã qua giờ nghỉ chưa: nếu dữ liệu có giờ nghỉ thì coi như rồi (không cắt lúc 00:00 đầu tiên)
+  let lastBreak = breaks.includes(true) ? day[0] : -Infinity;
   return times.map((t, i) => {
     if (i > 0) {
-      const gap = t - times[i - 1] - step >= minGap;
+      const gap = breaks[i];
       if (gap) lastBreak = day[i];
       if (gap || (day[i] !== day[i - 1] && lastBreak < day[i - 1])) {
         id++;

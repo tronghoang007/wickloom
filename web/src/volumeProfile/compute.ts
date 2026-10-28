@@ -15,8 +15,13 @@ export type Layout = { lo: number; hi: number; size: number; N: number };
 /** Chia row cho vùng giá [min low, max high] của `bars` (xem quy tắc ở trên); null nếu không có nến. */
 export function profileLayout(bars: Bar[], tick: number, rows: number, layout = "rows"): Layout | null {
   if (bars.length === 0) return null;
-  const priceLow = Math.min(...bars.map((b) => b.l)), priceHigh = Math.max(...bars.map((b) => b.h));
-  const lowTick = Math.floor(priceLow / tick), highTick = Math.ceil(priceHigh / tick);
+  let priceLow = Infinity, priceHigh = -Infinity;
+  for (const b of bars) {
+    priceLow = Math.min(priceLow, b.l);
+    priceHigh = Math.max(priceHigh, b.h);
+  }
+  // giá đứng yên đúng một mức (h = l = bội số tick): vẫn một row cao 1 tick, không thì row cao 0 và profile không hiện gì
+  const lowTick = Math.floor(priceLow / tick), highTick = Math.max(lowTick + 1, Math.ceil(priceHigh / tick));
   const totalTicks = Math.max(1, highTick - lowTick);
   const requestedRows = Math.max(2, Math.min(500, Math.round(rows)));
   const rowCandidates = [...new Set([
@@ -92,7 +97,7 @@ export function computeProfile(bars: Bar[], tick: number, rows: number, va: numb
 export function finishProfile(lay: Layout, up: number[], dn: number[], va: number) {
   const { lo, hi, size, N } = lay;
   const total: number[] = up.map((v, i) => v + dn[i]);
-  const mv = Math.max(...total), sum = total.reduce((s, v) => s + v, 0);
+  const mv = total.reduce((m, v) => Math.max(m, v), -Infinity), sum = total.reduce((s, v) => s + v, 0); // không spread: footprint 1 tick / row có thể hàng trăm nghìn row
   if (!(sum > 0)) return null;
   const poc = total.indexOf(mv);
 
@@ -107,7 +112,7 @@ export function finishProfile(lay: Layout, up: number[], dn: number[], va: numbe
       takeAbove = vh + 1 - poc <= poc - (vl - 1);
     }
     const candidate = takeAbove ? above : below;
-    if (acc + candidate > target) break;
+    if (acc + candidate > target * (1 + 1e-12)) break; // `acc` cộng khác thứ tự với `sum`: VA 100% không được hụt row ở mép vì sai số làm tròn
     acc += candidate;
     if (takeAbove) vh++;
     else vl--;
