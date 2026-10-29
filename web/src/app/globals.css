@@ -166,10 +166,17 @@ textarea,
 @keyframes wl-slide-left {
   from { opacity: 0; transform: translateX(24px); }
 }
+@keyframes wl-fade {
+  from { opacity: 0; }
+}
 @media (prefers-reduced-motion: no-preference) {
   .popup { animation: wl-pop 140ms cubic-bezier(0.2, 0.8, 0.2, 1); }
   .anim-drop { animation: wl-drop 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-  .anim-panel { animation: wl-slide-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  /* lớp gắn tay: phần tử nổi không mang .popup, nền mờ hộp thoại, panel trượt ngang, thanh hiện ở đáy */
+  .anim-pop { animation: wl-pop 140ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .anim-fade { animation: wl-fade 160ms ease-out; }
+  .anim-slide { animation: wl-slide-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .anim-rise { animation: wl-rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 }
 /* toast desktop / tablet ở góc dưới: nổi lên từ dưới */
 @media (min-width: 768px) and (prefers-reduced-motion: no-preference) {

@@ -35,7 +35,7 @@ export default function ConfirmHost() {
 
   return (
     <div
-      className="fixed inset-0 z-[75] flex items-center justify-center bg-black/50"
+      className="anim-fade fixed inset-0 z-[75] flex items-center justify-center bg-black/50"
       onMouseDown={(e) => e.target === e.currentTarget && !busy && dismiss()}
       onKeyDown={(e) => e.key === "Escape" && !busy && dismiss()}
     >

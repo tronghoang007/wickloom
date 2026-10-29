@@ -746,7 +746,7 @@ export default function SettingsDialog() {
   const body = { s, set };
   return (
     // phone (max-md): toàn màn, cột tab bên trái thành hàng tab cuộn ngang ở trên (cột 192px chiếm nửa màn hẹp, nội dung bị cắt)
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onMouseDown={(e) => e.target === e.currentTarget && cancel()}>
+    <div className="anim-fade fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onMouseDown={(e) => e.target === e.currentTarget && cancel()}>
       <div
         role="dialog"
         aria-label="Settings"

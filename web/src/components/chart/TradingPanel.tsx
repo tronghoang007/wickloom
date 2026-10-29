@@ -367,7 +367,7 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
         </button>
         {c.editing && (
           // nổi lên trên hàng (không đẩy các cột khác), cao đúng bằng hàng, neo bên phải
-          <CloseLotEditor c={c} className="absolute inset-y-0 right-0 z-10 flex items-center justify-center gap-3 border-l border-[var(--border)] bg-[var(--bg)] px-3 shadow-lg" />
+          <CloseLotEditor c={c} className="anim-slide absolute inset-y-0 right-0 z-10 flex items-center justify-center gap-3 border-l border-[var(--border)] bg-[var(--bg)] px-3 shadow-lg" />
         )}
       </td>
     </tr>

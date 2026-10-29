@@ -64,7 +64,7 @@ export default function TimeframeBar({ className, compact = false, chevron = tru
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
             {/* phone dọc: cả bề rộng dưới thanh trên; rộng hơn (tablet, phone ngang): thả xuống ngay dưới nút */}
-            <div className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+48px)] z-40 rounded-lg bg-[var(--panel)] p-3 shadow-[0_2px_8px_rgba(0,0,0,0.5)] md:absolute md:inset-x-auto md:left-0 md:top-10 md:w-[360px]" role="dialog" aria-label="Timeframe">
+            <div className="anim-pop fixed inset-x-3 top-[calc(env(safe-area-inset-top)+48px)] z-40 rounded-lg bg-[var(--panel)] p-3 shadow-[0_2px_8px_rgba(0,0,0,0.5)] md:absolute md:inset-x-auto md:left-0 md:top-10 md:w-[360px]" role="dialog" aria-label="Timeframe">
               {TF_MENU.map(({ title, tfs }) => (
                 <div key={title} className="mb-2 last:mb-0">
                   <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">{title}</div>
@@ -92,7 +92,7 @@ export default function TimeframeBar({ className, compact = false, chevron = tru
         {open && !compact && (
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-            <div className="absolute left-0 top-0 z-40 max-h-screen w-[196px] overflow-y-auto rounded-md bg-[var(--panel)] py-1.5 text-sm shadow-[0_2px_4px_rgba(0,0,0,0.4)]">
+            <div className="anim-pop absolute left-0 top-0 z-40 max-h-screen w-[196px] overflow-y-auto rounded-md bg-[var(--panel)] py-1.5 text-sm shadow-[0_2px_4px_rgba(0,0,0,0.4)]">
               <button
                 disabled
                 title="Add custom interval (sắp có)"

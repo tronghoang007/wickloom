@@ -336,7 +336,7 @@ export function DrawingHint() {
   if (!tool || !SPEC[tool] || open) return null;
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-[72px] z-[44] flex justify-center px-3">
-      <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] py-1 pl-3 pr-1 text-[13px] shadow-lg">
+      <div className="anim-rise pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] py-1 pl-3 pr-1 text-[13px] shadow-lg">
         <ToolIcon id={tool} size={22} />
         <span className="truncate">
           {SPEC[tool].label} · <span className="text-[var(--muted)]">chạm lên chart để đặt điểm</span>
@@ -512,8 +512,13 @@ export function MobileOrderSheet() {
       >
         <span className="h-1 w-10 rounded-full bg-[var(--muted)] opacity-60" />
       </button>
-      {collapsed && <CollapsedTicket onExpand={() => setCollapsed(false)} />}
-      <div className={collapsed ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+      {/* thu gọn ↔ mở rộng: phần mới hiện mờ dần vào (CSS chạy lại animation khi display none → hiện) */}
+      {collapsed && (
+        <div className="anim-fade">
+          <CollapsedTicket onExpand={() => setCollapsed(false)} />
+        </div>
+      )}
+      <div className={collapsed ? "hidden" : "anim-fade flex min-h-0 flex-1 flex-col"}>
         <OrderTicket />
       </div>
     </div>
@@ -736,7 +741,8 @@ export function MobilePanel() {
       </div>
     );
   return (
-    <div className="absolute inset-0 z-[45] flex flex-col bg-[var(--bg)]">
+    // key: đổi tab thì panel mới mờ dần vào
+    <div key={open} className="anim-fade absolute inset-0 z-[45] flex flex-col bg-[var(--bg)]">
       {open === "calendar" && (
         // tab của tab bar: không có ✕ (user 10-29)
         <div className="flex items-center border-b border-[var(--border)] px-3 py-2.5">

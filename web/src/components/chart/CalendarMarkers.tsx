@@ -161,7 +161,7 @@ export default function CalendarMarkers({ symbol, tf, replay, getChart, getBars,
       {opened && (
         <div
           data-calendar-ui
-          className="pointer-events-auto absolute max-h-[60%] w-[270px] overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2.5 text-xs shadow-xl"
+          className="anim-pop pointer-events-auto absolute max-h-[60%] w-[270px] overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-2.5 text-xs shadow-xl"
           style={{ left: Math.max(4, Math.min(width - 274, opened.x - 135)), bottom: bottom + SIZE + 8 }}
           role="dialog"
           aria-label="Economic events"

@@ -125,7 +125,7 @@ function Form() {
   const err = tried ? check.errors : {};
   const shape = f.drawing;
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" onMouseDown={(ev) => ev.target === ev.currentTarget && !busy && close()} onKeyDown={(ev) => ev.key === "Escape" && !busy && close()}>
+    <div className="anim-fade fixed inset-0 z-[70] flex items-center justify-center bg-black/50" onMouseDown={(ev) => ev.target === ev.currentTarget && !busy && close()} onKeyDown={(ev) => ev.key === "Escape" && !busy && close()}>
       <form onSubmit={submit} role="dialog" aria-label={editing ? "Edit alert" : "Create alert"} className="flex max-h-[94vh] w-[480px] max-w-[96vw] flex-col rounded-2xl popup">
         <div className="flex items-center justify-between px-5 pb-1 pt-4">
           <span className="text-lg font-semibold">{editing ? `Edit alert on ${shape?.label ?? ind?.label ?? editing.symbol}` : `Create alert on ${shape?.label ?? ind?.label ?? (f.symbol || "…")}`}</span>

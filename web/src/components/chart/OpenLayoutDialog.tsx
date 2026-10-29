@@ -47,7 +47,7 @@ export default function OpenLayoutDialog() {
   return (
     <>
       <div
-        className="fixed inset-0 z-[65] flex items-start justify-center bg-black/50 pt-20"
+        className="anim-fade fixed inset-0 z-[65] flex items-start justify-center bg-black/50 pt-20"
         onMouseDown={(e) => e.target === e.currentTarget && close()}
         onKeyDown={(e) => e.key === "Escape" && close()}
       >

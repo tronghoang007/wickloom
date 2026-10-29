@@ -76,7 +76,7 @@ function Form({ initial }: { initial: NonNullable<DialogState> }) {
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50"
+      className="anim-fade fixed inset-0 z-[70] flex items-center justify-center bg-black/50"
       onMouseDown={(e) => e.target === e.currentTarget && close()}
       onKeyDown={(e) => e.key === "Escape" && close()}
     >

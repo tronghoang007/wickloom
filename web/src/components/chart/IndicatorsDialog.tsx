@@ -77,7 +77,7 @@ export default function IndicatorsDialog({
       {open && (
         <div
           // phone (max-md): toàn màn, nhóm bên trái thành hàng tab cuộn ngang, bỏ cột AUTHOR
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-6 max-md:pt-0"
+          className="anim-fade fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-6 max-md:pt-0"
           onClick={() => setOpen(false)}
         >
           <div

@@ -106,7 +106,7 @@ export default function ReplayBar({ onStep }: { onStep: () => void }) {
   );
 
   return (
-    <div className="relative grid h-[46px] grid-cols-[1fr_auto_1fr] items-center border-t border-[var(--border)] px-3">
+    <div className="anim-rise relative grid h-[46px] grid-cols-[1fr_auto_1fr] items-center border-t border-[var(--border)] px-3">
       <div className="col-start-2 flex items-center">
       <button
         className={`${btn} ${selecting ? "bg-[var(--hover)]" : ""}`}

@@ -108,7 +108,7 @@ export default function SymbolSearchDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16 max-md:pt-0"
+      className="anim-fade fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16 max-md:pt-0"
       onClick={onClose}
       onKeyDown={onKey}
     >

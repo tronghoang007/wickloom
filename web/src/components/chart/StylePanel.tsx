@@ -194,7 +194,7 @@ export default function StylePanel() {
       {/* Nền bắt click ngoài để đóng menu: nằm ngoài thanh (thanh có transform nên fixed bên trong không phủ cả màn hình) */}
       {menu && <div className="absolute inset-0 z-[19]" onMouseDown={() => setMenu(null)} />}
       <div
-        className="absolute left-1/2 top-12 z-20 flex h-[38px] select-none items-center gap-0.5 rounded-md bg-[var(--panel)] px-0.5 text-[var(--fg)] shadow-[0_2px_4px_rgba(0,0,0,0.4)]"
+        className="anim-fade absolute left-1/2 top-12 z-20 flex h-[38px] select-none items-center gap-0.5 rounded-md bg-[var(--panel)] px-0.5 text-[var(--fg)] shadow-[0_2px_4px_rgba(0,0,0,0.4)]"
         style={{ transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)` }}
       >
         <div

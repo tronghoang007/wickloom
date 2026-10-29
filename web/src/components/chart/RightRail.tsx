@@ -32,7 +32,7 @@ export default function RightRail() {
   return (
     <div className="relative flex shrink-0">
       {active && (
-        <div key={open} className={`anim-panel flex w-[384px] shrink-0 flex-col border-l border-[var(--border)] ${overlay ? "absolute inset-y-0 right-full z-40 bg-[var(--bg)] shadow-[-6px_0_20px_rgba(0,0,0,0.45)]" : ""}`}>
+        <div key={open} className={`anim-slide flex w-[384px] shrink-0 flex-col border-l border-[var(--border)] ${overlay ? "absolute inset-y-0 right-full z-40 bg-[var(--bg)] shadow-[-6px_0_20px_rgba(0,0,0,0.45)]" : ""}`}>
           {open === "calendar" && (
             <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2.5">
               <span className="text-[18px] font-semibold leading-6">{TABS.find((t) => t.id === "calendar")!.label}</span>

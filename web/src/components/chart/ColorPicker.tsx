@@ -355,7 +355,7 @@ export default function ColorPicker({
         createPortal(
           <div
             ref={popRef}
-            className="fixed z-[1000] rounded-md border border-[var(--border)] bg-[var(--panel)] text-[var(--fg)] shadow-2xl"
+            className="anim-pop fixed z-[1000] rounded-md border border-[var(--border)] bg-[var(--panel)] text-[var(--fg)] shadow-2xl"
             style={{ width: POP_W, left: pos?.left ?? -9999, top: pos?.top ?? -9999 }}
           >
             {editing ? (

@@ -134,7 +134,7 @@ export function SettingsFrame({
   }, [onCancel]);
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+    <div className="anim-fade fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
       <div
         role="dialog"
         aria-label={label}

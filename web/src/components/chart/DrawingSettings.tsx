@@ -193,7 +193,7 @@ function Dialog({ init, startTab, onClose }: { init: Drawing; startTab: Settings
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="anim-fade fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={onClose}
     >
       <div
