@@ -295,7 +295,8 @@ export default function Chart({ paneId }: { paneId: string }) {
   const tapPreRef = useRef<{ at: number; x: number; y: number; busy: boolean } | null>(null); // xem onPointerDownCapture / vòng chọn khung // loại con trỏ của cú nhấn gần nhất: nhấn giữ bằng ngón tay (Android ra contextmenu) không mở menu chart
   const crossPriceRef = useRef<number | null>(null); // giá ở crosshair trên pane chính (null = crosshair ẩn): menu ⋯ của màn cảm ứng dùng thay giá dưới chuột phải
   const touch = useTouch();
-  const phone = useLayoutMode() === "phone";
+  const layoutMode = useLayoutMode();
+  const phone = layoutMode === "phone";
   // phone (dọc lẫn ngang, user 10-29): giao diện kiểu MT5 — SELL / BUY ở thanh trên, không legend, không dải 1D / 5D… dưới chart, không cụm nút pane
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
@@ -2060,7 +2061,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           onGhost={(owner, kind, e) => lineDragRef.current?.beginStop(owner, kind, e)}
           onConfirmEdit={(owner) => lineDragRef.current?.confirmEdit(owner)}
           onCancelEdit={(owner) => lineDragRef.current?.cancelEdit(owner)}
-          compact={phone}
+          compact={layoutMode !== "desktop"} // tablet cũng như phone (MT5): đường + chữ + chấm kéo, không thẻ nổi (user 10-29)
         />
         {/* Logo Wickloom mờ ở góc trái-dưới pane cuối, ngay trên trục thời gian: chỗ logo TV trước đây (đã tắt, xem attributionLogo) */}
         <div className="pointer-events-none absolute left-3 z-[3]" style={{ bottom: axes.timeH + 10 }}>

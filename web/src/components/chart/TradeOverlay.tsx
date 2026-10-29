@@ -62,7 +62,7 @@ type Props = {
   onGhost: (owner: TagOwner, kind: "sl" | "tp", e: PointerEvent) => void;
   onConfirmEdit: (owner: string) => void; // Confirm / Discard trên thẻ giá vào của chủ (vị thế / lệnh) có thay đổi chờ xác nhận sau khi kéo; owner = OWNER_ID
   onCancelEdit: (owner: string) => void;
-  /** Phone, kiểu MT5: không có thẻ / nút nổi (che nhau và che chart trên màn hẹp), chỉ đường kẻ + dòng chữ ở mép trái ngay trên đường + chấm tròn để kéo.
+  /** Phone + tablet, kiểu MT5: không có thẻ / nút nổi (che nhau và che chart trên màn hẹp), chỉ đường kẻ + dòng chữ ở mép trái ngay trên đường + chấm tròn để kéo.
    *  Đặt / thêm SL-TP / xác nhận thay đổi làm ở bảng lệnh (sheet): chạm vào đường lệnh đã đặt mở bảng của nó; kéo xong một lệnh đã đặt thì tự mở bảng để Confirm. */
   compact?: boolean;
 };
