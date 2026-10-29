@@ -9,7 +9,8 @@ import { Chevron, Plus, StarI } from "../icons";
 // Các khung "yêu thích" trên toolbar + dropdown đầy đủ như TradingView: nhóm Minutes/Hours/
 // Days thu gọn được, ngôi sao để ghim khung lên toolbar. Khung đang chọn mà chưa ghim vẫn
 // hiện trên toolbar (TV cũng vậy).
-export default function TimeframeBar({ className }: { className: string }) {
+/** `compact` (thanh trên của phone): không bày các khung yêu thích, chỉ một nút "khung đang chọn ⌄" mở dropdown. */
+export default function TimeframeBar({ className, compact = false }: { className: string; compact?: boolean }) {
   const tf = useChartStore((s) => s.tf);
   const favTfs = useChartStore((s) => s.favTfs);
   const set = useChartStore((s) => s.set);
@@ -33,7 +34,7 @@ export default function TimeframeBar({ className }: { className: string }) {
 
   return (
     <>
-      {shown.map((t) => (
+      {!compact && shown.map((t) => (
         <button
           key={t}
           onClick={() => set({ tf: t })}
@@ -43,7 +44,12 @@ export default function TimeframeBar({ className }: { className: string }) {
         </button>
       ))}
       <div className="relative">
-        <button className={`${className} px-1 ${open ? "bg-[var(--hover)]" : ""}`} onClick={() => setOpen(!open)}>
+        <button
+          className={`${className} ${compact ? "gap-0.5 px-2 font-semibold" : "px-1"} ${open ? "bg-[var(--hover)]" : ""}`}
+          title={compact ? tfLong(tf) : undefined}
+          onClick={() => setOpen(!open)}
+        >
+          {compact && tfShort(tf)}
           <Chevron />
         </button>
         {open && (

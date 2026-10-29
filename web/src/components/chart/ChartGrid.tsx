@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutMode } from "@/lib/layoutMode";
 import { useLayoutStore } from "@/store/layout";
 import { FULL, dragSizes, gutters, paneRects, splitAt, type Gutter } from "@/store/layoutTree";
 import { startPaneSync } from "@/store/paneSync";
@@ -12,7 +13,10 @@ const pct = (n: number) => `${n * 100}%`;
 const idNum = (id: string) => Number(id.slice(1)) || 0;
 
 /** Lưới các chart theo cây chia ô của layout. Mọi pane render PHẲNG (absolute theo tỉ lệ) và key theo id, nên đổi mẫu /
- *  phóng to không làm Chart nào bị tạo lại (giữ WebSocket, dữ liệu, góc nhìn). */
+ *  phóng to không làm Chart nào bị tạo lại (giữ WebSocket, dữ liệu, góc nhìn).
+ *  Phone: chỉ mount chart active, chiếm cả ô (không viền, splitter, nút Maximize); chuyển chart bằng nút trên thanh trên.
+ *  Các chart khác unmount cho đỡ CPU / pin; state của chúng nằm trong store của pane nên mount lại vẫn y như cũ.
+ *  Chart active giữ nguyên key nên đổi qua lại phone ↔ desktop không tạo lại nó. Không đụng `maximized` / cây layout: layout đã lưu giữ nguyên. */
 export default function ChartGrid() {
   const panes = useLayoutStore((s) => s.panes);
   const tree = useLayoutStore((s) => s.tree);
@@ -23,8 +27,17 @@ export default function ChartGrid() {
   const rects = useMemo(() => paneRects(tree), [tree]);
   const lines = useMemo(() => gutters(tree), [tree]);
   const ids = useMemo(() => Object.keys(panes).sort((a, b) => idNum(a) - idNum(b)), [panes]); // thứ tự DOM ổn định
-  const multi = ids.length > 1;
+  const phone = useLayoutMode() === "phone";
+  const multi = ids.length > 1 && !phone;
   useEffect(() => startPaneSync(), []); // "Sync in layout": symbol / khung đi theo giữa các chart
+
+  if (phone) {
+    return (
+      <div ref={boxRef} className="relative h-full w-full overflow-hidden">
+        {panes[activeId] && <PaneFrame key={`${revision}:${activeId}`} id={activeId} rect={FULL} hidden={false} multi={false} active maximized={false} />}
+      </div>
+    );
+  }
 
   return (
     <div ref={boxRef} className="relative h-full w-full overflow-hidden">

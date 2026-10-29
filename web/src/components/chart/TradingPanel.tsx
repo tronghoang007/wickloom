@@ -85,10 +85,23 @@ function useNowSec() {
   return now;
 }
 
+/** Hỏi backend vị thế / lệnh / account của account MT5 đang chọn (đăng xuất hay chưa có account thì xoá). Panel Trading dưới chart gọi trên desktop;
+ *  trên phone panel chỉ mount khi mở tab Trading nên tab bar đáy gọi thay, để thẻ lệnh và đường SL/TP trên chart vẫn có dữ liệu. */
+export function useTradePolling(enabled = true) {
+  const status = useAuthStore((s) => s.status);
+  const activeId = useMt5Store((s) => s.accounts.find((a) => a.active)?.id);
+  useEffect(() => {
+    if (!enabled) return;
+    if (status === "user" && activeId) return startTradePolling();
+    useTradeStore.getState().clear();
+  }, [enabled, status, activeId]);
+}
+
 /** Panel Trading dưới chart (docs/trade-plan.md T1-T2): vị thế, lệnh chờ, lịch sử, tóm tắt account MT5 đang cấp dữ liệu. Chỉ hiện khi đã đăng nhập
  *  và có account MT5 kết nối. Đóng / đóng một phần vị thế ở tab Positions (chỉ account demo); lệnh chờ và sửa SL/TP chưa có (T3-T4).
- *  Đang Replay: panel là của account giả lập (trading/simStore.ts, nhãn REPLAY, khách cũng thấy), có nút Reset để làm lại sổ lệnh từ số dư MT5. */
-export default function TradingPanel() {
+ *  Đang Replay: panel là của account giả lập (trading/simStore.ts, nhãn REPLAY, khách cũng thấy), có nút Reset để làm lại sổ lệnh từ số dư MT5.
+ *  `fill` (tab Trading trên phone): chiếm hết panel, không có nút thu gọn, tóm tắt account xuống dòng; chưa có dữ liệu thì hiện lời nhắc thay vì ẩn. */
+export default function TradingPanel({ fill = false }: { fill?: boolean }) {
   const status = useAuthStore((s) => s.status);
   const loaded = useMt5Store((s) => s.loaded);
   const activeId = useMt5Store((s) => s.accounts.find((a) => a.active)?.id);
@@ -97,13 +110,16 @@ export default function TradingPanel() {
   const open = useTradeStore((s) => s.open);
   const tab = useTradeStore((s) => s.tab);
   const now = useNowSec();
+  useTradePolling(!fill); // phone: tab bar đáy hỏi thay (panel này chỉ mount khi mở tab)
 
-  useEffect(() => {
-    if (status === "user" && activeId) return startTradePolling();
-    useTradeStore.getState().clear();
-  }, [status, activeId]);
-
-  if (!data || (!sim && (status !== "user" || !loaded || !activeId))) return null;
+  if (!data || (!sim && (status !== "user" || !loaded || !activeId))) {
+    if (!fill) return null;
+    return (
+      <EmptyState icon={<EmptyPositionsI size={40} />} className="h-full">
+        {status !== "user" ? "Đăng nhập và kết nối tài khoản MT5 để xem vị thế, lệnh chờ và lịch sử." : loaded && !activeId ? "Chưa có tài khoản MT5 nào đang kết nối." : "Đang tải…"}
+      </EmptyState>
+    );
+  }
   const stale = isStale(data, now);
   const a = data.account;
   const pnl = accountProfit(data);
@@ -118,57 +134,88 @@ export default function TradingPanel() {
     ...(a.margin_level ? ([["Margin level", `${a.margin_level.toLocaleString("en-US", { maximumFractionDigits: 2 })}%`]] as [string, string, string?][]) : []),
   ];
 
+  const account = (
+    <span className="flex min-w-0 items-center gap-2 px-1.5">
+      <span className="max-w-[160px] truncate text-[13px]" title={a.server || undefined}>{a.name || a.broker || a.server}</span>
+      <ModeBadge mode={a.mode} />
+      {sim && (
+        <button
+          className="inline-flex h-[18px] cursor-pointer items-center rounded border border-[var(--border)] px-1.5 text-[10px] leading-none text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+          title="Làm lại account giả lập từ số dư MT5: xoá vị thế, lệnh chờ và lịch sử của Replay"
+          onClick={() =>
+            askConfirm({
+              title: "Reset account Replay",
+              message: "Xoá vị thế, lệnh chờ và lịch sử giả lập; số dư về lại số dư account MT5.",
+              confirmLabel: "Reset",
+              danger: true,
+              onConfirm: resetSim,
+            })
+          }
+        >
+          Reset
+        </button>
+      )}
+      {stale && <span className="inline-flex h-[18px] items-center rounded border border-[var(--border)] bg-[var(--hover)] px-1.5 text-[10px] leading-none text-[var(--muted)]">{a.online ? "dữ liệu cũ" : "offline"}</span>}
+    </span>
+  );
+  const tabs = (
+    <div className="flex items-center gap-1.5">
+      {TABS.map((t) => {
+        const n = t.id === "positions" ? data.positions.length : t.id === "orders" ? data.orders.length : null;
+        const on = (fill || open) && tab === t.id;
+        return (
+          <button
+            key={t.id}
+            className={`cursor-pointer rounded px-3 py-1 text-[13px] hover:bg-[var(--hover)] ${on ? "bg-[var(--hover)] font-semibold" : "text-[var(--muted)]"}`}
+            onClick={() => useTradeStore.getState().showTab(t.id)}
+          >
+            {t.label}
+            {n ? <span className="ml-1 text-xs">({n})</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+  const summary = (className: string) => (
+    <div className={`${className} text-xs tabular-nums ${stale ? "opacity-60" : ""}`} data-testid="account-summary">
+      {stats.map(([k, v, cls]) => (
+        <span key={k} className="whitespace-nowrap text-[var(--muted)]">
+          {k} <span className={cls ?? "text-[var(--fg)]"}>{v}</span>
+        </span>
+      ))}
+    </div>
+  );
+  const body = (
+    <>
+      {tab === "positions" && <Positions data={data} />}
+      {tab === "orders" && <Orders data={data} />}
+      {tab === "history" && <History data={data} />}
+    </>
+  );
+
+  if (fill) {
+    return (
+      <div className="flex h-full flex-col bg-[var(--bg)]" data-testid="trading-panel">
+        <div className="flex items-center gap-1 px-2 pt-2 text-sm">
+          <span className="px-1.5 font-semibold">Trading</span>
+          {account}
+        </div>
+        {summary("flex flex-wrap gap-x-4 gap-y-1 px-3.5 py-2")}
+        <div className="border-b border-[var(--border)] px-2 pb-2">{tabs}</div>
+        <div className={`min-h-0 flex-1 overflow-auto ${stale ? "opacity-60" : ""}`}>{body}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg)]" data-testid="trading-panel">
       <div className="flex h-[34px] items-center gap-1 pl-2 text-sm">
         <span className="px-1.5 font-semibold">Trading</span>
         <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
-        <span className="flex items-center gap-2 px-1.5">
-          <span className="max-w-[160px] truncate text-[13px]" title={a.server || undefined}>{a.name || a.broker || a.server}</span>
-          <ModeBadge mode={a.mode} />
-          {sim && (
-            <button
-              className="inline-flex h-[18px] cursor-pointer items-center rounded border border-[var(--border)] px-1.5 text-[10px] leading-none text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]"
-              title="Làm lại account giả lập từ số dư MT5: xoá vị thế, lệnh chờ và lịch sử của Replay"
-              onClick={() =>
-                askConfirm({
-                  title: "Reset account Replay",
-                  message: "Xoá vị thế, lệnh chờ và lịch sử giả lập; số dư về lại số dư account MT5.",
-                  confirmLabel: "Reset",
-                  danger: true,
-                  onConfirm: resetSim,
-                })
-              }
-            >
-              Reset
-            </button>
-          )}
-          {stale && <span className="inline-flex h-[18px] items-center rounded border border-[var(--border)] bg-[var(--hover)] px-1.5 text-[10px] leading-none text-[var(--muted)]">{a.online ? "dữ liệu cũ" : "offline"}</span>}
-        </span>
+        {account}
         <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
-        <div className="flex items-center gap-1.5">
-          {TABS.map((t) => {
-            const n = t.id === "positions" ? data.positions.length : t.id === "orders" ? data.orders.length : null;
-            const on = open && tab === t.id;
-            return (
-              <button
-                key={t.id}
-                className={`cursor-pointer rounded px-3 py-1 text-[13px] hover:bg-[var(--hover)] ${on ? "bg-[var(--hover)] font-semibold" : "text-[var(--muted)]"}`}
-                onClick={() => useTradeStore.getState().showTab(t.id)}
-              >
-                {t.label}
-                {n ? <span className="ml-1 text-xs">({n})</span> : null}
-              </button>
-            );
-          })}
-        </div>
-        <div className={`ml-auto flex min-w-0 items-center gap-4 overflow-hidden pr-3 text-xs tabular-nums ${stale ? "opacity-60" : ""}`} data-testid="account-summary">
-          {stats.map(([k, v, cls]) => (
-            <span key={k} className="whitespace-nowrap text-[var(--muted)]">
-              {k} <span className={cls ?? "text-[var(--fg)]"}>{v}</span>
-            </span>
-          ))}
-        </div>
+        {tabs}
+        {summary("ml-auto flex min-w-0 items-center gap-4 overflow-hidden pr-3")}
         {/* Ô cùng bề rộng (w-12) và đường kẻ dọc với thanh icon bên phải chart: nút nằm thẳng cột với các icon trên và đường kẻ nối liền xuống */}
         <div className="flex h-full w-12 shrink-0 items-center justify-center border-l border-[var(--border)]">
           <button
@@ -186,9 +233,7 @@ export default function TradingPanel() {
       </div>
       {open && (
         <div className={`h-[180px] overflow-auto border-t border-[var(--border)] ${stale ? "opacity-60" : ""}`}>
-          {tab === "positions" && <Positions data={data} />}
-          {tab === "orders" && <Orders data={data} />}
-          {tab === "history" && <History data={data} />}
+          {body}
         </div>
       )}
     </div>

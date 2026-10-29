@@ -1,6 +1,6 @@
 # Plan: Wickloom dùng được trên điện thoại (responsive)
 
-Ngày lập: 2026-10-29. Trạng thái: **M0 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
+Ngày lập: 2026-10-29. Trạng thái: **M0 + M1 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
 
 ## 1. Hiện trạng (đã đọc code)
 
@@ -133,7 +133,7 @@ Ngày lập: 2026-10-29. Trạng thái: **M0 xong** (2026-10-29); user chọn th
 | Phase | Nội dung | Phụ thuộc |
 |---|---|---|
 | **M0** Nền ✅ | `useLayoutMode` + cờ `touch`, `viewport` export (đọc `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/generate-viewport.md` trước), `h-dvh`, safe-area, công thức test headless theo kích thước máy | — |
-| **M1** Khung phone | Thanh trên gọn + menu `⋯`, tab bar đáy, panel thành sheet, 1 chart (`maximized`) + unmount ô ẩn | M0 |
+| **M1** Khung phone ✅ | Thanh trên gọn + menu `⋯`, tab bar đáy, panel thành sheet, 1 chart (`maximized`) + unmount ô ẩn | M0 |
 | **M2** Chart cảm ứng | Crosshair nhấn giữ, menu `⋯` thay chuột phải, double-tap, nút luôn hiện khi touch, vùng bắt lớn, đo FPS | M1 |
 | **M3** Giao dịch | TradeWidget đáy, OrderTicket sheet, thẻ vị thế, kéo SL/TP bằng tay, xác nhận trên phone | M1, M2 |
 | **M4** Dialog & menu | Component `Sheet`, chuyển dialog lớn + menu thả xuống, input số | M1 |
@@ -154,6 +154,31 @@ Thứ tự đề xuất: M0 → M1 → M2 → M3 (đến đây là dùng đượ
   Tap-highlight không cần: preflight Tailwind đã tắt.
 - Đo headless: desktop 1440×900 khung gốc vẫn 1440×900, padding 0, overscroll `auto` (không đổi). Phone 390×844
   overscroll `none`; trang **vẫn tràn ngang** (scrollWidth 1184px) — đúng như dự kiến, M1 mới sửa bố cục.
+
+### M1 đã làm (2026-10-29)
+
+- `components/chart/MobileChrome.tsx`: `MobileTopBar` (Avatar, Symbol, khung `5m ⌄`, Indicators chỉ icon, nút chọn chart `1/2`
+  khi layout nhiều chart, menu `⋯`: Layout + Save, loại chart, Create alert, Replay, Undo/Redo, Settings, Snapshot, Theme,
+  Fullscreen nếu trình duyệt cho), `MobileTabBar` (Chart / Watchlist / Alerts / Calendar / Order khi đang soạn lệnh /
+  Trading), `MobilePanel` (panel phủ lên chart, chart vẫn mount bên dưới). Chọn symbol ở Watchlist thì tự về Chart.
+- `page.tsx`: phone dùng 3 phần trên thay `Toolbar` / `DrawingToolbar` / `RightRail` / `TradingPanel`; tablet / desktop không đổi.
+- `ChartGrid`: **khác plan ban đầu** — không dùng `maximized` mà phone chỉ mount chart active (key giữ nguyên nên chart
+  active không bị tạo lại khi đổi phone ↔ desktop); không đụng layout đã lưu.
+- Tách phần dùng chung: `useSymbolsPolling`, `toggleFullscreen`, `SymbolSearch`, `CHART_TYPES` (Toolbar);
+  `useTradePolling` (TradingPanel, tab bar gọi để thẻ lệnh / đường SL-TP trên chart vẫn có dữ liệu khi tab Trading đóng);
+  `ticketBusy` (trading/ticket.ts, dùng chung với RightRail); rail store thêm panel `"trading"` (chỉ phone).
+- `TradingPanel fill`: chiếm cả panel, tóm tắt account xuống dòng, chưa đăng nhập / chưa có account thì hiện lời nhắc.
+- `TimeframeBar compact`, `IndicatorsDialog iconOnly` + dialog Indicators toàn màn trên phone (`max-md:`; nhóm thành hàng tab,
+  bỏ cột AUTHOR, sao yêu thích luôn hiện khi `pointer-coarse`) — làm sớm phần này của M4 vì mở từ thanh trên.
+- `FavoritesBar` ẩn trên phone (chưa có thanh vẽ, M5). Thanh dưới của Chart: dải 1D/5D/… cuộn ngang khi hẹp.
+- Đo headless phone 390×844: không còn tràn ngang ở mọi tab / menu / popup Layout; layout 2 chart chỉ mount 1 chart, đổi
+  `1/2` → `2/2` đúng; Replay + đặt lệnh BUY giả lập: bảng đặt lệnh toàn panel, tab Trading hiện vị thế. Desktop 1440×900:
+  không có tab bar / menu ⋯, toolbar vẫn 38px, ảnh chụp như cũ.
+
+**Ghi lại cho các phase sau** (thấy khi test M1):
+- M2: chọn nến Replay bằng cảm ứng phải **chạm 2 lần** (lần 1 chỉ đặt vị trí hover, lần 2 mới chọn).
+- M3: bảng Positions trên phone cuộn ngang, cột nút Close nằm ngoài màn → cần thẻ lệnh như plan.
+- M4: dialog khác (Settings, Indicator settings, Drawing settings, Alert) chưa sửa.
 
 ## 11. Kiểm thử
 

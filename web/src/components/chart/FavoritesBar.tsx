@@ -2,6 +2,7 @@
 
 import { useDrawingStore } from "@/drawings/store";
 import { SPEC } from "@/drawings/tools";
+import { useLayoutMode } from "@/lib/layoutMode";
 import { useEffect, useRef, useState } from "react";
 import { ToolIcon } from "../toolIcons";
 
@@ -10,6 +11,7 @@ const TOP = 8; // top-2: vị trí gốc của thanh, y = 0
 
 export default function FavoritesBar() {
   const { favorites, showFavs, tool, api } = useDrawingStore();
+  const phone = useLayoutMode() === "phone";
   const [pos, setPos] = useState(() => useDrawingStore.getState().favoritesPos);
   const dragRef = useRef<{
     sx: number;
@@ -57,7 +59,8 @@ export default function FavoritesBar() {
     return () => bar.removeEventListener("wheel", onWheel);
   }, [showFavs, favorites.length]);
 
-  if (!showFavs || favorites.length === 0) return null;
+  // phone: chưa có thanh vẽ (docs/mobile-responsive-plan.md M5), thanh nổi này chỉ che chart
+  if (!showFavs || favorites.length === 0 || phone) return null;
 
   return (
     <div

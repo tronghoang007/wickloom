@@ -12,6 +12,9 @@ import type { Side } from "./orderType";
 export type TicketSeed = { symbol: string; side: Side; mode: TicketMode; price?: number; digits?: number };
 /** Bảng đang mở nhưng chưa có bản nháp (như TradingView sau khi đặt xong): các ô mờ đi, bấm Sell / Buy hoặc "Start creating order" mới bắt đầu lệnh mới theo hướng / loại lệnh đã nhớ. */
 export type TicketRest = { side: Side; mode: TicketMode };
+/** Bảng đặt lệnh đang có việc: đang soạn, đang chờ sau khi đặt xong, hoặc đang xem / sửa một lệnh đã đặt. Tab Order (thanh bên phải / tab bar của phone) chỉ hiện khi true. */
+export const ticketBusy = (s: Pick<State, "draft" | "rest" | "modifyOwner">) => s.draft !== null || s.rest !== null || s.modifyOwner !== null;
+
 type State = {
   draft: Draft | null;
   rest: TicketRest | null;

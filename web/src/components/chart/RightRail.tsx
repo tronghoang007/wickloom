@@ -1,7 +1,7 @@
 "use client";
 
 import { useRailStore, type RailPanel } from "@/store/rail";
-import { useTicketStore } from "@/trading/ticket";
+import { ticketBusy, useTicketStore } from "@/trading/ticket";
 import { type ReactNode } from "react";
 import { AddOrderI, AlertI, CalendarI, Close, WatchlistI } from "../icons";
 import AlertsPanel from "./AlertsPanel";
@@ -23,7 +23,7 @@ const TABS: { id: RailPanel; label: string; icon: ReactNode }[] = [
 export default function RightRail() {
   const open = useRailStore((s) => s.open);
   const setOpen = useRailStore((s) => s.setOpen);
-  const drafting = useTicketStore((s) => s.draft !== null || s.rest !== null || s.modifyOwner !== null); // đang soạn lệnh, bảng đang chờ sau khi đặt xong, hoặc đang xem / sửa một lệnh đã đặt
+  const drafting = useTicketStore(ticketBusy);
   const tabs = TABS.filter((t) => t.id !== "order" || drafting);
   const active = tabs.find((t) => t.id === open);
 

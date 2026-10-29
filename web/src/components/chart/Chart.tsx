@@ -2124,18 +2124,19 @@ export default function Chart({ paneId }: { paneId: string }) {
       </div>
       {(selecting || replayActive) && <ReplayBar onStep={() => stepReplay()} />}
       <div className="flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm">
-        <div className="flex gap-0.5">
+        {/* màn hẹp (phone): dải nút khoảng thời gian cuộn ngang, cụm bên phải giữ nguyên */}
+        <div className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none]">
           {RANGES.map((r) => (
             <button
               key={r.label}
               onClick={() => setRange(r.secs)}
-              className="rounded px-2 py-1 hover:bg-[var(--hover)]"
+              className="shrink-0 rounded px-2 py-1 hover:bg-[var(--hover)]"
             >
               {r.label}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <TimezoneMenu clock={clock} />
           {scaleBtn("percent", "%")}
           {scaleBtn("log", "log")}

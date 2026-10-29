@@ -42,9 +42,12 @@ const NAV: {
 export default function IndicatorsDialog({
   className = "",
   icon,
+  iconOnly = false,
 }: {
   className?: string;
   icon?: ReactNode;
+  /** chỉ hiện icon (chữ "Indicators" thành title): thanh trên của phone */
+  iconOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("fav");
@@ -67,21 +70,22 @@ export default function IndicatorsDialog({
 
   return (
     <>
-      <button className={className} onClick={() => setOpen(true)}>
+      <button className={className} title={iconOnly ? "Indicators" : undefined} aria-label="Indicators" onClick={() => setOpen(true)}>
         {icon}
-        Indicators
+        {!iconOnly && "Indicators"}
       </button>
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-6"
+          // phone (max-md): toàn màn, nhóm bên trái thành hàng tab cuộn ngang, bỏ cột AUTHOR
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-6 max-md:pt-0"
           onClick={() => setOpen(false)}
         >
           <div
-            className="flex h-[88vh] w-[860px] max-w-[96vw] flex-col rounded-2xl popup"
+            className="flex h-[88vh] w-[860px] max-w-[96vw] flex-col rounded-2xl popup max-md:h-dvh max-md:w-full max-md:max-w-none max-md:rounded-none"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 pb-3 pt-5">
-              <h2 className="text-xl font-semibold">
+              <h2 className="text-xl font-semibold max-md:text-lg">
                 Indicators, metrics, and strategies
               </h2>
               <button
@@ -106,11 +110,11 @@ export default function IndicatorsDialog({
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1">
-              <nav className="w-60 shrink-0 overflow-y-auto px-3 pb-4">
+            <div className="flex min-h-0 flex-1 max-md:flex-col">
+              <nav className="w-60 shrink-0 overflow-y-auto px-3 pb-4 max-md:flex max-md:w-auto max-md:gap-1 max-md:overflow-x-auto max-md:pb-2">
                 {NAV.map((g) => (
-                  <div key={g.title} className="mb-3">
-                    <div className="px-3 pb-1 pt-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
+                  <div key={g.title} className="mb-3 max-md:mb-0 max-md:flex max-md:gap-1">
+                    <div className="px-3 pb-1 pt-2 text-[11px] font-semibold tracking-wide text-[var(--muted)] max-md:hidden">
                       {g.title}
                     </div>
                     {g.items.map((it) => (
@@ -120,7 +124,7 @@ export default function IndicatorsDialog({
                           setTab(it.id);
                           setQ("");
                         }}
-                        className={`flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-sm ${tab === it.id && !query ? "bg-[var(--hover)]" : "hover:bg-[var(--hover)]/60"}`}
+                        className={`flex h-10 w-full items-center gap-2 rounded-lg px-2 text-left text-sm max-md:w-auto max-md:whitespace-nowrap ${tab === it.id && !query ? "bg-[var(--hover)]" : "hover:bg-[var(--hover)]/60"}`}
                       >
                         {it.icon}
                         {it.label}
@@ -130,10 +134,10 @@ export default function IndicatorsDialog({
                 ))}
               </nav>
 
-              <div className="min-w-0 flex-1 overflow-y-auto pr-3">
-                <div className="grid grid-cols-[1fr_120px_80px] px-3 pb-2 text-[11px] font-semibold tracking-wide text-[var(--muted)]">
+              <div className="min-w-0 flex-1 overflow-y-auto pr-3 max-md:pl-2">
+                <div className="grid grid-cols-[1fr_120px_80px] px-3 pb-2 text-[11px] font-semibold tracking-wide text-[var(--muted)] max-md:grid-cols-[1fr_64px]">
                   <span className="pl-6">NAME</span>
-                  <span>AUTHOR</span>
+                  <span className="max-md:hidden">AUTHOR</span>
                   <span>BOOSTS</span>
                 </div>
                 {rows.length === 0 && (
@@ -148,7 +152,7 @@ export default function IndicatorsDialog({
                     key={d.id}
                     // Volume đã có sẵn trên chart (indicator "Vol · Ticks"): chọn lại chỉ để thêm lại / hiện lại nó, không thêm pane trùng
                     onClick={() => (d.id === "volume" ? useVolumeStore.getState().set({ removed: false, hidden: false }) : add(d.id))}
-                    className="group grid cursor-pointer grid-cols-[1fr_120px_80px] items-center rounded px-3 py-2 text-sm hover:bg-[var(--hover)]"
+                    className="group grid cursor-pointer grid-cols-[1fr_120px_80px] items-center rounded px-3 py-2 text-sm hover:bg-[var(--hover)] max-md:grid-cols-[1fr_64px] max-md:py-2.5"
                   >
                     <span className="flex min-w-0 items-center gap-3">
                       <button
@@ -156,7 +160,7 @@ export default function IndicatorsDialog({
                         className={`-mr-2.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center ${
                           favorites.includes(d.id)
                             ? "text-[var(--solid,#f2f2f2)]"
-                            : "text-[var(--muted)] opacity-0 group-hover:opacity-100"
+                            : "text-[var(--muted)] opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100" // cảm ứng không có hover: luôn hiện sao
                         }`}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -175,7 +179,7 @@ export default function IndicatorsDialog({
                         </span>
                       )}
                     </span>
-                    <span className="text-[var(--muted)]">Built-in</span>
+                    <span className="text-[var(--muted)] max-md:hidden">Built-in</span>
                     <span className="text-[var(--muted)]">
                       {d.overlay ? "overlay" : "pane"}
                     </span>

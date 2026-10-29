@@ -12,10 +12,12 @@ import SettingsDialog from "@/components/chart/SettingsDialog";
 import IndicatorSettingsDialog from "@/components/chart/IndicatorSettingsDialog";
 import VolumeSettingsDialog from "@/components/chart/VolumeSettingsDialog";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
+import { MobilePanel, MobileTabBar, MobileTopBar } from "@/components/chart/MobileChrome";
 import RightRail from "@/components/chart/RightRail";
 import TradingPanel from "@/components/chart/TradingPanel";
 import Toolbar from "@/components/chart/Toolbar";
 import { drawingGlobal } from "@/drawings/store";
+import { useLayoutMode } from "@/lib/layoutMode";
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal, useChartStore } from "@/store/chart";
 import { appSession } from "@/store/appSession";
@@ -25,6 +27,7 @@ import { useEffect, useState } from "react";
 
 export default function Page() {
   const theme = useChartStore((s) => s.theme);
+  const phone = useLayoutMode() === "phone"; // docs/mobile-responsive-plan.md: phone có khung riêng, tablet / desktop giữ khung desktop
   const [prefsReady, setPrefsReady] = useState(false);
 
   useEffect(() => {
@@ -63,15 +66,16 @@ export default function Page() {
       // Padding safe-area chỉ khác 0 trên máy có tai thỏ / thanh home (viewportFit "cover" ở layout.tsx).
       className="flex h-dvh flex-col bg-[var(--bg)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-[var(--fg)]"
     >
-      <Toolbar />
+      {phone ? <MobileTopBar /> : <Toolbar />}
       <div className="flex min-h-0 flex-1">
-        <DrawingToolbar />
-        <main className="min-w-0 flex-1">
+        {!phone && <DrawingToolbar />}
+        <main className="relative min-w-0 flex-1">
           <ChartGrid />
+          {phone && <MobilePanel />}
         </main>
-        <RightRail />
+        {!phone && <RightRail />}
       </div>
-      <TradingPanel />
+      {phone ? <MobileTabBar /> : <TradingPanel />}
       {/* hộp thoại dùng chung: một bản cho cả trang, nhắm vào chart đang active */}
       <SettingsDialog />
       <VolumeSettingsDialog />

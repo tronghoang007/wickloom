@@ -32,7 +32,7 @@ import LayoutMenu from "./LayoutMenu";
 import SymbolSearchDialog from "./SymbolSearchDialog";
 import TimeframeBar from "./TimeframeBar";
 
-const CHART_TYPES: { v: ChartType; label: string; icon: ReactNode }[] = [
+export const CHART_TYPES: { v: ChartType; label: string; icon: ReactNode }[] = [
   { v: "candles", label: "Candles", icon: <Candles /> },
   { v: "bars", label: "Bars", icon: <BarsIcon /> },
   { v: "line", label: "Line", icon: <LineIcon /> },
@@ -72,7 +72,7 @@ function Menu({
   );
 }
 
-function SymbolSearch() {
+export function SymbolSearch() {
   const symbol = useChartStore((s) => s.symbol);
   const [open, setOpen] = useState(false);
 
@@ -92,12 +92,9 @@ function SymbolSearch() {
   );
 }
 
-export default function Toolbar() {
-  const { chartType, theme, set } = useChartStore();
-  const api = useDrawingStore((s) => s.api);
-  const replayOn = useReplayStore((s) => s.active || s.selecting);
-  const [typeOpen, setTypeOpen] = useState(false);
-
+/** Danh sách symbol (giá, digits...) hỏi backend 10s một lần. Toolbar desktop và thanh trên của phone đều gọi: luôn có đúng một cái đang mount. */
+export function useSymbolsPolling() {
+  const set = useChartStore((s) => s.set);
   useEffect(() => {
     const load = () =>
       fetchSymbols()
@@ -107,12 +104,21 @@ export default function Toolbar() {
     const id = setInterval(load, 10000);
     return () => clearInterval(id);
   }, [set]);
+}
+
+export const toggleFullscreen = () =>
+  document.fullscreenElement
+    ? document.exitFullscreen()
+    : document.documentElement.requestFullscreen();
+
+export default function Toolbar() {
+  const { chartType, theme, set } = useChartStore();
+  const api = useDrawingStore((s) => s.api);
+  const replayOn = useReplayStore((s) => s.active || s.selecting);
+  const [typeOpen, setTypeOpen] = useState(false);
+  useSymbolsPolling();
 
   const cur = CHART_TYPES.find((c) => c.v === chartType)!;
-  const fullscreen = () =>
-    document.fullscreenElement
-      ? document.exitFullscreen()
-      : document.documentElement.requestFullscreen();
 
   return (
     <div className="flex h-[38px] items-center border-b border-[var(--border)] bg-[var(--page)] pr-1">
@@ -174,7 +180,7 @@ export default function Toolbar() {
       <button className={iconBtn} title="Settings" onClick={() => useSettingsStore.setState({ open: true })}>
         <SettingsI />
       </button>
-      <button className={iconBtn} title="Fullscreen" onClick={fullscreen}>
+      <button className={iconBtn} title="Fullscreen" onClick={toggleFullscreen}>
         <FullscreenI />
       </button>
       <button
