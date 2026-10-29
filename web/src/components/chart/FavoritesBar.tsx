@@ -8,6 +8,8 @@ import { ToolIcon } from "../toolIcons";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const TOP = 8; // top-2: vị trí gốc của thanh, y = 0
+const PRICE_AXIS = 70; // chừa trục giá bên phải khi dời thanh sang cạnh legend
+const TIME_AXIS = 36; // chừa trục thời gian khi đặt thanh ở đáy
 
 export default function FavoritesBar() {
   const { favorites, showFavs, tool, api } = useDrawingStore();
@@ -21,30 +23,49 @@ export default function FavoritesBar() {
   } | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   // Kích thước vùng chart chứa thanh + của thanh: mở / đóng thanh bên phải, đổi layout, thêm / bớt công cụ yêu thích đều làm đổi → vị trí phải kẹp lại theo kích thước MỚI
-  const [size, setSize] = useState({ pw: 0, ph: 0, bw: 0, bh: 0 });
+  // lr: mép phải hàng legend đầu (mã · khung · O H L C) tính từ mép trái vùng chart, để vị trí mặc định không đè lên nó
+  const [size, setSize] = useState({ pw: 0, ph: 0, bw: 0, bh: 0, lr: 0 });
 
   useEffect(() => {
     const bar = barRef.current;
     const parent = bar?.parentElement;
     if (!bar || !parent) return;
-    const measure = () => setSize({ pw: parent.clientWidth, ph: parent.clientHeight, bw: bar.offsetWidth, bh: bar.offsetHeight });
+    const legend = parent.querySelector<HTMLElement>("[data-legend-row]");
+    const measure = () =>
+      setSize({
+        pw: parent.clientWidth,
+        ph: parent.clientHeight,
+        bw: bar.offsetWidth,
+        bh: bar.offsetHeight,
+        lr: legend ? Math.round(legend.getBoundingClientRect().right - parent.getBoundingClientRect().left) : 0,
+      });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(parent);
     ro.observe(bar);
+    if (legend) ro.observe(legend);
     return () => ro.disconnect();
   }, [showFavs, favorites.length]);
 
   /** Giới hạn dịch chuyển để thanh luôn nằm trọn trong vùng chart (gốc: giữa ngang, cách mép trên 8px). */
-  const limits = (sz: typeof size) => {
+  const limits = (sz: { pw: number; ph: number; bw: number; bh: number }) => {
     const baseX = (sz.pw - sz.bw) / 2;
     return { minX: -baseX, maxX: sz.pw - sz.bw - baseX, minY: -TOP, maxY: sz.ph - sz.bh - TOP };
+  };
+  /** Chưa kéo lần nào (vị trí gốc giữa trên): nếu đè lên hàng legend thì dời sang phải legend; không đủ chỗ (tablet, laptop nhỏ) thì xuống đáy chart. */
+  const defaultPos = (sz: typeof size) => {
+    const baseX = (sz.pw - sz.bw) / 2;
+    const left = sz.lr + 12;
+    if (left <= baseX) return { x: 0, y: 0 };
+    if (left + sz.bw <= sz.pw - PRICE_AXIS) return { x: left - baseX, y: 0 };
+    return { x: 0, y: sz.ph - sz.bh - TOP - TIME_AXIS };
   };
   // `pos` giữ vị trí người dùng chọn (đã lưu); vị trí HIỆN ra là bản kẹp theo kích thước hiện tại nên đóng sidebar lại thì thanh về chỗ cũ
   const shown = (() => {
     if (!size.pw) return pos;
     const l = limits(size);
-    return { x: clamp(pos.x, l.minX, Math.max(l.minX, l.maxX)), y: clamp(pos.y, l.minY, Math.max(l.minY, l.maxY)) };
+    const p = pos.x === 0 && pos.y === 0 ? defaultPos(size) : pos;
+    return { x: clamp(p.x, l.minX, Math.max(l.minX, l.maxX)), y: clamp(p.y, l.minY, Math.max(l.minY, l.maxY)) };
   })();
 
   useEffect(() => {

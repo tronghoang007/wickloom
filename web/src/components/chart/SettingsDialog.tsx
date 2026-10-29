@@ -52,7 +52,7 @@ function Row({ label, children, soon }: { label?: ReactNode; children?: ReactNod
   return (
     <div className={`flex min-h-10 items-center gap-3 ${soon ? "opacity-55" : ""}`} title={soon ? SOON : undefined}>
       {/* phone: nhãn hẹp hơn, ô điều khiển co theo chỗ còn lại (nhãn 160px + ô 220px vượt bề rộng màn) */}
-      {label !== undefined && <div className="w-40 shrink-0 max-md:w-28">{label}</div>}
+      {label !== undefined && <div className="w-40 shrink-0 phone:w-28">{label}</div>}
       <div className={`flex min-w-0 items-center gap-2 ${soon ? "pointer-events-none" : ""}`}>{children}</div>
     </div>
   );
@@ -750,7 +750,7 @@ export default function SettingsDialog() {
       <div
         role="dialog"
         aria-label="Settings"
-        className="anim-sheet flex h-[min(640px,92vh)] w-[min(640px,96vw)] flex-col rounded-lg popup text-sm max-md:h-dvh max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:w-full max-md:rounded-none"
+        className="anim-sheet flex h-[min(640px,92vh)] w-[min(640px,96vw)] flex-col rounded-lg popup text-sm phone:h-dvh phone:pt-[env(safe-area-inset-top)] phone:pb-[env(safe-area-inset-bottom)] phone:w-full phone:rounded-none"
       >
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <h2 className="text-lg font-semibold">Settings</h2>
@@ -758,8 +758,8 @@ export default function SettingsDialog() {
             <Close />
           </button>
         </div>
-        <div className="flex min-h-0 flex-1 max-md:flex-col">
-          <nav className="w-48 shrink-0 px-3 py-2 max-md:flex max-md:w-auto max-md:gap-1 max-md:overflow-x-auto max-md:border-b max-md:border-[var(--border)] max-md:[scrollbar-width:none]">
+        <div className="flex min-h-0 flex-1 phone:flex-col">
+          <nav className="w-48 shrink-0 px-3 py-2 phone:flex phone:w-auto phone:gap-1 phone:overflow-x-auto phone:border-b phone:border-[var(--border)] phone:[scrollbar-width:none]">
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -767,7 +767,7 @@ export default function SettingsDialog() {
                 disabled={t.soon}
                 title={t.soon ? SOON : undefined}
                 onClick={() => setTab(t.id)}
-                className={`mb-0.5 flex h-9 w-full items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 text-left disabled:opacity-55 max-md:mb-0 max-md:w-auto max-md:shrink-0 ${
+                className={`mb-0.5 flex h-9 w-full items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 text-left disabled:opacity-55 phone:mb-0 phone:w-auto phone:shrink-0 ${
                   tab === t.id ? "bg-[var(--hover)] font-medium" : "enabled:hover:bg-[var(--hover)]"
                 }`}
               >
@@ -786,7 +786,7 @@ export default function SettingsDialog() {
             {tab === "alerts" && <AlertsTab />}
           </div>
         </div>
-        <div className="flex items-center justify-between border-t border-[var(--border)] px-5 py-3 max-md:flex-wrap max-md:gap-y-2 max-md:px-4">
+        <div className="flex items-center justify-between border-t border-[var(--border)] px-5 py-3 phone:flex-wrap phone:gap-y-2 phone:px-4">
           <div className="relative">
             <button
               type="button"
@@ -811,7 +811,7 @@ export default function SettingsDialog() {
             )}
           </div>
           {/* Ghi công theo giấy phép lightweight-charts (đã gỡ khỏi thanh dưới chart) */}
-          <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" className="text-[11px] text-[var(--muted)] hover:underline max-md:order-last max-md:w-full max-md:text-center">
+          <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" className="text-[11px] text-[var(--muted)] hover:underline phone:order-last phone:w-full phone:text-center">
             Charts by TradingView
           </a>
           <div className="flex gap-2">

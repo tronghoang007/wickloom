@@ -382,6 +382,32 @@ iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad
     Trading trượt ngang; thanh Replay và gợi ý vẽ trên phone nổi lên; phone đổi tab / bảng lệnh thu gọn ↔ mở rộng mờ vào.
 - Còn mở: dòng thu gọn của **lệnh mới** kiểu MT5 có tab loại lệnh (Market Execution / Buy Limit / Sell Limit / Buy Stop…) — chưa làm, hỏi user.
 
+### Review chéo phone / tablet / desktop (2026-10-29 chiều)
+
+- **Chọn chế độ theo loại máy + bề rộng** (user: "check theo platform + screen width cho rõ"), `lib/layoutMode.ts` `platformOf` + `layoutModeFor(w, h, platform)`:
+  điện thoại (iPhone, Android có "Mobile") luôn phone kể cả xoay ngang, máy gập mở ra (cạnh ngắn ≥ 660) là tablet; máy tính bảng (iPad — kể cả iPadOS
+  tự xưng Mac, nhận bằng `maxTouchPoints > 1` — Android không "Mobile") luôn tablet, chỉ cửa sổ < 660px (Slide Over / Split View hẹp) là phone;
+  máy tính theo bề rộng 768 / 1280 như cũ. Trước: `pointer: coarse` + cao < 500 → iPad mini dọc (744) thành phone, iPad Pro ngang (1366) thành desktop.
+  Mốc 660: thanh trên của tablet cần ~650px (600 tràn, 678 vừa).
+- **CSS theo đúng chế độ**: biến thể `phone:` (globals.css, `[data-layout=phone]` trên `<html>`, page.tsx đặt) thay mọi `max-md:` / `md:` — phone ngang
+  giờ có Settings / Indicators / Symbol search toàn màn, toast dưới thanh trên.
+- **Chart bị dựng lại khi qua mốc phone ↔ tablet/desktop** (ChartGrid nhánh phone trả phần tử lẻ, không cùng mảng có key): tải lại bars, Replay về
+  "Select bar" + chart trắng, mất lệnh nháp. Sửa: một `shown.map` cho cả hai.
+- **RightRail** hiện bảng OrderTicket trống khi `open` là panel chỉ-phone (trading / objects / account) sau khi sang tablet / desktop: giờ chỉ nhận
+  watchlist / alerts / calendar / order.
+- **iPad không đổi được khung** (user báo): nút `5m ⌄` của tablet dùng chung `tfPicker` với vòng chọn khung của phone (vòng chỉ vẽ trên phone) → bấm
+  không hiện gì, từ d6a7f65. TimeframeBar thêm prop `ring` (chỉ phone); tablet giữ trạng thái riêng, thả lưới dưới nút.
+- **Thanh công cụ yêu thích** chưa kéo lần nào: đè hàng legend thì dời sang phải legend (desktop), không đủ chỗ thì xuống đáy chart (tablet, laptop nhỏ).
+- Bỏ nút `⋯` (menu chart cho màn cảm ứng) dưới legend trên tablet (user: không cần). iPad giờ không mở được menu chart (iOS không có contextmenu khi nhấn giữ);
+  Alert / Settings có trên thanh trên, bật lại tự co giãn bằng chạm đúp trục giá.
+- **Thanh vẽ bên trái trên iPad** (user: mũi tên 11px vô hình vì chỉ hiện khi hover, "tay to khó bấm"): mũi tên luôn hiện trên màn cảm ứng; ngón tay chạm icon
+  nhóm chưa chọn = mở danh sách, chạm nhóm đang cầm công cụ = bỏ công cụ; Cursors: đang cầm công cụ thì về con trỏ, không thì mở danh sách; nam châm chạm
+  vẫn bật / tắt. Nhấn giữ nút nào cũng mở danh sách (chặn click ma ở touchend, không thì lớp nền đóng ngay). Sao yêu thích trong danh sách luôn hiện.
+  Mũi tên 11px nằm sát icon (ngón tay trúng cái nào là ngẫu nhiên) nên chạm mũi tên = chạm icon; chuột / trackpad (kể cả trên iPad) bấm mũi tên vẫn mở danh sách.
+  Chuột giữ như TradingView desktop (`useTouchFlyout`, DrawingToolbar.tsx).
+- Đo headless với UA thật (iPhone / iPad / Android phone + tab / máy gập, 14 cỡ): đúng chế độ, không tràn; đổi cỡ qua mốc giữ chart (không /bars mới),
+  giữ Replay + lệnh nháp; đổi khung trên iPad 820 / 1366, laptop 1024, phone (vòng → lưới).
+
 ## 11. Kiểm thử
 
 - **Desktop không đổi**: chụp màn hình headless 1440×900 trước / sau mỗi phase, so khác biệt.

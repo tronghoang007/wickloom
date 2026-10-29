@@ -23,7 +23,7 @@ export default function Toasts() {
   if (items.length === 0) return null;
   return (
     // phone (max-md): ngay dưới thanh trên, cả bề rộng (như thông báo của MT5) — ở đáy thì che bảng đặt lệnh đang mở lúc vừa đặt / sửa lệnh xong
-    <div className="pointer-events-none fixed bottom-14 left-14 z-[80] flex w-[min(380px,calc(100vw-80px))] flex-col gap-2 max-md:bottom-auto max-md:left-3 max-md:top-[calc(env(safe-area-inset-top)+56px)] max-md:w-[calc(100vw-24px)]" role="status" aria-live="polite">
+    <div className="pointer-events-none fixed bottom-14 left-14 z-[80] flex w-[min(380px,calc(100vw-80px))] flex-col gap-2 phone:bottom-auto phone:left-3 phone:top-[calc(env(safe-area-inset-top)+56px)] phone:w-[calc(100vw-24px)]" role="status" aria-live="polite">
       {items.map((t) => (
         <div key={t.id} className="anim-drop pointer-events-auto flex items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] py-3.5 pl-4 pr-3 text-[var(--fg)] shadow-xl">
           <Icon kind={t.kind} />

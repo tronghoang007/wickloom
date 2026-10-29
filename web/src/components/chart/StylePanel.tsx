@@ -226,7 +226,7 @@ export default function StylePanel() {
         </div>
 
         {/* phone: nút chưa dùng được này bỏ đi để cả thanh vừa bề rộng màn (nút ⋯ cuối từng bị cắt) */}
-        <button className={`${btn} max-md:hidden`} disabled title="Template (sắp có)">
+        <button className={`${btn} phone:hidden`} disabled title="Template (sắp có)">
           <TemplatesAddI />
         </button>
 

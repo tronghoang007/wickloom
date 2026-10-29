@@ -40,6 +40,11 @@ export default function Page() {
     void useAuthStore.getState().refresh(); // ai đang đăng nhập? (khách / user)
   }, []);
 
+  // biến thể CSS `phone:` (globals.css) theo đúng chế độ của hook; đặt trên <html> để cả hộp thoại / toast ngoài khung này cũng nhận
+  useEffect(() => {
+    document.documentElement.dataset.layout = mode;
+  }, [mode]);
+
   useEffect(() => {
     let active = true;
     let started = false;

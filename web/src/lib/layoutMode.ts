@@ -1,27 +1,48 @@
 import { useSyncExternalStore } from "react";
 
-// Bố cục theo bề rộng màn hình (docs/mobile-responsive-plan.md mục 3). Mốc trùng breakpoint mặc định của Tailwind
-// (md = 768px, xl = 1280px) để phần chỉ cần CSS dùng thẳng `md:` / `xl:` mà vẫn khớp với hook này.
+// Bố cục theo LOẠI MÁY + bề rộng màn (docs/mobile-responsive-plan.md mục 3; user 10-29: "check theo platform + screen width cho rõ").
+// Trước đây đoán bằng `pointer: coarse` + chiều cao: iPad mini dọc (744px) thành phone, iPad Pro ngang (1366px) thành desktop.
 export type LayoutMode = "phone" | "tablet" | "desktop";
+export type Platform = "phone" | "tablet" | "desktop";
+// Máy tính: mốc theo bề rộng cửa sổ, trùng breakpoint md / xl mặc định của Tailwind
 export const TABLET_MIN = 768;
 export const DESKTOP_MIN = 1280;
-// Màn cảm ứng thấp hơn ngần này (điện thoại xoay ngang: rộng 844 nhưng chỉ cao ~390) cũng dùng khung phone: khung desktop cao ~150px chrome là hết chỗ cho chart.
-// Chỉ tính màn cảm ứng: cửa sổ desktop kéo thấp vẫn là desktop.
-export const SHORT_MAX = 500;
+// Điện thoại / máy tính bảng: cửa sổ hẹp hơn ngần này (iPad Slide Over / Split View hẹp) dùng khung phone; điện thoại mà cạnh ngắn từ ngần này
+// trở lên (máy gập mở ra) dùng khung tablet. Điện thoại thường (cạnh ngắn 360–430) luôn là phone, kể cả xoay ngang.
+export const COMPACT_MAX = 660; // thanh trên của tablet cần ~650px (đo headless: 600px tràn, 678px vừa)
 
-export function layoutModeFor(width: number, height = Infinity, touch = false): LayoutMode {
-  if (width < TABLET_MIN || (touch && height < SHORT_MAX)) return "phone";
+export function layoutModeFor(width: number, height = Infinity, platform: Platform = "desktop"): LayoutMode {
+  if (platform === "phone") return Math.min(width, height) < COMPACT_MAX ? "phone" : "tablet";
+  if (platform === "tablet") return width < COMPACT_MAX ? "phone" : "tablet"; // máy tính bảng không bao giờ là desktop: không chuột, không hover
+  if (width < TABLET_MIN) return "phone";
   if (width < DESKTOP_MIN) return "tablet";
   return "desktop";
 }
+
+/** Loại máy theo user agent, không đổi trong phiên. iPadOS Safari tự xưng là Mac: nhận ra bằng màn cảm ứng nhiều điểm.
+ *  Android: điện thoại có "Mobile" trong UA, máy tính bảng thì không. */
+export function platformOf(ua: string, maxTouchPoints = 0, uaMobile?: boolean): Platform {
+  if (uaMobile || /iPhone|iPod|Windows Phone|Android.*Mobile|Mobile.*Firefox/i.test(ua)) return "phone";
+  if (/iPad|Android|Tablet|Silk|Kindle|PlayBook/i.test(ua) || (/Macintosh/.test(ua) && maxTouchPoints > 1)) return "tablet";
+  return "desktop";
+}
+let platformCache: Platform | null = null;
+const platformNow = (): Platform => {
+  if (platformCache) return platformCache;
+  if (typeof navigator === "undefined" || typeof navigator.userAgent !== "string") return "desktop";
+  const uaData = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData;
+  return (platformCache = platformOf(navigator.userAgent, navigator.maxTouchPoints ?? 0, uaData?.mobile));
+};
 
 // Con trỏ chính là ngón tay (điện thoại / máy tính bảng). Tách khỏi bề rộng: iPad dùng bút hay laptop cảm ứng vẫn
 // theo đúng loại con trỏ chính của nó.
 const TOUCH_QUERY = "(pointer: coarse)";
 // Chỉ báo khi vượt mốc (không phải mỗi lần resize): media query đổi trạng thái đúng lúc innerWidth / innerHeight qua mốc.
-const MODE_QUERIES = [`(min-width: ${TABLET_MIN}px)`, `(min-width: ${DESKTOP_MIN}px)`, `(max-height: ${SHORT_MAX - 1}px)`, TOUCH_QUERY];
+const MODE_QUERIES = [`(min-width: ${COMPACT_MAX}px)`, `(min-height: ${COMPACT_MAX}px)`, `(min-width: ${TABLET_MIN}px)`, `(min-width: ${DESKTOP_MIN}px)`];
 const LANDSCAPE_QUERY = "(orientation: landscape)";
-const currentMode = () => layoutModeFor(window.innerWidth, window.innerHeight, window.matchMedia(TOUCH_QUERY).matches);
+const modeNow = (): LayoutMode | null =>
+  typeof window !== "undefined" && typeof window.innerWidth === "number" ? layoutModeFor(window.innerWidth, window.innerHeight ?? Infinity, platformNow()) : null;
+const currentMode = () => modeNow()!;
 
 function subscribeQueries(queries: string[], onChange: () => void) {
   const lists = queries.map((q) => window.matchMedia(q));
@@ -36,19 +57,16 @@ const subscribeTouch = (onChange: () => void) => subscribeQueries([TOUCH_QUERY],
 const subscribeLandscape = (onChange: () => void) => subscribeQueries([LANDSCAPE_QUERY], onChange);
 
 /** Đang ở bố cục phone? Đọc ngay, cho code ngoài React (hàm xử lý lệnh). Server / test không có window = false. */
-export const isPhoneNow = () =>
-  typeof window !== "undefined" &&
-  typeof window.innerWidth === "number" &&
-  layoutModeFor(window.innerWidth, window.innerHeight ?? Infinity, typeof window.matchMedia === "function" && window.matchMedia(TOUCH_QUERY).matches) === "phone";
+export const isPhoneNow = () => modeNow() === "phone";
 
 /** Bảng đặt lệnh đang là sheet ở đáy chart (phone + tablet, MobileOrderSheet) chứ không phải panel bên phải của desktop: chạm nền chart huỷ nháp,
  *  đặt lệnh xong đóng hẳn bảng. Đọc ngay, cho code ngoài React. */
-export const orderSheetNow = () =>
-  typeof window !== "undefined" &&
-  typeof window.innerWidth === "number" &&
-  layoutModeFor(window.innerWidth, window.innerHeight ?? Infinity, typeof window.matchMedia === "function" && window.matchMedia(TOUCH_QUERY).matches) !== "desktop";
+export const orderSheetNow = () => {
+  const m = modeNow();
+  return m !== null && m !== "desktop";
+};
 
-/** phone / tablet / desktop theo bề rộng (và chiều cao với màn cảm ứng) hiện tại; cập nhật khi xoay máy hay kéo cửa sổ qua mốc. Server luôn là desktop. */
+/** phone / tablet / desktop theo loại máy + kích thước màn hiện tại; cập nhật khi xoay máy hay kéo cửa sổ qua mốc. Server luôn là desktop. */
 export function useLayoutMode(): LayoutMode {
   return useSyncExternalStore(subscribeMode, currentMode, () => "desktop");
 }

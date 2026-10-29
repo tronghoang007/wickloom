@@ -1,7 +1,7 @@
 "use client";
 
 import { DrawingManager } from "@/drawings/manager";
-import { AlertI, Chevron, DotsI, ResetViewI, SettingsI, SkipToLatest } from "../icons";
+import { AlertI, Chevron, ResetViewI, SettingsI, SkipToLatest } from "../icons";
 import { drawingGlobal, useDrawingStore } from "@/drawings/store";
 import { overridePoint } from "@/indicators/candleColors";
 import { IndicatorManager } from "@/indicators/manager";
@@ -293,7 +293,6 @@ export default function Chart({ paneId }: { paneId: string }) {
   const hoverRef = useRef(false); // chuột đang ở trong chart này (nguồn của "Sync crosshair")
   const lastPointerRef = useRef("mouse");
   const tapPreRef = useRef<{ at: number; x: number; y: number; busy: boolean } | null>(null); // xem onPointerDownCapture / vòng chọn khung // loại con trỏ của cú nhấn gần nhất: nhấn giữ bằng ngón tay (Android ra contextmenu) không mở menu chart
-  const crossPriceRef = useRef<number | null>(null); // giá ở crosshair trên pane chính (null = crosshair ẩn): menu ⋯ của màn cảm ứng dùng thay giá dưới chuột phải
   const touch = useTouch();
   const layoutMode = useLayoutMode();
   const phone = layoutMode === "phone";
@@ -1087,7 +1086,6 @@ export default function Chart({ paneId }: { paneId: string }) {
 
     chart.subscribeCrosshairMove((p) => {
       const bars = barsRef.current;
-      crossPriceRef.current = p.point && p.paneIndex === mainIndex() ? (seriesRef.current?.coordinateToPrice(p.point.y) ?? null) : null;
       // "Sync in layout › Crosshair": rời chart thì luôn báo để xoá, còn vị trí chỉ báo khi chuột đang ở chart này
       if (!p.time) syncCrosshair(paneId, null);
       else if (hoverRef.current) syncCrosshair(paneId, p.time as number);
@@ -2098,7 +2096,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           onMouseLeave={() => setMainLegendHover(false)}
           style={{ top: mainTop + 8, "--legend-bg": `color-mix(in srgb, ${cs.bg ?? CHART_THEMES[theme].bg} 50%, transparent)` } as React.CSSProperties}
         >
-          <div className="-ml-1 flex w-fit flex-wrap items-baseline gap-x-3 rounded bg-[var(--legend-bg)] pl-1 pr-1">
+          <div data-legend-row className="-ml-1 flex w-fit flex-wrap items-baseline gap-x-3 rounded bg-[var(--legend-bg)] pl-1 pr-1">
             {/* phone: không legend (user 10-29) — mã + khung đã có trên thanh trên; OHLC / Vol / hàng indicator cũng bỏ
                 (ẩn / hiện indicator ở danh sách trong vòng chọn khung, TimeframeRing) */}
             {cs.showTitle && !phone && (
@@ -2160,7 +2158,7 @@ export default function Chart({ paneId }: { paneId: string }) {
             />
           )}
           {!legendCollapsed && !mainSqueezed && !phone && mainIndicators.map(indicatorRow)}
-          {!mainSqueezed && !phone && ((!vs.removed || indicators.length > 0) || touch) && (
+          {!mainSqueezed && !phone && (!vs.removed || indicators.length > 0) && (
             <div className="mt-1 flex gap-1">
               {(!vs.removed || indicators.length > 0) && (
                 <button
@@ -2172,24 +2170,6 @@ export default function Chart({ paneId }: { paneId: string }) {
                 >
                   <span className={legendCollapsed ? "" : "rotate-180"}>
                     <Chevron size={22} />
-                  </span>
-                </button>
-              )}
-              {/* màn cảm ứng không có chuột phải: menu chart ở đây, giá theo crosshair (chạm / nhấn giữ lên chart để đặt). Phone không có cả cụm này
-                  (user 10-29): Settings / Create alert / Replay ở menu ⋯ của vòng chọn khung, bật lại tự co giãn bằng chạm đúp trục giá */}
-              {touch && (
-                <button
-                  type="button"
-                  aria-label="Chart menu"
-                  title="Chart menu"
-                  onClick={(e) => {
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setCtxMenu({ x: r.left, y: r.bottom + 4, items: menuItems(crossPriceRef.current) });
-                  }}
-                  className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded border border-[#464646] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--hover)]"
-                >
-                  <span className="scale-[0.8]">
-                    <DotsI />
                   </span>
                 </button>
               )}

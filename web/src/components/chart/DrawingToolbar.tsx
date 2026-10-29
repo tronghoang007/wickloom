@@ -14,13 +14,57 @@ import { ToolIcon } from "../toolIcons";
 
 const base = "relative flex h-[38px] w-[38px] items-center justify-center rounded";
 // Nút nhóm kiểu TradingView: icon 38px giữa cột 52px + vùng mũi tên 11px ở mép phải
-// (mũi tên hiện khi hover hoặc khi flyout đang mở).
+// (mũi tên hiện khi hover hoặc khi flyout đang mở). Ngón tay: mũi tên 11px nằm sát icon, chạm trúng cái nào là ngẫu nhiên, nên chạm vào mũi tên làm
+// y như chạm icon (useTouchFlyout); chuột bấm mũi tên vẫn mở danh sách như TV.
 const wrap = "group relative flex w-full justify-center"; // w-full: cột chỉ rộng 51px (52 trừ viền), w-[52px] làm tràn 1px và hiện thanh cuộn ngang
 const arrowBtn = (open: boolean) =>
   `absolute right-0 top-1/2 flex h-[34px] w-[11px] -translate-y-1/2 items-center justify-center rounded-sm text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)] ${
-    // ẩn bằng opacity (không dùng visibility) để vẫn click/focus được
-    open ? "bg-[var(--hover)] text-[var(--fg)]" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+    // ẩn bằng opacity (không dùng visibility) để vẫn click/focus được; màn cảm ứng không có hover nên luôn hiện (iPad, user 10-29)
+    open ? "bg-[var(--hover)] text-[var(--fg)]" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
   }`;
+
+const LONG_PRESS_MS = 450;
+/** Ngón tay trên nút có flyout (iPad, user 10-29: mũi tên 11px "tay to khó bấm"): chạm = `onTouchTap` của click (thường là mở flyout), nhấn giữ = mở
+ *  flyout; cú click sau khi nhả tay nhấn giữ bị bỏ để không chọn luôn công cụ. Chuột / bút giữ như TradingView desktop. Trả props gắn vào nút chính. */
+function useTouchFlyout(open: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
+  const touched = useRef(false);
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  return {
+    onPointerDown: (e: React.PointerEvent) => {
+      fired.current = false;
+      touched.current = e.pointerType === "touch";
+      if (!touched.current) return;
+      clear();
+      timer.current = setTimeout(() => {
+        fired.current = true;
+        open();
+      }, LONG_PRESS_MS);
+    },
+    onPointerUp: clear,
+    // flyout mở trong lúc giữ thì lớp nền đóng flyout nằm ngay dưới ngón tay: không chặn thì click khi nhả tay rơi vào nó và đóng flyout luôn
+    onTouchEnd: (e: React.TouchEvent) => {
+      if (fired.current && e.cancelable) e.preventDefault();
+    },
+    onPointerCancel: clear,
+    onPointerLeave: clear,
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(), // Android bắn contextmenu khi nhấn giữ
+    /** Gọi trong onClick của nút: `f` cho chuột / bàn phím, `onTouchTap` (nếu có) cho cú chạm bằng ngón tay; bỏ cú click ngay sau khi nhấn giữ đã mở flyout. */
+    click: (f: () => void, onTouchTap?: () => void) => {
+      if (fired.current) {
+        fired.current = false;
+        return;
+      }
+      if (touched.current && onTouchTap) onTouchTap();
+      else f();
+    },
+  };
+}
+const holdCls = "[-webkit-touch-callout:none]"; // iOS: nhấn giữ không hiện bảng xem trước / chép
 const cls = (active: boolean) =>
   `${base} ${active ? "bg-[var(--hover)] text-[var(--accent-text)]" : "text-[var(--fg)] hover:bg-[var(--hover)]"}`;
 
@@ -74,7 +118,7 @@ function ToolItem({
       {!spec.disabled && (
         // ô 24x24 bo 4px, sao 13x12 như TV (đo trên flyout TV: nút 24, svg 18, sao 13.1x12.4); hover: nền #464646 (≈ fg 22%), sao đã yêu thích sáng trắng
         <button
-          className={`-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] hover:bg-[color-mix(in_srgb,var(--fg)_22%,transparent)] ${fav ? "text-[var(--fg)] hover:!text-[var(--solid,#f2f2f2)]" : "text-transparent group-hover/item:text-[var(--muted)] hover:!text-[var(--fg)]"}`}
+          className={`-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] hover:bg-[color-mix(in_srgb,var(--fg)_22%,transparent)] ${fav ? "text-[var(--fg)] hover:!text-[var(--solid,#f2f2f2)]" : "text-transparent group-hover/item:text-[var(--muted)] pointer-coarse:text-[var(--muted)] hover:!text-[var(--fg)]"}`}
           onClick={(e) => {
             e.stopPropagation();
             toggleFavorite(id);
@@ -98,19 +142,25 @@ function GroupButton({ group }: { group: Group }) {
       ? lastTool[group.id]
       : group.icon;
   const active = !!tool && ids.includes(tool);
+  const openFlyout = () => setRect(ref.current!.getBoundingClientRect());
+  const { click, ...hold } = useTouchFlyout(openFlyout);
+  const pick = () => api?.setTool(active ? null : current);
+  const touchTap = () => (active ? pick() : openFlyout()); // ngón tay: nhóm đang cầm công cụ thì chạm = bỏ công cụ (như chuột); chưa thì mở danh sách để chọn
 
   return (
     <div ref={ref} className={wrap}>
       <button
-        className={cls(active)}
+        className={`${cls(active)} ${holdCls}`}
         title={group.label}
-        onClick={() => api?.setTool(active ? null : current)}
+        {...hold}
+        onClick={() => click(pick, touchTap)}
       >
         <ToolIcon id={current} />
       </button>
       <button
         className={arrowBtn(!!rect)}
-        onClick={() => setRect(ref.current!.getBoundingClientRect())}
+        {...hold}
+        onClick={() => click(openFlyout, touchTap)}
         title={group.label}
       >
         <FlyoutArrowI />
@@ -164,19 +214,25 @@ function CursorButton() {
     api?.setTool(v === "eraser" ? "eraser" : null);
     setRect(null);
   };
+  const openFlyout = () => setRect(ref.current!.getBoundingClientRect());
+  const { click, ...hold } = useTouchFlyout(openFlyout);
+  // ngón tay: đang cầm công cụ vẽ thì chạm = về con trỏ (huỷ công cụ); đang ở con trỏ rồi thì mở danh sách kiểu con trỏ
+  const touchTap = () => (tool !== null && tool !== "eraser" ? choose(cursor) : openFlyout());
 
   return (
     <div ref={ref} className={wrap}>
       <button
-        className={cls(tool === null || tool === "eraser")}
+        className={`${cls(tool === null || tool === "eraser")} ${holdCls}`}
         title="Cursors"
-        onClick={() => choose(cursor)}
+        {...hold}
+        onClick={() => click(() => choose(cursor), touchTap)}
       >
         <ToolIcon id={cur.icon} />
       </button>
       <button
         className={arrowBtn(!!rect)}
-        onClick={() => setRect(ref.current!.getBoundingClientRect())}
+        {...hold}
+        onClick={() => click(openFlyout, touchTap)}
         title="Cursors"
       >
         <FlyoutArrowI />
@@ -284,16 +340,21 @@ function MagnetButton() {
     setRect(null);
   };
   const label = magnetMode === "strong" ? "Strong magnet" : "Weak magnet";
+  // nam châm: chạm vẫn bật / tắt (danh sách chỉ có Weak / Strong, không tắt được), nhấn giữ hay chạm mũi tên mới mở danh sách
+  const openFlyout = () => setRect(ref.current!.getBoundingClientRect());
+  const toggle = () => useDrawingStore.setState({ magnet: !magnet });
+  const { click, ...hold } = useTouchFlyout(openFlyout);
   return (
     <div ref={ref} className={wrap}>
       <button
-        className={cls(magnet)}
+        className={`${cls(magnet)} ${holdCls}`}
         title={`${label} (giữ Ctrl/Cmd để đảo tạm thời)`}
-        onClick={() => useDrawingStore.setState({ magnet: !magnet })}
+        {...hold}
+        onClick={() => click(toggle)}
       >
         <Magnet strong={magnetMode === "strong"} />
       </button>
-      <button className={arrowBtn(!!rect)} onClick={() => setRect(ref.current!.getBoundingClientRect())} title="Magnet mode">
+      <button className={arrowBtn(!!rect)} {...hold} onClick={() => click(openFlyout, toggle)} title="Magnet mode">
         <FlyoutArrowI />
       </button>
       {rect && (

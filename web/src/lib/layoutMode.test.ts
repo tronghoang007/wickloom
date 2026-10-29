@@ -1,33 +1,51 @@
 import { describe, expect, it, vi } from "vitest";
-import { DESKTOP_MIN, TABLET_MIN, holdTouch, layoutModeFor } from "./layoutMode";
+import { COMPACT_MAX, DESKTOP_MIN, TABLET_MIN, holdTouch, layoutModeFor, platformOf } from "./layoutMode";
+
+const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+const IPAD_AS_MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+const ANDROID_PHONE = "Mozilla/5.0 (Linux; Android 14; SM-A556E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
+const ANDROID_TAB = "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+const WIN = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
+describe("platformOf", () => {
+  it("nhận ra điện thoại, máy tính bảng (kể cả iPadOS tự xưng là Mac), máy tính", () => {
+    expect(platformOf(IPHONE)).toBe("phone");
+    expect(platformOf(ANDROID_PHONE)).toBe("phone");
+    expect(platformOf(ANDROID_TAB)).toBe("tablet");
+    expect(platformOf(IPAD_AS_MAC, 5)).toBe("tablet");
+    expect(platformOf(IPAD_AS_MAC, 0)).toBe("desktop"); // Mac thật
+    expect(platformOf(WIN)).toBe("desktop");
+    expect(platformOf(WIN, 0, true)).toBe("phone"); // userAgentData.mobile
+  });
+});
 
 describe("layoutModeFor", () => {
-  it("điện thoại dọc / ngang nhỏ là phone", () => {
-    expect(layoutModeFor(320)).toBe("phone");
+  it("máy tính: theo bề rộng cửa sổ (768 / 1280), cửa sổ thấp không đổi", () => {
     expect(layoutModeFor(390)).toBe("phone");
     expect(layoutModeFor(TABLET_MIN - 1)).toBe("phone");
-  });
-
-  it("từ 768px đến dưới 1280px là tablet", () => {
     expect(layoutModeFor(TABLET_MIN)).toBe("tablet");
-    expect(layoutModeFor(1024)).toBe("tablet");
     expect(layoutModeFor(DESKTOP_MIN - 1)).toBe("tablet");
-  });
-
-  it("từ 1280px trở lên là desktop", () => {
     expect(layoutModeFor(DESKTOP_MIN)).toBe("desktop");
-    expect(layoutModeFor(1440)).toBe("desktop");
+    expect(layoutModeFor(1440, 450, "desktop")).toBe("desktop");
   });
 
-  it("điện thoại xoay ngang (màn cảm ứng thấp) là phone; cửa sổ desktop thấp thì không", () => {
-    expect(layoutModeFor(844, 390, true)).toBe("phone");
-    expect(layoutModeFor(932, 430, true)).toBe("phone");
-    expect(layoutModeFor(1180, 820, true)).toBe("tablet"); // iPad ngang
-    expect(layoutModeFor(1024, 400, false)).toBe("tablet");
-    expect(layoutModeFor(1440, 450, false)).toBe("desktop");
+  it("điện thoại: luôn phone, kể cả xoay ngang; máy gập mở ra là tablet", () => {
+    expect(layoutModeFor(360, 740, "phone")).toBe("phone");
+    expect(layoutModeFor(844, 390, "phone")).toBe("phone");
+    expect(layoutModeFor(932, 430, "phone")).toBe("phone");
+    expect(layoutModeFor(884, 1104, "phone")).toBe("tablet");
+    expect(layoutModeFor(1024, 600, "phone")).toBe("phone");
   });
 
-  it("mốc trùng breakpoint md / xl mặc định của Tailwind", () => {
+  it("máy tính bảng: luôn tablet (iPad mini dọc, iPad Pro ngang), chỉ cửa sổ hẹp (Slide Over / Split View) là phone", () => {
+    expect(layoutModeFor(744, 1133, "tablet")).toBe("tablet");
+    expect(layoutModeFor(1366, 1024, "tablet")).toBe("tablet");
+    expect(layoutModeFor(COMPACT_MAX, 1024, "tablet")).toBe("tablet");
+    expect(layoutModeFor(COMPACT_MAX - 1, 1024, "tablet")).toBe("phone");
+    expect(layoutModeFor(320, 1024, "tablet")).toBe("phone");
+  });
+
+  it("mốc máy tính trùng breakpoint md / xl mặc định của Tailwind", () => {
     expect(TABLET_MIN).toBe(768);
     expect(DESKTOP_MIN).toBe(1280);
   });

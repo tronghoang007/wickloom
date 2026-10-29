@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* `phone:` = đang ở khung phone theo useLayoutMode (loại máy + bề rộng, lib/layoutMode.ts; page.tsx đặt data-layout trên <html>). Dùng thay `max-md:`:
+ * breakpoint chỉ theo bề rộng nên lệch với hook (điện thoại xoay ngang rộng 844 vẫn là phone, iPad mini dọc 744 là tablet). */
+@custom-variant phone (&:where([data-layout="phone"], [data-layout="phone"] *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

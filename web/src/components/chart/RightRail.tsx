@@ -29,7 +29,9 @@ export default function RightRail() {
   const overlay = useLayoutMode() === "tablet";
   // bảng đặt lệnh không có nút riêng trên cột icon (user 10-29): mở bằng SELL / BUY hay chọn lệnh trên chart, đóng bằng ✕ của bảng
   // tablet: bảng đặt lệnh là sheet ở đáy chart (MobileOrderSheet), không phải panel ở đây
-  const active = open !== null && (open !== "order" || (drafting && !overlay));
+  // "trading" / "objects" / "account" chỉ có trên phone: qua mốc sang tablet / desktop (xoay iPad mini, Split View) mà còn mở thì bỏ qua,
+  // không thì panel rơi xuống nhánh OrderTicket — bảng trống đè chart, không có nút đóng
+  const active = (open === "watchlist" || open === "alerts" || open === "calendar") || (open === "order" && drafting && !overlay);
 
   return (
     <div className="relative flex shrink-0">

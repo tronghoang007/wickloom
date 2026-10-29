@@ -372,7 +372,7 @@ export function MobileTopBar() {
   return (
     <div className="relative z-50 flex h-12 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--page)] px-1">
       <SymbolSearch flat />
-      <TimeframeBar className={`${btn} min-w-11 justify-center text-[15px]`} compact chevron={false} />
+      <TimeframeBar className={`${btn} min-w-11 justify-center text-[15px]`} compact chevron={false} ring />
       <TradeButtons />
       <PaneSwitcher />
       <PhoneRing />

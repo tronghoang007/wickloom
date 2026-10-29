@@ -12,24 +12,26 @@ import { Chevron, Plus, StarI } from "../icons";
 // hiện trên toolbar (TV cũng vậy).
 /** `compact` (thanh trên của phone): không bày các khung yêu thích, chỉ một nút "khung đang chọn ⌄" mở dropdown. */
 /** `chevron={false}`: thanh trên phẳng của phone dọc (như MT5) chỉ ghi "M15", không mũi tên. */
-export default function TimeframeBar({ className, compact = false, chevron = true }: { className: string; compact?: boolean; chevron?: boolean }) {
+/** `ring` (chỉ phone): nút mở vòng chọn khung (TimeframeRing của MobileChrome); không có thì nút compact (tablet) thả lưới khung ngay dưới nút. */
+export default function TimeframeBar({ className, compact = false, chevron = true, ring = false }: { className: string; compact?: boolean; chevron?: boolean; ring?: boolean }) {
   const tf = useChartStore((s) => s.tf);
   const favTfs = useChartStore((s) => s.favTfs);
   const set = useChartStore((s) => s.set);
-  // phone (compact): trạng thái ở useRailStore.tfPicker vì chạm nền chart cũng mở vòng; vòng trước, nút ⋯ của vòng mới mở lưới đủ khung
+  // phone (ring): trạng thái ở useRailStore.tfPicker vì chạm nền chart cũng mở vòng; vòng trước, nút ⋯ của vòng mới mở lưới đủ khung.
+  // Tablet (compact, không ring) giữ trạng thái riêng: vòng chỉ vẽ trên phone, dùng chung tfPicker thì bấm nút trên iPad không hiện gì (user 10-29)
   const picker = useRailStore((s) => s.tfPicker);
   const [menuOpen, setMenuOpen] = useState(false);
-  const open = compact ? picker !== null : menuOpen;
-  const setOpen = (v: boolean) => (compact ? useRailStore.setState({ tfPicker: v ? "ring" : null, ringAt: null }) : setMenuOpen(v));
-  const grid = picker === "grid";
+  const open = ring ? picker !== null : menuOpen;
+  const setOpen = (v: boolean) => (ring ? useRailStore.setState({ tfPicker: v ? "ring" : null, ringAt: null }) : setMenuOpen(v));
+  const grid = compact && (ring ? picker === "grid" : open);
   const [collapsed, setCollapsed] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && (compact ? useRailStore.setState({ tfPicker: null }) : setMenuOpen(false));
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && (ring ? useRailStore.setState({ tfPicker: null }) : setMenuOpen(false));
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, compact]);
+  }, [open, ring]);
 
   const shown = [...new Set([...favTfs, tf])]
     .filter((t) => t in TF_SECONDS)
@@ -59,12 +61,12 @@ export default function TimeframeBar({ className, compact = false, chevron = tru
           {compact && tfShort(tf)}
           {chevron && <Chevron />}
         </button>
-        {open && compact && grid && (
+        {open && grid && (
           // phone: lưới ô bấm thay danh sách dài phải cuộn (chọn một chạm, như vòng chọn khung của MT5); bỏ ngôi sao yêu thích — chỉ có ý nghĩa với toolbar desktop
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-            {/* phone dọc: cả bề rộng dưới thanh trên; rộng hơn (tablet, phone ngang): thả xuống ngay dưới nút */}
-            <div className="anim-pop fixed inset-x-3 top-[calc(env(safe-area-inset-top)+48px)] z-40 rounded-lg bg-[var(--panel)] p-3 shadow-[0_2px_8px_rgba(0,0,0,0.5)] md:absolute md:inset-x-auto md:left-0 md:top-10 md:w-[360px]" role="dialog" aria-label="Timeframe">
+            {/* phone: cả bề rộng dưới thanh trên; tablet: thả xuống ngay dưới nút */}
+            <div className="anim-pop absolute left-0 top-10 z-40 w-[360px] rounded-lg bg-[var(--panel)] p-3 shadow-[0_2px_8px_rgba(0,0,0,0.5)] phone:fixed phone:inset-x-3 phone:top-[calc(env(safe-area-inset-top)+48px)] phone:w-auto" role="dialog" aria-label="Timeframe">
               {TF_MENU.map(({ title, tfs }) => (
                 <div key={title} className="mb-2 last:mb-0">
                   <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">{title}</div>

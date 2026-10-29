@@ -108,13 +108,13 @@ export default function SymbolSearchDialog({
 
   return (
     <div
-      className="anim-fade fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16 max-md:pt-0"
+      className="anim-fade fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16 phone:pt-0"
       onClick={onClose}
       onKeyDown={onKey}
     >
       <div
         // phone (max-md): toàn màn để danh sách dài và bàn phím ảo đều có chỗ
-        className="anim-sheet flex max-h-[80vh] w-[790px] max-w-[96vw] flex-col overflow-hidden rounded-2xl popup max-md:h-dvh max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:max-h-none max-md:max-w-none max-md:w-full max-md:rounded-none"
+        className="anim-sheet flex max-h-[80vh] w-[790px] max-w-[96vw] flex-col overflow-hidden rounded-2xl popup phone:h-dvh phone:pt-[env(safe-area-inset-top)] phone:pb-[env(safe-area-inset-bottom)] phone:max-h-none phone:max-w-none phone:w-full phone:rounded-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pb-3 pt-4">

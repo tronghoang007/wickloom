@@ -31,17 +31,13 @@ export default function ChartGrid() {
   const multi = ids.length > 1 && !phone;
   useEffect(() => startPaneSync(), []); // "Sync in layout": symbol / khung đi theo giữa các chart
 
-  if (phone) {
-    return (
-      <div ref={boxRef} className="relative h-full w-full overflow-hidden">
-        {panes[activeId] && <PaneFrame key={`${revision}:${activeId}`} id={activeId} rect={FULL} hidden={false} multi={false} active maximized={false} />}
-      </div>
-    );
-  }
-
+  // phone và desktop phải render chart trong CÙNG một mảng có key: nhánh phone từng trả một phần tử lẻ nên React dựng lại Chart mỗi lần qua mốc
+  // (xoay iPad mini, Split View, kéo cửa sổ) — tải lại dữ liệu, mất Replay và lệnh nháp
+  const shown = phone ? ids.filter((id) => id === activeId) : ids;
   return (
     <div ref={boxRef} className="relative h-full w-full overflow-hidden">
-      {ids.map((id) => {
+      {shown.map((id) => {
+        if (phone) return <PaneFrame key={`${revision}:${id}`} id={id} rect={FULL} hidden={false} multi={false} active maximized={false} />;
         const hidden = maximized !== null && id !== maximized;
         // pane bị ẩn vẫn giữ nguyên kích thước (autoSize của chart không về 0) và vẫn mount
         const r = maximized !== null ? FULL : rects[id] ?? FULL;
@@ -49,7 +45,7 @@ export default function ChartGrid() {
           <PaneFrame key={`${revision}:${id}`} id={id} rect={r} hidden={hidden} multi={multi} active={id === activeId} maximized={id === maximized} />
         );
       })}
-      {maximized === null && lines.map((g) => <Splitter key={`${g.path.join(".")}/${g.index}`} g={g} boxRef={boxRef} />)}
+      {!phone && maximized === null && lines.map((g) => <Splitter key={`${g.path.join(".")}/${g.index}`} g={g} boxRef={boxRef} />)}
     </div>
   );
 }
