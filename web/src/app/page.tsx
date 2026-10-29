@@ -12,7 +12,7 @@ import SettingsDialog from "@/components/chart/SettingsDialog";
 import IndicatorSettingsDialog from "@/components/chart/IndicatorSettingsDialog";
 import VolumeSettingsDialog from "@/components/chart/VolumeSettingsDialog";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
-import { DrawingHint, MobileOrderSheet, MobilePanel, MobileTabBar, MobileTopBar } from "@/components/chart/MobileChrome";
+import { MobileOrderSheet, MobilePanel, MobileTabBar, MobileTopBar } from "@/components/chart/MobileChrome";
 import RightRail from "@/components/chart/RightRail";
 import TradingPanel from "@/components/chart/TradingPanel";
 import Toolbar from "@/components/chart/Toolbar";
@@ -86,7 +86,6 @@ export default function Page() {
         {!phone && showToolbar && <DrawingToolbar />}
         <main className="relative min-w-0 flex-1">
           <ChartGrid />
-          {phone && <DrawingHint />}
           {/* tablet cũng dùng sheet ở đáy chart: bảng 384px đè lên chart che mất đường / thẻ của lệnh nháp (user 10-29, iPad) */}
           {mode !== "desktop" && <MobileOrderSheet />}
           {phone && <MobilePanel />}

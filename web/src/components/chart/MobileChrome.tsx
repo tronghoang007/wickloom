@@ -245,7 +245,7 @@ function ToolCell({ id, onPick }: { id: string; onPick: (id: string) => void }) 
 }
 
 /** Màn Objects (như MT5): các nút chung (nam châm, giữ chế độ vẽ, ẩn / hiện, khoá, xoá tất cả), hàng công cụ yêu thích, rồi mọi công cụ theo nhóm.
- *  Chọn một công cụ thì về chart để chạm đặt điểm (thanh DrawingHint báo đang vẽ gì và có nút huỷ). */
+ *  Chọn một công cụ thì về chart để chạm đặt điểm. */
 function ObjectsPanel({ onClose }: { onClose: () => void }) {
   const { favorites, magnet, stay, hideAll, lockAll, api } = useDrawingStore();
   const pick = (id: string) => {
@@ -317,27 +317,6 @@ function ObjectsPanel({ onClose }: { onClose: () => void }) {
             );
           }),
         )}
-      </div>
-    </div>
-  );
-}
-
-/** Đang cầm công cụ vẽ trên phone: thanh nhỏ ở đáy chart nói đang vẽ gì + nút huỷ (desktop huỷ bằng chuột phải / Esc, phone không có). */
-export function DrawingHint() {
-  const tool = useDrawingStore((s) => s.tool);
-  const api = useDrawingStore((s) => s.api);
-  const open = useRailStore((s) => s.open);
-  if (!tool || !SPEC[tool] || open) return null;
-  return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-[72px] z-[44] flex justify-center px-3">
-      <div className="anim-rise pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] py-1 pl-3 pr-1 text-[13px] shadow-lg">
-        <ToolIcon id={tool} size={22} />
-        <span className="truncate">
-          {SPEC[tool].label} · <span className="text-[var(--muted)]">chạm lên chart để đặt điểm</span>
-        </span>
-        <button type="button" aria-label="Huỷ vẽ" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-[var(--hover)]" onClick={() => api?.setTool(null)}>
-          <Close size={20} />
-        </button>
       </div>
     </div>
   );
