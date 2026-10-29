@@ -341,10 +341,13 @@ iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad
   ngay sau → bỏ focus → bảng đóng sau 1ms. `LineDrag` giờ đặt cờ `tapped` cho cả cú bấm này (trước chỉ đường `fixed` của vị thế). Unit test thêm.
 - **Khung giá chừa phần bị bảng che**: bảng nổi báo mép trên (`sheetTop`), `autoscaleInfoProvider` thêm `margins.below` = phần pane bị che, nên SL / TP
   thấp nhất không nằm sau bảng. Chỉ phone dọc (ngang thì bảng ở bên phải).
-- **Legend gọn**: phone dọc chỉ "XAUUSDm · 5m" — bỏ logo, tên đầy đủ, sàn, OHLC, thay đổi, Vol, hàng Volume / indicator (cả legend của pane riêng), nút thu legend.
-  Còn nút ⋯ (menu chart cho cảm ứng).
-- **Vòng chọn khung như MT5** (`TimeframeRing`): bấm nút khung → vòng giữa màn, M1 M5 M15 M30 H1 H4 D1 W1 MN quanh vòng (M15 ở đỉnh), ⋯ mở lưới đủ khung
-  (M2, M3, M10, H2, H3), mục Indicators mở danh sách indicator của chart (Volume + đã thêm) chạm để ẩn / hiện.
+- **Không legend trên chart** (phone dọc): bỏ cả mã + khung (đã có trên thanh trên), OHLC, Vol, hàng Volume / indicator (cả legend của pane riêng),
+  nút thu legend, nút ⋯ menu chart của cảm ứng, cụm nút của pane (Move / Maximize…).
+- **Vòng chọn khung như MT5** (`TimeframeRing`, trạng thái `useRailStore.tfPicker` / `ringAt`): **chạm nền chart** → vòng hiện tâm ở chỗ chạm (kẹp trong màn),
+  xoay vào (Web Animations); nút khung trên thanh cũng mở (giữa màn). Không mở khi cú chạm đang làm việc khác (cầm công cụ vẽ, bỏ chọn hình, bỏ nháp / focus
+  lệnh, chọn nến Replay, vừa chọn hình / đường lệnh — xét trạng thái trước và sau cú chạm, Chart.tsx `tapPreRef`). Quanh vòng: M1 M5 M15 M30 H1 H4 D1 W1 MN
+  (M15 ở đỉnh), lưới đủ khung (M2, M3, M10, H2, H3), Indicators (danh sách ẩn / hiện), ⋯ (menu ⋯ cũ thành popup dưới thanh trên — nút ⋯ trên thanh bỏ ở phone dọc).
+- SELL / BUY rộng 80px (co tới 44px khi chật).
 - Thử headless (390 / 360 / ngang / desktop): không tràn ngang, các luồng đặt / sửa / kéo / đóng lệnh trên Replay, vòng khung + danh sách ẩn hiện.
 - Còn mở: dòng thu gọn của **lệnh mới** kiểu MT5 có tab loại lệnh (Market Execution / Buy Limit / Sell Limit / Buy Stop…) — chưa làm, hỏi user.
 

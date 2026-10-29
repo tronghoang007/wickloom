@@ -14,6 +14,10 @@ type State = {
   sheetExpandedFor: number | null;
   /** Phone dọc: mép trên (toạ độ viewport, px) của bảng đặt lệnh đang nổi đè lên đáy chart, null = không có. Khung giá chừa phần bị che (Chart.tsx). */
   sheetTop: number | null;
+  /** Phone: bộ chọn khung đang mở — vòng kiểu MT5 (TimeframeRing; mở bằng nút khung hoặc chạm nền chart) hay lưới đủ khung (nút ⋯ của vòng). */
+  tfPicker: "ring" | "grid" | null;
+  /** Chỗ chạm chart (toạ độ viewport) mở vòng: tâm vòng đặt ở đó; null = giữa màn (mở bằng nút khung). */
+  ringAt: { x: number; y: number } | null;
 };
 
 export const useRailStore = create<State>()((set, get) => ({
@@ -22,6 +26,8 @@ export const useRailStore = create<State>()((set, get) => ({
   before: null,
   sheetExpandedFor: null,
   sheetTop: null,
+  tfPicker: null,
+  ringAt: null,
   openOrder: () => {
     const { open, before } = get();
     set({ open: "order", before: open === "order" ? before : open });

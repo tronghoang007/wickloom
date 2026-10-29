@@ -3,9 +3,9 @@
 import { TF_SECONDS } from "@/lib/api";
 import { TF_MENU, tfLong, tfShort } from "@/lib/timeframes";
 import { useChartStore } from "@/store/chart";
+import { useRailStore } from "@/store/rail";
 import { useEffect, useState } from "react";
 import { Chevron, Plus, StarI } from "../icons";
-import TimeframeRing from "./TimeframeRing";
 
 // Các khung "yêu thích" trên toolbar + dropdown đầy đủ như TradingView: nhóm Minutes/Hours/
 // Days thu gọn được, ngôi sao để ghim khung lên toolbar. Khung đang chọn mà chưa ghim vẫn
@@ -16,16 +16,20 @@ export default function TimeframeBar({ className, compact = false, chevron = tru
   const tf = useChartStore((s) => s.tf);
   const favTfs = useChartStore((s) => s.favTfs);
   const set = useChartStore((s) => s.set);
-  const [open, setOpen] = useState(false);
-  const [grid, setGrid] = useState(false); // phone: vòng chọn khung (TimeframeRing) trước, nút ⋯ của vòng mới mở lưới đủ khung
+  // phone (compact): trạng thái ở useRailStore.tfPicker vì chạm nền chart cũng mở vòng; vòng trước, nút ⋯ của vòng mới mở lưới đủ khung
+  const picker = useRailStore((s) => s.tfPicker);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const open = compact ? picker !== null : menuOpen;
+  const setOpen = (v: boolean) => (compact ? useRailStore.setState({ tfPicker: v ? "ring" : null, ringAt: null }) : setMenuOpen(v));
+  const grid = picker === "grid";
   const [collapsed, setCollapsed] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && (compact ? useRailStore.setState({ tfPicker: null }) : setMenuOpen(false));
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, compact]);
 
   const shown = [...new Set([...favTfs, tf])]
     .filter((t) => t in TF_SECONDS)
@@ -50,15 +54,11 @@ export default function TimeframeBar({ className, compact = false, chevron = tru
         <button
           className={`${className} ${compact ? "gap-0.5 px-2 font-semibold" : "px-1"} ${open ? "bg-[var(--hover)]" : ""}`}
           title={compact ? tfLong(tf) : undefined}
-          onClick={() => {
-            setGrid(false);
-            setOpen(!open);
-          }}
+          onClick={() => setOpen(!open)}
         >
           {compact && tfShort(tf)}
           {chevron && <Chevron />}
         </button>
-        {open && compact && !grid && <TimeframeRing onClose={() => setOpen(false)} onGrid={() => setGrid(true)} />}
         {open && compact && grid && (
           // phone: lưới ô bấm thay danh sách dài phải cuộn (chọn một chạm, như vòng chọn khung của MT5); bỏ ngôi sao yêu thích — chỉ có ý nghĩa với toolbar desktop
           <>

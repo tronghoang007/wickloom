@@ -57,6 +57,7 @@ import LayoutBar from "./LayoutBar";
 import LayoutMenu from "./LayoutMenu";
 import OrderTicket from "./OrderTicket";
 import TimeframeBar from "./TimeframeBar";
+import TimeframeRing from "./TimeframeRing";
 import { CHART_TYPES, SymbolSearch, toggleFullscreen, useSymbolsPolling } from "./Toolbar";
 import { useTradeClick } from "./TradeWidget";
 import TradingPanel, { useTradePolling } from "./TradingPanel";
@@ -128,21 +129,9 @@ function PaneSwitcher() {
   );
 }
 
-/** Menu ⋯: các nút của toolbar desktop không còn chỗ trên phone. */
+/** Menu ⋯ (phone ngang: nút trên thanh; phone dọc: mục ⋯ của vòng chọn khung) */
 function MoreMenu() {
   const [open, setOpen] = useState(false);
-  const chartType = useChartStore((s) => s.chartType);
-  const theme = useChartStore((s) => s.theme);
-  const set = useChartStore((s) => s.set);
-  const api = useDrawingStore((s) => s.api);
-  const replayOn = useReplayStore((s) => s.active || s.selecting);
-  const run = (f: () => void) => () => {
-    setOpen(false);
-    f();
-  };
-  // iPhone Safari không cho trang web vào fullscreen: không có thì ẩn nút
-  const canFullscreen = typeof document !== "undefined" && document.fullscreenEnabled;
-
   return (
     <Popover
       open={open}
@@ -154,6 +143,27 @@ function MoreMenu() {
         </button>
       }
     >
+      <MoreContent onDone={() => setOpen(false)} />
+    </Popover>
+  );
+}
+
+/** Nội dung menu ⋯: các nút của toolbar desktop không còn chỗ trên phone. `onDone`: một mục đã chạy, đóng menu. */
+function MoreContent({ onDone }: { onDone: () => void }) {
+  const chartType = useChartStore((s) => s.chartType);
+  const theme = useChartStore((s) => s.theme);
+  const set = useChartStore((s) => s.set);
+  const api = useDrawingStore((s) => s.api);
+  const replayOn = useReplayStore((s) => s.active || s.selecting);
+  const run = (f: () => void) => () => {
+    onDone();
+    f();
+  };
+  // iPhone Safari không cho trang web vào fullscreen: không có thì ẩn nút
+  const canFullscreen = typeof document !== "undefined" && document.fullscreenEnabled;
+
+  return (
+    <>
       {/* popup của LayoutMenu / LayoutBar canh mép phải nút của chúng: để chúng sát mép phải cho khỏi tràn trái màn hình */}
       <div className="flex items-center gap-1 border-b border-[var(--border)] pb-1 pl-3 pr-1">
         <span className="mr-auto text-xs text-[var(--muted)]">Layout</span>
@@ -203,8 +213,17 @@ function MoreMenu() {
           <FullscreenI /> Fullscreen
         </button>
       )}
-    </Popover>
+    </>
   );
+}
+
+/** Vòng chọn khung của phone (TimeframeRing), mở bằng nút khung hoặc chạm nền chart (useRailStore.tfPicker); mục ⋯ của vòng là menu ⋯ (MoreContent). */
+function PhoneRing() {
+  const picker = useRailStore((s) => s.tfPicker);
+  const at = useRailStore((s) => s.ringAt);
+  if (picker !== "ring") return null;
+  const close = () => useRailStore.setState({ tfPicker: null });
+  return <TimeframeRing onClose={close} onGrid={() => useRailStore.setState({ tfPicker: "grid" })} more={<MoreContent onDone={close} />} at={at} />;
 }
 
 /** Nút vẽ trên thanh trên: mở màn Objects; đang cầm công cụ thì sáng lên, bấm nữa là bỏ công cụ. */
@@ -351,10 +370,11 @@ function TradeButtons() {
   const digits = useChartStore((s) => s.symbols.find((x) => x.name === s.symbol)?.digits) ?? 5;
   const replay = useReplayStore((s) => s.active);
   const { block, busy, click } = useTradeClick(symbol, digits, replay);
-  const half = `flex h-9 w-11 items-center justify-center rounded-md text-[11px] font-semibold text-white ${block !== null || busy ? "opacity-60" : ""}`;
+  // rộng 80px (user 10-29: "dài ra nữa"), màn hẹp / nhiều nút (chọn chart) thì co lại tới 44px
+  const half = `flex h-9 w-20 min-w-11 shrink items-center justify-center rounded-md text-[12px] font-semibold text-white ${block !== null || busy ? "opacity-60" : ""}`;
   return (
     // hai nút tách rời, cách nhau 8px: dính liền thì ngón tay to dễ bấm nhầm hướng (user 10-29)
-    <div className="flex shrink-0 gap-2" data-testid="trade-widget" title={block ?? undefined}>
+    <div className="flex min-w-0 gap-2" data-testid="trade-widget" title={block ?? undefined}>
       <button type="button" aria-label="Sell at market" className={`${half} bg-[#f23645]`} onClick={() => click("sell")}>
         SELL
       </button>
@@ -366,7 +386,8 @@ function TradeButtons() {
 }
 
 /** Thanh công cụ trên cùng của phone: symbol, khung thời gian, indicators, vẽ, chọn chart, menu ⋯. `flat` (phone dọc, như MT5): phẳng, các nút dàn đều
- *  cả bề rộng, thêm SELL | BUY nhỏ cạnh bút vẽ (thay thanh SELL / BUY to trên đầu chart); phone ngang thì gọn bên trái, SELL / BUY ở widget dưới tiêu đề. */
+ *  cả bề rộng, thêm SELL | BUY cạnh bút vẽ (thay thanh SELL / BUY to trên đầu chart), menu ⋯ chuyển vào vòng chọn khung; phone ngang thì gọn bên trái,
+ *  SELL / BUY ở widget dưới tiêu đề. */
 export function MobileTopBar({ flat = false }: { flat?: boolean }) {
   useSymbolsPolling();
   // z-50: popup của thanh này thả xuống đè lên panel phủ chart (z-[45]) bên dưới
@@ -378,7 +399,8 @@ export function MobileTopBar({ flat = false }: { flat?: boolean }) {
       <DrawButton />
       {flat ? <TradeButtons /> : <div className="flex-1" />}
       <PaneSwitcher />
-      <MoreMenu />
+      {!flat && <MoreMenu />}
+      <PhoneRing />
     </div>
   );
 }

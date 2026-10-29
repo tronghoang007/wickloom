@@ -57,6 +57,7 @@ export default function PaneChrome({
   onMainSqueezed,
   onMainTop,
   mainLegendHover,
+  buttons = true,
 }: {
   getChart: () => IChartApi | null;
   getBox: () => HTMLElement | null;
@@ -73,6 +74,8 @@ export default function PaneChrome({
   onMainTop: (top: number) => void;
   /** Con trỏ đang ở legend của pane chính (legend đó do Chart vẽ): hiện cụm nút của pane chính như khi rê vào pane. */
   mainLegendHover: boolean;
+  /** false (phone dọc, user 10-29): không có cụm nút Move / Delete / Collapse / Maximize của pane, chart cho gọn. */
+  buttons?: boolean;
 }) {
   const [rects, setRects] = useState<PaneRect[]>([]);
   const [priceW, setPriceW] = useState(70);
@@ -196,7 +199,7 @@ export default function PaneChrome({
         const isMain = g.key === MAIN_PANE;
         const isCollapsed = collapsedKeys.includes(g.key);
         const isMaxi = maxiKey === g.key;
-        const show = hover === g.index || onCover === g.index || (isMain && mainLegendHover);
+        const show = buttons && (hover === g.index || onCover === g.index || (isMain && mainLegendHover));
         return (
           <div key={g.key}>
             {g.insts.length > 0 && (

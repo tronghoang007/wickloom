@@ -2,7 +2,7 @@
 
 import { DrawingManager } from "@/drawings/manager";
 import { AlertI, Chevron, DotsI, ResetViewI, SettingsI, SkipToLatest } from "../icons";
-import { useDrawingStore } from "@/drawings/store";
+import { drawingGlobal, useDrawingStore } from "@/drawings/store";
 import { overridePoint } from "@/indicators/candleColors";
 import { IndicatorManager } from "@/indicators/manager";
 import { byId } from "@/indicators/catalog";
@@ -11,7 +11,6 @@ import { MAIN_PANE, clampSlot, otherPaneKeys, paneIndices, paneKeyOf } from "@/i
 import PaneChrome, { type PaneGroup } from "./PaneChrome";
 import { VERT_DRAG_PX, paneAt, paneRects, panPriceRange } from "./panes";
 
-import { tfShort } from "@/lib/timeframes";
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
@@ -27,6 +26,7 @@ import { quoteOf, useQuoteStore } from "@/trading/quote";
 import { draftLevels, parsePrice } from "@/trading/draft";
 import { useTicketStore } from "@/trading/ticket";
 import { useRailStore } from "@/store/rail";
+import { useTradeFocus } from "@/trading/focus";
 import type { SimBar } from "@/trading/sim";
 import { enterSim, feedSim, leaveSim, restartSim, seedSim } from "@/trading/simStore";
 import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView";
@@ -47,6 +47,7 @@ import {
   PriceScaleMode,
   createChart,
   type AutoscaleInfo,
+  type MouseEventParams,
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
@@ -290,7 +291,8 @@ export default function Chart({ paneId }: { paneId: string }) {
   const digits = cs.precision ?? symDigits;
   const boxRef = useRef<HTMLDivElement>(null);
   const hoverRef = useRef(false); // chuột đang ở trong chart này (nguồn của "Sync crosshair")
-  const lastPointerRef = useRef("mouse"); // loại con trỏ của cú nhấn gần nhất: nhấn giữ bằng ngón tay (Android ra contextmenu) không mở menu chart
+  const lastPointerRef = useRef("mouse");
+  const tapPreRef = useRef<{ at: number; x: number; y: number; busy: boolean } | null>(null); // xem onPointerDownCapture / vòng chọn khung // loại con trỏ của cú nhấn gần nhất: nhấn giữ bằng ngón tay (Android ra contextmenu) không mở menu chart
   const crossPriceRef = useRef<number | null>(null); // giá ở crosshair trên pane chính (null = crosshair ẩn): menu ⋯ của màn cảm ứng dùng thay giá dưới chuột phải
   const touch = useTouch();
   const phone = useLayoutMode() === "phone";
@@ -1399,6 +1401,27 @@ export default function Chart({ paneId }: { paneId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Phone, như MT5: chạm nền chart mở vòng chọn khung (TimeframeRing). Không mở khi cú chạm đó đang làm việc khác: cầm công cụ vẽ, bỏ chọn hình /
+  // bỏ nháp lệnh / bỏ focus lệnh (trạng thái trước cú nhấn), hay vừa chọn hình / đường lệnh (trạng thái sau khi các handler click khác chạy xong)
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const onClick = (p: MouseEventParams) => {
+      const pre = tapPreRef.current;
+      if (!isPhoneNow() || !p.point || !pre || pre.busy || performance.now() - pre.at > 1500) return;
+      if (pane.replay.getState().selecting) return; // đang chọn nến bắt đầu Replay: chạm = chọn nến
+      setTimeout(() => {
+        const t = useTicketStore.getState();
+        const dr = pane.draw.getState();
+        if (drawingGlobal.getState().tool || dr.selectedId || t.draft || t.modifyOwner) return;
+        useRailStore.setState({ tfPicker: "ring", ringAt: { x: pre.x, y: pre.y } }); // vòng hiện đúng chỗ chạm, như MT5
+      }, 0);
+    };
+    chart.subscribeClick(onClick);
+    return () => chart.unsubscribeClick(onClick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Đường alert của symbol này (kéo để đổi giá): alerts/useAlertLines.ts
   useAlertLines({ symbol, chartType, replay: replayActive, getChart, getBox, getSeries, getDigits });
 
@@ -1994,6 +2017,10 @@ export default function Chart({ paneId }: { paneId: string }) {
       // bấm vào chart nào thì chart đó active TRƯỚC khi DrawingManager xử lý, để công cụ đang chọn vẽ đúng chart vừa bấm
       onPointerDownCapture={(e) => {
         lastPointerRef.current = e.pointerType;
+        // trạng thái ngay TRƯỚC cú nhấn (DrawingManager / LineDrag đổi nó trong lúc nhấn): chạm nền chart trên phone có mở vòng chọn khung không
+        const t = useTicketStore.getState();
+        const dr = pane.draw.getState();
+        tapPreRef.current = { at: performance.now(), x: e.clientX, y: e.clientY, busy: !!(drawingGlobal.getState().tool || dr.selectedId || t.draft || t.modifyOwner || useTradeFocus.getState().owner) };
         useLayoutStore.getState().setActive(paneId);
       }}
     >
@@ -2049,15 +2076,8 @@ export default function Chart({ paneId }: { paneId: string }) {
           style={{ top: mainTop + 8, "--legend-bg": `color-mix(in srgb, ${cs.bg ?? CHART_THEMES[theme].bg} 50%, transparent)` } as React.CSSProperties}
         >
           <div className="-ml-1 flex w-fit flex-wrap items-baseline gap-x-3 rounded bg-[var(--legend-bg)] pl-1 pr-1">
-            {/* phone dọc: legend gọn như MT5 (user 10-29) — chỉ mã + khung, không logo / tên đầy đủ / sàn / OHLC / Vol; hàng indicator cũng bỏ
-                (ẩn / hiện ở danh sách trong vòng chọn khung, TimeframeRing) */}
-            {portrait && (
-              <span className="whitespace-nowrap text-[15px] font-semibold">
-                <span className="text-[var(--accent-text)]">{symbol}</span>
-                <span className="text-[var(--muted)]"> · </span>
-                {tfShort(tf)}
-              </span>
-            )}
+            {/* phone dọc: không legend (user 10-29) — mã + khung đã có trên thanh trên; OHLC / Vol / hàng indicator cũng bỏ
+                (ẩn / hiện indicator ở danh sách trong vòng chọn khung, TimeframeRing) */}
             {cs.showTitle && !portrait && (
               <span className="flex items-center whitespace-nowrap text-[16px] text-[var(--fg)]">
                 <span className="mr-2 flex">
@@ -2117,9 +2137,9 @@ export default function Chart({ paneId }: { paneId: string }) {
             />
           )}
           {!legendCollapsed && !mainSqueezed && !portrait && mainIndicators.map(indicatorRow)}
-          {!mainSqueezed && ((!vs.removed || indicators.length > 0) || touch) && (
+          {!mainSqueezed && !portrait && ((!vs.removed || indicators.length > 0) || touch) && (
             <div className="mt-1 flex gap-1">
-              {(!vs.removed || indicators.length > 0) && !portrait && (
+              {(!vs.removed || indicators.length > 0) && (
                 <button
                   type="button"
                   aria-label={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
@@ -2132,7 +2152,8 @@ export default function Chart({ paneId }: { paneId: string }) {
                   </span>
                 </button>
               )}
-              {/* màn cảm ứng không có chuột phải: menu chart ở đây, giá theo crosshair (chạm / nhấn giữ lên chart để đặt) */}
+              {/* màn cảm ứng không có chuột phải: menu chart ở đây, giá theo crosshair (chạm / nhấn giữ lên chart để đặt). Phone dọc không có cả cụm này
+                  (user 10-29): Settings / Create alert / Replay ở menu ⋯ của vòng chọn khung, bật lại tự co giãn bằng chạm đúp trục giá */}
               {touch && (
                 <button
                   type="button"
@@ -2166,6 +2187,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           onMainSqueezed={setMainSqueezed}
           onMainTop={setMainTop}
           mainLegendHover={mainLegendHover}
+          buttons={!portrait}
           onDelete={(key) => pane.indicators.getState().removeMany(paneGroups.find((g) => g.key === key)?.insts.map((i) => i.uid) ?? [])}
         />
         <div ref={lblRef} className="pointer-events-none absolute right-0 top-0 z-10 hidden">
