@@ -12,7 +12,7 @@ import SettingsDialog from "@/components/chart/SettingsDialog";
 import IndicatorSettingsDialog from "@/components/chart/IndicatorSettingsDialog";
 import VolumeSettingsDialog from "@/components/chart/VolumeSettingsDialog";
 import DrawingToolbar from "@/components/chart/DrawingToolbar";
-import { MobileOrderSheet, MobilePanel, MobileTabBar, MobileTopBar } from "@/components/chart/MobileChrome";
+import { DrawingBar, MobileOrderSheet, MobilePanel, MobileTabBar, MobileTopBar } from "@/components/chart/MobileChrome";
 import RightRail from "@/components/chart/RightRail";
 import TradingPanel from "@/components/chart/TradingPanel";
 import Toolbar from "@/components/chart/Toolbar";
@@ -93,6 +93,8 @@ export default function Page() {
         {!phone && <RightRail />}
         {sideTabs && <MobileTabBar vertical />}
       </div>
+      {/* phone đang cầm công cụ vẽ: thanh điều khiển vẽ kiểu TV ngay trên tab bar (chart co lại, không che trục thời gian) */}
+      {phone && chartTab && <DrawingBar />}
       {phone ? !sideTabs && <MobileTabBar /> : <TradingPanel />}
       {/* hộp thoại dùng chung: một bản cho cả trang, nhắm vào chart đang active */}
       <SettingsDialog />

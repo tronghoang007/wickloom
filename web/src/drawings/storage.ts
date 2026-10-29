@@ -1,5 +1,6 @@
 import { apiFetch } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
+import { isPhoneNow } from "@/lib/layoutMode";
 import { toast } from "@/store/toast";
 import { memoryFetch } from "./guest";
 
@@ -14,10 +15,11 @@ export const drawingsFetch: typeof fetch = (input, init) => {
 
 let told = false;
 
-/** Lần vẽ đầu tiên của khách trong phiên: nhắc đăng nhập để lưu, không chặn thao tác. */
+/** Lần vẽ đầu tiên của khách trong phiên: nhắc đăng nhập để lưu, không chặn thao tác.
+ *  Phone thì thôi (user 10-29): toast nằm đúng chỗ thanh nổi của hình vừa vẽ, che mất nó. */
 export function noteGuestDrawing() {
   const s = useAuthStore.getState();
-  if (told || s.status !== "guest") return;
+  if (told || s.status !== "guest" || isPhoneNow()) return;
   told = true;
   toast("Đăng nhập để lưu hình vẽ", {
     action: { label: "Sign in", run: () => s.openAuth("login", "Đăng nhập để lưu hình vẽ") },

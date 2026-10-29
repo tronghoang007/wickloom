@@ -19,7 +19,7 @@ import type {
 import { PriceScaleMode } from "lightweight-charts";
 import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } from "./coords";
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
-import { holdTouch, isTouch, TOUCH_SLOP } from "@/lib/layoutMode";
+import { holdTouch, isPhoneNow, isTouch, TOUCH_SLOP } from "@/lib/layoutMode";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
@@ -98,6 +98,9 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private mode: Mode = { k: "idle" };
   private chartLock: { handleScroll: unknown; handleScale: unknown } | null = null;
   private releaseTouch: (() => void) | null = null; // holdTouch đang chặn cuộn trang trong lúc kéo bằng ngón tay
+  // Phone (như app TradingView): con trỏ chữ thập của công cụ vẽ (toạ độ pane; null = giữa pane) và cú vuốt đang dời nó
+  private cursor: Pt | null = null;
+  private swipe: { id: number; f0: Pt; c0: Pt; moved: boolean } | null = null;
   private pendingText: string | undefined;
   private symbol = "";
   private unsub: () => void;
@@ -172,7 +175,17 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     this.timeLabels = [];
     this.bands = { price: null, time: null };
     const st = this.st;
-    if (st.hideAll || !this.series) return;
+    if (!this.series) return;
+    // con trỏ vẽ của phone: nhãn giá / giờ trên trục như crosshair (crosshair của LWC không theo con trỏ này)
+    const cur = this.cursorShown();
+    const at = cur && this.fromPx(cur);
+    if (cur && at) {
+      const ch = this.o.chart.options().crosshair;
+      const price = this.series.coordinateToPrice(cur.y);
+      if (price !== null) this.axis.push({ coordinate: () => cur.y, text: () => price.toFixed(this.o.getDigits()), textColor: () => "#ffffff", backColor: () => ch.horzLine.labelBackgroundColor });
+      this.timeLabels.push({ x: cur.x, text: crosshairLabel(at.time), bg: ch.vertLine.labelBackgroundColor });
+    }
+    if (st.hideAll) return;
     const v = this.view();
     // Nhãn trục luôn hiện (vd "Price label" của Horizontal line/ray), kể cả hình không chọn
     for (const x of this.drawings) {
@@ -226,7 +239,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   priceAxisPaneViews(): readonly IPrimitivePaneView[] { return [this.bandView("price")]; }
   timeAxisPaneViews(): readonly IPrimitivePaneView[] { return [this.bandView("time"), this.timeLabelView()]; }
   private axis: ISeriesPrimitiveAxisView[] = [];
-  private timeLabels: { x: number; text: string }[] = [];
+  private timeLabels: { x: number; text: string; bg?: string }[] = [];
   private bands: { price: [number, number] | null; time: [number, number] | null } = { price: null, time: null };
 
   // Nhãn giờ xanh của các điểm neo. LWC vẽ nhãn crosshair SAU nhãn của axis view nên nhãn crosshair đè lên nhãn neo;
@@ -245,18 +258,25 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
           const maxW = this.o.chart.timeScale().width();
           const boxes = target.useMediaCoordinateSpace(({ context: ctx }) => {
             ctx.font = font;
-            return labels.map(({ x, text }) => {
+            return labels.map(({ x, text, bg }) => {
               const w = Math.round(ctx.measureText(text.replace(/[1-9]/g, "0")).width) + 2 * padX;
               let x1 = Math.floor(x - w / 2) + 0.5;
               if (x1 < 0) x1 = Math.floor(x - x1 - w / 2) + 0.5;
               else if (x1 + w > maxW) x1 = Math.floor(x - (x1 + w - maxW) - w / 2) + 0.5;
-              return { x1, w, text };
+              return { x1, w, text, bg };
             });
           });
+          // hai điểm gần nhau (màn phone hẹp): nhãn chồng lên nhau đọc không được -> đẩy sang hai bên cho vừa khít, vẫn trong trục
+          boxes.sort((a, b) => a.x1 - b.x1);
+          for (let i = 1; i < boxes.length; i++) boxes[i].x1 = Math.max(boxes[i].x1, boxes[i - 1].x1 + boxes[i - 1].w);
+          for (let i = boxes.length - 1; i >= 0; i--) {
+            const lim = i === boxes.length - 1 ? maxW : boxes[i + 1].x1;
+            if (boxes[i].x1 + boxes[i].w > lim) boxes[i].x1 = Math.max(0.5, lim - boxes[i].w);
+          }
           target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
-            ctx.fillStyle = AXIS_BG;
             const y2 = Math.round(bottom * vpr), r = Math.round(2 * hpr);
             for (const b of boxes) {
+              ctx.fillStyle = b.bg ?? AXIS_BG;
               const xa = Math.round(b.x1 * hpr), xb = Math.round((b.x1 + b.w) * hpr);
               ctx.beginPath();
               ctx.moveTo(xa, 0);
@@ -312,21 +332,24 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
         // Bitmap space: shapes.ts bắt nét ngang/dọc vào lưới pixel thiết bị (nét 1px không nhòe)
         target.useBitmapCoordinateSpace(({ context, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
           const st = this.st;
-          if (st.hideAll) return;
           context.save();
           context.scale(hpr, vpr);
           const v = this.view();
-          for (const d of this.drawings) {
+          for (const d of st.hideAll ? [] : this.drawings) {
             if (!this.shown(d)) continue;
             const b = this.built(d, v);
             if (!b) continue;
             drawShapes(context, b.shapes, d, hpr);
             if (d.id === st.selectedId) this.drawHandles(context, d, b.c);
           }
-          if (this.mode.k === "drafting") {
-            const d = this.mode.d;
+          const cur = this.cursorShown(); // vẽ trước nét đang vẽ dở: vòng tròn của điểm vừa đặt nằm đè lên chấm con trỏ
+          if (cur) this.drawCursor(context, cur);
+          if (this.mode.k === "drafting" && !st.hideAll) {
+            const m = this.mode, d = m.d;
             const c = this.ctx(d, v, true);
             if (c) drawShapes(context, this.shapes(d, c), d, hpr);
+            // điểm đã đặt hiện vòng tròn như handle lúc chọn hình: chạm (phone) / click xong là thấy điểm đã ăn
+            if (SPEC[d.type].n !== -1) this.drawRings(context, d.points.slice(0, m.placed).map((a) => this.toPx(a)).filter((q): q is Pt => q !== null));
           }
           context.restore();
         });
@@ -334,12 +357,68 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     }),
   };
 
+  // Con trỏ vẽ của phone: crosshair nét đứt (màu crosshair của chart) + chấm xanh ở giao điểm, như app TradingView
+  private drawCursor(ctx: CanvasRenderingContext2D, c: Pt) {
+    const { w, h } = this.paneSize();
+    const x = Math.round(c.x) + 0.5, y = Math.round(c.y) + 0.5;
+    ctx.save();
+    ctx.strokeStyle = this.o.chart.options().crosshair.vertLine.color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = AXIS_BG;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Phone, như app TradingView: cầm công cụ vẽ thì có con trỏ chữ thập riêng. Vuốt ở đâu trên chart cũng dời con trỏ đúng bằng quãng vuốt
+  // (ngón tay không che điểm đang đặt), chạm = đặt điểm tại con trỏ. Nét tự do (Brush, n = -1) và tẩy vẫn vẽ / xoá ngay dưới ngón tay.
+  private cursorTool(): DrawingType | null {
+    const t = this.st.tool;
+    return t && t !== "eraser" && SPEC[t] && SPEC[t].n !== -1 && isPhoneNow() ? t : null;
+  }
+
+  private cursorPt(): Pt {
+    const { w, h } = this.paneSize();
+    const c = this.cursor ?? { x: w / 2, y: h / 2 };
+    return { x: Math.min(w, Math.max(0, c.x)), y: Math.min(h, Math.max(0, c.y)) };
+  }
+
+  /** Con trỏ vẽ đang hiện ở pane này (chỉ chart active, khỏi mỗi pane một con trỏ). */
+  private cursorShown(): Pt | null {
+    return this.cursorTool() && isActivePane(this.o.pane.id) ? this.cursorPt() : null;
+  }
+
+  /** Chạm (không vuốt) ở chế độ con trỏ: đặt điểm tại con trỏ. Path / Polyline: chạm lần nữa mà con trỏ chưa rời điểm vừa đặt = xong (thay double-click / Enter). */
+  private tapCursor(tool: DrawingType, e: Mods) {
+    const c = this.cursorPt();
+    const m = this.mode;
+    if (m.k === "drafting" && SPEC[m.d.type].n === 0) {
+      const last = this.toPx(m.d.points[m.placed - 1]);
+      if (last && Math.hypot(last.x - c.x, last.y - c.y) < 6) return this.finishMulti(m.d, m.d.points.slice(0, m.placed));
+    }
+    this.place(tool, c, e);
+    if (this.mode.k === "drafting") this.mode.downAt = null; // không có kiểu nhấn-kéo-thả: điểm sau cũng đặt bằng một cú chạm
+  }
+
   private drawHandles(ctx: CanvasRenderingContext2D, d: Drawing, c: Ctx) {
+    this.drawRings(ctx, this.handlePts(d, c));
+  }
+
+  private drawRings(ctx: CanvasRenderingContext2D, pts: Pt[]) {
     ctx.save();
     ctx.fillStyle = "rgba(15,15,15,0.55)";
     ctx.strokeStyle = "#2962ff";
     ctx.lineWidth = 2;
-    for (const p of this.handlePts(d, c)) {
+    for (const p of pts) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
       ctx.fill();
@@ -684,6 +763,14 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
 
     if (tool && SPEC[tool]) {
       this.consume(e);
+      if (isTouch(e) && this.cursorTool()) {
+        // chỉ ngón đầu tiên lái con trỏ, ngón thứ hai (chụm) bỏ qua
+        if (!this.swipe) {
+          this.lockChart();
+          this.swipe = { id: e.pointerId, f0: p, c0: this.cursorPt(), moved: false };
+        }
+        return;
+      }
       this.lockChart();
       this.place(tool, p, e);
       return;
@@ -809,18 +896,36 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     else if (spec.grid) this.startEdit(d.id, true, [0, 0]);
   }
 
+  // Điểm đang vẽ dở theo con trỏ (chuột / ngón tay / con trỏ vẽ của phone)
+  private track(m: Extract<Mode, { k: "drafting" }>, p: Pt, e: Mods) {
+    const a0 = this.anchorAt(p, e, this.draftRef(m), SPEC[m.d.type].shift === "square");
+    const a = a0 && this.fit(m.d.type, a0);
+    if (SPEC[m.d.type].n === -1) {
+      if (m.pressed && a) { m.d.points.push(a); this.refresh(); }
+    } else if (a) {
+      m.d.points[m.placed] = a;
+      this.refresh();
+    }
+  }
+
   private onMove = (e: PointerEvent) => {
     const p = this.rel(e);
+    const sw = this.swipe;
+    if (sw) {
+      if (e.pointerId !== sw.id) return;
+      this.consume(e);
+      if (!sw.moved && Math.hypot(p.x - sw.f0.x, p.y - sw.f0.y) < DRAG_MIN) return;
+      sw.moved = true;
+      this.cursor = { x: sw.c0.x + p.x - sw.f0.x, y: sw.c0.y + p.y - sw.f0.y };
+      const cur = this.cursorPt();
+      this.cursor = cur; // giữ trong pane: vuốt quá mép rồi vuốt ngược thì con trỏ đi ngay
+      if (this.mode.k === "drafting") this.track(this.mode, cur, e);
+      this.refresh();
+      return;
+    }
     const m = this.mode;
     if (m.k === "drafting") {
-      const a0 = this.anchorAt(p, e, this.draftRef(m), SPEC[m.d.type].shift === "square");
-      const a = a0 && this.fit(m.d.type, a0);
-      if (SPEC[m.d.type].n === -1) {
-        if (m.pressed && a) { m.d.points.push(a); this.refresh(); }
-      } else if (a) {
-        m.d.points[m.placed] = a;
-        this.refresh();
-      }
+      if (!this.cursorTool()) this.track(m, p, e); // phone: điểm dở theo con trỏ vẽ, không theo ngón tay
       this.consume(e);
       return;
     }
@@ -892,6 +997,15 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   };
 
   private onUp = (e: PointerEvent) => {
+    const sw = this.swipe;
+    if (sw) {
+      if (e.pointerId !== sw.id) return;
+      this.swipe = null;
+      this.unlockChart();
+      const tool = this.cursorTool();
+      if (!sw.moved && e.type === "pointerup" && tool) this.tapCursor(tool, e);
+      return;
+    }
     this.unlockChart();
     const m = this.mode;
     if (m.k === "drafting") {

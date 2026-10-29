@@ -16,7 +16,7 @@ import { drawingMenuItems } from "./drawingMenu";
 
 // Thanh nổi kiểu TradingView: cao 38px, nút 34px với icon 28px, vạch màu 3px dưới icon.
 const btn =
-  "relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-55 disabled:hover:bg-transparent";
+  "relative flex h-[34px] w-[34px] shrink-0 phone:w-[32px] items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-55 disabled:hover:bg-transparent";
 
 const Grip = () => (
   <svg
@@ -121,7 +121,7 @@ export default function StylePanel() {
   const bgValue = String(d.opts?.backgroundColor || d.color);
   const dropdown = (key: "width" | "dash" | "font", title: string, label: ReactNode, rows: { on: boolean; label: ReactNode; pick: () => void }[], wide = false) => (
     <div className="relative">
-      <button className={`${btn} ${wide ? "w-auto gap-1.5 px-1.5 text-[13px]" : ""}`} title={title} onClick={() => setMenu(menu === key ? null : key)}>
+      <button className={`${btn} ${wide ? "w-auto gap-1.5 px-1.5 text-[13px] phone:w-auto" : ""}`} title={title} onClick={() => setMenu(menu === key ? null : key)}>
         {label}
       </button>
       {menu === key &&
@@ -159,7 +159,7 @@ export default function StylePanel() {
         // Như TV: mở bảng đặt lệnh với entry / SL / TP của Position (Long = Buy, Short = Sell)
         return <button className={btn} title="Create limit order" onClick={createLimitOrder}><LimitOrderI /></button>;
       case "w":
-        return dropdown("width", "Line width", <>{dashLine(0, d.width)} {d.width}px</>, [1, 2, 3, 4].map((w) => ({ on: d.width === w, label: <>{dashLine(0, w)} {w}px</>, pick: () => api.update({ width: w }) })), true);
+        return dropdown("width", "Line width", <><span className="contents phone:hidden">{dashLine(0, d.width)}</span>{d.width}px</>, [1, 2, 3, 4].map((w) => ({ on: d.width === w, label: <>{dashLine(0, w)} {w}px</>, pick: () => api.update({ width: w }) })), true);
       case "st":
         return dropdown("dash", "Line style", dashLine(dash), [0, 1, 2].map((v) => ({ on: dash === v, label: <>{dashLine(v)} {DASH_LABEL[v]}</>, pick: () => api.update({ dash: v as 0 | 1 | 2 }) })));
       case "fs": {
@@ -193,8 +193,10 @@ export default function StylePanel() {
     <>
       {/* Nền bắt click ngoài để đóng menu: nằm ngoài thanh (thanh có transform nên fixed bên trong không phủ cả màn hình) */}
       {menu && <div className="absolute inset-0 z-[19]" onMouseDown={() => setMenu(null)} />}
+      {/* phone: thanh không vừa bề rộng chart (Rectangle 412px, máy 360px tràn cả hai mép) thì xuống dòng, chừa 8px mỗi bên.
+          Không cuộn ngang: overflow sẽ cắt menu width / style mở bên trong thanh */}
       <div
-        className="anim-fade absolute left-1/2 top-12 z-20 flex h-[38px] select-none items-center gap-0.5 rounded-md bg-[var(--panel)] px-0.5 text-[var(--fg)] shadow-[0_2px_4px_rgba(0,0,0,0.4)]"
+        className="anim-fade absolute left-1/2 top-12 z-20 flex h-[38px] select-none items-center gap-0.5 rounded-md bg-[var(--panel)] px-0.5 text-[var(--fg)] shadow-[0_2px_4px_rgba(0,0,0,0.4)] phone:h-auto phone:min-h-[38px] phone:w-max phone:max-w-[calc(100%-16px)] phone:flex-wrap phone:justify-center phone:py-0.5"
         style={{ transform: `translate(calc(-50% + ${pos.x}px), ${pos.y}px)` }}
       >
         <div

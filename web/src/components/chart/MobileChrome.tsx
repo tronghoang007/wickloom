@@ -322,6 +322,47 @@ function ObjectsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Thanh dưới chart khi đang cầm công cụ vẽ trên phone, như app TradingView: nút công cụ đang cầm (chạm = thôi vẽ, về con trỏ thường),
+ *  nam châm, giữ chế độ vẽ, ẩn / hiện hình vẽ, toàn màn hình. */
+export function DrawingBar() {
+  const tool = useDrawingStore((s) => s.tool);
+  const { magnet, stay, hideAll, api } = useDrawingStore();
+  const open = useRailStore((s) => s.open);
+  if (!tool || !SPEC[tool] || open) return null;
+  const flag = (k: "magnet" | "stay" | "hideAll", on: boolean, label: string, icon: ReactNode) => (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={on}
+      className={`${iconBtn} h-11 w-11 ${on ? "bg-[var(--hover)] text-[var(--accent-text)]" : ""}`}
+      onClick={() => useDrawingStore.setState({ [k]: !on })}
+    >
+      {icon}
+    </button>
+  );
+  return (
+    <div className="flex h-14 shrink-0 items-center gap-1 border-t border-[var(--border)] bg-[var(--page)] px-3">
+      <button
+        type="button"
+        title={`${SPEC[tool].label} · chạm để thôi vẽ`}
+        aria-label="Thôi vẽ"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--hover)] text-[var(--fg)]"
+        onClick={() => api?.setTool(null)}
+      >
+        <ToolIcon id={tool} />
+      </button>
+      <div className="flex-1" />
+      {flag("magnet", magnet, "Magnet", <Magnet />)}
+      {flag("stay", stay, "Stay in drawing mode", <Stay />)}
+      {flag("hideAll", hideAll, "Hide all drawings", <Eye off={hideAll} />)}
+      <button type="button" title="Fullscreen" aria-label="Fullscreen" className={`${iconBtn} h-11 w-11`} onClick={toggleFullscreen}>
+        <FullscreenI />
+      </button>
+    </div>
+  );
+}
+
 /** SELL | BUY nhỏ trên thanh trên của phone dọc (như nút giao dịch của MT5), cho symbol của chart đang active: bấm mở bảng đặt lệnh thu gọn,
  *  đang soạn lệnh thì đổi hướng. Không hiện giá (thanh hẹp) — giá bid / ask đã có trên trục giá và trên dòng lệnh. */
 function TradeButtons() {
