@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  allowedDevOrigins: ["127.0.0.1"], // mở app bằng http://127.0.0.1:3000 (cookie phiên theo host, xem lib/api.ts) vẫn nạp được tài nguyên dev
+  allowedDevOrigins: ["127.0.0.1", "*.ts.net"], // mở app bằng http://127.0.0.1:3000 (cookie phiên theo host, xem lib/api.ts) hoặc qua Tailscale trên điện thoại vẫn nạp được tài nguyên dev
   devIndicators: false, // ẩn nút "N" góc dưới trái khi chạy dev (lỗi compile/runtime vẫn hiện)
   cacheComponents: true,
   partialPrefetching: true,
