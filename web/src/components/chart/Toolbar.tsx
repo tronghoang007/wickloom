@@ -82,7 +82,7 @@ export function SymbolSearch({ flat = false }: { flat?: boolean }) {
   return (
     <>
       {flat ? (
-        <button className="flex h-10 min-w-0 items-center truncate px-2 text-[15px] font-semibold" onClick={() => setOpen(true)} aria-label="Symbol search">
+        <button className="flex h-10 shrink-0 items-center px-2 text-[15px] font-semibold" onClick={() => setOpen(true)} aria-label="Symbol search">
           {symbol}
         </button>
       ) : (
@@ -136,7 +136,7 @@ export default function Toolbar() {
 
   return (
     // tablet: panel bên phải đè lên chart (z-40) — nâng toolbar lên trên để menu thả xuống của nó không bị panel che
-    <div className={`flex h-[38px] items-center border-b border-[var(--border)] bg-[var(--page)] pr-1 ${tablet ? "relative z-50" : ""}`}>
+    <div className={`flex h-[38px] min-w-0 items-center border-b border-[var(--border)] bg-[var(--page)] pr-1 ${tablet ? "relative z-50" : ""}`}>
       <div className="flex w-[52px] shrink-0 items-center justify-center">
         <AccountMenu />
       </div>

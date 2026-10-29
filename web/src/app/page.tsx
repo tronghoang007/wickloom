@@ -68,11 +68,13 @@ export default function Page() {
       data-theme={theme}
       // h-dvh: trên điện thoại 100vh tính cả phần thanh địa chỉ che mất, dvh theo đúng phần đang thấy.
       // Padding safe-area chỉ khác 0 trên máy có tai thỏ / thanh home (viewportFit "cover" ở layout.tsx).
-      className="flex h-dvh flex-col bg-[var(--bg)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-[var(--fg)]"
+      // overflow-hidden: không phần tử nào (thanh trên đông nút, thanh vẽ nổi đặt chỗ từ màn lớn…) được làm trang rộng hơn màn — iPad mini từng bị đẩy
+      // mất thanh bên phải (user 10-29)
+      className="flex h-dvh flex-col overflow-hidden bg-[var(--bg)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-[var(--fg)]"
     >
       {/* phone dọc: thanh trên phẳng như MT5 (có SELL | BUY nhỏ); phone ngang: thanh gọn, tab bar là cột bên phải */}
-      {/* thanh trên của phone chỉ ở tab Chart (user 10-29): các tab khác (Watchlist, Trading…) dùng hết màn */}
-      {phone ? chartTab && <MobileTopBar flat={!sideTabs} /> : <Toolbar />}
+      {/* thanh trên của phone (dọc lẫn ngang) chỉ ở tab Chart (user 10-29): các tab khác (Watchlist, Trading…) dùng hết màn */}
+      {phone ? chartTab && <MobileTopBar /> : <Toolbar />}
       <div className="flex min-h-0 flex-1">
         {!phone && <DrawingToolbar />}
         <main className="relative min-w-0 flex-1">

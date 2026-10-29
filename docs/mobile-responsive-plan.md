@@ -360,6 +360,15 @@ iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad
   - Tab Trading: thêm **Realized P/L** (hôm nay theo giờ máy: lãi / lỗ lệnh đóng + phí + swap, `realizedSince`).
   - Watchlist: nút ✕ bỏ mã luôn hiện trên cảm ứng (desktop vẫn hiện khi rê chuột vào dòng như TV), dòng cao 44px.
   - **Hiệu ứng** (chỉ màn cảm ứng, tắt khi "giảm chuyển động"): popup phóng nhẹ (`.popup`), bảng lệnh + hộp toàn màn trượt lên (`anim-sheet`), toast trượt xuống (`anim-drop`).
+- **Đợt 3 (10-29 chiều)**:
+  - Phone **xoay ngang** dùng cùng giao diện với dọc (thanh trên phẳng có SELL / BUY, không legend, không dải 1D / 5D…); bỏ biến thể thanh "gọn" + nút ⋯ của ngang.
+  - **Bỏ tab Order** ở cả tab bar phone lẫn cột icon desktop: bảng lệnh mở bằng SELL / BUY hay chọn lệnh; bấm SELL / BUY khi đang có nháp thì mở lại bảng.
+    Phone: đang nháp / sửa lệnh mà **chuyển tab = huỷ** (đơn giản, không giữ).
+  - Khổ hẹp (Samsung A55 ~384px): mã symbol không co (nút SELL / BUY co thay); lịch kinh tế: ô "This week / Next week" một dòng.
+  - iPad mini: khung trang `overflow-hidden` — không phần tử nào được làm trang rộng hơn màn (thanh phải từng bị đẩy ra ngoài; chưa tái hiện được
+    đúng máy user, đã thử nhét phần tử quá rộng: thanh phải vẫn trong màn).
+  - **Hiệu ứng cả desktop**: popup phóng nhẹ, panel bên phải trượt vào (`anim-panel`), toast nổi lên ở góc dưới; phone giữ trượt từ dưới cho sheet / hộp toàn màn.
+    Gotcha: Turbopack dev phát CSS cũ tới khi globals.css có thay đổi nội dung thật (touch không đủ).
 - Còn mở: dòng thu gọn của **lệnh mới** kiểu MT5 có tab loại lệnh (Market Execution / Buy Limit / Sell Limit / Buy Stop…) — chưa làm, hỏi user.
 
 ## 11. Kiểm thử

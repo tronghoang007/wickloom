@@ -83,7 +83,8 @@ function Row({ e, now }: { e: CalEvent; now: number }) {
   );
 }
 
-const chip = (on: boolean) => `h-8 cursor-pointer rounded-full px-2.5 text-[13px] transition-colors ${on ? "bg-[var(--fg)] text-[var(--bg)]" : "bg-[var(--hover)] text-[var(--fg)] hover:brightness-125"}`;
+// whitespace-nowrap + px-1.5: 4 ô một hàng vẫn vừa "This week" / "Next week" trên phone hẹp (~360px) — trước bị xuống 2 dòng
+const chip = (on: boolean) => `h-8 cursor-pointer whitespace-nowrap rounded-full px-1.5 text-[13px] transition-colors ${on ? "bg-[var(--fg)] text-[var(--bg)]" : "bg-[var(--hover)] text-[var(--fg)] hover:brightness-125"}`;
 
 /** Lịch kinh tế ở thanh bên phải. Dữ liệu là lịch có sẵn của MT5 do EA TVBridge (>= 2.15) đẩy lên backend (cache SQLite): không phụ thuộc mạng ngoài / widget TradingView.
  *  Lọc theo ngày, mức quan trọng, đồng tiền (mặc định mọi đồng; "Symbol" = các đồng của symbol đang xem); giờ theo múi giờ trong Settings. Tự làm mới mỗi phút. */

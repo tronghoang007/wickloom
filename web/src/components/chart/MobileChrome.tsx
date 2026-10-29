@@ -24,13 +24,11 @@ import { seedDraftStop, submitDraft } from "@/trading/submit";
 import { ticketBusy, useTicketStore } from "@/trading/ticket";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AddOrderI,
   AlertI,
   CalendarI,
   CameraI,
   Candles,
   Close,
-  DotsI,
   FullscreenI,
   Eye,
   IndicatorsI,
@@ -127,25 +125,6 @@ function PaneSwitcher() {
           </button>
         );
       })}
-    </Popover>
-  );
-}
-
-/** Menu ⋯ (phone ngang: nút trên thanh; phone dọc: mục ⋯ của vòng chọn khung) */
-function MoreMenu() {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover
-      open={open}
-      setOpen={setOpen}
-      className="w-[min(300px,calc(100vw-16px))]"
-      trigger={
-        <button className={`${iconBtn} ${open ? "bg-[var(--hover)]" : ""}`} title="More" aria-label="More" aria-expanded={open} onClick={() => setOpen(!open)}>
-          <DotsI />
-        </button>
-      }
-    >
-      <MoreContent onDone={() => setOpen(false)} />
     </Popover>
   );
 }
@@ -392,20 +371,18 @@ function TradeButtons() {
   );
 }
 
-/** Thanh công cụ trên cùng của phone: symbol, khung thời gian, indicators, vẽ, chọn chart, menu ⋯. `flat` (phone dọc, như MT5): phẳng, các nút dàn đều
- *  cả bề rộng, thêm SELL | BUY cạnh bút vẽ (thay thanh SELL / BUY to trên đầu chart), menu ⋯ chuyển vào vòng chọn khung; phone ngang thì gọn bên trái,
- *  SELL / BUY ở widget dưới tiêu đề. */
-export function MobileTopBar({ flat = false }: { flat?: boolean }) {
+/** Thanh công cụ trên cùng của phone (dọc lẫn ngang, như MT5): phẳng, các nút dàn đều cả bề rộng — symbol, khung thời gian, indicators, bút vẽ, SELL | BUY
+ *  (thay thanh SELL / BUY to trên đầu chart), chọn chart. Menu ⋯ nằm trong vòng chọn khung (PhoneRing). */
+export function MobileTopBar() {
   // z-50: popup của thanh này thả xuống đè lên panel phủ chart (z-[45]) bên dưới
   return (
-    <div className={`relative z-50 flex shrink-0 items-center border-b border-[var(--border)] bg-[var(--page)] ${flat ? "h-12 justify-between px-1" : "h-11 gap-0.5 px-1"}`}>
-      <SymbolSearch flat={flat} />
-      <TimeframeBar className={`${btn} ${flat ? "min-w-11 justify-center text-[15px]" : ""}`} compact chevron={!flat} />
+    <div className="relative z-50 flex h-12 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--page)] px-1">
+      <SymbolSearch flat />
+      <TimeframeBar className={`${btn} min-w-11 justify-center text-[15px]`} compact chevron={false} />
       <IndicatorsDialog className={iconBtn} icon={<IndicatorsI />} iconOnly />
       <DrawButton />
-      {flat ? <TradeButtons /> : <div className="flex-1" />}
+      <TradeButtons />
       <PaneSwitcher />
-      {!flat && <MoreMenu />}
       <PhoneRing />
     </div>
   );
@@ -415,7 +392,6 @@ const TABS: { id: RailPanel | null; label: string; icon: ReactNode }[] = [
   { id: "watchlist", label: "Watchlist", icon: <WatchlistI /> }, // thứ tự theo user (10-29): Watchlist, Chart, Trading ở giữa
   { id: null, label: "Chart", icon: <Candles /> },
   { id: "trading", label: "Trading", icon: <TradingI /> },
-  { id: "order", label: "Order", icon: <AddOrderI /> }, // chỉ hiện khi đang soạn lệnh (như thanh bên phải)
   { id: "alerts", label: "Alerts", icon: <AlertI /> },
   { id: "calendar", label: "Calendar", icon: <CalendarI /> },
   { id: "account", label: "Account", icon: <AccountAvatar size={26} /> }, // như tab "Menu" của TradingView mobile: avatar không còn trên thanh công cụ
@@ -429,7 +405,6 @@ export function MobileTabBar({ vertical = false }: { vertical?: boolean }) {
   useSymbolsPolling(); // danh sách symbol (digits, lot…): thanh trên chỉ có ở tab Chart nên hỏi ở đây
   const open = useRailStore((s) => s.open);
   const setOpen = useRailStore((s) => s.setOpen);
-  const drafting = useTicketStore(ticketBusy);
   const symbol = useChartStore((s) => s.symbol);
   const lastSymbol = useRef(symbol);
 
@@ -440,17 +415,25 @@ export function MobileTabBar({ vertical = false }: { vertical?: boolean }) {
     if (useRailStore.getState().open === "watchlist") setOpen(null);
   }, [symbol, setOpen]);
 
-  const tabs = TABS.filter((t) => t.id !== "order" || drafting);
   return (
     <nav className={`flex shrink-0 bg-[var(--page)] ${vertical ? "w-16 flex-col border-l border-[var(--border)]" : "h-14 border-t border-[var(--border)]"}`} aria-label="Panels">
-      {tabs.map((t) => {
-        const on = open === t.id || (t.id === null && open === "order" && !drafting);
+      {TABS.map((t) => {
+        // không có tab Order (user 10-29): bảng đặt lệnh là sheet trượt trên tab Chart
+        const on = open === t.id || (t.id === null && open === "order");
         return (
           <button
             key={t.label}
             className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] ${on ? "text-[var(--accent-text)]" : "text-[var(--muted)]"}`}
             aria-current={on ? "page" : undefined}
-            onClick={() => setOpen(t.id)}
+            onClick={() => {
+              // đang soạn / sửa lệnh mà chuyển tab: huỷ luôn bản nháp / thay đổi chờ (user 10-29: đơn giản, không giữ để quay lại)
+              const tk = useTicketStore.getState();
+              if (ticketBusy(tk)) {
+                if (tk.modifyOwner) cancelOwnerEdits(tk.modifyOwner);
+                tk.close();
+              }
+              setOpen(t.id);
+            }}
           >
             {t.icon}
             <span className="truncate">{t.label}</span>

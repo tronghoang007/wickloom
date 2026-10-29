@@ -3,6 +3,7 @@
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
+import { useRailStore } from "@/store/rail";
 import { toast } from "@/store/toast";
 import { useOrderState } from "@/trading/actions";
 import { tradeBlock } from "@/trading/gate";
@@ -40,8 +41,10 @@ export function useTradeClick(symbol: string, digits: number, replay: boolean) {
     // Bấm SELL / BUY mở bảng đặt lệnh (Market hoặc lệnh chờ, SL/TP, kéo đường trên chart) như TradingView, lot lấy từ lot đã nhớ của account × symbol;
     // bảng đang mở cho symbol này thì chỉ đổi hướng, giữ SL/TP đã soạn
     const t = useTicketStore.getState();
-    if (t.draft && t.draft.symbol === symbol) t.patch({ side });
-    else t.open({ symbol, side, mode: "market", digits });
+    if (t.draft && t.draft.symbol === symbol) {
+      t.patch({ side });
+      useRailStore.getState().openOrder(); // không còn tab Order: bảng nháp đang bị panel khác che thì bấm SELL / BUY là hiện lại
+    } else t.open({ symbol, side, mode: "market", digits });
   };
   return { quote, block, busy, click };
 }

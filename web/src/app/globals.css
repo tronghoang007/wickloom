@@ -149,7 +149,7 @@ textarea,
   border-color: var(--popup-line);
 }
 
-/* Màn cảm ứng (phone / tablet): popup, bảng đặt lệnh, hộp toàn màn và toast hiện ra có chuyển động (user 10-29: hiện bụp ra thì thô). Desktop giữ như TradingView.
+/* Popup, panel bên phải, bảng đặt lệnh, hộp toàn màn và toast hiện ra có chuyển động (user 10-29: hiện bụp ra thì thô) — cả desktop lẫn cảm ứng.
    Chỉ chạy lúc phần tử được gắn vào trang; máy bật "giảm chuyển động" thì bỏ. */
 @keyframes wl-pop {
   from { opacity: 0; transform: scale(0.96); }
@@ -160,12 +160,23 @@ textarea,
 @keyframes wl-drop {
   from { opacity: 0; transform: translateY(-12px); }
 }
-@media (pointer: coarse) and (prefers-reduced-motion: no-preference) {
-  .popup { animation: wl-pop 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes wl-rise {
+  from { opacity: 0; transform: translateY(12px); }
+}
+@keyframes wl-slide-left {
+  from { opacity: 0; transform: translateX(24px); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .popup { animation: wl-pop 140ms cubic-bezier(0.2, 0.8, 0.2, 1); }
   .anim-drop { animation: wl-drop 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .anim-panel { animation: wl-slide-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+}
+/* toast desktop / tablet ở góc dưới: nổi lên từ dưới */
+@media (min-width: 768px) and (prefers-reduced-motion: no-preference) {
+  .anim-drop { animation-name: wl-rise; }
 }
 /* bảng đặt lệnh (sheet đáy) và hộp toàn màn của phone: trượt từ dưới lên thay vì phóng */
-@media (pointer: coarse) and (max-width: 767px) and (prefers-reduced-motion: no-preference) {
+@media (max-width: 767px) and (prefers-reduced-motion: no-preference) {
   .anim-sheet,
   .popup.anim-sheet { animation: wl-sheet 240ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 }

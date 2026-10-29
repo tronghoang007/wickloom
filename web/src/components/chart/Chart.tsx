@@ -33,7 +33,7 @@ import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView"
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
-import { isPhoneNow, isTouch, TOUCH_SLOP, useLandscape, useLayoutMode, useTouch, widenPaneHandles } from "@/lib/layoutMode";
+import { isPhoneNow, isTouch, TOUCH_SLOP, useLayoutMode, useTouch, widenPaneHandles } from "@/lib/layoutMode";
 import { fmtVol, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
 import {
   AreaSeries,
@@ -296,9 +296,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   const crossPriceRef = useRef<number | null>(null); // giá ở crosshair trên pane chính (null = crosshair ẩn): menu ⋯ của màn cảm ứng dùng thay giá dưới chuột phải
   const touch = useTouch();
   const phone = useLayoutMode() === "phone";
-  // phone dọc: SELL / BUY là nút nhỏ trên thanh trên (như MT5), không có widget dưới tiêu đề; xoay ngang thì giữ widget nhỏ như desktop
-  const landscape = useLandscape();
-  const portrait = phone && !landscape;
+  // phone (dọc lẫn ngang, user 10-29): giao diện kiểu MT5 — SELL / BUY ở thanh trên, không legend, không dải 1D / 5D… dưới chart, không cụm nút pane
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
   const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -2083,9 +2081,9 @@ export default function Chart({ paneId }: { paneId: string }) {
           style={{ top: mainTop + 8, "--legend-bg": `color-mix(in srgb, ${cs.bg ?? CHART_THEMES[theme].bg} 50%, transparent)` } as React.CSSProperties}
         >
           <div className="-ml-1 flex w-fit flex-wrap items-baseline gap-x-3 rounded bg-[var(--legend-bg)] pl-1 pr-1">
-            {/* phone dọc: không legend (user 10-29) — mã + khung đã có trên thanh trên; OHLC / Vol / hàng indicator cũng bỏ
+            {/* phone: không legend (user 10-29) — mã + khung đã có trên thanh trên; OHLC / Vol / hàng indicator cũng bỏ
                 (ẩn / hiện indicator ở danh sách trong vòng chọn khung, TimeframeRing) */}
-            {cs.showTitle && !portrait && (
+            {cs.showTitle && !phone && (
               <span className="flex items-center whitespace-nowrap text-[16px] text-[var(--fg)]">
                 <span className="mr-2 flex">
                   <SymbolBadge name={symbol} type={symType} size={20} />
@@ -2103,7 +2101,7 @@ export default function Chart({ paneId }: { paneId: string }) {
                 </span>
               </span>
             )}
-            {L && cs.showChartValues && !portrait && (
+            {L && cs.showChartValues && !phone && (
               <span className="flex items-baseline gap-x-2 whitespace-nowrap">
                 {(
                   [
@@ -2120,22 +2118,22 @@ export default function Chart({ paneId }: { paneId: string }) {
                 ))}
               </span>
             )}
-            {L && cs.showBarChange && chg !== null && legend.prev && !portrait && (
+            {L && cs.showBarChange && chg !== null && legend.prev && !phone && (
               <span className="whitespace-nowrap" style={{ color }}>
                 {chg >= 0 ? "+" : "−"}
                 {fmtPrice(Math.abs(chg), d)} ({chg >= 0 ? "+" : "−"}
                 {Math.abs((chg / legend.prev) * 100).toFixed(2)}%)
               </span>
             )}
-            {L && cs.showVolume && !portrait && (
+            {L && cs.showVolume && !phone && (
               <span className="whitespace-nowrap">
                 <span className="text-[var(--fg)]">Vol </span>
                 <span style={{ color }}>{fmtVol(L.v, volDigits(vs))}</span>
               </span>
             )}
           </div>
-          {!mainSqueezed && !portrait && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
-          {!legendCollapsed && !mainSqueezed && !portrait && (
+          {!mainSqueezed && !phone && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
+          {!legendCollapsed && !mainSqueezed && !phone && (
             <VolumeLegend
               getBars={() => barsRef.current}
               bar={L}
@@ -2143,8 +2141,8 @@ export default function Chart({ paneId }: { paneId: string }) {
               onMenu={(x, y) => setCtxMenu({ x, y, items: volumeMenuItems(tf) })}
             />
           )}
-          {!legendCollapsed && !mainSqueezed && !portrait && mainIndicators.map(indicatorRow)}
-          {!mainSqueezed && !portrait && ((!vs.removed || indicators.length > 0) || touch) && (
+          {!legendCollapsed && !mainSqueezed && !phone && mainIndicators.map(indicatorRow)}
+          {!mainSqueezed && !phone && ((!vs.removed || indicators.length > 0) || touch) && (
             <div className="mt-1 flex gap-1">
               {(!vs.removed || indicators.length > 0) && (
                 <button
@@ -2159,7 +2157,7 @@ export default function Chart({ paneId }: { paneId: string }) {
                   </span>
                 </button>
               )}
-              {/* màn cảm ứng không có chuột phải: menu chart ở đây, giá theo crosshair (chạm / nhấn giữ lên chart để đặt). Phone dọc không có cả cụm này
+              {/* màn cảm ứng không có chuột phải: menu chart ở đây, giá theo crosshair (chạm / nhấn giữ lên chart để đặt). Phone không có cả cụm này
                   (user 10-29): Settings / Create alert / Replay ở menu ⋯ của vòng chọn khung, bật lại tự co giãn bằng chạm đúp trục giá */}
               {touch && (
                 <button
@@ -2188,13 +2186,13 @@ export default function Chart({ paneId }: { paneId: string }) {
           ver={indVer}
           groups={paneGroups}
           bg={cs.bg ?? CHART_THEMES[theme].bg}
-          renderLegend={portrait ? () => null : indicatorRow}
+          renderLegend={phone ? () => null : indicatorRow}
           mainIndex={mainPaneIdx}
           onMove={(key, dir) => pane.indicators.getState().movePane(key, dir)}
           onMainSqueezed={setMainSqueezed}
           onMainTop={setMainTop}
           mainLegendHover={mainLegendHover}
-          buttons={!portrait}
+          buttons={!phone}
           onDelete={(key) => pane.indicators.getState().removeMany(paneGroups.find((g) => g.key === key)?.insts.map((i) => i.uid) ?? [])}
         />
         <div ref={lblRef} className="pointer-events-none absolute right-0 top-0 z-10 hidden">
@@ -2273,8 +2271,8 @@ export default function Chart({ paneId }: { paneId: string }) {
         )}
       </div>
       {(selecting || replayActive) && <ReplayBar onStep={() => stepReplay()} />}
-      {/* phone dọc: không có thanh này (như TradingView mobile; bật lại tự co giãn bằng chạm đúp trục giá / "Reset chart view" trong menu ⋯) */}
-      <div className={`flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm ${portrait ? "hidden" : ""}`}>
+      {/* phone: không có thanh này (như MT5 / TradingView mobile; bật lại tự co giãn bằng chạm đúp trục giá) */}
+      <div className={`flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm ${phone ? "hidden" : ""}`}>
         {/* màn hẹp: dải nút khoảng thời gian cuộn ngang (ẩn thanh cuộn), cụm bên phải giữ nguyên */}
         <div className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {RANGES.map((r) => (
