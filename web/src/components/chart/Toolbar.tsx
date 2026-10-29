@@ -74,21 +74,28 @@ function Menu({
   );
 }
 
-export function SymbolSearch() {
+/** `flat` (thanh trên phẳng của phone dọc, như MT5): chỉ chữ symbol, không nền bo tròn / nút ⊕. */
+export function SymbolSearch({ flat = false }: { flat?: boolean }) {
   const symbol = useChartStore((s) => s.symbol);
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      <button
-        className="flex h-9 items-center gap-2 rounded-full bg-[var(--hover)] pl-3 pr-1.5 text-sm font-semibold hover:brightness-125"
-        onClick={() => setOpen(true)}
-      >
-        {symbol}
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg)]">
-          <CompareI />
-        </span>
-      </button>
+      {flat ? (
+        <button className="flex h-10 min-w-0 items-center truncate px-2 text-[15px] font-semibold" onClick={() => setOpen(true)} aria-label="Symbol search">
+          {symbol}
+        </button>
+      ) : (
+        <button
+          className="flex h-9 items-center gap-2 rounded-full bg-[var(--hover)] pl-3 pr-1.5 text-sm font-semibold hover:brightness-125"
+          onClick={() => setOpen(true)}
+        >
+          {symbol}
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg)]">
+            <CompareI />
+          </span>
+        </button>
+      )}
       {open && <SymbolSearchDialog onClose={() => setOpen(false)} />}
     </>
   );

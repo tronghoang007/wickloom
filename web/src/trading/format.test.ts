@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Deal, Mt5Account, PendingOrder, Position, TradeData } from "@/lib/mt5Api";
-import { COLORS, STALE_SECONDS, accountProfit, closedPositions, dealNet, dealSummary, ghostsFor, stopLabel, type StopTitleFn, fmtLot, fmtPnl, fmtPx, isStale, orderLabel, positionPnl, sideLabel, totalPnl, tradeLines } from "./format";
+import { COLORS, STALE_SECONDS, accountProfit, closedPositions, dealNet, dealSummary, ghostsFor, stopLabel, type StopTitleFn, fmtLot, fmtPnl, fmtPx, isStale, orderLabel, positionPnl, sideLabel, totalPnl, tradeLevels, tradeLines } from "./format";
 
 const account = { id: "S:1", server: "S", broker: "B", login: 1, name: "n", mode: "demo", currency: "USD", leverage: 500, online: true, active: true, seen: 1 } as Mt5Account;
 const pos = (o: Partial<Position> = {}): Position => ({
@@ -262,5 +262,16 @@ describe("closedPositions", () => {
     ]);
     expect(rows[1]).toMatchObject({ sl: 90, tp: 0 }); // mức đã chạm đọc từ comment
     expect(rows.every((r) => r.position < 0)).toBe(true);
+  });
+});
+
+describe("tradeLevels (phone: khung giá chứa đường lệnh)", () => {
+  it("giá vào / SL / TP của vị thế và lệnh chờ đúng symbol, bỏ mức chưa đặt", () => {
+    const data = {
+      positions: [{ symbol: "XAUUSDm", price_open: 4040, sl: 4030, tp: 0 }, { symbol: "BTCUSDm", price_open: 60000, sl: 0, tp: 0 }],
+      orders: [{ symbol: "XAUUSDm", price_open: 4020, sl: 0, tp: 4060 }],
+    } as never;
+    expect(tradeLevels(data, "XAUUSDm")).toEqual([4040, 4030, 4020, 4060]);
+    expect(tradeLevels(null, "XAUUSDm")).toEqual([]);
   });
 });

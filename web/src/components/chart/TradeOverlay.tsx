@@ -97,7 +97,7 @@ export default function TradeOverlay({ symbol, chartType, replay, preview, getCh
     const owner = pendingKey.split(",")[0];
     if (owner === "draft" || useTicketStore.getState().modifyOwner === owner) return;
     useTicketStore.getState().select(owner);
-    useRailStore.setState({ sheetCollapsedFor: useTicketStore.getState().id }); // mở dạng thu gọn (✕ / ✓) để không che đường vừa kéo
+    useRailStore.setState({ sheetExpandedFor: null }); // hiện thu gọn (MODIFY, SL, TP, →) để không che đường vừa kéo (✕ / ✓) để không che đường vừa kéo
   }, [compact, pendingKey]);
   const compactRef = useRef(compact);
   useEffect(() => {

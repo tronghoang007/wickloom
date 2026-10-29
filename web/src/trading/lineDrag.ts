@@ -42,7 +42,8 @@ export class LineDrag {
   /** `slop`: ngưỡng "bấm hay kéo" của cú nhấn này (ngón tay rung nhiều hơn chuột: + TOUCH_SLOP). */
   private drag: { id: string; from: number; price: number; y: number; moved: boolean; slop: number; arm?: () => boolean } | null = null;
   private tap: { id: string; price: number; x: number; y: number; slop: number } | null = null; // nhấn xuống một đường `fixed`, chưa thả
-  private tapped = false; // vừa bấm xong một đường `fixed`: cú click của chart ngay sau đó không phải "bấm nền"
+  private tapped = false; // vừa bấm (không kéo) xong một đường: cú click của chart ngay sau đó không phải "bấm nền"
+  private hitAt = -Infinity; // lúc nhấn trúng một đường gần nhất (performance.now): ngón tay chạm đường thì LWC vẫn thấy cú chạm và báo click
   private lock: { handleScroll: unknown; handleScale: unknown } | null = null;
   private releaseTouch: (() => void) | null = null; // holdTouch đang chặn cuộn trang trong lúc kéo bằng ngón tay
   private hovering = false;
@@ -155,13 +156,19 @@ export class LineDrag {
     this.tapped = false;
     this.tap = null;
     const t = this.pick(e);
+    this.hitAt = t ? performance.now() : -Infinity; // nhấn vào nền thì xoá dấu của lần chạm đường trước (cú chạm nền ngay sau đó vẫn là "nền")
     if (!t) return;
     // đường chỉ-bấm: không chặn sự kiện, chart vẫn nhận cú nhấn nên kéo ra khỏi chỗ bấm là kéo chart như bình thường
     if (t.fixed) this.tap = { id: t.id, price: t.price, x: e.clientX, y: e.clientY, slop: CLICK_SLOP + (isTouch(e) ? TOUCH_SLOP : 0) };
     else this.start(e, t.id, t.price, t.price);
   };
 
-  /** Cú click chart ngay sau khi bấm một đường `fixed` (đọc một lần): bên dùng bỏ qua nó, không thì "bấm nền chart" bỏ chọn lệnh vừa chọn. */
+  /** Vừa nhấn trúng một đường (bất kỳ loại nào) trong `ms` gần đây: cú click của chart lúc đó không phải "chạm nền chart". */
+  touchedLine(ms = 800): boolean {
+    return performance.now() - this.hitAt < ms;
+  }
+
+  /** Cú click chart ngay sau khi bấm một đường (đọc một lần): bên dùng bỏ qua nó, không thì "bấm nền chart" bỏ chọn lệnh vừa chọn. */
   consumeTap(): boolean {
     const t = this.tapped;
     this.tapped = false;
@@ -232,7 +239,12 @@ export class LineDrag {
     }
     this.finish();
     if (!d.moved && d.arm) return; // đường chưa được tạo: không có gì để thả hay huỷ
-    if (!d.moved) this.h.onAbort(d.id, d.from, true); // nhấn xuống rồi thả ra, không dời: bấm
+    if (!d.moved) {
+      // nhấn xuống rồi thả ra, không dời: bấm. Cảm ứng: chặn pointerdown không ngăn được LWC thấy cú chạm và báo click nền ngay sau đó,
+      // click đó bỏ focus = đóng luôn bảng vừa mở (chạm đường lệnh chờ trên phone không sửa được)
+      this.tapped = true;
+      this.h.onAbort(d.id, d.from, true);
+    }
     else if (Math.abs(d.price - d.from) < this.h.tickSize() / 2) this.h.onAbort(d.id, d.from, false); // đã kéo nhưng thả lại đúng giá cũ: vẫn là kéo, không phải chọn
     else this.h.onDrop(d.id, d.price, d.from);
   };

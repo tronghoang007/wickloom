@@ -1,6 +1,6 @@
 # Plan: Wickloom dùng được trên điện thoại (responsive)
 
-Ngày lập: 2026-10-29. Trạng thái: **M0–M6 xong** (2026-10-29), M7 (PWA) tuỳ chọn chưa làm; user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
+Ngày lập: 2026-10-29. Trạng thái: **M0–M7 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
 
 ## 1. Hiện trạng (đã đọc code)
 
@@ -139,7 +139,7 @@ Ngày lập: 2026-10-29. Trạng thái: **M0–M6 xong** (2026-10-29), M7 (PWA) 
 | **M4** Dialog & menu ✅ | Component `Sheet`, chuyển dialog lớn + menu thả xuống, input số | M1 |
 | **M5** Vẽ ✅ | Sheet công cụ + favorites, đặt điểm bằng chạm, thanh style gọn, text editor với bàn phím ảo | M2, M4 |
 | **M6** Tablet & ngang ✅ | Overlay rail, toolbar co giãn, màn ngang toàn chart | M1 |
-| **M7** PWA *(tuỳ chọn)* | manifest, icon, `display: standalone` | M0 |
+| **M7** PWA ✅ | manifest, icon, `display: standalone` | M0 |
 
 Thứ tự đề xuất: M0 → M1 → M2 → M3 (đến đây là dùng được để trade) → M4 → M5 → M6 → M7. Mỗi phase commit riêng.
 
@@ -298,6 +298,55 @@ iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad
 - Đo lại: phone ngang 844×390, iPad 820×1180 / 1180×820, laptop 1024×700 đều đúng bề rộng màn, không tràn; phone ngang: chart 780×346,
   đặt lệnh giả lập + bảng tự đóng; tablet: panel Watchlist đè chart (chart giữ 720px), menu ⋯ nằm trên panel, lưới khung thời gian dưới nút.
   Các kiểm tra phone dọc / desktop cũ chạy lại đều qua.
+
+### M7 đã làm (2026-10-29)
+
+- `app/manifest.ts`: Wickloom, `display: standalone`, nền / theme `#1a1a1a`, icon 192 / 512 + bản maskable 512 (`web/public/`).
+  **Không** có service worker / cache offline — giá và lệnh luôn lấy trực tiếp từ backend.
+- Icon xuất từ `app/icon.svg` bằng headless Chromium: nền vuông kín (hệ điều hành tự bo / cắt theo khuôn), bỏ viền mảnh 1px;
+  hình logo và màu giữ nguyên. Maskable thu nội dung vào 80% giữa. `app/apple-icon.png` 180px cho iPhone.
+- `layout.tsx`: `appleWebApp` (capable, title, thanh trạng thái `black-translucent`) + `themeColor`.
+- Chạy toàn màn trên iPhone thì nội dung nằm dưới thanh trạng thái: khung chính đã chừa bằng safe-area (M0); 3 dialog toàn màn trên
+  phone (Settings, Indicators, Symbol search) thêm padding safe-area trên / dưới.
+- Kiểm tra: Chromium `Page.getInstallabilityErrors` = [] (profile thường, 127.0.0.1), manifest không lỗi, icon trả 200,
+  meta `mobile-web-app-capable` / `apple-mobile-web-app-status-bar-style` / `theme-color` có trong trang.
+- **Lưu ý cài trên điện thoại thật**: Android chỉ cho cài như app khi trang chạy qua **HTTPS** (hoặc localhost) — vào bằng
+  `http://<IP>:3000` thì chỉ tạo được lối tắt mở trong trình duyệt. Liên quan câu 4 mục 9 (điện thoại vào app bằng đường nào).
+
+### Sau M7: góp ý của user (2026-10-29)
+
+- **Chạm nền chart = bỏ nháp** ("đang nháp lệnh nhấn ra ngoài thì phải bỏ đi"): phone, đang có bản nháp hoặc bảng sửa lệnh mà chạm nền chart
+  (click của LWC — kéo / pan không tính) thì bỏ bản nháp / huỷ thay đổi chờ và đóng bảng (`chartOrders.onChartClick`). Chạm / kéo chính đường
+  lệnh không tính (`LineDrag.touchedLine`, xoá dấu khi nhấn vào nền), đang cầm công cụ vẽ cũng không tính.
+- Khung giá trên phone chứa cả giá vào / SL / TP của **vị thế và lệnh chờ** (`tradeLevels`), không chỉ bản nháp: đặt lệnh xong SL từng nằm ngoài khung.
+- ~~Bố cục như TradingView mobile (thanh công cụ ở đáy, thanh SELL / BUY to trên đầu chart)~~ — cùng ngày user đổi sang **kiểu MT5** (xem dưới).
+  Còn giữ từ đợt đó: thanh phẳng (`XAUUSDm` chữ trơn, `5m` không mũi tên), bỏ hàng `1D 5D … % log auto` của chart trên phone dọc
+  (bật lại tự co giãn: chạm đúp trục giá / "Reset chart view").
+- **Avatar thành tab Account** (như tab "Menu" của TradingView mobile): thanh công cụ phone không còn avatar; tab cuối của tab bar (cả dọc lẫn
+  cột ngang) mở panel `AccountPanel` = cùng nội dung menu avatar desktop (`AccountContent`: khách → Sign in / Create account; đã login →
+  Trading accounts, Account settings, Sign out). Huy hiệu MT5 / chấm phiên hết hạn nằm trên icon tab (`AccountAvatar`); tab bar gọi
+  `useMt5Polling` vì panel chỉ mount khi mở. Desktop / tablet giữ avatar góc trên trái như cũ.
+
+### Sau M7: chuyển sang kiểu MT5 mobile (2026-10-29, user gửi ảnh MT5)
+
+- **Thanh trên cùng phẳng** (`MobileTopBar flat`): symbol, khung, Indicators, bút vẽ, **SELL / BUY nhỏ** (2 nút 44×36 tách rời cách 8px — user:
+  "tay tôi to"), chọn chart, ⋯. Bỏ thanh SELL / BUY to trên đầu chart (`TradeWidget bar` gỡ; logic bấm tách thành `useTradeClick`). Gỡ `DropUp`
+  (menu mở lên của thanh ở đáy). Toast phone lên ngay dưới thanh trên (ở đáy thì che bảng lệnh).
+- **Tab bar**: Watchlist, Chart, Trading (giữa), [Order khi đang soạn], Alerts, Calendar, Account.
+- **Bảng lệnh luôn hiện thu gọn trước** (`useRailStore.sheetExpandedFor`): bấm SELL / BUY, chạm hay kéo lệnh đã đặt.
+- **Dòng thu gọn của lệnh đã đặt như MT5** (`ModifyRow`): tab "Delete order | Modify order" (vị thế: Close position | Modify position); Modify =
+  nút MODIFY + SL + TP + → (gửi thay đổi chờ; SL / TP bật = thêm mức gợi ý thành thay đổi chờ, tắt = bỏ / xoá mức có hỏi xác nhận); Delete / Close
+  = → huỷ lệnh chờ / đóng cả vị thế (hỏi xác nhận). Ở tab Delete không hiện SL / TP (MT5 vẫn hiện, nhưng ở đó vô nghĩa).
+- **Sửa lỗi chạm đường lệnh chờ không mở bảng sửa** (user báo): đường kéo được bấm không kéo thì chọn lệnh, nhưng trên cảm ứng LWC vẫn báo click nền
+  ngay sau → bỏ focus → bảng đóng sau 1ms. `LineDrag` giờ đặt cờ `tapped` cho cả cú bấm này (trước chỉ đường `fixed` của vị thế). Unit test thêm.
+- **Khung giá chừa phần bị bảng che**: bảng nổi báo mép trên (`sheetTop`), `autoscaleInfoProvider` thêm `margins.below` = phần pane bị che, nên SL / TP
+  thấp nhất không nằm sau bảng. Chỉ phone dọc (ngang thì bảng ở bên phải).
+- **Legend gọn**: phone dọc chỉ "XAUUSDm · 5m" — bỏ logo, tên đầy đủ, sàn, OHLC, thay đổi, Vol, hàng Volume / indicator (cả legend của pane riêng), nút thu legend.
+  Còn nút ⋯ (menu chart cho cảm ứng).
+- **Vòng chọn khung như MT5** (`TimeframeRing`): bấm nút khung → vòng giữa màn, M1 M5 M15 M30 H1 H4 D1 W1 MN quanh vòng (M15 ở đỉnh), ⋯ mở lưới đủ khung
+  (M2, M3, M10, H2, H3), mục Indicators mở danh sách indicator của chart (Volume + đã thêm) chạm để ẩn / hiện.
+- Thử headless (390 / 360 / ngang / desktop): không tràn ngang, các luồng đặt / sửa / kéo / đóng lệnh trên Replay, vòng khung + danh sách ẩn hiện.
+- Còn mở: dòng thu gọn của **lệnh mới** kiểu MT5 có tab loại lệnh (Market Execution / Buy Limit / Sell Limit / Buy Stop…) — chưa làm, hỏi user.
 
 ## 11. Kiểm thử
 

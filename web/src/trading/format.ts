@@ -178,6 +178,15 @@ export const ghostsFor = (sl: number, tp: number): ("tp" | "sl")[] => [...(tp > 
 
 /** Đường trên chart của symbol hiện tại: entry + SL + TP của vị thế, giá + SL + TP của lệnh chờ. Dữ liệu cũ thì không có đường nào. `drag` đè giá + nhãn của các đường đang kéo
  *  hoặc chờ xác nhận (đường SL/TP chưa tồn tại mà đang được kéo ra từ nút mờ thì được dựng tạm). `ccy` = đơn vị tiền của account, ghi sau số lãi/lỗ của vị thế. */
+/** Mức giá của vị thế / lệnh chờ trên `symbol` (giá vào, SL, TP đã đặt). Phone dùng cho co giãn tự động: chart thấp, đường SL / TP hay nằm ngoài khung. */
+export function tradeLevels(data: TradeData | null, symbol: string): number[] {
+  if (!data) return [];
+  const out: number[] = [];
+  for (const p of data.positions) if (p.symbol === symbol) out.push(p.price_open, p.sl, p.tp);
+  for (const o of data.orders) if (o.symbol === symbol) out.push(o.price_open, o.sl, o.tp);
+  return out.filter((v) => Number.isFinite(v) && v > 0);
+}
+
 export function tradeLines(data: TradeData | null, symbol: string, nowSec: number, drag?: DragPreview | DragPreview[] | null, stopTitle: StopTitleFn = plainStop, ccy = ""): LineSpec[] {
   if (!data || isStale(data, nowSec)) return [];
   const out: LineSpec[] = [];

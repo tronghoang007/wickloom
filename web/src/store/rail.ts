@@ -1,8 +1,8 @@
 import { create } from "zustand";
 
 // Panel đang mở ở thanh bên phải (watchlist / alert / lịch kinh tế / bảng đặt lệnh). Đặt ngoài RightRail để bảng đặt lệnh tự mở thanh khi bấm SELL / BUY.
-// "trading" (vị thế / lệnh chờ / lịch sử) và "objects" (chọn công cụ vẽ) chỉ có trên phone; RightRail không có tab của chúng nên bỏ qua.
-export type RailPanel = "watchlist" | "alerts" | "calendar" | "order" | "trading" | "objects";
+// "trading" (vị thế / lệnh chờ / lịch sử), "objects" (chọn công cụ vẽ) và "account" (tài khoản) chỉ có trên phone; RightRail không có tab của chúng nên bỏ qua.
+export type RailPanel = "watchlist" | "alerts" | "calendar" | "order" | "trading" | "objects" | "account";
 type State = {
   open: RailPanel | null;
   setOpen: (p: RailPanel | null) => void;
@@ -10,15 +10,18 @@ type State = {
   before: RailPanel | null;
   openOrder: () => void;
   closeOrder: () => void;
-  /** Phone: bảng đặt lệnh (sheet kiểu MT5) đang thu gọn cho bảng có `id` này của useTicketStore. Mở bảng mới (id khác) thì tự mở rộng. */
-  sheetCollapsedFor: number | null;
+  /** Phone: bảng đặt lệnh (sheet kiểu MT5) đang mở rộng cho bảng có `id` này của useTicketStore. Bảng mới (id khác) thì hiện thu gọn trước, như MT5. */
+  sheetExpandedFor: number | null;
+  /** Phone dọc: mép trên (toạ độ viewport, px) của bảng đặt lệnh đang nổi đè lên đáy chart, null = không có. Khung giá chừa phần bị che (Chart.tsx). */
+  sheetTop: number | null;
 };
 
 export const useRailStore = create<State>()((set, get) => ({
   open: null,
   setOpen: (open) => set({ open }),
   before: null,
-  sheetCollapsedFor: null,
+  sheetExpandedFor: null,
+  sheetTop: null,
   openOrder: () => {
     const { open, before } = get();
     set({ open: "order", before: open === "order" ? before : open });

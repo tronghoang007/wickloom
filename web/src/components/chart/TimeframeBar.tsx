@@ -5,16 +5,19 @@ import { TF_MENU, tfLong, tfShort } from "@/lib/timeframes";
 import { useChartStore } from "@/store/chart";
 import { useEffect, useState } from "react";
 import { Chevron, Plus, StarI } from "../icons";
+import TimeframeRing from "./TimeframeRing";
 
 // Các khung "yêu thích" trên toolbar + dropdown đầy đủ như TradingView: nhóm Minutes/Hours/
 // Days thu gọn được, ngôi sao để ghim khung lên toolbar. Khung đang chọn mà chưa ghim vẫn
 // hiện trên toolbar (TV cũng vậy).
 /** `compact` (thanh trên của phone): không bày các khung yêu thích, chỉ một nút "khung đang chọn ⌄" mở dropdown. */
-export default function TimeframeBar({ className, compact = false }: { className: string; compact?: boolean }) {
+/** `chevron={false}`: thanh trên phẳng của phone dọc (như MT5) chỉ ghi "M15", không mũi tên. */
+export default function TimeframeBar({ className, compact = false, chevron = true }: { className: string; compact?: boolean; chevron?: boolean }) {
   const tf = useChartStore((s) => s.tf);
   const favTfs = useChartStore((s) => s.favTfs);
   const set = useChartStore((s) => s.set);
   const [open, setOpen] = useState(false);
+  const [grid, setGrid] = useState(false); // phone: vòng chọn khung (TimeframeRing) trước, nút ⋯ của vòng mới mở lưới đủ khung
   const [collapsed, setCollapsed] = useState<string[]>([]);
 
   useEffect(() => {
@@ -47,12 +50,16 @@ export default function TimeframeBar({ className, compact = false }: { className
         <button
           className={`${className} ${compact ? "gap-0.5 px-2 font-semibold" : "px-1"} ${open ? "bg-[var(--hover)]" : ""}`}
           title={compact ? tfLong(tf) : undefined}
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            setGrid(false);
+            setOpen(!open);
+          }}
         >
           {compact && tfShort(tf)}
-          <Chevron />
+          {chevron && <Chevron />}
         </button>
-        {open && compact && (
+        {open && compact && !grid && <TimeframeRing onClose={() => setOpen(false)} onGrid={() => setGrid(true)} />}
+        {open && compact && grid && (
           // phone: lưới ô bấm thay danh sách dài phải cuộn (chọn một chạm, như vòng chọn khung của MT5); bỏ ngôi sao yêu thích — chỉ có ý nghĩa với toolbar desktop
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />

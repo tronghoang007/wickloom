@@ -81,7 +81,7 @@ export default function IndicatorsDialog({
           onClick={() => setOpen(false)}
         >
           <div
-            className="flex h-[88vh] w-[860px] max-w-[96vw] flex-col rounded-2xl popup max-md:h-dvh max-md:w-full max-md:max-w-none max-md:rounded-none"
+            className="flex h-[88vh] w-[860px] max-w-[96vw] flex-col rounded-2xl popup max-md:h-dvh max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:w-full max-md:max-w-none max-md:rounded-none"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 pb-3 pt-5">

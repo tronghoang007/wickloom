@@ -107,6 +107,21 @@ describe("đường chỉ-bấm (fixed)", () => {
     expect(onMove).toHaveBeenCalledWith("o:2", 340);
   });
 
+  it("bấm (không kéo) đường kéo được: chọn lệnh và nuốt cú click chart ngay sau (cảm ứng: LWC vẫn báo click)", () => {
+    handlers.pointerdown(ev(301) as never);
+    winHandlers.pointerup(ev(301) as never);
+    expect(onAbort).toHaveBeenCalledWith("o:2", 300, true);
+    expect(drag.consumeTap()).toBe(true);
+    expect(drag.consumeTap()).toBe(false);
+  });
+
+  it("kéo đường kéo được rồi thả: không phải bấm", () => {
+    handlers.pointerdown(ev(301) as never);
+    handlers.pointermove(ev(340) as never);
+    winHandlers.pointerup(ev(340) as never);
+    expect(drag.consumeTap()).toBe(false);
+  });
+
   it("trỏ vào đường fixed: con trỏ bàn tay và báo hover; đường kéo được là mũi tên lên xuống", () => {
     handlers.pointermove(ev(203) as never);
     expect(cursor.cursor).toBe("pointer");
@@ -142,6 +157,18 @@ describe("đường chỉ-bấm (fixed)", () => {
   });
 
   const touchEv = (y: number, x = 100) => ({ ...ev(y, canvas, x), pointerType: "touch" });
+
+  it("touchedLine: nhấn trúng đường thì đúng trong ít lâu sau, nhấn nền thì không", () => {
+    expect(drag.touchedLine()).toBe(false);
+    handlers.pointerdown(touchEv(500) as never); // nền
+    expect(drag.touchedLine()).toBe(false);
+    handlers.pointerdown(touchEv(305) as never); // đường kéo được
+    expect(drag.touchedLine()).toBe(true);
+    expect(drag.touchedLine(-1)).toBe(false); // hết hạn
+    winHandlers.pointerup(touchEv(305) as never); // nhả tay
+    handlers.pointerdown(touchEv(500) as never); // chạm nền ngay sau: không còn tính là chạm đường
+    expect(drag.touchedLine()).toBe(false);
+  });
 
   it("ngón tay: chạm lệch 12px vẫn trúng đường (chuột thì không)", () => {
     handlers.pointerdown(ev(212) as never);

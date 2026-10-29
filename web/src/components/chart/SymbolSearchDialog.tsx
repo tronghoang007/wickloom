@@ -114,7 +114,7 @@ export default function SymbolSearchDialog({
     >
       <div
         // phone (max-md): toàn màn để danh sách dài và bàn phím ảo đều có chỗ
-        className="flex max-h-[80vh] w-[790px] max-w-[96vw] flex-col overflow-hidden rounded-2xl popup max-md:h-dvh max-md:max-h-none max-md:max-w-none max-md:w-full max-md:rounded-none"
+        className="flex max-h-[80vh] w-[790px] max-w-[96vw] flex-col overflow-hidden rounded-2xl popup max-md:h-dvh max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:max-h-none max-md:max-w-none max-md:w-full max-md:rounded-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pb-3 pt-4">

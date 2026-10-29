@@ -68,7 +68,8 @@ export default function Page() {
       // Padding safe-area chỉ khác 0 trên máy có tai thỏ / thanh home (viewportFit "cover" ở layout.tsx).
       className="flex h-dvh flex-col bg-[var(--bg)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-[var(--fg)]"
     >
-      {phone ? <MobileTopBar /> : <Toolbar />}
+      {/* phone dọc: thanh trên phẳng như MT5 (có SELL | BUY nhỏ); phone ngang: thanh gọn, tab bar là cột bên phải */}
+      {phone ? <MobileTopBar flat={!sideTabs} /> : <Toolbar />}
       <div className="flex min-h-0 flex-1">
         {!phone && <DrawingToolbar />}
         <main className="relative min-w-0 flex-1">

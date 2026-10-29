@@ -16,10 +16,9 @@ import PriceText from "./PriceText";
 
 const sideBtn = "flex min-w-[72px] cursor-pointer flex-col items-center justify-center rounded-md px-2.5 pb-px text-white";
 
-/** Widget SELL | spread | BUY như TradingView, dưới dòng tiêu đề của chart (docs/trade-plan.md T2-T3): bấm thì mở bảng đặt lệnh (OrderTicket, nơi chỉnh lot) cho account MT5 đang cấp dữ liệu.
- *  Chưa đặt được thì nút mờ đi và tooltip/toast nói lý do (tradeBlock); khách bấm thì ra popup đăng nhập. Đang Replay thì đặt lệnh với account giả lập (trading/simStore.ts), khách cũng được. */
-/** `bar` (phone): thanh ngang cả bề rộng ở đầu chart (xa tab bar ở đáy cho đỡ bấm nhầm), nút cao 44px cho dễ chạm thay cho widget nhỏ dưới tiêu đề. */
-export default function TradeWidget({ symbol, digits, replay, bar = false }: { symbol: string; digits: number; replay: boolean; bar?: boolean }) {
+/** Bấm SELL / BUY cho `symbol`: mở bảng đặt lệnh (OrderTicket) cho account MT5 đang cấp dữ liệu. Chưa đặt được thì `block` = lý do (toast khi bấm);
+ *  khách bấm thì ra popup đăng nhập. Đang Replay thì đặt lệnh với account giả lập (trading/simStore.ts), khách cũng được. */
+export function useTradeClick(symbol: string, digits: number, replay: boolean) {
   const quote = useQuoteStore((s) => quoteOf(s, symbol, replay)); // pane khác đang Replay: chart này vẫn hiện giá thật
   const status = useAuthStore((s) => s.status);
   const loaded = useMt5Store((s) => s.loaded);
@@ -44,21 +43,25 @@ export default function TradeWidget({ symbol, digits, replay, bar = false }: { s
     if (t.draft && t.draft.symbol === symbol) t.patch({ side });
     else t.open({ symbol, side, mode: "market", digits });
   };
+  return { quote, block, busy, click };
+}
 
+/** Widget SELL | spread | BUY như TradingView, dưới dòng tiêu đề của chart (docs/trade-plan.md T2-T3): bấm thì mở bảng đặt lệnh (OrderTicket, nơi chỉnh lot) cho account MT5 đang cấp dữ liệu.
+ *  Chưa đặt được thì nút mờ đi và tooltip/toast nói lý do (useTradeClick). Phone dọc không có widget này: nút SELL / BUY nhỏ ở thanh trên (MobileChrome). */
+export default function TradeWidget({ symbol, digits, replay }: { symbol: string; digits: number; replay: boolean }) {
+  const { quote, block, busy, click } = useTradeClick(symbol, digits, replay);
   const dim = block !== null || busy ? "opacity-60" : "";
-  const size = bar ? "flex-1 py-0.5" : "";
-  const price = bar ? "text-[15px] leading-5" : "text-[12px] leading-4";
   return (
-    <div className={`pointer-events-auto flex select-none items-stretch gap-1 text-[11px] ${bar ? "h-11" : "mt-1 h-[34px]"}`} data-testid="trade-widget" title={block ?? undefined}>
-      <button type="button" aria-label="Sell at market" onClick={() => click("sell")} className={`${sideBtn} ${size} ${dim} bg-[#f23645] hover:brightness-110`}>
-        <span className={`${price} font-semibold tabular-nums`}>{quote ? <PriceText value={quote.bid} digits={digits} /> : "—"}</span>
+    <div className="pointer-events-auto mt-1 flex h-[34px] select-none items-stretch gap-1 text-[11px]" data-testid="trade-widget" title={block ?? undefined}>
+      <button type="button" aria-label="Sell at market" onClick={() => click("sell")} className={`${sideBtn} ${dim} bg-[#f23645] hover:brightness-110`}>
+        <span className="text-[12px] font-semibold leading-4 tabular-nums">{quote ? <PriceText value={quote.bid} digits={digits} /> : "—"}</span>
         <span className="text-[11px] leading-3">SELL</span>
       </button>
       <span className="flex min-w-[24px] items-center justify-center text-[10px] text-[var(--muted)] tabular-nums" data-testid="trade-spread" title="Spread (pip)">
         {quote ? spreadPips(quote.bid, quote.ask, digits) : "—"}
       </span>
-      <button type="button" aria-label="Buy at market" onClick={() => click("buy")} className={`${sideBtn} ${size} ${dim} bg-[#2962ff] hover:brightness-110`}>
-        <span className={`${price} font-semibold tabular-nums`}>{quote ? <PriceText value={quote.ask} digits={digits} /> : "—"}</span>
+      <button type="button" aria-label="Buy at market" onClick={() => click("buy")} className={`${sideBtn} ${dim} bg-[#2962ff] hover:brightness-110`}>
+        <span className="text-[12px] font-semibold leading-4 tabular-nums">{quote ? <PriceText value={quote.ask} digits={digits} /> : "—"}</span>
         <span className="text-[11px] leading-3">BUY</span>
       </button>
     </div>

@@ -11,6 +11,7 @@ import { MAIN_PANE, clampSlot, otherPaneKeys, paneIndices, paneKeyOf } from "@/i
 import PaneChrome, { type PaneGroup } from "./PaneChrome";
 import { VERT_DRAG_PX, paneAt, paneRects, panPriceRange } from "./panes";
 
+import { tfShort } from "@/lib/timeframes";
 import { TF_SECONDS, WS_URL, fetchBars, fetchSymbols, triggerBackfillAt, type Bar } from "@/lib/api";
 import { SPEEDS, exitReplay } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
@@ -20,10 +21,11 @@ import type { ChartType, ScaleMode, VolumeSettings } from "@/store/paneStores";
 import { openCreateAlert } from "@/alerts/store";
 import { useAlertLines } from "@/alerts/useAlertLines";
 import { createLineDrag, type ChartDrag } from "@/trading/chartOrders";
-import type { DragPreview } from "@/trading/format";
+import { tradeLevels, type DragPreview } from "@/trading/format";
+import { useTradeStore } from "@/trading/store";
 import { quoteOf, useQuoteStore } from "@/trading/quote";
 import { draftLevels, parsePrice } from "@/trading/draft";
-import { ticketBusy, useTicketStore } from "@/trading/ticket";
+import { useTicketStore } from "@/trading/ticket";
 import { useRailStore } from "@/store/rail";
 import type { SimBar } from "@/trading/sim";
 import { enterSim, feedSim, leaveSim, restartSim, seedSim } from "@/trading/simStore";
@@ -292,12 +294,9 @@ export default function Chart({ paneId }: { paneId: string }) {
   const crossPriceRef = useRef<number | null>(null); // giá ở crosshair trên pane chính (null = crosshair ẩn): menu ⋯ của màn cảm ứng dùng thay giá dưới chuột phải
   const touch = useTouch();
   const phone = useLayoutMode() === "phone";
-  // phone dọc: SELL / BUY thành thanh to ở đầu chart thay vì widget nhỏ dưới tiêu đề; xoay ngang thì màn thấp, giữ widget nhỏ như desktop
+  // phone dọc: SELL / BUY là nút nhỏ trên thanh trên (như MT5), không có widget dưới tiêu đề; xoay ngang thì giữ widget nhỏ như desktop
   const landscape = useLandscape();
-  const tradeBar = phone && !landscape;
-  // bảng đặt lệnh đang mở (phone: sheet dưới chart, đã có Sell / Buy riêng): bỏ thanh SELL / BUY để chart còn chỗ
-  const orderPanel = useRailStore((s) => s.open === "order");
-  const ticketShown = useTicketStore(ticketBusy) && orderPanel;
+  const portrait = phone && !landscape;
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
   const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -1305,7 +1304,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       volRef.current?.getPane().paneIndex() ?? 0, // vào đúng pane chính (đã chứa series volume)
       fpOn,
     );
-    // Phone: chart thấp nên đường giá vào / SL / TP của bản nháp hay rơi ra ngoài khung giá, không thấy để kéo bằng tay: co giãn tự động tính cả các mức đó.
+    // Phone: chart thấp nên đường giá vào / SL / TP (bản nháp, vị thế, lệnh chờ) hay rơi ra ngoài khung giá, không thấy để kéo bằng tay: co giãn tự động tính cả các mức đó.
     // Desktop giữ như TradingView (khung giá chỉ theo nến).
     let last: AutoscaleInfo | null = null;
     seriesRef.current.applyOptions({
@@ -1316,9 +1315,24 @@ export default function Chart({ paneId }: { paneId: string }) {
         const hs = chart.options().handleScroll;
         if (last && (typeof hs === "object" ? !hs.pressedMouseMove : !hs)) return last;
         const sym = pane.chart.getState().symbol;
-        const levels = draftLevels(useTicketStore.getState().draft, sym, quoteOf(useQuoteStore.getState(), sym, pane.replay.getState().active));
+        const replaying = pane.replay.getState().active;
+        const trades = useTradeStore.getState();
+        const levels = [
+          ...draftLevels(useTicketStore.getState().draft, sym, quoteOf(useQuoteStore.getState(), sym, replaying)),
+          ...(trades.sim === replaying ? tradeLevels(trades.data, sym) : []), // lệnh của account đang hiện trên chart này (Replay: giả lập)
+        ];
         const { minValue, maxValue } = base.priceRange;
         last = levels.length ? { ...base, priceRange: { minValue: Math.min(minValue, ...levels), maxValue: Math.max(maxValue, ...levels) } } : base;
+        // bảng đặt lệnh nổi đè đáy chart: chừa phần pane bị che, mức thấp nhất (thường là SL) nằm trên mép bảng để còn thấy và kéo
+        const sheetTop = useRailStore.getState().sheetTop;
+        const box = boxRef.current;
+        const pi = seriesRef.current?.getPane().paneIndex() ?? 0;
+        if (sheetTop !== null && box) {
+          let paneTop = box.getBoundingClientRect().top;
+          for (let i = 0; i < pi; i++) paneTop += chart.paneSize(i).height + 1; // + đường phân cách pane
+          const hidden = paneTop + chart.paneSize(pi).height - sheetTop;
+          if (hidden > 0) last = { ...last, margins: { above: last.margins?.above ?? 0, below: Math.max(last.margins?.below ?? 0, hidden + 8) } };
+        }
         return last;
       },
     });
@@ -1333,6 +1347,20 @@ export default function Chart({ paneId }: { paneId: string }) {
     () =>
       useTicketStore.subscribe((s, prev) => {
         if (s.draft !== prev.draft && isPhoneNow()) seriesRef.current?.applyOptions({});
+      }),
+    [],
+  );
+  useEffect(
+    () =>
+      useRailStore.subscribe((s, prev) => {
+        if (s.sheetTop !== prev.sheetTop) seriesRef.current?.applyOptions({}); // bảng đặt lệnh mở / đóng / đổi cao: chừa lại đáy khung giá
+      }),
+    [],
+  );
+  useEffect(
+    () =>
+      useTradeStore.subscribe((s, prev) => {
+        if (s.data !== prev.data && isPhoneNow()) seriesRef.current?.applyOptions({}); // đặt / sửa / đóng lệnh: khung giá theo mức mới
       }),
     [],
   );
@@ -1969,12 +1997,6 @@ export default function Chart({ paneId }: { paneId: string }) {
         useLayoutStore.getState().setActive(paneId);
       }}
     >
-      {/* phone: SELL / BUY ở trên đầu chart, xa tab bar ở đáy cho đỡ bấm nhầm */}
-      {tradeBar && !ticketShown && (
-        <div className="border-b border-[var(--border)] px-2 py-1.5">
-          <TradeWidget symbol={symbol} digits={digits} replay={replayActive} bar />
-        </div>
-      )}
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
         <TradeOverlay
@@ -2027,7 +2049,16 @@ export default function Chart({ paneId }: { paneId: string }) {
           style={{ top: mainTop + 8, "--legend-bg": `color-mix(in srgb, ${cs.bg ?? CHART_THEMES[theme].bg} 50%, transparent)` } as React.CSSProperties}
         >
           <div className="-ml-1 flex w-fit flex-wrap items-baseline gap-x-3 rounded bg-[var(--legend-bg)] pl-1 pr-1">
-            {cs.showTitle && (
+            {/* phone dọc: legend gọn như MT5 (user 10-29) — chỉ mã + khung, không logo / tên đầy đủ / sàn / OHLC / Vol; hàng indicator cũng bỏ
+                (ẩn / hiện ở danh sách trong vòng chọn khung, TimeframeRing) */}
+            {portrait && (
+              <span className="whitespace-nowrap text-[15px] font-semibold">
+                <span className="text-[var(--accent-text)]">{symbol}</span>
+                <span className="text-[var(--muted)]"> · </span>
+                {tfShort(tf)}
+              </span>
+            )}
+            {cs.showTitle && !portrait && (
               <span className="flex items-center whitespace-nowrap text-[16px] text-[var(--fg)]">
                 <span className="mr-2 flex">
                   <SymbolBadge name={symbol} type={symType} size={20} />
@@ -2045,7 +2076,7 @@ export default function Chart({ paneId }: { paneId: string }) {
                 </span>
               </span>
             )}
-            {L && cs.showChartValues && (
+            {L && cs.showChartValues && !portrait && (
               <span className="flex items-baseline gap-x-2 whitespace-nowrap">
                 {(
                   [
@@ -2062,22 +2093,22 @@ export default function Chart({ paneId }: { paneId: string }) {
                 ))}
               </span>
             )}
-            {L && cs.showBarChange && chg !== null && legend.prev && (
+            {L && cs.showBarChange && chg !== null && legend.prev && !portrait && (
               <span className="whitespace-nowrap" style={{ color }}>
                 {chg >= 0 ? "+" : "−"}
                 {fmtPrice(Math.abs(chg), d)} ({chg >= 0 ? "+" : "−"}
                 {Math.abs((chg / legend.prev) * 100).toFixed(2)}%)
               </span>
             )}
-            {L && cs.showVolume && (
+            {L && cs.showVolume && !portrait && (
               <span className="whitespace-nowrap">
                 <span className="text-[var(--fg)]">Vol </span>
                 <span style={{ color }}>{fmtVol(L.v, volDigits(vs))}</span>
               </span>
             )}
           </div>
-          {!mainSqueezed && !tradeBar && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
-          {!legendCollapsed && !mainSqueezed && (
+          {!mainSqueezed && !portrait && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
+          {!legendCollapsed && !mainSqueezed && !portrait && (
             <VolumeLegend
               getBars={() => barsRef.current}
               bar={L}
@@ -2085,10 +2116,10 @@ export default function Chart({ paneId }: { paneId: string }) {
               onMenu={(x, y) => setCtxMenu({ x, y, items: volumeMenuItems(tf) })}
             />
           )}
-          {!legendCollapsed && !mainSqueezed && mainIndicators.map(indicatorRow)}
+          {!legendCollapsed && !mainSqueezed && !portrait && mainIndicators.map(indicatorRow)}
           {!mainSqueezed && ((!vs.removed || indicators.length > 0) || touch) && (
             <div className="mt-1 flex gap-1">
-              {(!vs.removed || indicators.length > 0) && (
+              {(!vs.removed || indicators.length > 0) && !portrait && (
                 <button
                   type="button"
                   aria-label={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
@@ -2129,7 +2160,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           ver={indVer}
           groups={paneGroups}
           bg={cs.bg ?? CHART_THEMES[theme].bg}
-          renderLegend={indicatorRow}
+          renderLegend={portrait ? () => null : indicatorRow}
           mainIndex={mainPaneIdx}
           onMove={(key, dir) => pane.indicators.getState().movePane(key, dir)}
           onMainSqueezed={setMainSqueezed}
@@ -2213,9 +2244,10 @@ export default function Chart({ paneId }: { paneId: string }) {
         )}
       </div>
       {(selecting || replayActive) && <ReplayBar onStep={() => stepReplay()} />}
-      <div className="flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm">
-        {/* màn hẹp (phone): dải nút khoảng thời gian cuộn ngang, cụm bên phải giữ nguyên */}
-        <div className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none]">
+      {/* phone dọc: không có thanh này (như TradingView mobile; bật lại tự co giãn bằng chạm đúp trục giá / "Reset chart view" trong menu ⋯) */}
+      <div className={`flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm ${portrait ? "hidden" : ""}`}>
+        {/* màn hẹp: dải nút khoảng thời gian cuộn ngang (ẩn thanh cuộn), cụm bên phải giữ nguyên */}
+        <div className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {RANGES.map((r) => (
             <button
               key={r.label}
