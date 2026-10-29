@@ -1,6 +1,7 @@
 "use client";
 
 import { TF_SECONDS } from "@/lib/api";
+import { useLayoutMode } from "@/lib/layoutMode";
 import { SPEEDS, exitReplay, useReplayStore } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
 import { useState } from "react";
@@ -99,25 +100,27 @@ function Pop({
 
 export default function ReplayBar({ onStep }: { onStep: () => void }) {
   const { selecting, active, playing, speed, interval } = useReplayStore();
+  const phone = useLayoutMode() === "phone";
   const tf = useChartStore((s) => s.tf);
   const ivl = interval && TF_SECONDS[interval] < TF_SECONDS[tf] ? interval : tf;
   const intervals = Object.keys(TF_LABEL).filter(
     (k) => TF_SECONDS[k] <= TF_SECONDS[tf],
   );
 
-  return (
-    <div className="anim-rise relative grid h-[46px] grid-cols-[1fr_auto_1fr] items-center border-t border-[var(--border)] px-3">
-      <div className="col-start-2 flex items-center">
-      <button
-        className={`${btn} ${selecting ? "bg-[var(--hover)]" : ""}`}
-        onClick={() =>
-          useReplayStore.setState({ selecting: true, playing: false })
-        }
-      >
-        <SelectBarIcon />
-        Select bar
-      </button>
-      <Sep />
+  const selectBtn = (
+    <button
+      className={`${btn} ${selecting ? "bg-[var(--hover)]" : ""}`}
+      title="Select bar"
+      onClick={() =>
+        useReplayStore.setState({ selecting: true, playing: false })
+      }
+    >
+      <SelectBarIcon />
+      Select bar
+    </button>
+  );
+  const controls = (
+    <>
       <button
         className={btn}
         disabled={!active}
@@ -153,14 +156,38 @@ export default function ReplayBar({ onStep }: { onStep: () => void }) {
       >
         <JumpIcon />
       </button>
+    </>
+  );
+  const closeBtn = (
+    <button
+      className="flex h-[38px] w-[38px] items-center justify-center rounded hover:bg-[var(--hover)]"
+      title="Close replay"
+      aria-label="Close replay"
+      onClick={() => exitReplay()}
+    >
+      <CloseIcon />
+    </button>
+  );
+
+  // phone: 2 hàng (user 10-29) — Select bar + nút đóng ở trên, các nút chạy ở dưới; một hàng thì chật, nút đóng đè lên cụm giữa
+  if (phone)
+    return (
+      <div className="anim-rise border-t border-[var(--border)] px-2 py-1">
+        <div className="flex h-10 items-center justify-between">
+          {selectBtn}
+          {closeBtn}
+        </div>
+        <div className="flex h-10 items-center justify-center">{controls}</div>
       </div>
-      <button
-        className="absolute right-3 flex h-[38px] w-[38px] items-center justify-center rounded hover:bg-[var(--hover)]"
-        title="Close replay"
-        onClick={() => exitReplay()}
-      >
-        <CloseIcon />
-      </button>
+    );
+  return (
+    <div className="anim-rise relative grid h-[46px] grid-cols-[1fr_auto_1fr] items-center border-t border-[var(--border)] px-3">
+      <div className="col-start-2 flex items-center">
+        {selectBtn}
+        <Sep />
+        {controls}
+      </div>
+      <div className="absolute right-3">{closeBtn}</div>
     </div>
   );
 }

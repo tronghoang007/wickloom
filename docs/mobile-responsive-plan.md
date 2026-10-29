@@ -374,6 +374,9 @@ iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad
     Như phone: chạm nền chart = huỷ nháp, mở panel khác ở cột phải = huỷ nháp, đặt lệnh xong sheet đóng hẳn (`orderSheetNow()` = phone + tablet). Desktop ≥1280px giữ panel phải.
   - Menu tài khoản (desktop / tablet): công tắc **Drawing toolbar** ẩn / hiện thanh vẽ bên trái (`drawingGlobal.showToolbar`, lưu theo tài khoản qua /me/prefs như `showFavs`).
   - Danh sách múi giờ cao từ nút tới đầu vùng chart (dưới thanh trên); phone có lại thanh mỏng 28px chỉ chứa đồng hồ + UTC (bấm đổi múi giờ).
+  - Phone: đồng hồ (chỉ giờ, bỏ "UTC+7") ở ô góc dưới trục giá, cùng hàng trục thời gian — không thêm hàng; danh sách múi giờ định vị cố định theo nút.
+  - Thanh Replay trên phone 2 hàng (Select bar + đóng / các nút chạy); desktop 1 hàng. Chọn nến bắt đầu trên cảm ứng: vạch cắt hiện sẵn ở 60% bề rộng,
+    kéo ngón tay dời vạch, nhấc tay = bắt đầu (trước đó không có hover nên không thấy vạch).
   - Rà hiệu ứng toàn app: lớp dùng chung `anim-fade` / `anim-pop` / `anim-slide` / `anim-rise` (globals.css). Nền mờ mọi hộp thoại mờ dần vào; thẻ tin trên chart,
     bảng màu, menu khung (desktop + lưới phone) phóng nhẹ; thanh kiểu hình vẽ mờ vào (chỉ opacity: nó canh giữa bằng translate); ô đóng một phần trong bảng
     Trading trượt ngang; thanh Replay và gợi ý vẽ trên phone nổi lên; phone đổi tab / bảng lệnh thu gọn ↔ mở rộng mờ vào.

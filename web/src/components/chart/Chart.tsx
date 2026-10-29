@@ -701,17 +701,28 @@ export default function Chart({ paneId }: { paneId: string }) {
     if (view) chartRef.current?.timeScale().setVisibleLogicalRange(view);
   };
 
-  const selectAt = (e: RMouseEvent<HTMLDivElement>) => {
+  const pickBar = (el: HTMLElement, clientX: number, clientY: number) => {
     const ts = chartRef.current?.timeScale();
     const bars = barsRef.current;
     if (!ts || bars.length === 0) return null;
-    const r = e.currentTarget.getBoundingClientRect();
-    const l = ts.coordinateToLogical(e.clientX - r.left);
+    const r = el.getBoundingClientRect();
+    const l = ts.coordinateToLogical(clientX - r.left);
     if (l === null) return null;
     const idx = Math.max(0, Math.min(bars.length - 1, Math.round(l)));
-    const x = ts.logicalToCoordinate(idx as never) ?? e.clientX - r.left;
-    return { x, y: e.clientY - r.top, idx, label: `Re: ${crosshairLabel(bars[idx].t)}` };
+    const x = ts.logicalToCoordinate(idx as never) ?? clientX - r.left;
+    return { x, y: clientY - r.top, idx, label: `Re: ${crosshairLabel(bars[idx].t)}` };
   };
+  const selectAt = (e: RMouseEvent<HTMLDivElement>) => pickBar(e.currentTarget, e.clientX, e.clientY);
+  // Cảm ứng (không có hover): vạch cắt hiện sẵn ở 60% bề rộng khi vào chọn nến; chạm / kéo ngón tay dời vạch, nhấc tay = bắt đầu Replay tại vạch (user 10-29)
+  const selectRef = useRef<HTMLDivElement>(null);
+  const touchSel = useRef({ down: false, skipClick: false });
+  useEffect(() => {
+    const el = selectRef.current;
+    if (!selecting || !touch || !el) return;
+    const r = el.getBoundingClientRect();
+    const h = pickBar(el, r.left + r.width * 0.6, r.top + r.height / 2);
+    if (h) setHover(h);
+  }, [selecting, touch]);
   const onSelectMove = (e: RMouseEvent<HTMLDivElement>) => {
     const h = selectAt(e);
     if (h) setHover(h);
@@ -2031,6 +2042,12 @@ export default function Chart({ paneId }: { paneId: string }) {
     >
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
+        {/* phone: đồng hồ + múi giờ ở ô góc dưới trục giá, cùng hàng trục thời gian (user 10-29: không thêm hàng riêng), chỉ giờ, không múi giờ */}
+        {phone && (
+          <div className="absolute bottom-0 right-0 z-10 flex h-7 items-center" style={{ background: cs.bg ?? CHART_THEMES[theme].bg }}>
+            <TimezoneMenu clock={clock} timeOnly />
+          </div>
+        )}
         <TradeOverlay
           symbol={symbol}
           chartType={chartType}
@@ -2218,12 +2235,36 @@ export default function Chart({ paneId }: { paneId: string }) {
         )}
         {selecting && (
           <div
-            className="absolute inset-y-0 left-0 z-30 cursor-pointer"
+            ref={selectRef}
+            className="absolute inset-y-0 left-0 z-30 cursor-pointer touch-none"
             style={{ right: axes.priceW }}
             onMouseMove={onSelectMove}
-            onMouseLeave={() => setHover(null)}
-            // theo đúng chỗ bấm chứ không theo hover: chạm bằng ngón tay không có di chuột trước nên một chạm là chọn luôn
+            onMouseLeave={() => !touch && setHover(null)}
+            onPointerDown={(e) => {
+              if (e.pointerType !== "touch") return;
+              touchSel.current.down = true;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const h = pickBar(e.currentTarget, e.clientX, e.clientY);
+              if (h) setHover(h);
+            }}
+            onPointerMove={(e) => {
+              if (e.pointerType !== "touch" || !touchSel.current.down) return;
+              const h = pickBar(e.currentTarget, e.clientX, e.clientY);
+              if (h) setHover(h);
+            }}
+            onPointerUp={(e) => {
+              if (e.pointerType !== "touch" || !touchSel.current.down) return;
+              touchSel.current = { down: false, skipClick: true }; // click giả lập ngay sau đó không chọn lần nữa
+              const h = pickBar(e.currentTarget, e.clientX, e.clientY);
+              if (h) startReplay(h.idx);
+            }}
+            onPointerCancel={() => (touchSel.current.down = false)}
+            // chuột: theo đúng chỗ bấm
             onClick={(e) => {
+              if (touchSel.current.skipClick) {
+                touchSel.current.skipClick = false;
+                return;
+              }
               const h = selectAt(e);
               if (h) startReplay(h.idx);
             }}
@@ -2271,10 +2312,10 @@ export default function Chart({ paneId }: { paneId: string }) {
         )}
       </div>
       {(selecting || replayActive) && <ReplayBar onStep={() => stepReplay()} />}
-      {/* phone: thanh mỏng chỉ có đồng hồ + múi giờ (user 10-29); bỏ 1D / 5D…, %, log, auto như MT5 / TradingView mobile (bật lại tự co giãn: chạm đúp trục giá) */}
-      <div className={`flex items-center border-t border-[var(--border)] px-2 text-sm ${phone ? "h-7 justify-end text-xs" : "h-8 justify-between"}`}>
+      {/* phone: không có thanh này (như MT5 / TradingView mobile; bật lại tự co giãn bằng chạm đúp trục giá); đồng hồ + múi giờ nằm ở góc trục thời gian */}
+      <div className={`flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm ${phone ? "hidden" : ""}`}>
         {/* màn hẹp: dải nút khoảng thời gian cuộn ngang (ẩn thanh cuộn), cụm bên phải giữ nguyên */}
-        <div className={`flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${phone ? "hidden" : ""}`}>
+        <div className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {RANGES.map((r) => (
             <button
               key={r.label}
@@ -2286,9 +2327,9 @@ export default function Chart({ paneId }: { paneId: string }) {
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <TimezoneMenu clock={clock} />
-          {!phone && scaleBtn("percent", "%")}
-          {!phone && scaleBtn("log", "log")}
+          {!phone && <TimezoneMenu clock={clock} />}
+          {scaleBtn("percent", "%")}
+          {scaleBtn("log", "log")}
           <button
             title="Auto (fits data to screen)"
             onClick={() => {
@@ -2297,7 +2338,7 @@ export default function Chart({ paneId }: { paneId: string }) {
               s.setAutoScale(!s.options().autoScale);
               setAutoOn(s.options().autoScale);
             }}
-            className={`rounded px-1.5 py-0.5 hover:bg-[var(--hover)] ${autoOn ? "text-[var(--accent-text)]" : ""} ${phone ? "hidden" : ""}`}
+            className={`rounded px-1.5 py-0.5 hover:bg-[var(--hover)] ${autoOn ? "text-[var(--accent-text)]" : ""}`}
           >
             auto
           </button>
