@@ -233,11 +233,14 @@ export default function TradingPanel({ fill = false }: { fill?: boolean }) {
           </button>
         </div>
       </div>
-      {open && (
-        <div className={`h-[180px] overflow-auto border-t border-[var(--border)] ${stale ? "opacity-60" : ""}`}>
-          {body}
+      {/* mở / thu có chuyển động (user 10-29): hàng lưới 0fr ↔ 1fr trượt chiều cao, chart bên trên co giãn theo; thu xong vẫn giữ nội dung (ẩn) */}
+      <div className={`grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`} aria-hidden={!open}>
+        <div className="min-h-0 overflow-hidden">
+          <div className={`h-[180px] overflow-auto border-t border-[var(--border)] ${stale ? "opacity-60" : ""}`} inert={!open}>
+            {body}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

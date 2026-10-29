@@ -369,6 +369,7 @@ iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad
     đúng máy user, đã thử nhét phần tử quá rộng: thanh phải vẫn trong màn).
   - **Hiệu ứng cả desktop**: popup phóng nhẹ, panel bên phải trượt vào (`anim-panel`), toast nổi lên ở góc dưới; phone giữ trượt từ dưới cho sheet / hộp toàn màn.
     Gotcha: Turbopack dev phát CSS cũ tới khi globals.css có thay đổi nội dung thật (touch không đủ).
+  - Panel Trading ở đáy desktop mở / thu có chuyển động (hàng lưới 0fr ↔ 1fr, 200ms); nội dung giữ khi thu (inert).
 - Còn mở: dòng thu gọn của **lệnh mới** kiểu MT5 có tab loại lệnh (Market Execution / Buy Limit / Sell Limit / Buy Stop…) — chưa làm, hỏi user.
 
 ## 11. Kiểm thử
