@@ -5,7 +5,7 @@ import { useIndicatorStore } from "@/indicators/store";
 import { useChartStore } from "@/store/chart";
 import { useVolumeStore } from "@/store/volume";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Close, DotsI, Eye, IndicatorsI } from "../icons";
+import { Close, DotsI, Eye, IndicatorsI, PenI } from "../icons";
 
 // Khung trên vòng như MT5 mobile; khung khác (M2, M3, M10, H2, H3) chọn ở lưới đầy đủ (nút ⋯)
 const RING_TFS = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"];
@@ -24,7 +24,21 @@ const GridI = () => (
  *  kim đồng hồ), bên trái là lưới đủ khung, Indicators (danh sách indicator đang có trên chart, bật tắt ẩn / hiện — legend của phone dọc không còn hàng indicator)
  *  và ⋯ (`more`: menu ⋯ cũ của thanh trên, hiện thành popup ngay dưới thanh). Chạm ngoài vòng (cả lỗ giữa) thì đóng.
  *  `at` (toạ độ viewport): mở bằng chạm chart thì tâm vòng ở chỗ chạm (dời vào trong nếu tràn màn), không có thì giữa màn; mở ra có xoay vào như MT5. */
-export default function TimeframeRing({ onClose, onGrid, more, at }: { onClose: () => void; onGrid: () => void; more: ReactNode; at?: { x: number; y: number } | null }) {
+export default function TimeframeRing({
+  onClose,
+  onGrid,
+  onDraw,
+  onAddIndicator,
+  more,
+  at,
+}: {
+  onClose: () => void;
+  onGrid: () => void;
+  onDraw: () => void;
+  onAddIndicator: () => void;
+  more: ReactNode;
+  at?: { x: number; y: number } | null;
+}) {
   const tf = useChartStore((s) => s.tf);
   const set = useChartStore((s) => s.set);
   const [view, setView] = useState<"ring" | "list" | "more">("ring");
@@ -32,6 +46,7 @@ export default function TimeframeRing({ onClose, onGrid, more, at }: { onClose: 
     ...RING_TFS.map((t) => ({ key: t, label: ringLabel(t), aria: t, on: t === tf, run: () => (set({ tf: t }), onClose()) })),
     { key: "grid", label: <GridI />, aria: "All timeframes", run: onGrid },
     { key: "ind", label: <IndicatorsI />, aria: "Indicator list", run: () => setView("list") },
+    { key: "draw", label: <PenI />, aria: "Objects", run: onDraw },
     { key: "more", label: <DotsI />, aria: "More", run: () => setView("more") },
   ];
   const step = 360 / items.length;
@@ -63,7 +78,7 @@ export default function TimeframeRing({ onClose, onGrid, more, at }: { onClose: 
       )}
       {view === "list" && (
         <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center">
-          <IndicatorList onBack={() => setView("ring")} onClose={onClose} />
+          <IndicatorList onBack={() => setView("ring")} onClose={onClose} onAdd={onAddIndicator} />
         </div>
       )}
       {view === "ring" && (
@@ -83,7 +98,7 @@ export default function TimeframeRing({ onClose, onGrid, more, at }: { onClose: 
                 aria-pressed={it.on}
                 onClick={it.run}
                 // chữ xoay theo vòng như MT5 (nửa dưới lộn ngược), icon thì đứng thẳng; khung đang chọn chỉ đổi màu chữ, không có nền tròn
-                className={`pointer-events-auto absolute flex h-[19%] w-[19%] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[14px] font-semibold active:bg-[var(--hover)] [&_svg]:size-6 ${
+                className={`pointer-events-auto absolute flex h-[18%] w-[18%] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[14px] font-semibold active:bg-[var(--hover)] [&_svg]:size-6 ${
                   it.on ? "text-[var(--accent-text)]" : "text-[var(--fg)]"
                 }`}
                 style={{ left: `${50 + 39 * Math.sin(a)}%`, top: `${50 - 39 * Math.cos(a)}%`, rotate: typeof it.label === "string" ? `${deg}deg` : undefined }}
@@ -98,8 +113,8 @@ export default function TimeframeRing({ onClose, onGrid, more, at }: { onClose: 
   );
 }
 
-/** Danh sách indicator của chart đang active (Volume + các indicator đã thêm): chạm mắt để ẩn / hiện. Thêm / gỡ indicator vẫn ở nút Indicators trên thanh trên. */
-function IndicatorList({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+/** Danh sách indicator của chart đang active (Volume + các indicator đã thêm): chạm mắt để ẩn / hiện; dòng đầu "Thêm indicator" mở bảng Indicators như MT5. */
+function IndicatorList({ onBack, onClose, onAdd }: { onBack: () => void; onClose: () => void; onAdd: () => void }) {
   const list = useIndicatorStore((s) => s.list);
   const update = useIndicatorStore((s) => s.update);
   const vol = useVolumeStore((s) => s.s);
@@ -122,6 +137,9 @@ function IndicatorList({ onBack, onClose }: { onBack: () => void; onClose: () =>
         </button>
       </div>
       <div className="max-h-[60dvh] overflow-y-auto py-1">
+        <button type="button" className={`${row} text-[var(--accent-text)]`} onClick={onAdd}>
+          + Thêm indicator
+        </button>
         {!vol.removed && (
           <button type="button" aria-pressed={!vol.hidden} className={row} onClick={() => setVol({ hidden: !vol.hidden })}>
             <span className={vol.hidden ? "text-[var(--muted)]" : ""}>Volume</span>
@@ -134,7 +152,7 @@ function IndicatorList({ onBack, onClose }: { onBack: () => void; onClose: () =>
             {eye(!!inst.hidden)}
           </button>
         ))}
-        {vol.removed && list.length === 0 && <div className="px-4 py-3 text-sm text-[var(--muted)]">Chưa có indicator — thêm ở nút Indicators trên thanh trên.</div>}
+        {vol.removed && list.length === 0 && <div className="px-4 py-3 text-sm text-[var(--muted)]">Chưa có indicator trên chart.</div>}
       </div>
     </div>
   );

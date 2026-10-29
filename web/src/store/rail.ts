@@ -18,6 +18,8 @@ type State = {
   tfPicker: "ring" | "grid" | null;
   /** Chỗ chạm chart (toạ độ viewport) mở vòng: tâm vòng đặt ở đó; null = giữa màn (mở bằng nút khung). */
   ringAt: { x: number; y: number } | null;
+  /** Phone: bảng thêm indicator đang mở (mở từ danh sách indicator của vòng; thanh trên không còn nút Indicators). */
+  indicatorsOpen: boolean;
 };
 
 export const useRailStore = create<State>()((set, get) => ({
@@ -28,6 +30,7 @@ export const useRailStore = create<State>()((set, get) => ({
   sheetTop: null,
   tfPicker: null,
   ringAt: null,
+  indicatorsOpen: false,
   openOrder: () => {
     const { open, before } = get();
     set({ open: "order", before: open === "order" ? before : open });

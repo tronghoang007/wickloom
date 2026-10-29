@@ -43,13 +43,21 @@ export default function IndicatorsDialog({
   className = "",
   icon,
   iconOnly = false,
+  open: openProp,
+  onClose,
 }: {
   className?: string;
   icon?: ReactNode;
   /** chỉ hiện icon (chữ "Indicators" thành title): thanh trên của phone */
   iconOnly?: boolean;
+  /** điều khiển từ ngoài (phone: mở từ vòng chọn khung), khi đó không có nút mở */
+  open?: boolean;
+  onClose?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [openSelf, setOpenSelf] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : openSelf;
+  const setOpen = (v: boolean) => (controlled ? !v && onClose?.() : setOpenSelf(v));
   const [tab, setTab] = useState<Tab>("fav");
   const [q, setQ] = useState("");
   const { list, favorites, add, toggleFavorite } = useIndicatorStore();
@@ -70,10 +78,12 @@ export default function IndicatorsDialog({
 
   return (
     <>
-      <button className={className} title={iconOnly ? "Indicators" : undefined} aria-label="Indicators" onClick={() => setOpen(true)}>
-        {icon}
-        {!iconOnly && "Indicators"}
-      </button>
+      {!controlled && (
+        <button className={className} title={iconOnly ? "Indicators" : undefined} aria-label="Indicators" onClick={() => setOpen(true)}>
+          {icon}
+          {!iconOnly && "Indicators"}
+        </button>
+      )}
       {open && (
         <div
           // phone (max-md): toàn màn, nhóm bên trái thành hàng tab cuộn ngang, bỏ cột AUTHOR

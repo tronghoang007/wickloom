@@ -31,11 +31,9 @@ import {
   Close,
   FullscreenI,
   Eye,
-  IndicatorsI,
   Lock,
   Magnet,
   MoonI,
-  PenI,
   Redo,
   Replay,
   SettingsI,
@@ -198,31 +196,27 @@ function MoreContent({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** Vòng chọn khung của phone (TimeframeRing), mở bằng nút khung hoặc chạm nền chart (useRailStore.tfPicker); mục ⋯ của vòng là menu ⋯ (MoreContent). */
+/** Vòng chọn khung của phone (TimeframeRing), mở bằng nút khung hoặc chạm nền chart (useRailStore.tfPicker); mục ⋯ của vòng là menu ⋯ (MoreContent).
+ *  Bút vẽ (màn Objects) và thêm indicator cũng nằm trong vòng: trên thanh trên chúng sát SELL, dễ bấm nhầm (user 10-29). */
 function PhoneRing() {
   const picker = useRailStore((s) => s.tfPicker);
   const at = useRailStore((s) => s.ringAt);
-  if (picker !== "ring") return null;
+  const indicatorsOpen = useRailStore((s) => s.indicatorsOpen);
   const close = () => useRailStore.setState({ tfPicker: null });
-  return <TimeframeRing onClose={close} onGrid={() => useRailStore.setState({ tfPicker: "grid" })} more={<MoreContent onDone={close} />} at={at} />;
-}
-
-/** Nút vẽ trên thanh trên: mở màn Objects; đang cầm công cụ thì sáng lên, bấm nữa là bỏ công cụ. */
-function DrawButton() {
-  const tool = useDrawingStore((s) => s.tool);
-  const api = useDrawingStore((s) => s.api);
-  const open = useRailStore((s) => s.open === "objects");
   return (
-    <button
-      type="button"
-      className={`${iconBtn} ${tool || open ? "bg-[var(--hover)] text-[var(--accent-text)]" : ""}`}
-      title="Objects"
-      aria-label="Objects"
-      aria-pressed={!!tool || open}
-      onClick={() => (tool ? api?.setTool(null) : useRailStore.getState().setOpen(open ? null : "objects"))}
-    >
-      <PenI />
-    </button>
+    <>
+      {picker === "ring" && (
+        <TimeframeRing
+          onClose={close}
+          onGrid={() => useRailStore.setState({ tfPicker: "grid" })}
+          onDraw={() => (close(), useRailStore.getState().setOpen("objects"))}
+          onAddIndicator={() => useRailStore.setState({ tfPicker: null, indicatorsOpen: true })}
+          more={<MoreContent onDone={close} />}
+          at={at}
+        />
+      )}
+      <IndicatorsDialog open={indicatorsOpen} onClose={() => useRailStore.setState({ indicatorsOpen: false })} />
+    </>
   );
 }
 
@@ -371,16 +365,14 @@ function TradeButtons() {
   );
 }
 
-/** Thanh công cụ trên cùng của phone (dọc lẫn ngang, như MT5): phẳng, các nút dàn đều cả bề rộng — symbol, khung thời gian, indicators, bút vẽ, SELL | BUY
- *  (thay thanh SELL / BUY to trên đầu chart), chọn chart. Menu ⋯ nằm trong vòng chọn khung (PhoneRing). */
+/** Thanh công cụ trên cùng của phone (dọc lẫn ngang, như MT5): phẳng, các nút dàn đều cả bề rộng — symbol, khung thời gian, SELL | BUY
+ *  (thay thanh SELL / BUY to trên đầu chart), chọn chart. Menu ⋯, bút vẽ và indicators nằm trong vòng chọn khung (PhoneRing). */
 export function MobileTopBar() {
   // z-50: popup của thanh này thả xuống đè lên panel phủ chart (z-[45]) bên dưới
   return (
     <div className="relative z-50 flex h-12 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--page)] px-1">
       <SymbolSearch flat />
       <TimeframeBar className={`${btn} min-w-11 justify-center text-[15px]`} compact chevron={false} />
-      <IndicatorsDialog className={iconBtn} icon={<IndicatorsI />} iconOnly />
-      <DrawButton />
       <TradeButtons />
       <PaneSwitcher />
       <PhoneRing />
