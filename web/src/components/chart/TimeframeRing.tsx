@@ -45,10 +45,10 @@ export default function TimeframeRing({ onClose, onGrid, more, at }: { onClose: 
       { duration: 280, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
     );
   }, [view]);
-  // cỡ và chỗ đặt: tâm ở `at`, kẹp trong màn chừa thanh trên (56px) và tab bar (64px)
+  // cỡ và chỗ đặt: tâm ở `at`, kẹp trong màn chừa thanh trên (56px) và tab bar (64px). Đo ảnh MT5 (10-29): vòng ~60% bề ngang màn, lỗ giữa ~0,56 đường kính
   const W = window.innerWidth;
   const H = window.innerHeight;
-  const D = Math.min(300, W * 0.82, H * 0.82);
+  const D = Math.min(260, W * 0.62, H * 0.62);
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   const left = clamp((at?.x ?? W / 2) - D / 2, 8, W - D - 8);
   const top = clamp((at?.y ?? H / 2) - D / 2, Math.min(56, (H - D) / 2), Math.max(H - D - 64, (H - D) / 2));
@@ -69,11 +69,12 @@ export default function TimeframeRing({ onClose, onGrid, more, at }: { onClose: 
       {view === "ring" && (
         <div ref={ring} role="dialog" aria-label="Timeframe" className="pointer-events-none fixed z-40" style={{ left, top, width: D, height: D }}>
           {/* vòng = nét tròn dày của SVG: lỗ giữa trong suốt, thấy chart như MT5 */}
-          <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
-            <circle cx="50" cy="50" r="37.5" fill="none" stroke="var(--panel)" strokeWidth="25" />
+          <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full overflow-visible drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
+            <circle cx="50" cy="50" r="39" fill="none" stroke="var(--panel)" strokeWidth="22" />
           </svg>
           {items.map((it, i) => {
-            const a = ((i * step - 2 * step) * Math.PI) / 180; // M1 ở trên bên trái (hai nấc trước đỉnh), M15 ở đỉnh như MT5
+            const deg = i * step - 2 * step; // M1 ở trên bên trái (hai nấc trước đỉnh), M15 ở đỉnh như MT5
+            const a = (deg * Math.PI) / 180;
             return (
               <button
                 key={it.key}
@@ -81,10 +82,11 @@ export default function TimeframeRing({ onClose, onGrid, more, at }: { onClose: 
                 aria-label={it.aria}
                 aria-pressed={it.on}
                 onClick={it.run}
-                className={`pointer-events-auto absolute flex h-[17%] w-[17%] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[15px] font-semibold ${
-                  it.on ? "bg-[var(--accent)] text-white" : "text-[var(--fg)] active:bg-[var(--hover)]"
+                // chữ xoay theo vòng như MT5 (nửa dưới lộn ngược), icon thì đứng thẳng; khung đang chọn chỉ đổi màu chữ, không có nền tròn
+                className={`pointer-events-auto absolute flex h-[19%] w-[19%] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[14px] font-semibold active:bg-[var(--hover)] [&_svg]:size-6 ${
+                  it.on ? "text-[var(--accent-text)]" : "text-[var(--fg)]"
                 }`}
-                style={{ left: `${50 + 37.5 * Math.sin(a)}%`, top: `${50 - 37.5 * Math.cos(a)}%` }}
+                style={{ left: `${50 + 39 * Math.sin(a)}%`, top: `${50 - 39 * Math.cos(a)}%`, rotate: typeof it.label === "string" ? `${deg}deg` : undefined }}
               >
                 {it.label}
               </button>
