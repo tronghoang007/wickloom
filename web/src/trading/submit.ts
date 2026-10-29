@@ -1,4 +1,4 @@
-import { isPhoneNow } from "@/lib/layoutMode";
+import { orderSheetNow } from "@/lib/layoutMode";
 import { chartGlobal } from "@/store/chart";
 import { useAuthStore } from "@/store/auth";
 import { useMt5Store } from "@/store/mt5";
@@ -72,7 +72,7 @@ export async function submitDraft(): Promise<boolean> {
   }
   // người dùng đã đóng bảng trong lúc lệnh đang bay thì không mở lại
   if (ok && useTicketStore.getState().draft) {
-    if (isPhoneNow()) useTicketStore.getState().close();
+    if (orderSheetNow()) useTicketStore.getState().close(); // phone / tablet: sheet đóng hẳn (desktop giữ bảng ở trạng thái chờ như TradingView)
     else useTicketStore.getState().settle({ side: d.side, mode: d.mode });
   }
   return ok;

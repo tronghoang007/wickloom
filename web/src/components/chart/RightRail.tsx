@@ -2,6 +2,7 @@
 
 import { useLayoutMode } from "@/lib/layoutMode";
 import { useRailStore, type RailPanel } from "@/store/rail";
+import { cancelOwnerEdits } from "@/trading/editBridge";
 import { ticketBusy, useTicketStore } from "@/trading/ticket";
 import { type ReactNode } from "react";
 import { AlertI, CalendarI, Close, WatchlistI } from "../icons";
@@ -24,10 +25,11 @@ export default function RightRail() {
   const open = useRailStore((s) => s.open);
   const setOpen = useRailStore((s) => s.setOpen);
   const drafting = useTicketStore(ticketBusy);
-  // bảng đặt lệnh không có nút riêng trên cột icon (user 10-29): mở bằng SELL / BUY hay chọn lệnh trên chart, đóng bằng ✕ của bảng
-  const active = open !== null && (open !== "order" || drafting);
   // tablet: panel 384px đè lên chart (bên trái cột icon) thay vì đẩy chart hẹp lại — màn 820px mà đẩy thì chart chỉ còn ~330px
   const overlay = useLayoutMode() === "tablet";
+  // bảng đặt lệnh không có nút riêng trên cột icon (user 10-29): mở bằng SELL / BUY hay chọn lệnh trên chart, đóng bằng ✕ của bảng
+  // tablet: bảng đặt lệnh là sheet ở đáy chart (MobileOrderSheet), không phải panel ở đây
+  const active = open !== null && (open !== "order" || (drafting && !overlay));
 
   return (
     <div className="relative flex shrink-0">
@@ -48,7 +50,20 @@ export default function RightRail() {
       )}
       <div className="flex w-12 shrink-0 flex-col items-center gap-0.5 border-l border-[var(--border)] py-2">
         {TABS.map((t) => (
-          <button key={t.id} className={cls(open === t.id)} title={t.label} onClick={() => setOpen(open !== t.id ? t.id : null)}>
+          <button
+            key={t.id}
+            className={cls(open === t.id)}
+            title={t.label}
+            onClick={() => {
+              // tablet (bảng lệnh là sheet đáy): mở panel khác khi đang nháp / sửa lệnh = huỷ nháp, như đổi tab trên phone (user 10-29)
+              const tk = useTicketStore.getState();
+              if (overlay && ticketBusy(tk)) {
+                if (tk.modifyOwner) cancelOwnerEdits(tk.modifyOwner);
+                tk.close();
+              }
+              setOpen(open !== t.id ? t.id : null);
+            }}
+          >
             {t.icon}
           </button>
         ))}

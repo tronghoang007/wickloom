@@ -1310,7 +1310,7 @@ export default function Chart({ paneId }: { paneId: string }) {
     seriesRef.current.applyOptions({
       autoscaleInfoProvider: (orig: () => AutoscaleInfo | null) => {
         const base = orig();
-        if (!base?.priceRange || !isPhoneNow()) return base;
+        if (!base?.priceRange || (!isPhoneNow() && useRailStore.getState().sheetTop === null)) return base; // tablet: chỉ khi sheet lệnh đang mở
         // đang kéo đường / hình (LineDrag, DrawingManager khoá pan của chart): giữ khung giá đứng yên, không thì khung nở theo đường đang kéo và giá dưới ngón tay trượt mãi
         const hs = chart.options().handleScroll;
         if (last && (typeof hs === "object" ? !hs.pressedMouseMove : !hs)) return last;
@@ -1346,7 +1346,7 @@ export default function Chart({ paneId }: { paneId: string }) {
   useEffect(
     () =>
       useTicketStore.subscribe((s, prev) => {
-        if (s.draft !== prev.draft && isPhoneNow()) seriesRef.current?.applyOptions({});
+        if (s.draft !== prev.draft && (isPhoneNow() || useRailStore.getState().sheetTop !== null)) seriesRef.current?.applyOptions({});
       }),
     [],
   );

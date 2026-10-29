@@ -1,7 +1,7 @@
 import type { IChartApi, ISeriesApi, SeriesType } from "lightweight-charts";
 import type { PendingOrder, Position } from "@/lib/mt5Api";
 import { drawingGlobal } from "@/drawings/store";
-import { isPhoneNow } from "@/lib/layoutMode";
+import { orderSheetNow } from "@/lib/layoutMode";
 import { chartGlobal } from "@/store/chart";
 import { useAuthStore } from "@/store/auth";
 import { oneClickOn } from "@/store/settings";
@@ -186,9 +186,9 @@ export function createLineDrag(o: Opts): ChartDrag {
   };
   const onChartClick = () => {
     if (drag.consumeTap()) return; // cú bấm vừa chọn lệnh qua đường chỉ-bấm: chart cũng báo click, đừng bỏ chọn ngay
-    // Phone (như MT5): đang nháp lệnh / sửa lệnh mà chạm nền chart = bỏ luôn bản nháp / thay đổi chờ và đóng bảng. Kéo / pan chart không phải chạm
+    // Phone / tablet (như MT5, bảng lệnh là sheet ở đáy): đang nháp lệnh / sửa lệnh mà chạm nền chart = bỏ luôn bản nháp / thay đổi chờ và đóng bảng. Kéo / pan chart không phải chạm
     // (LWC không báo click); chạm hay kéo chính đường lệnh, hoặc đang cầm công cụ vẽ, thì không tính.
-    if (isPhoneNow() && !drag.touchedLine() && !drawingGlobal.getState().tool) {
+    if (orderSheetNow() && !drag.touchedLine() && !drawingGlobal.getState().tool) {
       const t = useTicketStore.getState();
       if (t.draft || t.modifyOwner) {
         cancelEdit();

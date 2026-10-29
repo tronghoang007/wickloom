@@ -28,7 +28,8 @@ import { useEffect, useState } from "react";
 
 export default function Page() {
   const theme = useChartStore((s) => s.theme);
-  const phone = useLayoutMode() === "phone"; // docs/mobile-responsive-plan.md: phone có khung riêng, tablet / desktop giữ khung desktop
+  const mode = useLayoutMode();
+  const phone = mode === "phone"; // docs/mobile-responsive-plan.md: phone có khung riêng, tablet / desktop giữ khung desktop
   const landscape = useLandscape();
   const sideTabs = phone && landscape; // phone xoay ngang: tab bar thành cột dọc bên phải
   const chartTab = useRailStore((s) => s.open === null || s.open === "order" || s.open === "objects"); // phone: tab Chart (kể cả bảng lệnh, Objects nổi trên chart)
@@ -80,7 +81,8 @@ export default function Page() {
         <main className="relative min-w-0 flex-1">
           <ChartGrid />
           {phone && <DrawingHint />}
-          {phone && <MobileOrderSheet />}
+          {/* tablet cũng dùng sheet ở đáy chart: bảng 384px đè lên chart che mất đường / thẻ của lệnh nháp (user 10-29, iPad) */}
+          {mode !== "desktop" && <MobileOrderSheet />}
           {phone && <MobilePanel />}
         </main>
         {!phone && <RightRail />}

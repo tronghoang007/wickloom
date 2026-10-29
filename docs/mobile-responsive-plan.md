@@ -370,6 +370,8 @@ iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad
   - **Hiệu ứng cả desktop**: popup phóng nhẹ, panel bên phải trượt vào (`anim-panel`), toast nổi lên ở góc dưới; phone giữ trượt từ dưới cho sheet / hộp toàn màn.
     Gotcha: Turbopack dev phát CSS cũ tới khi globals.css có thay đổi nội dung thật (touch không đủ).
   - Panel Trading ở đáy desktop mở / thu có chuyển động (hàng lưới 0fr ↔ 1fr, 200ms); nội dung giữ khi thu (inert).
+  - **Tablet / iPad**: bảng đặt lệnh là sheet ở đáy chart như phone (panel 384px phủ giữa chart che mất đường / thẻ của lệnh nháp); khung giá chừa phần sheet che.
+    Như phone: chạm nền chart = huỷ nháp, mở panel khác ở cột phải = huỷ nháp, đặt lệnh xong sheet đóng hẳn (`orderSheetNow()` = phone + tablet). Desktop ≥1280px giữ panel phải.
   - Rà hiệu ứng toàn app: lớp dùng chung `anim-fade` / `anim-pop` / `anim-slide` / `anim-rise` (globals.css). Nền mờ mọi hộp thoại mờ dần vào; thẻ tin trên chart,
     bảng màu, menu khung (desktop + lưới phone) phóng nhẹ; thanh kiểu hình vẽ mờ vào (chỉ opacity: nó canh giữa bằng translate); ô đóng một phần trong bảng
     Trading trượt ngang; thanh Replay và gợi ý vẽ trên phone nổi lên; phone đổi tab / bảng lệnh thu gọn ↔ mở rộng mờ vào.

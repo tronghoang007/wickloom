@@ -7,7 +7,7 @@ import { askConfirm } from "@/store/confirm";
 import { tfShort } from "@/lib/timeframes";
 import { toggleReplay, useReplayStore } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
-import { startedOn, useLandscape } from "@/lib/layoutMode";
+import { startedOn, useLandscape, useLayoutMode } from "@/lib/layoutMode";
 import { useLayoutStore } from "@/store/layout";
 import { useRailStore, type RailPanel } from "@/store/rail";
 import { useSettingsStore } from "@/store/settings";
@@ -455,7 +455,10 @@ export function MobileOrderSheet() {
   const collapsed = useRailStore((s) => s.sheetExpandedFor !== id); // bảng mới (id khác) luôn hiện thu gọn trước
   const setCollapsed = (v: boolean) => useRailStore.setState({ sheetExpandedFor: v ? null : id });
   const startY = useRef<number | null>(null);
-  const landscape = useLandscape(); // xoay ngang: sheet ở góc dưới bên phải, cao hết màn (60% của ~350px thì không đủ chỗ)
+  // phone xoay ngang: sheet ở góc dưới bên phải, cao hết màn (60% của ~350px thì không đủ chỗ); tablet luôn ở đáy (đủ cao)
+  const turned = useLandscape();
+  const mode = useLayoutMode();
+  const landscape = turned && mode === "phone";
   const shown = open === "order" && drafting;
   // phone dọc: báo mép trên của bảng để khung giá chừa phần bị che (đường SL / TP thấp nhất không nằm sau bảng); ngang thì bảng ở bên phải, không che đáy
   const box = useRef<HTMLDivElement>(null);

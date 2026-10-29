@@ -41,6 +41,13 @@ export const isPhoneNow = () =>
   typeof window.innerWidth === "number" &&
   layoutModeFor(window.innerWidth, window.innerHeight ?? Infinity, typeof window.matchMedia === "function" && window.matchMedia(TOUCH_QUERY).matches) === "phone";
 
+/** Bảng đặt lệnh đang là sheet ở đáy chart (phone + tablet, MobileOrderSheet) chứ không phải panel bên phải của desktop: chạm nền chart huỷ nháp,
+ *  đặt lệnh xong đóng hẳn bảng. Đọc ngay, cho code ngoài React. */
+export const orderSheetNow = () =>
+  typeof window !== "undefined" &&
+  typeof window.innerWidth === "number" &&
+  layoutModeFor(window.innerWidth, window.innerHeight ?? Infinity, typeof window.matchMedia === "function" && window.matchMedia(TOUCH_QUERY).matches) !== "desktop";
+
 /** phone / tablet / desktop theo bề rộng (và chiều cao với màn cảm ứng) hiện tại; cập nhật khi xoay máy hay kéo cửa sổ qua mốc. Server luôn là desktop. */
 export function useLayoutMode(): LayoutMode {
   return useSyncExternalStore(subscribeMode, currentMode, () => "desktop");
