@@ -353,8 +353,8 @@ function TradeButtons() {
   // rộng 80px (user 10-29: "dài ra nữa"), màn hẹp / nhiều nút (chọn chart) thì co lại tới 44px
   const half = `flex h-9 w-20 min-w-11 shrink items-center justify-center rounded-md text-[12px] font-semibold text-white ${block !== null || busy ? "opacity-60" : ""}`;
   return (
-    // hai nút tách rời, cách nhau 8px: dính liền thì ngón tay to dễ bấm nhầm hướng (user 10-29)
-    <div className="flex min-w-0 gap-2" data-testid="trade-widget" title={block ?? undefined}>
+    // hai nút tách rời, cách nhau 16px: dính liền thì ngón tay to dễ bấm nhầm hướng (user 10-29; nới từ 8px khi thanh trên bỏ nút Indicators / bút vẽ)
+    <div className="flex min-w-0 gap-4" data-testid="trade-widget" title={block ?? undefined}>
       <button type="button" aria-label="Sell at market" className={`${half} bg-[#f23645]`} onClick={() => click("sell")}>
         SELL
       </button>
