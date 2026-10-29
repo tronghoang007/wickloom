@@ -1,6 +1,6 @@
 # Plan: Wickloom dùng được trên điện thoại (responsive)
 
-Ngày lập: 2026-10-29. Trạng thái: **M0–M5 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
+Ngày lập: 2026-10-29. Trạng thái: **M0–M6 xong** (2026-10-29), M7 (PWA) tuỳ chọn chưa làm; user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
 
 ## 1. Hiện trạng (đã đọc code)
 
@@ -138,7 +138,7 @@ Ngày lập: 2026-10-29. Trạng thái: **M0–M5 xong** (2026-10-29); user ch�
 | **M3** Giao dịch ✅ | TradeWidget đáy, OrderTicket sheet, thẻ vị thế, kéo SL/TP bằng tay, xác nhận trên phone | M1, M2 |
 | **M4** Dialog & menu ✅ | Component `Sheet`, chuyển dialog lớn + menu thả xuống, input số | M1 |
 | **M5** Vẽ ✅ | Sheet công cụ + favorites, đặt điểm bằng chạm, thanh style gọn, text editor với bàn phím ảo | M2, M4 |
-| **M6** Tablet & ngang | Overlay rail, toolbar co giãn, màn ngang toàn chart | M1 |
+| **M6** Tablet & ngang ✅ | Overlay rail, toolbar co giãn, màn ngang toàn chart | M1 |
 | **M7** PWA *(tuỳ chọn)* | manifest, icon, `display: standalone` | M0 |
 
 Thứ tự đề xuất: M0 → M1 → M2 → M3 (đến đây là dùng được để trade) → M4 → M5 → M6 → M7. Mỗi phase commit riêng.
@@ -283,6 +283,21 @@ Theo màn "Objects" của MT5 user gửi:
 - Đo headless: Trendline / Fib retracement / Long position / FRVP / Horizontal ray đặt được bằng chạm, thanh chỉnh kiểu nằm trong 0–390px;
   kéo dời trendline bằng ngón tay được. Desktop không đổi.
 - Chưa thử: công cụ Text / Note với bàn phím ảo (headless không giả lập được bàn phím co màn hình) — cần máy thật.
+
+### M6 đã làm (2026-10-29)
+
+Nguyên nhân chính tìm được khi đo: khung desktop cần ~1250px bề rộng (toolbar). Dưới đó trang tràn ngang, còn trình duyệt điện thoại /
+iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad dọc, iPad ngang, phone ngang đều bị.
+- **Toolbar tablet (768–1279px)**: khung thời gian thành một nút `5m ⌄` (lưới thả ngay dưới nút), Indicators / Alert / Replay chỉ icon,
+  Undo / Redo / Fullscreen / Snapshot / Theme vào menu `⋯`; toolbar `relative z-50` để menu không bị panel bên phải che.
+- **Panel bên phải trên tablet** mở đè lên chart (384px, bên trái cột icon) thay vì làm chart hẹp lại.
+- **Phone xoay ngang**: `layoutModeFor(width, height, touch)` — màn cảm ứng thấp dưới 500px cũng là phone (cửa sổ desktop thấp thì không);
+  tab bar thành cột dọc bên phải (`useLandscape`), SELL / BUY thu về widget nhỏ ở legend, bảng đặt lệnh ở góc phải (380px, cao hết màn).
+  Lưu ý: các class `max-md:` (Settings / Indicators toàn màn…) theo bề rộng nên không áp khi phone ngang (844px) — các dialog đó vẫn vừa
+  nhờ `max-w-[96vw]` / `max-h`.
+- Đo lại: phone ngang 844×390, iPad 820×1180 / 1180×820, laptop 1024×700 đều đúng bề rộng màn, không tràn; phone ngang: chart 780×346,
+  đặt lệnh giả lập + bảng tự đóng; tablet: panel Watchlist đè chart (chart giữ 720px), menu ⋯ nằm trên panel, lưới khung thời gian dưới nút.
+  Các kiểm tra phone dọc / desktop cũ chạy lại đều qua.
 
 ## 11. Kiểm thử
 

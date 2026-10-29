@@ -17,7 +17,7 @@ import RightRail from "@/components/chart/RightRail";
 import TradingPanel from "@/components/chart/TradingPanel";
 import Toolbar from "@/components/chart/Toolbar";
 import { drawingGlobal } from "@/drawings/store";
-import { useLayoutMode } from "@/lib/layoutMode";
+import { useLandscape, useLayoutMode } from "@/lib/layoutMode";
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal, useChartStore } from "@/store/chart";
 import { appSession } from "@/store/appSession";
@@ -28,6 +28,8 @@ import { useEffect, useState } from "react";
 export default function Page() {
   const theme = useChartStore((s) => s.theme);
   const phone = useLayoutMode() === "phone"; // docs/mobile-responsive-plan.md: phone có khung riêng, tablet / desktop giữ khung desktop
+  const landscape = useLandscape();
+  const sideTabs = phone && landscape; // phone xoay ngang: tab bar thành cột dọc bên phải
   const [prefsReady, setPrefsReady] = useState(false);
 
   useEffect(() => {
@@ -76,8 +78,9 @@ export default function Page() {
           {phone && <MobilePanel />}
         </main>
         {!phone && <RightRail />}
+        {sideTabs && <MobileTabBar vertical />}
       </div>
-      {phone ? <MobileTabBar /> : <TradingPanel />}
+      {phone ? !sideTabs && <MobileTabBar /> : <TradingPanel />}
       {/* hộp thoại dùng chung: một bản cho cả trang, nhắm vào chart đang active */}
       <SettingsDialog />
       <VolumeSettingsDialog />

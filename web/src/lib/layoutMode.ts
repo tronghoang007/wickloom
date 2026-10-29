@@ -5,18 +5,23 @@ import { useSyncExternalStore } from "react";
 export type LayoutMode = "phone" | "tablet" | "desktop";
 export const TABLET_MIN = 768;
 export const DESKTOP_MIN = 1280;
+// Màn cảm ứng thấp hơn ngần này (điện thoại xoay ngang: rộng 844 nhưng chỉ cao ~390) cũng dùng khung phone: khung desktop cao ~150px chrome là hết chỗ cho chart.
+// Chỉ tính màn cảm ứng: cửa sổ desktop kéo thấp vẫn là desktop.
+export const SHORT_MAX = 500;
 
-export function layoutModeFor(width: number): LayoutMode {
-  if (width < TABLET_MIN) return "phone";
+export function layoutModeFor(width: number, height = Infinity, touch = false): LayoutMode {
+  if (width < TABLET_MIN || (touch && height < SHORT_MAX)) return "phone";
   if (width < DESKTOP_MIN) return "tablet";
   return "desktop";
 }
 
-// Chỉ báo khi vượt mốc (không phải mỗi lần resize): media query đổi trạng thái đúng lúc innerWidth qua mốc.
-const MODE_QUERIES = [`(min-width: ${TABLET_MIN}px)`, `(min-width: ${DESKTOP_MIN}px)`];
 // Con trỏ chính là ngón tay (điện thoại / máy tính bảng). Tách khỏi bề rộng: iPad dùng bút hay laptop cảm ứng vẫn
 // theo đúng loại con trỏ chính của nó.
 const TOUCH_QUERY = "(pointer: coarse)";
+// Chỉ báo khi vượt mốc (không phải mỗi lần resize): media query đổi trạng thái đúng lúc innerWidth / innerHeight qua mốc.
+const MODE_QUERIES = [`(min-width: ${TABLET_MIN}px)`, `(min-width: ${DESKTOP_MIN}px)`, `(max-height: ${SHORT_MAX - 1}px)`, TOUCH_QUERY];
+const LANDSCAPE_QUERY = "(orientation: landscape)";
+const currentMode = () => layoutModeFor(window.innerWidth, window.innerHeight, window.matchMedia(TOUCH_QUERY).matches);
 
 function subscribeQueries(queries: string[], onChange: () => void) {
   const lists = queries.map((q) => window.matchMedia(q));
@@ -28,13 +33,22 @@ function subscribeQueries(queries: string[], onChange: () => void) {
 
 const subscribeMode = (onChange: () => void) => subscribeQueries(MODE_QUERIES, onChange);
 const subscribeTouch = (onChange: () => void) => subscribeQueries([TOUCH_QUERY], onChange);
+const subscribeLandscape = (onChange: () => void) => subscribeQueries([LANDSCAPE_QUERY], onChange);
 
 /** Đang ở bố cục phone? Đọc ngay, cho code ngoài React (hàm xử lý lệnh). Server / test không có window = false. */
-export const isPhoneNow = () => typeof window !== "undefined" && typeof window.innerWidth === "number" && layoutModeFor(window.innerWidth) === "phone";
+export const isPhoneNow = () =>
+  typeof window !== "undefined" &&
+  typeof window.innerWidth === "number" &&
+  layoutModeFor(window.innerWidth, window.innerHeight ?? Infinity, typeof window.matchMedia === "function" && window.matchMedia(TOUCH_QUERY).matches) === "phone";
 
-/** phone / tablet / desktop theo bề rộng hiện tại; cập nhật khi xoay máy hay kéo cửa sổ qua mốc. Server luôn là desktop. */
+/** phone / tablet / desktop theo bề rộng (và chiều cao với màn cảm ứng) hiện tại; cập nhật khi xoay máy hay kéo cửa sổ qua mốc. Server luôn là desktop. */
 export function useLayoutMode(): LayoutMode {
-  return useSyncExternalStore(subscribeMode, () => layoutModeFor(window.innerWidth), () => "desktop");
+  return useSyncExternalStore(subscribeMode, currentMode, () => "desktop");
+}
+
+/** Màn đang nằm ngang (rộng hơn cao): khung phone xoay ngang đổi tab bar thành cột dọc, bảng lệnh sang bên phải. */
+export function useLandscape(): boolean {
+  return useSyncExternalStore(subscribeLandscape, () => window.matchMedia(LANDSCAPE_QUERY).matches, () => false);
 }
 
 /** true khi con trỏ chính là cảm ứng: dùng để phóng to vùng chạm, hiện các nút vốn chỉ hiện khi hover. */

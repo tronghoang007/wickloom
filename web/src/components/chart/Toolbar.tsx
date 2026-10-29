@@ -3,6 +3,7 @@
 import { openCreateAlert } from "@/alerts/store";
 import { useDrawingStore } from "@/drawings/store";
 import { fetchSymbols } from "@/lib/api";
+import { useLayoutMode } from "@/lib/layoutMode";
 import { useSettingsStore } from "@/store/settings";
 import { toggleReplay, useReplayStore } from "@/replay/store";
 import { useChartStore, type ChartType } from "@/store/chart";
@@ -14,6 +15,7 @@ import {
   CameraI,
   Candles,
   CompareI,
+  DotsI,
   FullscreenI,
   Heikin,
   IndicatorsI,
@@ -116,18 +118,24 @@ export default function Toolbar() {
   const api = useDrawingStore((s) => s.api);
   const replayOn = useReplayStore((s) => s.active || s.selecting);
   const [typeOpen, setTypeOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   useSymbolsPolling();
+  // Tablet (768–1279px): khung desktop cần ~1250px nên gom bớt — khung thời gian thành một nút, Indicators / Alert / Replay chỉ còn icon,
+  // Undo / Redo / Fullscreen / Snapshot / Theme vào menu ⋯ (thiếu chỗ thì trình duyệt điện thoại thu nhỏ cả trang cho vừa)
+  const tablet = useLayoutMode() === "tablet";
+  const moreItem = "flex h-10 w-full items-center gap-2.5 whitespace-nowrap px-3 text-left text-sm hover:bg-[var(--hover)]";
 
   const cur = CHART_TYPES.find((c) => c.v === chartType)!;
 
   return (
-    <div className="flex h-[38px] items-center border-b border-[var(--border)] bg-[var(--page)] pr-1">
+    // tablet: panel bên phải đè lên chart (z-40) — nâng toolbar lên trên để menu thả xuống của nó không bị panel che
+    <div className={`flex h-[38px] items-center border-b border-[var(--border)] bg-[var(--page)] pr-1 ${tablet ? "relative z-50" : ""}`}>
       <div className="flex w-[52px] shrink-0 items-center justify-center">
         <AccountMenu />
       </div>
       <SymbolSearch />
       {sep}
-      <TimeframeBar className={btn} />
+      <TimeframeBar className={btn} compact={tablet} />
       {sep}
       <Menu
         open={typeOpen}
@@ -152,25 +160,29 @@ export default function Toolbar() {
         ))}
       </Menu>
       {sep}
-      <IndicatorsDialog className={btn} icon={<IndicatorsI />} />
+      <IndicatorsDialog className={tablet ? iconBtn : btn} icon={<IndicatorsI />} iconOnly={tablet} />
       {sep}
       <button className={btn} title="Create alert (⌥ A)" onClick={() => void openCreateAlert()}>
-        <AlertI /> Alert
+        <AlertI /> {!tablet && "Alert"}
       </button>
       <button
         className={`${btn} ${replayOn ? "bg-[var(--fg)] text-[var(--bg)] hover:bg-[var(--fg)]" : ""}`}
         title="Replay"
         onClick={toggleReplay}
       >
-        <Replay /> Replay
+        <Replay /> {!tablet && "Replay"}
       </button>
-      {sep}
-      <button className={iconBtn} title="Undo" onClick={() => api?.undo()}>
-        <Undo />
-      </button>
-      <button className={iconBtn} title="Redo" onClick={() => api?.redo()}>
-        <Redo />
-      </button>
+      {!tablet && (
+        <>
+          {sep}
+          <button className={iconBtn} title="Undo" onClick={() => api?.undo()}>
+            <Undo />
+          </button>
+          <button className={iconBtn} title="Redo" onClick={() => api?.redo()}>
+            <Redo />
+          </button>
+        </>
+      )}
 
       <div className="flex-1" />
 
@@ -180,23 +192,62 @@ export default function Toolbar() {
       <button className={iconBtn} title="Settings" onClick={() => useSettingsStore.setState({ open: true })}>
         <SettingsI />
       </button>
-      <button className={iconBtn} title="Fullscreen" onClick={toggleFullscreen}>
-        <FullscreenI />
-      </button>
-      <button
-        className={iconBtn}
-        title="Take a snapshot"
-        onClick={() => window.dispatchEvent(new Event("tv-screenshot"))}
-      >
-        <CameraI />
-      </button>
-      <button
-        className={iconBtn}
-        title="Toggle theme"
-        onClick={() => set({ theme: theme === "dark" ? "light" : "dark" })}
-      >
-        {theme === "dark" ? <SunI /> : <MoonI />}
-      </button>
+      {tablet ? (
+        <div className="relative">
+          <button className={`${iconBtn} ${moreOpen ? "bg-[var(--hover)]" : ""}`} title="More" aria-label="More" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>
+            <DotsI />
+          </button>
+          {moreOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
+              <div className="absolute right-0 top-10 z-40 min-w-48 rounded popup py-1" role="menu">
+                <button className={moreItem} onClick={() => api?.undo()}>
+                  <Undo /> Undo
+                </button>
+                <button className={moreItem} onClick={() => api?.redo()}>
+                  <Redo /> Redo
+                </button>
+                {[
+                  { label: "Fullscreen", icon: <FullscreenI />, run: () => void toggleFullscreen() },
+                  { label: "Take a snapshot", icon: <CameraI />, run: () => window.dispatchEvent(new Event("tv-screenshot")) },
+                  { label: theme === "dark" ? "Light theme" : "Dark theme", icon: theme === "dark" ? <SunI /> : <MoonI />, run: () => set({ theme: theme === "dark" ? "light" : "dark" }) },
+                ].map((m) => (
+                  <button
+                    key={m.label}
+                    className={moreItem}
+                    onClick={() => {
+                      setMoreOpen(false);
+                      m.run();
+                    }}
+                  >
+                    {m.icon} {m.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          <button className={iconBtn} title="Fullscreen" onClick={toggleFullscreen}>
+            <FullscreenI />
+          </button>
+          <button
+            className={iconBtn}
+            title="Take a snapshot"
+            onClick={() => window.dispatchEvent(new Event("tv-screenshot"))}
+          >
+            <CameraI />
+          </button>
+          <button
+            className={iconBtn}
+            title="Toggle theme"
+            onClick={() => set({ theme: theme === "dark" ? "light" : "dark" })}
+          >
+            {theme === "dark" ? <SunI /> : <MoonI />}
+          </button>
+        </>
+      )}
     </div>
   );
 }

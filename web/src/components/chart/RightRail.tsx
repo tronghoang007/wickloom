@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutMode } from "@/lib/layoutMode";
 import { useRailStore, type RailPanel } from "@/store/rail";
 import { ticketBusy, useTicketStore } from "@/trading/ticket";
 import { type ReactNode } from "react";
@@ -26,11 +27,13 @@ export default function RightRail() {
   const drafting = useTicketStore(ticketBusy);
   const tabs = TABS.filter((t) => t.id !== "order" || drafting);
   const active = tabs.find((t) => t.id === open);
+  // tablet: panel 384px đè lên chart (bên trái cột icon) thay vì đẩy chart hẹp lại — màn 820px mà đẩy thì chart chỉ còn ~330px
+  const overlay = useLayoutMode() === "tablet";
 
   return (
-    <div className="flex shrink-0">
+    <div className="relative flex shrink-0">
       {active && (
-        <div className="flex w-[384px] shrink-0 flex-col border-l border-[var(--border)]">
+        <div className={`flex w-[384px] shrink-0 flex-col border-l border-[var(--border)] ${overlay ? "absolute inset-y-0 right-full z-40 bg-[var(--bg)] shadow-[-6px_0_20px_rgba(0,0,0,0.45)]" : ""}`}>
           {open === "calendar" && (
             <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2.5">
               <span className="text-[18px] font-semibold leading-6">{active.label}</span>

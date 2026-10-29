@@ -31,7 +31,7 @@ import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView"
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
-import { isPhoneNow, isTouch, TOUCH_SLOP, useLayoutMode, useTouch } from "@/lib/layoutMode";
+import { isPhoneNow, isTouch, TOUCH_SLOP, useLandscape, useLayoutMode, useTouch } from "@/lib/layoutMode";
 import { fmtVol, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
 import {
   AreaSeries,
@@ -291,7 +291,10 @@ export default function Chart({ paneId }: { paneId: string }) {
   const lastPointerRef = useRef("mouse"); // loại con trỏ của cú nhấn gần nhất: nhấn giữ bằng ngón tay (Android ra contextmenu) không mở menu chart
   const crossPriceRef = useRef<number | null>(null); // giá ở crosshair trên pane chính (null = crosshair ẩn): menu ⋯ của màn cảm ứng dùng thay giá dưới chuột phải
   const touch = useTouch();
-  const phone = useLayoutMode() === "phone"; // phone: SELL / BUY thành thanh to ở đầu chart thay vì widget nhỏ dưới tiêu đề
+  const phone = useLayoutMode() === "phone";
+  // phone dọc: SELL / BUY thành thanh to ở đầu chart thay vì widget nhỏ dưới tiêu đề; xoay ngang thì màn thấp, giữ widget nhỏ như desktop
+  const landscape = useLandscape();
+  const tradeBar = phone && !landscape;
   // bảng đặt lệnh đang mở (phone: sheet dưới chart, đã có Sell / Buy riêng): bỏ thanh SELL / BUY để chart còn chỗ
   const orderPanel = useRailStore((s) => s.open === "order");
   const ticketShown = useTicketStore(ticketBusy) && orderPanel;
@@ -1967,7 +1970,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       }}
     >
       {/* phone: SELL / BUY ở trên đầu chart, xa tab bar ở đáy cho đỡ bấm nhầm */}
-      {phone && !ticketShown && (
+      {tradeBar && !ticketShown && (
         <div className="border-b border-[var(--border)] px-2 py-1.5">
           <TradeWidget symbol={symbol} digits={digits} replay={replayActive} bar />
         </div>
@@ -2073,7 +2076,7 @@ export default function Chart({ paneId }: { paneId: string }) {
               </span>
             )}
           </div>
-          {!mainSqueezed && !phone && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
+          {!mainSqueezed && !tradeBar && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
           {!legendCollapsed && !mainSqueezed && (
             <VolumeLegend
               getBars={() => barsRef.current}

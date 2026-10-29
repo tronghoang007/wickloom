@@ -19,6 +19,14 @@ describe("layoutModeFor", () => {
     expect(layoutModeFor(1440)).toBe("desktop");
   });
 
+  it("điện thoại xoay ngang (màn cảm ứng thấp) là phone; cửa sổ desktop thấp thì không", () => {
+    expect(layoutModeFor(844, 390, true)).toBe("phone");
+    expect(layoutModeFor(932, 430, true)).toBe("phone");
+    expect(layoutModeFor(1180, 820, true)).toBe("tablet"); // iPad ngang
+    expect(layoutModeFor(1024, 400, false)).toBe("tablet");
+    expect(layoutModeFor(1440, 450, false)).toBe("desktop");
+  });
+
   it("mốc trùng breakpoint md / xl mặc định của Tailwind", () => {
     expect(TABLET_MIN).toBe(768);
     expect(DESKTOP_MIN).toBe(1280);

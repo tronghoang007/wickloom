@@ -56,7 +56,8 @@ export default function TimeframeBar({ className, compact = false }: { className
           // phone: lưới ô bấm thay danh sách dài phải cuộn (chọn một chạm, như vòng chọn khung của MT5); bỏ ngôi sao yêu thích — chỉ có ý nghĩa với toolbar desktop
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-            <div className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+48px)] z-40 rounded-lg bg-[var(--panel)] p-3 shadow-[0_2px_8px_rgba(0,0,0,0.5)]" role="dialog" aria-label="Timeframe">
+            {/* phone dọc: cả bề rộng dưới thanh trên; rộng hơn (tablet, phone ngang): thả xuống ngay dưới nút */}
+            <div className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+48px)] z-40 rounded-lg bg-[var(--panel)] p-3 shadow-[0_2px_8px_rgba(0,0,0,0.5)] md:absolute md:inset-x-auto md:left-0 md:top-10 md:w-[360px]" role="dialog" aria-label="Timeframe">
               {TF_MENU.map(({ title, tfs }) => (
                 <div key={title} className="mb-2 last:mb-0">
                   <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">{title}</div>

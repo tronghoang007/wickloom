@@ -7,7 +7,7 @@ import { askConfirm } from "@/store/confirm";
 import { tfShort } from "@/lib/timeframes";
 import { toggleReplay, useReplayStore } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
-import { startedOn } from "@/lib/layoutMode";
+import { startedOn, useLandscape } from "@/lib/layoutMode";
 import { useLayoutStore } from "@/store/layout";
 import { useRailStore, type RailPanel } from "@/store/rail";
 import { useSettingsStore } from "@/store/settings";
@@ -369,8 +369,9 @@ const TABS: { id: RailPanel | null; label: string; icon: ReactNode }[] = [
   { id: "trading", label: "Trading", icon: <TradingI /> },
 ];
 
-/** Tab bar ở đáy: Chart = không panel nào mở; các tab khác mở panel tương ứng phủ lên chart. */
-export function MobileTabBar() {
+/** Tab bar ở đáy: Chart = không panel nào mở; các tab khác mở panel tương ứng phủ lên chart. `vertical`: phone xoay ngang, thành cột dọc bên phải
+ *  (màn chỉ cao ~390px, thêm thanh 56px ở đáy thì chart hết chỗ). */
+export function MobileTabBar({ vertical = false }: { vertical?: boolean }) {
   useTradePolling(); // panel Trading chỉ mount khi mở tab: hỏi dữ liệu lệnh ở đây cho thẻ lệnh / đường SL-TP trên chart
   const open = useRailStore((s) => s.open);
   const setOpen = useRailStore((s) => s.setOpen);
@@ -387,7 +388,7 @@ export function MobileTabBar() {
 
   const tabs = TABS.filter((t) => t.id !== "order" || drafting);
   return (
-    <nav className="flex h-14 shrink-0 border-t border-[var(--border)] bg-[var(--page)]" aria-label="Panels">
+    <nav className={`flex shrink-0 bg-[var(--page)] ${vertical ? "w-16 flex-col border-l border-[var(--border)]" : "h-14 border-t border-[var(--border)]"}`} aria-label="Panels">
       {tabs.map((t) => {
         const on = open === t.id || (t.id === null && open === "order" && !drafting);
         return (
@@ -416,9 +417,14 @@ export function MobileOrderSheet() {
   const collapsed = useRailStore((s) => s.sheetCollapsedFor === id); // bảng mới (id khác) thì tự mở rộng
   const setCollapsed = (v: boolean) => useRailStore.setState({ sheetCollapsedFor: v ? id : null });
   const startY = useRef<number | null>(null);
+  const landscape = useLandscape(); // xoay ngang: sheet ở góc dưới bên phải, cao hết màn (60% của ~350px thì không đủ chỗ)
   if (open !== "order" || !drafting) return null;
   return (
-    <div className={`absolute inset-x-0 bottom-0 z-[45] flex flex-col rounded-t-xl border-t border-[var(--border)] bg-[var(--bg)] shadow-[0_-6px_20px_rgba(0,0,0,0.45)] ${collapsed ? "" : "max-h-[60%]"}`}>
+    <div
+      className={`absolute bottom-0 z-[45] flex flex-col rounded-t-xl border-t border-[var(--border)] bg-[var(--bg)] shadow-[0_-6px_20px_rgba(0,0,0,0.45)] ${
+        landscape ? `right-0 w-[min(380px,55%)] border-l ${collapsed ? "" : "max-h-full"}` : `inset-x-0 ${collapsed ? "" : "max-h-[60%]"}`
+      }`}
+    >
       <button
         type="button"
         aria-label={collapsed ? "Mở rộng bảng đặt lệnh" : "Thu gọn bảng đặt lệnh"}
