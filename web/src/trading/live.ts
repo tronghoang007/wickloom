@@ -3,7 +3,7 @@ import type { SymbolInfo } from "@/lib/api";
 import type { TradeData } from "@/lib/mt5Api";
 import { chartGlobal } from "@/store/chart";
 import { totalPnl } from "./format";
-import { estimatePnl, exactPnlSpec, pnlSpec } from "./pnl";
+import { estimatePnl, exactPnlSpec, mt5Pnl, pnlSpec } from "./pnl";
 import { quoteFresh, useQuoteStore } from "./quote";
 import { SIM_ACCOUNT_ID } from "./simId";
 import { useTradeStore } from "./store";
@@ -25,9 +25,10 @@ export function liveTrade(data: TradeData | null, quotes: Record<string, Quote>,
     if (!q || !fresh(p.symbol) || (p.type !== "buy" && p.type !== "sell")) return p;
     const now = p.type === "buy" ? q.bid : q.ask;
     const sym = symbols.find((s) => s.name === p.symbol);
-    // symbol tính bằng đồng tiền account: tính thẳng từ giá mở như MT5 (cộng dồn lên số MT5 đã làm tròn có thể lệch 0.01); còn lại cộng quãng giá vào số MT5 (giữ tỉ giá quy đổi của MT5)
+    // symbol tính bằng đồng tiền account: tính thẳng từ giá mở đúng cách MT5 làm tròn (`mt5Pnl`); cộng dồn lên số MT5 đã làm tròn có thể lệch 0.01.
+    // Còn lại cộng quãng giá vào số MT5 (giữ tỉ giá quy đổi của MT5)
     const exact = exactPnlSpec(sym, a.currency);
-    if (exact) return now === p.price_current ? p : { ...p, price_current: now, profit: round2(estimatePnl(p.type, p.volume, p.price_open, now, exact)) };
+    if (exact) return now === p.price_current ? p : { ...p, price_current: now, profit: mt5Pnl(p.type, p.volume, p.price_open, now, exact) };
     const spec = pnlSpec(sym, a.currency);
     if (now === p.price_current || !spec) return p;
     return { ...p, price_current: now, profit: round2(p.profit + estimatePnl(p.type, p.volume, p.price_current, now, spec)) };

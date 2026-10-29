@@ -48,6 +48,15 @@ export function estimatePnl(side: Side, lot: number, entry: number, exit: number
   return ticks * (ticks >= 0 ? s.tickValue : s.tickValueLoss) * lot;
 }
 
+const cents = (v: number) => (Math.sign(v) * Math.round(Math.abs(v) * 100 + 1e-7)) / 100;
+
+/** Lãi / lỗ ĐÚNG như MT5 ghi cho symbol tính bằng tiền account (spec của `exactPnlSpec`): MT5 làm tròn từng vế (giá × contract × lot) về cent rồi mới trừ, không làm tròn hiệu.
+ *  Buy 0.02 lot vàng 4026.718 → 4027.261: 8054.52 − 8053.44 = 1.08 (làm tròn hiệu 1.086 ra 1.09, lệch MT5). Kiểm trên 67 deal thật của account demo (vàng + BTC) 10-29: khớp cả 67. */
+export function mt5Pnl(side: Side, lot: number, entry: number, exit: number, s: PnlSpec): number {
+  const perPrice = (s.tickValue / s.tickSize) * lot;
+  return cents(dirOf(side) * (cents(exit * perPrice) - cents(entry * perPrice)));
+}
+
 /** Ngược lại: giá đóng để lãi / lỗi đúng `amount` (dương = lãi, âm = lỗ). null nếu lot không hợp lệ. */
 export function priceForPnl(side: Side, lot: number, entry: number, amount: number, s: PnlSpec): number | null {
   if (!(lot > 0) || !Number.isFinite(amount)) return null;

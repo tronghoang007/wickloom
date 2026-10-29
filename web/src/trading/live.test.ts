@@ -27,13 +27,15 @@ describe("liveTrade", () => {
     expect(d.positions[0].profit).toBe(-1); // (4026.1 - 4026.6) × 100 × 0.02
   });
 
-  it("symbol tính bằng đồng tiền account: tính thẳng từ giá mở như MT5, không cộng dồn lên số đã làm tròn", () => {
-    // MT5: 0.004 × 100 × 0.01 = 0.004 → 0.00; tick mới 4000.009 → 0.009 → 0.01 (cộng dồn: 0.00 + 0.005 → 0.00, lệch MT5)
-    const p = pos({ volume: 0.01, price_open: 4000, price_current: 4000.004, profit: 0 });
-    expect(liveTrade(data({ positions: [p] }), { XAUUSDm: { bid: 4000.009, ask: 4000.2 } }, [gold])!.positions[0].profit).toBe(0.01);
-    // nửa xa số 0 như MT5: -0.125 → -0.13
-    const s = pos({ type: "sell", volume: 0.01, price_open: 4000, price_current: 4000.1, profit: -0.1 });
-    expect(liveTrade(data({ positions: [s] }), { XAUUSDm: { bid: 4000, ask: 4000.125 } }, [gold])!.positions[0].profit).toBe(-0.13);
+  it("symbol tính bằng đồng tiền account: làm tròn từng vế như MT5, không làm tròn hiệu", () => {
+    // deal thật 10-29 (account demo): Buy 0.02 4026.718 → 4027.261, MT5 ghi 1.08 (= 8054.52 − 8053.44; làm tròn hiệu 1.086 ra 1.09)
+    const b = pos({ price_open: 4026.718, price_current: 4027.2, profit: 0.96 });
+    expect(liveTrade(data({ positions: [b] }), { XAUUSDm: { bid: 4027.261, ask: 4027.5 } }, [gold])!.positions[0].profit).toBe(1.08);
+    // Sell 0.01 4040.404 → 4040.416: MT5 ghi -0.02 (4040.40 − 4040.42); Buy 0.01 4092.294 → 4093.338: MT5 ghi 1.05
+    const s = pos({ type: "sell", volume: 0.01, price_open: 4040.404, price_current: 4040.5, profit: -0.1 });
+    expect(liveTrade(data({ positions: [s] }), { XAUUSDm: { bid: 4040.3, ask: 4040.416 } }, [gold])!.positions[0].profit).toBe(-0.02);
+    const b2 = pos({ volume: 0.01, price_open: 4092.294, price_current: 4093, profit: 0.71 });
+    expect(liveTrade(data({ positions: [b2] }), { XAUUSDm: { bid: 4093.338, ask: 4093.5 } }, [gold])!.positions[0].profit).toBe(1.05);
   });
 
   it("cặp lãi bằng đồng khác account: cộng quãng giá vào số MT5 theo tick value MT5 báo", () => {
