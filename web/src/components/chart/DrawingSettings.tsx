@@ -197,7 +197,7 @@ function Dialog({ init, startTab, onClose }: { init: Drawing; startTab: Settings
       onClick={onClose}
     >
       <div
-        className="flex max-h-[85vh] w-[420px] flex-col rounded-2xl popup"
+        className="flex max-h-[85vh] w-[420px] max-w-[96vw] flex-col rounded-2xl popup"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pb-2 pt-4">

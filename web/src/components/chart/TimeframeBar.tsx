@@ -52,7 +52,36 @@ export default function TimeframeBar({ className, compact = false }: { className
           {compact && tfShort(tf)}
           <Chevron />
         </button>
-        {open && (
+        {open && compact && (
+          // phone: lưới ô bấm thay danh sách dài phải cuộn (chọn một chạm, như vòng chọn khung của MT5); bỏ ngôi sao yêu thích — chỉ có ý nghĩa với toolbar desktop
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+            <div className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+48px)] z-40 rounded-lg bg-[var(--panel)] p-3 shadow-[0_2px_8px_rgba(0,0,0,0.5)]" role="dialog" aria-label="Timeframe">
+              {TF_MENU.map(({ title, tfs }) => (
+                <div key={title} className="mb-2 last:mb-0">
+                  <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">{title}</div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {tfs.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        aria-pressed={t === tf}
+                        onClick={() => {
+                          set({ tf: t });
+                          setOpen(false);
+                        }}
+                        className={`h-11 rounded-md text-sm ${t === tf ? "bg-[var(--accent)] font-semibold text-white" : "bg-[var(--hover)]"}`}
+                      >
+                        {title === "Days" ? tfLong(t) : tfShort(t)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        {open && !compact && (
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
             <div className="absolute left-0 top-0 z-40 max-h-screen w-[196px] overflow-y-auto rounded-md bg-[var(--panel)] py-1.5 text-sm shadow-[0_2px_4px_rgba(0,0,0,0.4)]">

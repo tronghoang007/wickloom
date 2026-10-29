@@ -108,12 +108,13 @@ export default function SymbolSearchDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16 max-md:pt-0"
       onClick={onClose}
       onKeyDown={onKey}
     >
       <div
-        className="flex max-h-[80vh] w-[790px] max-w-[96vw] flex-col overflow-hidden rounded-2xl popup"
+        // phone (max-md): toàn màn để danh sách dài và bàn phím ảo đều có chỗ
+        className="flex max-h-[80vh] w-[790px] max-w-[96vw] flex-col overflow-hidden rounded-2xl popup max-md:h-dvh max-md:max-h-none max-md:max-w-none max-md:w-full max-md:rounded-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pb-3 pt-4">
@@ -210,7 +211,8 @@ export default function SymbolSearchDialog({
           ))}
         </div>
 
-        <div className="border-t border-[var(--border)] bg-[var(--hover)]/40 px-5 py-2.5 text-center text-xs text-[var(--muted)]">
+        {/* gợi ý phím: màn cảm ứng không có bàn phím vật lý */}
+        <div className="border-t border-[var(--border)] bg-[var(--hover)]/40 px-5 py-2.5 text-center text-xs text-[var(--muted)] pointer-coarse:hidden">
           ↑ ↓ để chọn, Enter để mở, Esc để đóng
         </div>
       </div>

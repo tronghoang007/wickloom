@@ -51,8 +51,9 @@ function Section({ children }: { children: ReactNode }) {
 function Row({ label, children, soon }: { label?: ReactNode; children?: ReactNode; soon?: boolean }) {
   return (
     <div className={`flex min-h-10 items-center gap-3 ${soon ? "opacity-55" : ""}`} title={soon ? SOON : undefined}>
-      {label !== undefined && <div className="w-40 shrink-0">{label}</div>}
-      <div className={`flex items-center gap-2 ${soon ? "pointer-events-none" : ""}`}>{children}</div>
+      {/* phone: nhãn hẹp hơn, ô điều khiển co theo chỗ còn lại (nhãn 160px + ô 220px vượt bề rộng màn) */}
+      {label !== undefined && <div className="w-40 shrink-0 max-md:w-28">{label}</div>}
+      <div className={`flex min-w-0 items-center gap-2 ${soon ? "pointer-events-none" : ""}`}>{children}</div>
     </div>
   );
 }
@@ -126,7 +127,7 @@ function Select<T extends string>({ value, options, onChange, width = 150, disab
       disabled={disabled}
       onChange={(e) => onChange?.(e.target.value as T)}
       style={{ width }}
-      className="h-8 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-[13px] text-[var(--fg)] outline-none hover:border-[var(--muted)] focus:border-[var(--accent)] disabled:opacity-55"
+      className="h-8 min-w-0 max-w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-[13px] text-[var(--fg)] outline-none hover:border-[var(--muted)] focus:border-[var(--accent)] disabled:opacity-55"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -744,11 +745,12 @@ export default function SettingsDialog() {
 
   const body = { s, set };
   return (
+    // phone (max-md): toàn màn, cột tab bên trái thành hàng tab cuộn ngang ở trên (cột 192px chiếm nửa màn hẹp, nội dung bị cắt)
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onMouseDown={(e) => e.target === e.currentTarget && cancel()}>
       <div
         role="dialog"
         aria-label="Settings"
-        className="flex h-[min(640px,92vh)] w-[min(640px,96vw)] flex-col rounded-lg popup text-sm"
+        className="flex h-[min(640px,92vh)] w-[min(640px,96vw)] flex-col rounded-lg popup text-sm max-md:h-dvh max-md:w-full max-md:rounded-none"
       >
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <h2 className="text-lg font-semibold">Settings</h2>
@@ -756,8 +758,8 @@ export default function SettingsDialog() {
             <Close />
           </button>
         </div>
-        <div className="flex min-h-0 flex-1">
-          <nav className="w-48 shrink-0 px-3 py-2">
+        <div className="flex min-h-0 flex-1 max-md:flex-col">
+          <nav className="w-48 shrink-0 px-3 py-2 max-md:flex max-md:w-auto max-md:gap-1 max-md:overflow-x-auto max-md:border-b max-md:border-[var(--border)] max-md:[scrollbar-width:none]">
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -765,7 +767,7 @@ export default function SettingsDialog() {
                 disabled={t.soon}
                 title={t.soon ? SOON : undefined}
                 onClick={() => setTab(t.id)}
-                className={`mb-0.5 flex h-9 w-full items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 text-left disabled:opacity-55 ${
+                className={`mb-0.5 flex h-9 w-full items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 text-left disabled:opacity-55 max-md:mb-0 max-md:w-auto max-md:shrink-0 ${
                   tab === t.id ? "bg-[var(--hover)] font-medium" : "enabled:hover:bg-[var(--hover)]"
                 }`}
               >
@@ -784,7 +786,7 @@ export default function SettingsDialog() {
             {tab === "alerts" && <AlertsTab />}
           </div>
         </div>
-        <div className="flex items-center justify-between border-t border-[var(--border)] px-5 py-3">
+        <div className="flex items-center justify-between border-t border-[var(--border)] px-5 py-3 max-md:flex-wrap max-md:gap-y-2 max-md:px-4">
           <div className="relative">
             <button
               type="button"
@@ -809,7 +811,7 @@ export default function SettingsDialog() {
             )}
           </div>
           {/* Ghi công theo giấy phép lightweight-charts (đã gỡ khỏi thanh dưới chart) */}
-          <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" className="text-[11px] text-[var(--muted)] hover:underline">
+          <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" className="text-[11px] text-[var(--muted)] hover:underline max-md:order-last max-md:w-full max-md:text-center">
             Charts by TradingView
           </a>
           <div className="flex gap-2">
