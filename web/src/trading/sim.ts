@@ -1,7 +1,7 @@
 import type { Deal, Mt5Account, PendingOrder, Position, TradeData } from "@/lib/mt5Api";
 import type { TradeResult } from "@/lib/tradeApi";
 import { checkStopMove, isPendingType, resolveOrderType, sideOfType, tooClose, type PendingType, type Side } from "./orderType";
-import { estimatePnl, type PnlSpec } from "./pnl";
+import { estimatePnl, mt5Pnl, type PnlSpec } from "./pnl";
 import { SIM_ACCOUNT_ID } from "./simId";
 
 // Sàn giả lập của Replay: nhận lệnh như EA (market, lệnh chờ Limit / Stop, đóng / đóng một phần, sửa SL / TP / giá) và trả dữ liệu đúng khuôn MT5 (TradeData) nên toàn bộ giao diện
@@ -10,8 +10,9 @@ import { SIM_ACCOUNT_ID } from "./simId";
 // của Strategy Tester (mở → thấp → cao → đóng nếu nến tăng, mở → cao → thấp → đóng nếu nến giảm), nên lệnh chờ khớp rồi chạm SL / TP trong cùng một nến cũng đúng thứ tự. Đi liền thì khớp
 // đúng mức; nhảy giá (từ giá trước tới giá mở của nến mới) thì khớp ở giá mở như sàn thật (Stop trượt, Limit được giá tốt hơn). Hàm thuần, không đụng store.
 
-/** Thông số của symbol mà sàn cần: lãi/lỗi theo tiền account (null = chưa biết, không nhận lệnh), số chữ số, stops level, lot tối thiểu / step (thiếu = không kiểm, như EA cũ). */
-export type SimSymbol = { spec: PnlSpec | null; digits: number; stopsLevel: number | null; lot?: { min: number; step: number } | null };
+/** Thông số của symbol mà sàn cần: lãi/lỗi theo tiền account (null = chưa biết, không nhận lệnh), số chữ số, stops level, lot tối thiểu / step (thiếu = không kiểm, như EA cũ).
+ *  `exact` = symbol tính bằng chính tiền account (`exactPnlSpec`): lãi / lỗ làm tròn từng vế đúng như MT5 (`mt5Pnl`). */
+export type SimSymbol = { spec: PnlSpec | null; exact?: PnlSpec | null; digits: number; stopsLevel: number | null; lot?: { min: number; step: number } | null };
 export type SimEnv = (symbol: string) => SimSymbol;
 
 export type SimBar = { t: number; o: number; h: number; l: number; c: number };
@@ -47,6 +48,12 @@ export function newBook(info: SimAccountInfo, balance: number, time = 0): SimBoo
 const done = (r: Partial<TradeResult>): TradeResult => ({ ok: true, message: "", retcode: 10009, order: 0, deal: 0, price: 0, volume: 0, orderType: "", typeChanged: false, ...r });
 const fail = (retcode: number, message: string): TradeResult => ({ ok: false, message, retcode, order: 0, deal: 0, price: 0, volume: 0, orderType: "", typeChanged: false });
 export type SimOut = { book: SimBook; result: TradeResult };
+
+/** Lãi / lỗ của `volume` lot mở ở `open`, đóng ở `close`, theo cent: như MT5 khi biết `exact`, còn lại theo tick value (làm tròn hiệu). */
+function pnlOf(side: Side, volume: number, open: number, close: number, sym: SimSymbol): number {
+  if (sym.exact) return mt5Pnl(side, volume, open, close, sym.exact);
+  return sym.spec ? round(estimatePnl(side, volume, open, close, sym.spec), 2) : 0;
+}
 
 const openAt = (side: Side, q: SimQuote) => (side === "buy" ? q.ask : q.bid);
 const closeAt = (side: Side, q: SimQuote) => (side === "buy" ? q.bid : q.ask);
@@ -85,8 +92,7 @@ function revalue(b: SimBook, env: SimEnv): SimBook {
       if (!q) return p;
       const side = sideOf(p);
       const now = closeAt(side, q);
-      const spec = env(p.symbol).spec;
-      return { ...p, price_current: now, profit: spec ? round(estimatePnl(side, p.volume, p.price_open, now, spec), 2) : 0 };
+      return { ...p, price_current: now, profit: pnlOf(side, p.volume, p.price_open, now, env(p.symbol)) };
     }),
   };
 }
@@ -140,8 +146,7 @@ export function fillSpread(b: SimBook, symbol: string, spread: number, env: SimE
 function closePart(b: SimBook, p: Position, volume: number, price: number, reason: string, time: number, env: SimEnv, order = 0): { book: SimBook; deal: number; pnl: number } {
   const side = sideOf(p);
   const vol = Math.min(volume, p.volume);
-  const spec = env(p.symbol).spec;
-  const pnl = spec ? round(estimatePnl(side, vol, p.price_open, price, spec), 2) : 0;
+  const pnl = pnlOf(side, vol, p.price_open, price, env(p.symbol));
   const deal: Deal = {
     ticket: b.nextDeal, order: order || b.nextOrder, symbol: p.symbol, type: opposite(side), entry: "out", volume: vol, price, profit: pnl, commission: 0, swap: 0, time, magic: 0, comment: "",
     position: p.ticket, sl: p.sl, tp: p.tp, reason,

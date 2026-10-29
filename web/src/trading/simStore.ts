@@ -8,7 +8,7 @@ import { cancelAllEdits } from "./editBridge";
 import { useTradeFocus } from "./focus";
 import { fmtLot, fmtPnl, fmtPx } from "./format";
 import { isPendingType, pendingLabel } from "./orderType";
-import { pnlSpec } from "./pnl";
+import { exactPnlSpec, pnlSpec } from "./pnl";
 import { typicalSpread, useQuoteStore } from "./quote";
 import * as sim from "./sim";
 import { useTradeStore } from "./store";
@@ -27,7 +27,7 @@ const env: sim.SimEnv = (symbol) => {
   const s = chartGlobal.getState().symbols.find((x) => x.name === symbol);
   const ccy = useSimStore.getState().book?.info.currency ?? "USD";
   const lot = s?.volume_min && s.volume_step ? { min: s.volume_min, step: s.volume_step } : null;
-  return { spec: pnlSpec(s, ccy), digits: s?.digits ?? 5, stopsLevel: s?.stops_level ?? null, lot };
+  return { spec: pnlSpec(s, ccy), exact: exactPnlSpec(s, ccy), digits: s?.digits ?? 5, stopsLevel: s?.stops_level ?? null, lot };
 };
 
 function freshBook(): sim.SimBook {

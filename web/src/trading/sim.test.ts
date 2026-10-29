@@ -26,6 +26,17 @@ describe("market", () => {
     expect(b.positions[1]).toMatchObject({ type: "sell", price_open: 4000 });
   });
 
+  it("vàng tính bằng tiền account: lãi / lỗ làm tròn từng vế như MT5 (deal thật: Buy 0.02 4026.718 → 4027.261 = 1.08, không phải 1.09)", () => {
+    const exact: sim.SimEnv = () => ({ spec: GOLD, exact: GOLD, digits: 3, stopsLevel: 0 });
+    let b = ok(sim.marketOrder(sim.seed(sim.newBook(INFO, 1000), S, 4026.5, 1000, 0.218, exact), { symbol: S, side: "buy", volume: 0.02 }, exact));
+    expect(b.positions[0].price_open).toBe(4026.718);
+    b = sim.seed(b, S, 4027.261, 1060, 0.218, exact);
+    expect(b.positions[0].profit).toBe(1.08);
+    b = ok(sim.closePosition(b, b.positions[0].ticket, 0, exact));
+    expect(b.deals.at(-1)!.profit).toBe(1.08);
+    expect(b.balance).toBe(1001.08);
+  });
+
   it("chưa có giá / chưa biết tick value / SL sai phía / không đủ tiền: sàn từ chối, sổ không đổi", () => {
     const empty = sim.newBook(INFO, 1000);
     expect(sim.marketOrder(empty, { symbol: S, side: "buy", volume: 1 }, env).result).toMatchObject({ ok: false, retcode: 10021 });
