@@ -9,7 +9,7 @@ import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
 import { askCancelAll, askCancelOrder, askCloseAll, askClosePosition } from "@/trading/tagActions";
-import { accountProfit, closedPositions, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, realizedSince, REASON_LABEL, sideLabel } from "@/trading/format";
+import { accountProfit, closedPositions, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, REASON_LABEL, sideLabel } from "@/trading/format";
 import { useTradeFocus } from "@/trading/focus";
 import { tradeBlock } from "@/trading/gate";
 import { closeLot } from "@/trading/lot";
@@ -21,6 +21,8 @@ import EmptyState from "../EmptyState";
 import { EmptyHistoryI, EmptyOrdersI, EmptyPositionsI } from "../icons";
 import { SymbolBadge } from "../SymbolIcon";
 import LotSlider from "./LotSlider";
+import { useLiveTrade } from "@/trading/live";
+import { startQuoteFeed } from "@/trading/quoteFeed";
 
 const TABS: { id: TradeTab; label: string }[] = [
   { id: "positions", label: "Positions" },
@@ -92,7 +94,14 @@ export function useTradePolling(enabled = true) {
   const activeId = useMt5Store((s) => s.accounts.find((a) => a.active)?.id);
   useEffect(() => {
     if (!enabled) return;
-    if (status === "user" && activeId) return startTradePolling();
+    if (status === "user" && activeId) {
+      const stopPoll = startTradePolling();
+      const stopQuotes = startQuoteFeed(); // tick của symbol có lệnh cả khi chart đang xem symbol khác: P/L nhảy theo tick
+      return () => {
+        stopPoll();
+        stopQuotes();
+      };
+    }
     useTradeStore.getState().clear();
   }, [enabled, status, activeId]);
 }
@@ -105,7 +114,7 @@ export default function TradingPanel({ fill = false }: { fill?: boolean }) {
   const status = useAuthStore((s) => s.status);
   const loaded = useMt5Store((s) => s.loaded);
   const activeId = useMt5Store((s) => s.accounts.find((a) => a.active)?.id);
-  const data = useTradeStore((s) => s.data);
+  const data = useLiveTrade(useTradeStore((s) => s.data)); // lãi / lỗ, equity theo từng tick (trading/live.ts)
   const sim = useTradeStore((s) => s.sim);
   const open = useTradeStore((s) => s.open);
   const tab = useTradeStore((s) => s.tab);
@@ -123,7 +132,6 @@ export default function TradingPanel({ fill = false }: { fill?: boolean }) {
   const stale = isStale(data, now);
   const a = data.account;
   const pnl = accountProfit(data);
-  const realized = realizedSince(data.deals, new Date(now * 1000).setHours(0, 0, 0, 0) / 1000); // hôm nay, theo giờ máy
   const ccy = a.currency;
   // Unrealized P/L và Margin level chỉ có nghĩa khi đang có lệnh (MT5 báo margin level 0 khi chưa dùng margin)
   const stats: [string, string, string?][] = [
@@ -132,7 +140,6 @@ export default function TradingPanel({ fill = false }: { fill?: boolean }) {
     ["Margin", fmtMoney(a.margin, ccy)],
     ["Balance", fmtMoney(a.balance, ccy)],
     ...(data.positions.length > 0 ? ([["Unrealized P/L", fmtPnl(pnl), pnlClass(pnl)]] as [string, string, string?][]) : []),
-    ["Realized P/L", fmtPnl(realized), pnlClass(realized)],
     ...(a.margin_level ? ([["Margin level", `${a.margin_level.toLocaleString("en-US", { maximumFractionDigits: 2 })}%`]] as [string, string, string?][]) : []),
   ];
 

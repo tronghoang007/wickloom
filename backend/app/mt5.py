@@ -77,6 +77,22 @@ def _deals(v: Any) -> List[Dict[str, Any]]:
     return sorted(rows, key=lambda r: -r["time"])
 
 
+SUMMARY_KEYS = ("profit", "swap", "commission", "deposit", "withdrawal", "credit")
+
+
+def _summary(v: Any) -> Optional[Dict[str, float]]:
+    """Tổng TOÀN BỘ lịch sử account (EA >= 2.22) như dòng tổng tab History của MT5; EA cũ không gửi / sai kiểu -> None (web tự cộng từ các deal gần đây)."""
+    if not isinstance(v, dict):
+        return None
+    out: Dict[str, float] = {}
+    for k in SUMMARY_KEYS:
+        x = v.get(k, 0)
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+            return None
+        out[k] = float(x)
+    return out
+
+
 class Mt5Registry:
     def __init__(self, clock: Callable[[], float] = time.time) -> None:
         self.clock = clock
@@ -145,12 +161,13 @@ class Mt5Registry:
         aid = self._by_writer.get(writer)
         if aid is None:
             return
-        t = self._trade.setdefault(aid, {"positions": [], "orders": [], "deals": [], "updated_at": None})
+        t = self._trade.setdefault(aid, {"positions": [], "orders": [], "deals": [], "summary": None, "updated_at": None})
         if msg.get("type") == "trade":
             t["positions"], t["orders"] = _positions(msg.get("positions")), _orders(msg.get("orders"))
             t["updated_at"] = self.clock()
         elif msg.get("type") == "deals":
             t["deals"] = _deals(msg.get("deals"))
+            t["summary"] = _summary(msg.get("summary"))
         else:
             return
         for fn in self.listeners:
@@ -164,7 +181,7 @@ class Mt5Registry:
         info = self._info.get(aid)
         if info is None:
             return None
-        t = self._trade.get(aid, {"positions": [], "orders": [], "deals": [], "updated_at": None})
+        t = self._trade.get(aid, {"positions": [], "orders": [], "deals": [], "summary": None, "updated_at": None})
         return {"account": next(a for a in self.snapshot() if a["id"] == aid), **t}
 
     def remove(self, writer: Any) -> None:

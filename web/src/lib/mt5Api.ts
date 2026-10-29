@@ -64,7 +64,9 @@ export type Deal = {
   /** EA 2.18+: mã vị thế mà deal thuộc về (0 = deal nạp/rút), SL/TP lúc khớp, lý do (client/mobile/web/expert/sl/tp/so); EA cũ không gửi. */
   position?: number; sl?: number; tp?: number; reason?: string;
 };
-export type TradeData = { account: Mt5Account; positions: Position[]; orders: PendingOrder[]; deals: Deal[]; updated_at: number | null };
+/** Tổng TOÀN BỘ lịch sử account như dòng tổng tab History của MT5 (EA >= 2.22): profit = lãi / lỗ gộp, commission gồm fee, withdrawal âm. */
+export type HistorySummary = { profit: number; swap: number; commission: number; deposit: number; withdrawal: number; credit: number };
+export type TradeData = { account: Mt5Account; positions: Position[]; orders: PendingOrder[]; deals: Deal[]; updated_at: number | null; summary?: HistorySummary | null };
 
 /** null = chưa lấy được (khách 401, account không có 404, lỗi mạng); `gone` = account không còn trong backend (404). */
 export async function fetchTrade(accountId: string): Promise<{ data: TradeData | null; unauthorized: boolean; gone: boolean }> {
@@ -86,6 +88,7 @@ export async function fetchTrade(accountId: string): Promise<{ data: TradeData |
         orders: Array.isArray(j.orders) ? j.orders : [],
         deals: Array.isArray(j.deals) ? j.deals : [],
         updated_at: typeof j.updated_at === "number" ? j.updated_at : null,
+        summary: j.summary && typeof j.summary === "object" ? j.summary : null,
       },
       unauthorized: false,
       gone: false,

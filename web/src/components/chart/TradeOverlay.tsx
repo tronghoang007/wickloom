@@ -15,6 +15,7 @@ import { closeFromTag, placeFromTag } from "@/trading/tagActions";
 import { useTicketStore } from "@/trading/ticket";
 import { useRailStore } from "@/store/rail";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLiveTrade } from "@/trading/live";
 
 const TAG_H = 22;
 const RIGHT_GAP = 70; // thẻ nằm lệch trái khỏi mép vùng vẽ (giống TV: "Order and position alignment: Right")
@@ -71,7 +72,7 @@ type Props = {
  *  cùng các thẻ DOM nằm trên đường: [Buy/Sell của bản nháp] [TP+] [SL+] [lot | loại lệnh hoặc lãi/lỗi | ×], và đường nối dọc giữa giá vào với SL/TP. Kéo thẻ = kéo đường (LineDrag
  *  nhận ra thẻ qua `data-line-key`); kéo nút TP/SL mờ ra giá cần đặt để tạo mới. Vị trí cập nhật mỗi khung hình vì chart không báo khi trục giá đổi. */
 export default function TradeOverlay({ symbol, chartType, replay, preview, getChart, getSeries, getMainRect, getDigits, onGhost, onConfirmEdit, onCancelEdit, compact = false }: Props) {
-  const tradeData = useTradeStore((s) => s.data);
+  const tradeData = useLiveTrade(useTradeStore((s) => s.data)); // lãi / lỗ trên thẻ vị thế nhảy theo tick
   const sim = useTradeStore((s) => s.sim);
   const draft = useTicketStore((s) => s.draft);
   const quote = useQuoteStore((s) => quoteOf(s, symbol, replay));

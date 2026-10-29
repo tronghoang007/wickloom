@@ -8,6 +8,7 @@ import { fmtLot, fmtPnl, fmtPx, orderLabel, positionPnl, sideLabel, type LineSpe
 import { submitDraft } from "./submit";
 import { useTicketStore } from "./ticket";
 import { tradeAccount, useTradeStore } from "./store";
+import { liveTradeNow } from "./live";
 
 // Nút trên thẻ lệnh của chart (kiểu TradingView): đặt lệnh của bản nháp, và dấu × của từng loại thẻ. Đọc store lúc gọi nên gọi được từ bất kỳ đâu.
 
@@ -149,7 +150,7 @@ export function closeFromTag(line: LineSpec, symbol: string, digits: number): vo
     return;
   }
   if (tag.kind !== "entry") return askRemoveStop(owner, tag.kind, line.price, symbol, digits);
-  const data = useTradeStore.getState().data;
+  const data = liveTradeNow(); // hộp đóng vị thế hiện lãi / lỗ lúc bấm
   if (owner.t === "order") {
     const ord = data?.orders.find((x) => x.ticket === owner.ticket);
     if (ord) askCancelOrder(ord);

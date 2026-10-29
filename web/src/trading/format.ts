@@ -147,6 +147,9 @@ export function realizedSince(deals: Deal[], since: number): number {
   return deals.reduce((s, d) => (d.time >= since && (d.type === "buy" || d.type === "sell") ? s + dealNet(d) : s), 0);
 }
 
+/** 0h hôm nay theo giờ máy (giây), mốc "Today" của tổng hợp lịch sử ở tab Account. `nowSec`: giây. */
+export const todayStart = (nowSec: number) => new Date(nowSec * 1000).setHours(0, 0, 0, 0) / 1000;
+
 export const STALE_SECONDS = 15;
 /** Dữ liệu cũ: account offline, hoặc EA lâu rồi chưa báo vị thế/lệnh. UI phải làm mờ và không vẽ đường trên chart. */
 export function isStale(data: TradeData | null, nowSec: number): boolean {

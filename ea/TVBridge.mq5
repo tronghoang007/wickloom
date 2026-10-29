@@ -85,14 +85,19 @@
 //|   cat giua hai lan doc), JsonStr giai ma \" \n \uXXXX            |
 //| - 2.21: TradingEnabled mac dinh BAT (tat nhanh bang nut Algo      |
 //|   Trading; account khong phai demo van bi chan nhu cu)            |
+//| - 2.22: "deals" them "summary" = tong TOAN BO lich su account nhu   |
+//|   dong tong o tab History cua MT5 (profit, swap, commission + fee, |
+//|   deposit, withdrawal, credit) - danh sach deal van DealsDays ngay |
+//| - 2.23: vi the / lenh cho doi thi gui "account" ngay sau "trade"   |
+//|   (truoc cho nhip 5s: Equity tren web hut phan lai/lo vua chot)    |
 //| Nếu SocketConnect báo lỗi: Tools > Options > Expert Advisors >   |
 //| "Allow WebRequest for listed URL" - thêm ServerHost:ServerPort   |
 //| (MT5 áp whitelist này cho cả Socket*, không chỉ WebRequest)      |
 //+------------------------------------------------------------------+
 #property strict
-#property version "2.21"
+#property version "2.23"
 
-#define EA_VERSION "2.21"
+#define EA_VERSION "2.23"
 
 input string ServerHost = "127.0.0.1";
 input int ServerPort = 8001;
@@ -412,10 +417,15 @@ void PostTrade(bool force)
   ulong every = (sigP != "" || sigO != "") ? 1000 : 5000;
   if (!force && sig == g_lastTradeSig && now - g_lastTradeMs < every)
     return;
+  bool changed = sig != g_lastTradeSig;
   if (SendLine("{\"type\":\"trade\",\"positions\":" + pos + ",\"orders\":" + ord + "}"))
   {
     g_lastTradeSig = sig;
     g_lastTradeMs = now;
+    // Vi the / lenh doi (mo, dong, dong mot phan, sua SL/TP): gui so du + equity ngay, khong cho nhip 5s - web khong ghep danh sach vi the moi voi balance cu
+    // (dong 1 trong 2 vi the thi Equity hut dung phan lai/lo vua chot toi 5s)
+    if (changed)
+      PostAccount();
   }
 }
 
@@ -460,7 +470,7 @@ string DealReasonStr(long r)
   return "";
 }
 
-// Lich su khop lenh DealsDays ngay gan nhat (toi da MaxDeals, moi nhat truoc)
+// Lich su khop lenh DealsDays ngay gan nhat (toi da MaxDeals, moi nhat truoc) + tong toan bo lich su ("summary", nhu dong tong tab History cua MT5)
 void PostDeals()
 {
   g_dealsDirty = false;
@@ -468,9 +478,36 @@ void PostDeals()
   // TimeCurrent() = gio cua bao gia cuoi: deal vua khop sau bao gia do (thi truong im) se nam ngoai [from, to] -> lay du them 1 ngay
   datetime to = (datetime)((long)TimeCurrent() + 86400);
   datetime from = (datetime)((long)TimeCurrent() - (long)DealsDays * 86400);
-  if (!HistorySelect(from, to))
+  if (!HistorySelect(0, to))
     return;
   int total = HistoryDealsTotal();
+  // Tong toan bo lich su: nap / rut = deal BALANCE, credit rieng, moi deal con lai (mua / ban, phi, dieu chinh...) cong vao profit / swap / commission
+  double sProfit = 0, sSwap = 0, sComm = 0, sDep = 0, sWd = 0, sCredit = 0;
+  for (int i = 0; i < total; i++)
+  {
+    ulong tk = HistoryDealGetTicket(i);
+    if (tk == 0)
+      continue;
+    long t = HistoryDealGetInteger(tk, DEAL_TYPE);
+    double p = HistoryDealGetDouble(tk, DEAL_PROFIT);
+    if (t == DEAL_TYPE_BALANCE)
+    {
+      if (p >= 0)
+        sDep += p;
+      else
+        sWd += p;
+    }
+    else if (t == DEAL_TYPE_CREDIT)
+      sCredit += p;
+    else
+    {
+      sProfit += p;
+      sSwap += HistoryDealGetDouble(tk, DEAL_SWAP);
+      sComm += HistoryDealGetDouble(tk, DEAL_COMMISSION) + HistoryDealGetDouble(tk, DEAL_FEE);
+    }
+  }
+  string sum = "{\"profit\":" + DoubleToString(sProfit, 2) + ",\"swap\":" + DoubleToString(sSwap, 2) + ",\"commission\":" + DoubleToString(sComm, 2)
+             + ",\"deposit\":" + DoubleToString(sDep, 2) + ",\"withdrawal\":" + DoubleToString(sWd, 2) + ",\"credit\":" + DoubleToString(sCredit, 2) + "}";
   int stop = MathMax(0, total - MaxDeals);
   string js = "[";
   for (int i = total - 1; i >= stop; i--)
@@ -478,6 +515,8 @@ void PostDeals()
     ulong tk = HistoryDealGetTicket(i);
     if (tk == 0)
       continue;
+    if ((datetime)HistoryDealGetInteger(tk, DEAL_TIME) < from)
+      break; // deal xep theo thoi gian tang dan: cu hon DealsDays ngay thi dung
     string sym = HistoryDealGetString(tk, DEAL_SYMBOL);
     int dg = sym == "" ? 2 : PriceDigits(sym);
     if (js != "[")
@@ -499,7 +538,7 @@ void PostDeals()
         + ",\"reason\":\"" + DealReasonStr(HistoryDealGetInteger(tk, DEAL_REASON)) + "\""
         + ",\"comment\":\"" + Esc(HistoryDealGetString(tk, DEAL_COMMENT)) + "\"}";
   }
-  SendLine("{\"type\":\"deals\",\"deals\":" + js + "]}");
+  SendLine("{\"type\":\"deals\",\"deals\":" + js + "],\"summary\":" + sum + "}");
 }
 
 string SymbolType(string s)

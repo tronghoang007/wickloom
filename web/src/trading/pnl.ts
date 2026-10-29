@@ -30,6 +30,16 @@ export function pnlSpec(sym: SymbolInfo | undefined, accountCcy?: string): PnlSp
   return null;
 }
 
+/** Thông số tính ĐÚNG như MT5 tính lãi / lỗ vị thế: chỉ khi symbol tính bằng chính đồng tiền account (XAUUSDm với account USD): giá trị một tick = tick_size × contract_size,
+ *  không đổi theo tỉ giá. Cặp khác (lãi bằng đồng khác, phải quy đổi theo tỉ giá lúc đó) → null. */
+export function exactPnlSpec(sym: SymbolInfo | undefined, accountCcy?: string): PnlSpec | null {
+  const tickSize = sym?.tick_size;
+  const size = sym?.contract_size;
+  if (!sym || !accountCcy || !tickSize || tickSize <= 0 || !size || size <= 0 || quoteCurrency(sym.name) !== accountCcy.toUpperCase()) return null;
+  const v = tickSize * size;
+  return { tickSize, tickValue: v, tickValueLoss: v };
+}
+
 const dirOf = (side: Side) => (side === "buy" ? 1 : -1);
 
 /** Lãi (+) / lỗi (−) nếu vị thế `side` `lot` lot mở ở `entry` và đóng ở `exit`. */

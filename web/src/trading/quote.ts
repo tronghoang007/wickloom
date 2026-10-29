@@ -12,12 +12,18 @@ type State = {
   setSim: (quotes: Record<string, Quote> | null) => void;
 };
 
+// Lúc nhận tick gần nhất của từng symbol (giờ máy, ms), kể cả tick lặp giá: biết giá trong kho còn đang chạy hay đã cũ (chart rời symbol đó, không ai subscribe nữa).
+const tickAt: Record<string, number> = {};
+/** Giá thật của `symbol` có tick trong `maxAgeMs` gần đây không. */
+export const quoteFresh = (symbol: string, maxAgeMs: number, nowMs = Date.now()) => nowMs - (tickAt[symbol] ?? -Infinity) <= maxAgeMs;
+
 export const useQuoteStore = create<State>()((set, get) => ({
   quotes: {},
   real: {},
   sim: false,
   set: (symbol, bid, ask) => {
     if (!(bid > 0) || !(ask > 0)) return; // tick thiếu một phía (vd chỉ có last)
+    tickAt[symbol] = Date.now();
     const cur = get().real[symbol];
     if (cur && cur.bid === bid && cur.ask === ask) return; // tick lặp: khỏi render lại
     const real = { ...get().real, [symbol]: { bid, ask } };

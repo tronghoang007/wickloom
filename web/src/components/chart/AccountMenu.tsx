@@ -14,6 +14,7 @@ import Avatar from "../auth/Avatar";
 import EmptyState from "../EmptyState";
 import { EmptyPlugI } from "../icons";
 import AccountDetails from "./AccountDetails";
+import { useLiveTrade } from "@/trading/live";
 
 const item = "flex w-full items-center px-4 py-2 text-left text-sm hover:bg-[var(--hover)]";
 
@@ -193,7 +194,7 @@ function TradingAccounts() {
   const accounts = useMt5Store((s) => s.accounts);
   const loaded = useMt5Store((s) => s.loaded);
   const switchable = useMt5Store((s) => s.switchable);
-  const trade = useTradeStore((s) => s.real); // số liệu MT5, kể cả khi panel đang hiện account giả lập của Replay
+  const trade = useLiveTrade(useTradeStore((s) => s.real)); // số liệu MT5 (kể cả khi panel đang hiện account giả lập của Replay), lãi / equity theo tick
   return (
     <div className="border-b border-[var(--border)] px-4 py-3">
       <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">Trading accounts (MT5)</div>
@@ -215,12 +216,18 @@ function TradingAccounts() {
             <div className="break-words text-xs text-[var(--muted)]">{accountSub(a)}</div>
             {a.login === null && <div className="text-xs text-[var(--muted)]">EA cũ — cập nhật TVBridge 2.10 để thấy login và Demo/Real.</div>}
           </div>
-          {a.balance !== undefined && (
-            <div className="shrink-0 text-right">
-              <div className="text-sm tabular-nums">{fmtMoney(a.balance, a.currency)}</div>
-              {a.equity !== undefined && a.equity !== a.balance && <div className="text-xs tabular-nums text-[var(--muted)]">Equity {fmtMoney(a.equity, "")}</div>}
-            </div>
-          )}
+          {a.balance !== undefined && (() => {
+            // account đang cấp dữ liệu: số dư / equity theo dữ liệu lệnh (live, như panel Trading), danh sách account chỉ hỏi lại mỗi 10s
+            const live = a.active && trade?.account.id === a.id ? trade.account : null;
+            const balance = live?.balance ?? a.balance;
+            const equity = live?.equity ?? a.equity;
+            return (
+              <div className="shrink-0 text-right">
+                <div className="text-sm tabular-nums">{fmtMoney(balance, a.currency)}</div>
+                {equity !== undefined && equity !== balance && <div className="text-xs tabular-nums text-[var(--muted)]">Equity {fmtMoney(equity, "")}</div>}
+              </div>
+            );
+          })()}
         </div>
         {a.active && trade && <AccountDetails data={trade} />}
         </div>

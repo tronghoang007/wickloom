@@ -245,6 +245,20 @@ def test_deals_sorted_newest_first_and_independent_of_trade_message():
     assert len(r.trade("Exness-MT5Trial17:12345678")["deals"]) == 4  # trade không xoá deals
 
 
+def test_deals_summary_all_history_from_ea_2_22():
+    r, w = registered()
+    aid = "Exness-MT5Trial17:12345678"
+    r.update_trade(w, {"type": "deals", "deals": [DEAL]})
+    assert r.trade(aid)["summary"] is None  # EA cũ không gửi
+    s = {"profit": 2.45, "swap": 0, "commission": -0.1, "deposit": 100, "withdrawal": 0, "credit": 0}
+    r.update_trade(w, {"type": "deals", "deals": [DEAL], "summary": s})
+    assert r.trade(aid)["summary"] == {k: float(v) for k, v in s.items()}
+    r.update_trade(w, {"type": "deals", "deals": [DEAL], "summary": {**s, "profit": float("nan")}})
+    assert r.trade(aid)["summary"] is None  # số hỏng: bỏ cả tổng, web tự cộng từ deal
+    r.update_trade(w, {"type": "deals", "deals": [DEAL], "summary": {**s, "deposit": True}})
+    assert r.trade(aid)["summary"] is None
+
+
 def test_trade_unknown_account_and_unregistered_writer():
     r, w = registered()
     assert r.trade("nope") is None

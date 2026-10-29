@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { spreadPips, splitPrice, typicalSpread, useQuoteStore } from "./quote";
+import { quoteFresh, spreadPips, splitPrice, typicalSpread, useQuoteStore } from "./quote";
 
 beforeEach(() => useQuoteStore.setState({ quotes: {} }));
 
@@ -61,5 +61,15 @@ describe("splitPrice", () => {
   });
   it("symbol khác giữ nguyên giá", () => {
     expect(splitPrice(67000.5, 2)).toEqual(["67,000.50", ""]);
+  });
+});
+
+describe("quoteFresh", () => {
+  it("theo lúc nhận tick gần nhất, kể cả tick lặp giá", () => {
+    const t0 = Date.now();
+    useQuoteStore.getState().set("FRESHm", 1, 1.1);
+    expect(quoteFresh("FRESHm", 10_000, t0 + 5_000)).toBe(true);
+    expect(quoteFresh("FRESHm", 10_000, Date.now() + 20_000)).toBe(false);
+    expect(quoteFresh("NEVERm", 10_000)).toBe(false);
   });
 });

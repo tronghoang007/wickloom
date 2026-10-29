@@ -60,6 +60,7 @@ import { CHART_TYPES, SymbolSearch, toggleFullscreen, useSymbolsPolling } from "
 import { useTradeClick } from "./TradeWidget";
 import TradingPanel, { useTradePolling } from "./TradingPanel";
 import WatchlistPanel from "./WatchlistPanel";
+import { useLiveTrade } from "@/trading/live";
 
 // Khung của phone (docs/mobile-responsive-plan.md M1): thanh trên gọn + menu ⋯, tab bar ở đáy thay thanh bên phải và panel Trading,
 // các panel mở phủ lên vùng chart (chart vẫn mount bên dưới, giữ WebSocket và góc nhìn). Nút cao 40px cho dễ chạm.
@@ -562,7 +563,7 @@ function CollapsedTicket({ onExpand }: { onExpand: () => void }) {
   const replay = useReplayStore((s) => s.active);
   const quote = useQuoteStore((s) => (d ? quoteOf(s, d.symbol, replay) : undefined));
   const busy = useOrderState((s) => s.busy);
-  const data = useTradeStore((s) => s.data);
+  const data = useLiveTrade(useTradeStore((s) => s.data));
   if (!d) {
     const [kind, tk] = (owner ?? "").split(":");
     const pos = kind === "position" ? data?.positions.find((p) => p.ticket === Number(tk)) : undefined;

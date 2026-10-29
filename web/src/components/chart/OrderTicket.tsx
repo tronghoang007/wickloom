@@ -28,6 +28,7 @@ import { Close } from "../icons";
 import LotSlider from "./LotSlider";
 import PriceText from "./PriceText";
 import ModeBadge from "./ModeBadge";
+import { useLiveTrade } from "@/trading/live";
 
 // Ô nhập nổi lên khỏi nền tối: nền sáng hơn một chút + viền rõ hơn (tính từ màu chữ nên đúng cả theme sáng). Ô bị khoá (TP / SL chưa bật) vẫn thấy khung, chỉ mờ chữ, không mờ cả ô
 const fieldBase = "w-full rounded-lg border border-[color-mix(in_srgb,var(--fg)_24%,transparent)] bg-[color-mix(in_srgb,var(--fg)_6%,transparent)] tabular-nums outline-none placeholder:text-[var(--muted)] hover:border-[color-mix(in_srgb,var(--fg)_38%,transparent)] focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:border-[color-mix(in_srgb,var(--fg)_14%,transparent)] disabled:bg-transparent disabled:text-[var(--muted)] disabled:hover:border-[color-mix(in_srgb,var(--fg)_14%,transparent)]";
@@ -52,7 +53,7 @@ export default function OrderTicket() {
  *  Confirm = gửi các thay đổi đang chờ (như nút Confirm trên thẻ chart), Discard = trả về giá cũ, Delete = huỷ lệnh chờ (có hộp thoại xác nhận như dấu × trên thẻ). Lệnh đã khớp (vị thế) thì Delete thành Close, kèm thanh kéo đóng một phần
  *  như tab Positions; lệnh chờ đang xem mà khớp thì bảng chuyển sang vị thế vừa mở ra. */
 function ModifyPanel({ owner }: { owner: string }) {
-  const data = useTradeStore((s) => s.data);
+  const data = useLiveTrade(useTradeStore((s) => s.data));
   const byPane = useEditBridge((s) => s.byPane);
   const account = useTradeAccount();
   const busy = useOrderState((s) => s.busy);
@@ -406,6 +407,7 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
   const status = useAuthStore((s) => s.status);
   const loaded = useMt5Store((s) => s.loaded);
   const account = useTradeAccount();
+  const live = useLiveTrade(useTradeStore((s) => s.data));
   const busy = useOrderState((s) => s.busy);
   const spec = lotSpec(sym, account?.max_lot);
   const ccy = account?.currency ?? "";
@@ -441,7 +443,9 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
   const reward = tp > 0 && entry > 0 ? Math.abs(tp - entry) : 0;
   const risk = sl > 0 && entry > 0 ? Math.abs(entry - sl) : 0;
   const lossAmount = pnl && sl > 0 && entry > 0 && lot > 0 ? Math.abs(estimatePnl(d.side, lot, entry, sl, pnl)) : null;
-  const riskPct = lossAmount !== null && account?.equity && account.equity > 0 ? (lossAmount / account.equity) * 100 : null;
+  // Equity theo tick (trading/live.ts) khi dữ liệu lệnh là của account đang nhận lệnh; danh sách /accounts chỉ hỏi mỗi 10s
+  const equity = live?.account.id === account?.id ? live?.account.equity : account?.equity;
+  const riskPct = lossAmount !== null && equity && equity > 0 ? (lossAmount / equity) * 100 : null;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
