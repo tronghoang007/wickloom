@@ -1,7 +1,9 @@
 "use client";
 
 import { openCreateAlert } from "@/alerts/store";
-import { useDrawingStore } from "@/drawings/store";
+import { toggleFavorite, useDrawingStore } from "@/drawings/store";
+import { GROUPS, SPEC } from "@/drawings/tools";
+import { askConfirm } from "@/store/confirm";
 import { tfShort } from "@/lib/timeframes";
 import { toggleReplay, useReplayStore } from "@/replay/store";
 import { useChartStore } from "@/store/chart";
@@ -27,16 +29,24 @@ import {
   Close,
   DotsI,
   FullscreenI,
+  Eye,
   IndicatorsI,
+  Lock,
+  Magnet,
   MoonI,
+  PenI,
   Redo,
   Replay,
   SettingsI,
+  StarI,
+  Stay,
   SunI,
+  Trash,
   TradingI,
   Undo,
   WatchlistI,
 } from "../icons";
+import { ToolIcon } from "../toolIcons";
 import AccountMenu from "./AccountMenu";
 import AlertsPanel from "./AlertsPanel";
 import EconomicCalendarPanel from "./EconomicCalendarPanel";
@@ -194,6 +204,143 @@ function MoreMenu() {
   );
 }
 
+/** Nút vẽ trên thanh trên: mở màn Objects; đang cầm công cụ thì sáng lên, bấm nữa là bỏ công cụ. */
+function DrawButton() {
+  const tool = useDrawingStore((s) => s.tool);
+  const api = useDrawingStore((s) => s.api);
+  const open = useRailStore((s) => s.open === "objects");
+  return (
+    <button
+      type="button"
+      className={`${iconBtn} ${tool || open ? "bg-[var(--hover)] text-[var(--accent-text)]" : ""}`}
+      title="Objects"
+      aria-label="Objects"
+      aria-pressed={!!tool || open}
+      onClick={() => (tool ? api?.setTool(null) : useRailStore.getState().setOpen(open ? null : "objects"))}
+    >
+      <PenI />
+    </button>
+  );
+}
+
+// Công cụ chọn được trên phone: bỏ công cụ "sắp có" và Emoji (cần bảng chọn emoji riêng của thanh vẽ desktop)
+const phoneTool = (id: string) => !!SPEC[id] && !SPEC[id].disabled && id !== "emoji";
+const toolCell = "relative flex h-[68px] flex-col items-center justify-center gap-1 rounded-md px-1 text-center text-[11px] leading-tight";
+
+function ToolCell({ id, onPick }: { id: string; onPick: (id: string) => void }) {
+  const fav = useDrawingStore((s) => s.favorites.includes(id));
+  return (
+    <div className={`${toolCell} bg-[var(--hover)]`}>
+      <button type="button" className="absolute inset-0" aria-label={SPEC[id].label} onClick={() => onPick(id)} />
+      <ToolIcon id={id} />
+      <span className="line-clamp-2 text-[var(--muted)]">{SPEC[id].label}</span>
+      <button
+        type="button"
+        aria-label={fav ? `Bỏ ${SPEC[id].label} khỏi yêu thích` : `Thêm ${SPEC[id].label} vào yêu thích`}
+        aria-pressed={fav}
+        className={`absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center ${fav ? "text-[var(--fg)]" : "text-[var(--muted)] opacity-60"}`}
+        onClick={() => toggleFavorite(id)}
+      >
+        <StarI on={fav} size={14} />
+      </button>
+    </div>
+  );
+}
+
+/** Màn Objects (như MT5): các nút chung (nam châm, giữ chế độ vẽ, ẩn / hiện, khoá, xoá tất cả), hàng công cụ yêu thích, rồi mọi công cụ theo nhóm.
+ *  Chọn một công cụ thì về chart để chạm đặt điểm (thanh DrawingHint báo đang vẽ gì và có nút huỷ). */
+function ObjectsPanel() {
+  const { favorites, magnet, stay, hideAll, lockAll, api } = useDrawingStore();
+  const pick = (id: string) => {
+    api?.setTool(id as never);
+    useRailStore.getState().setOpen(null);
+  };
+  const flag = (k: "magnet" | "stay" | "hideAll" | "lockAll", on: boolean, label: string, icon: ReactNode) => (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={on}
+      className={`${iconBtn} ${on ? "bg-[var(--hover)] text-[var(--accent-text)]" : ""}`}
+      onClick={() => useDrawingStore.setState({ [k]: !on })}
+    >
+      {icon}
+    </button>
+  );
+  const favs = favorites.filter(phoneTool);
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-1 border-b border-[var(--border)] px-3 py-1.5">
+        <span className="mr-auto text-[18px] font-semibold">Objects</span>
+        {flag("magnet", magnet, "Magnet", <Magnet />)}
+        {flag("stay", stay, "Stay in drawing mode", <Stay />)}
+        {flag("hideAll", hideAll, "Hide all drawings", <Eye off={hideAll} />)}
+        {flag("lockAll", lockAll, "Lock all drawings", <Lock open={!lockAll} />)}
+        <button
+          type="button"
+          title="Remove drawings"
+          aria-label="Remove drawings"
+          className={iconBtn}
+          onClick={() =>
+            askConfirm({ title: "Xoá hình vẽ", message: "Xoá mọi hình vẽ trên chart này?", confirmLabel: "Xoá", danger: true, onConfirm: () => api?.clearAll() })
+          }
+        >
+          <Trash />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        <div className="pb-2 pt-3 text-[11px] font-semibold tracking-wide text-[var(--accent-text)]">FAVORITE OBJECTS</div>
+        {favs.length ? (
+          <div className="grid grid-cols-4 gap-2">
+            {favs.map((id) => (
+              <ToolCell key={id} id={id} onPick={pick} />
+            ))}
+          </div>
+        ) : (
+          <div className="text-[13px] text-[var(--muted)]">Chạm ngôi sao của một công cụ bên dưới để ghim vào đây.</div>
+        )}
+        {GROUPS.map((g) =>
+          g.sections.map((sec, i) => {
+            const ids = sec.ids.filter(phoneTool);
+            if (!ids.length) return null;
+            return (
+              <div key={`${g.id}:${i}`}>
+                <div className="pb-2 pt-4 text-[11px] font-semibold tracking-wide text-[var(--muted)]">{sec.title ?? g.label.toUpperCase()}</div>
+                <div className="grid grid-cols-4 gap-2">
+                  {ids.map((id) => (
+                    <ToolCell key={id} id={id} onPick={pick} />
+                  ))}
+                </div>
+              </div>
+            );
+          }),
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Đang cầm công cụ vẽ trên phone: thanh nhỏ ở đáy chart nói đang vẽ gì + nút huỷ (desktop huỷ bằng chuột phải / Esc, phone không có). */
+export function DrawingHint() {
+  const tool = useDrawingStore((s) => s.tool);
+  const api = useDrawingStore((s) => s.api);
+  const open = useRailStore((s) => s.open);
+  if (!tool || !SPEC[tool] || open) return null;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-[72px] z-[44] flex justify-center px-3">
+      <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel)] py-1 pl-3 pr-1 text-[13px] shadow-lg">
+        <ToolIcon id={tool} size={22} />
+        <span className="truncate">
+          {SPEC[tool].label} · <span className="text-[var(--muted)]">chạm lên chart để đặt điểm</span>
+        </span>
+        <button type="button" aria-label="Huỷ vẽ" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-[var(--hover)]" onClick={() => api?.setTool(null)}>
+          <Close size={20} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function MobileTopBar() {
   useSymbolsPolling();
   // z-50: popup của thanh này thả xuống đè lên panel phủ chart (z-[45]) bên dưới
@@ -205,6 +352,7 @@ export function MobileTopBar() {
       <SymbolSearch />
       <TimeframeBar className={btn} compact />
       <IndicatorsDialog className={iconBtn} icon={<IndicatorsI />} iconOnly />
+      <DrawButton />
       <div className="flex-1" />
       <PaneSwitcher />
       <MoreMenu />
@@ -399,6 +547,8 @@ export function MobilePanel() {
           <AlertsPanel />
         ) : open === "calendar" ? (
           <EconomicCalendarPanel />
+        ) : open === "objects" ? (
+          <ObjectsPanel />
         ) : (
           <TradingPanel fill />
         )}

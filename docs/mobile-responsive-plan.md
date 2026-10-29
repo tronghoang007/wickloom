@@ -1,6 +1,6 @@
 # Plan: Wickloom dùng được trên điện thoại (responsive)
 
-Ngày lập: 2026-10-29. Trạng thái: **M0–M4 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
+Ngày lập: 2026-10-29. Trạng thái: **M0–M5 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
 
 ## 1. Hiện trạng (đã đọc code)
 
@@ -137,7 +137,7 @@ Ngày lập: 2026-10-29. Trạng thái: **M0–M4 xong** (2026-10-29); user ch�
 | **M2** Chart cảm ứng ✅ | Crosshair nhấn giữ, menu `⋯` thay chuột phải, double-tap, nút luôn hiện khi touch, vùng bắt lớn, đo FPS | M1 |
 | **M3** Giao dịch ✅ | TradeWidget đáy, OrderTicket sheet, thẻ vị thế, kéo SL/TP bằng tay, xác nhận trên phone | M1, M2 |
 | **M4** Dialog & menu ✅ | Component `Sheet`, chuyển dialog lớn + menu thả xuống, input số | M1 |
-| **M5** Vẽ | Sheet công cụ + favorites, đặt điểm bằng chạm, thanh style gọn, text editor với bàn phím ảo | M2, M4 |
+| **M5** Vẽ ✅ | Sheet công cụ + favorites, đặt điểm bằng chạm, thanh style gọn, text editor với bàn phím ảo | M2, M4 |
 | **M6** Tablet & ngang | Overlay rail, toolbar co giãn, màn ngang toàn chart | M1 |
 | **M7** PWA *(tuỳ chọn)* | manifest, icon, `display: standalone` | M0 |
 
@@ -268,6 +268,21 @@ xác nhận, menu tài khoản / layout / múi giờ, menu chart) đã vừa mà
 - Ô nhập số đã có bàn phím số (`type="number"` / `inputMode="decimal"`); chữ 16px từ M3.
 - Desktop: Settings vẫn 640×640 với cột tab 192px, dropdown khung thời gian như cũ.
 - Chưa mở được trên phone khi test (cần đăng nhập): dialog tạo Alert — đọc code: chia cột `w-1/2` + `max-w-[96vw]`, nên vừa.
+
+### M5 đã làm (2026-10-29)
+
+Theo màn "Objects" của MT5 user gửi:
+- Thanh trên có nút bút vẽ → màn **Objects** (panel `objects` của rail store, phủ chart): nút nam châm, giữ chế độ vẽ, ẩn / hiện,
+  khoá, xoá tất cả (có hộp xác nhận vì phone không có ⌘Z tiện tay); hàng **FAVORITE OBJECTS** (đồng bộ favorites của thanh vẽ desktop),
+  rồi mọi công cụ theo nhóm dạng lưới 4 cột (icon + tên + sao yêu thích). Bỏ công cụ "sắp có" và Emoji (cần bảng emoji riêng).
+- Chọn công cụ → về chart, thanh nhắc nhỏ ở đáy chart "Trendline · chạm lên chart để đặt điểm [✕]" (phone không có chuột phải / Esc để huỷ);
+  nút bút sáng khi đang cầm công cụ, bấm nữa là bỏ.
+- Đặt điểm: chạm từng điểm, hoặc kéo ngón tay (Rectangle kéo một lần là xong) — chạy bằng chính DrawingManager (M2 đã nới vùng bắt,
+  ngưỡng kéo; M3 sửa pointercancel khi kéo).
+- Thanh chỉnh kiểu của hình đang chọn: ẩn nút Template (chưa dùng được) trên phone để vừa màn (nút ⋯ cuối từng bị cắt).
+- Đo headless: Trendline / Fib retracement / Long position / FRVP / Horizontal ray đặt được bằng chạm, thanh chỉnh kiểu nằm trong 0–390px;
+  kéo dời trendline bằng ngón tay được. Desktop không đổi.
+- Chưa thử: công cụ Text / Note với bàn phím ảo (headless không giả lập được bàn phím co màn hình) — cần máy thật.
 
 ## 11. Kiểm thử
 

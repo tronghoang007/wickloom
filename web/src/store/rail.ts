@@ -1,8 +1,8 @@
 import { create } from "zustand";
 
 // Panel đang mở ở thanh bên phải (watchlist / alert / lịch kinh tế / bảng đặt lệnh). Đặt ngoài RightRail để bảng đặt lệnh tự mở thanh khi bấm SELL / BUY.
-// "trading" (vị thế / lệnh chờ / lịch sử) chỉ có trên phone, nơi panel Trading dưới chart thành một tab ở đáy; RightRail không có tab này nên bỏ qua nó.
-export type RailPanel = "watchlist" | "alerts" | "calendar" | "order" | "trading";
+// "trading" (vị thế / lệnh chờ / lịch sử) và "objects" (chọn công cụ vẽ) chỉ có trên phone; RightRail không có tab của chúng nên bỏ qua.
+export type RailPanel = "watchlist" | "alerts" | "calendar" | "order" | "trading" | "objects";
 type State = {
   open: RailPanel | null;
   setOpen: (p: RailPanel | null) => void;
