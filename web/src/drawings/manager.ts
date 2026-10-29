@@ -19,6 +19,7 @@ import type {
 import { PriceScaleMode } from "lightweight-charts";
 import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } from "./coords";
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
+import { isTouch, TOUCH_SLOP } from "@/lib/layoutMode";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
@@ -48,9 +49,10 @@ type Mode =
   // pressed: đang giữ chuột vẽ tay. downAt: chỗ nhấn điểm đầu, nhả xa chỗ đó = đặt điểm 2 (nhấn-kéo-thả)
   | { k: "drafting"; d: Drawing; placed: number; pressed: boolean; downAt: Pt | null }
   // gen: DrawingDoc.gen lúc chụp `before`; bản server về giữa lúc kéo thì `before` thiếu hình server, không đưa vào undo
-  | { k: "dragPoint"; id: string; index: number; before: string; gen: number; moved: boolean }
+  // `slop`: chưa dời quá ngần này px thì chưa kéo (0 với chuột; ngón tay rung khi chạm chọn hình không được xê dịch hình)
+  | { k: "dragPoint"; id: string; index: number; before: string; gen: number; moved: boolean; down: Pt; slop: number }
   // a0: vị trí (tỉ lệ khung) của hình đang ghim; hint: nhấn trúng nhãn "+ Add text" (nhả không kéo = mở ô gõ chữ)
-  | { k: "dragBody"; id: string; start: Pt; orig: Anchor[]; before: string; gen: number; moved: boolean; a0?: Pt; hint?: boolean };
+  | { k: "dragBody"; id: string; start: Pt; orig: Anchor[]; before: string; gen: number; moved: boolean; slop: number; a0?: Pt; hint?: boolean };
 
 // Khung nhìn hiện tại; key đổi khi cuộn/zoom/đổi trục giá/có nến mới. `lastKey` = giá cao / thấp / đóng của nến cuối (đổi theo từng tick giá): chỉ hình có đọc `c.bars` mới phụ thuộc.
 type View = { w: number; h: number; bars: Bar[]; step: number; key: string; lastKey: string };
@@ -598,14 +600,15 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     return p.x >= 0 && p.x <= s.w && p.y >= 0 && p.y <= s.h;
   }
 
-  private hitAt(p: Pt): { d: Drawing; hit: Hit } | null {
+  /** `slop`: px nới vùng bắt (chạm bằng ngón tay: TOUCH_SLOP). */
+  private hitAt(p: Pt, slop = 0): { d: Drawing; hit: Hit } | null {
     const st = this.st;
     if (st.hideAll) return null;
     const v = this.view();
     const sel = this.selected();
     if (sel && this.shown(sel)) {
       const b = this.built(sel, v);
-      const i = b ? this.handlePts(sel, b.c).findIndex((q) => Math.hypot(q.x - p.x, q.y - p.y) <= HANDLE_R) : -1;
+      const i = b ? this.handlePts(sel, b.c).findIndex((q) => Math.hypot(q.x - p.x, q.y - p.y) <= HANDLE_R + slop) : -1;
       // handle riêng mà tool không định nghĩa cách kéo (hline, vline) = kéo cả hình
       const spec = SPEC[sel.type];
       if (i >= 0) return { d: sel, hit: spec.handles && !spec.moveHandle ? { kind: "body" } : { kind: "point", index: i } };
@@ -614,7 +617,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       const d = this.drawings[i];
       if (!this.shown(d)) continue;
       const b = this.built(d, v);
-      if (b && hitShapes(b.shapes, p)) return { d, hit: { kind: "body" } };
+      if (b && hitShapes(b.shapes, p, slop)) return { d, hit: { kind: "body" } };
     }
     return null;
   }
@@ -661,11 +664,12 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     if (!this.inPane(p)) return;
     const st = this.st;
     const tool = st.tool;
+    const slop = isTouch(e) ? TOUCH_SLOP : 0;
 
     if (tool === "eraser") {
       this.consume(e);
       this.lockChart();
-      const f = this.hitAt(p);
+      const f = this.hitAt(p, slop);
       if (f) {
         this.pushUndo();
         this.drawings = this.drawings.filter((x) => x !== f.d);
@@ -682,7 +686,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     }
 
     if (st.lockAll) return;
-    const found = this.hitAt(p);
+    const found = this.hitAt(p, slop);
     const wasSelected = found !== null && found.d.id === st.selectedId; // nhãn "+ Add text" chỉ bấm được khi hình đã chọn
     this.select(found?.d.id ?? null);
     if (found && !found.d.locked) {
@@ -692,8 +696,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
       const before = this.snapshot(), gen = this.doc.gen;
       const pin = this.pinned(d);
       this.mode = hit.kind === "point" && !pin
-        ? { k: "dragPoint", id: d.id, index: hit.index, before, gen, moved: false }
-        : { k: "dragBody", id: d.id, start: p, orig: d.points.map((q) => ({ ...q })), before, gen, moved: false, a0: pin ?? undefined, hint: wasSelected && this.onHint(d, p) };
+        ? { k: "dragPoint", id: d.id, index: hit.index, before, gen, moved: false, down: p, slop }
+        : { k: "dragBody", id: d.id, start: p, orig: d.points.map((q) => ({ ...q })), before, gen, moved: false, slop, a0: pin ?? undefined, hint: wasSelected && this.onHint(d, p) };
     }
   };
 
@@ -818,6 +822,8 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     }
     if (m.k === "dragPoint" || m.k === "dragBody") {
       this.consume(e);
+      const from = m.k === "dragPoint" ? m.down : m.start;
+      if (!m.moved && Math.hypot(p.x - from.x, p.y - from.y) < m.slop) return;
       const d = this.drawings.find((x) => x.id === m.id);
       if (!d) return;
       if (m.k === "dragPoint") {
@@ -1194,7 +1200,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
 
   // Chuột phải: hình dưới con trỏ được chọn luôn (như TV) để menu và thanh nổi cùng nói về nó
   pickAt(e: MouseEvent): Drawing | null {
-    const found = this.hitAt(this.rel(e));
+    const found = this.hitAt(this.rel(e), isTouch(e) ? TOUCH_SLOP : 0); // nhấn giữ trên Android cũng ra contextmenu (pointerType "touch")
     if (found) this.select(found.d.id);
     return found?.d ?? null;
   }

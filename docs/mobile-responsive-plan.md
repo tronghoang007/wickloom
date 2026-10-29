@@ -1,6 +1,6 @@
 # Plan: Wickloom dùng được trên điện thoại (responsive)
 
-Ngày lập: 2026-10-29. Trạng thái: **M0 + M1 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
+Ngày lập: 2026-10-29. Trạng thái: **M0 + M1 + M2 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
 
 ## 1. Hiện trạng (đã đọc code)
 
@@ -134,7 +134,7 @@ Ngày lập: 2026-10-29. Trạng thái: **M0 + M1 xong** (2026-10-29); user ch�
 |---|---|---|
 | **M0** Nền ✅ | `useLayoutMode` + cờ `touch`, `viewport` export (đọc `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/generate-viewport.md` trước), `h-dvh`, safe-area, công thức test headless theo kích thước máy | — |
 | **M1** Khung phone ✅ | Thanh trên gọn + menu `⋯`, tab bar đáy, panel thành sheet, 1 chart (`maximized`) + unmount ô ẩn | M0 |
-| **M2** Chart cảm ứng | Crosshair nhấn giữ, menu `⋯` thay chuột phải, double-tap, nút luôn hiện khi touch, vùng bắt lớn, đo FPS | M1 |
+| **M2** Chart cảm ứng ✅ | Crosshair nhấn giữ, menu `⋯` thay chuột phải, double-tap, nút luôn hiện khi touch, vùng bắt lớn, đo FPS | M1 |
 | **M3** Giao dịch | TradeWidget đáy, OrderTicket sheet, thẻ vị thế, kéo SL/TP bằng tay, xác nhận trên phone | M1, M2 |
 | **M4** Dialog & menu | Component `Sheet`, chuyển dialog lớn + menu thả xuống, input số | M1 |
 | **M5** Vẽ | Sheet công cụ + favorites, đặt điểm bằng chạm, thanh style gọn, text editor với bàn phím ảo | M2, M4 |
@@ -179,6 +179,35 @@ Thứ tự đề xuất: M0 → M1 → M2 → M3 (đến đây là dùng đượ
 - M2: chọn nến Replay bằng cảm ứng phải **chạm 2 lần** (lần 1 chỉ đặt vị trí hover, lần 2 mới chọn).
 - M3: bảng Positions trên phone cuộn ngang, cột nút Close nằm ngoài màn → cần thẻ lệnh như plan.
 - M4: dialog khác (Settings, Indicator settings, Drawing settings, Alert) chưa sửa.
+
+### M2 đã làm (2026-10-29)
+
+Đo trước khi sửa (headless, sự kiện touch thật qua CDP): kéo ngang, pinch zoom, nhấn giữ = crosshair (legend chạy theo, nhấc
+tay vẫn giữ tới lần chạm sau), kéo dọc = kéo giá đều đã chạy nhờ lightweight-charts. Lỗi tìm thấy và đã sửa:
+
+- **Pinch tắt `auto`**: phần kéo giá của app (`Chart.tsx` onPriceDrag*) bắt ngón đầu của pinch. Giờ đếm ngón đang chạm, từ 2
+  ngón thì bỏ; ngón tay chỉ thành kéo giá khi dọc rõ ràng (> 3 + TOUCH_SLOP px và dọc nhiều hơn ngang).
+- **Chạm đúp trục giá**: lightweight-charts có bật lại tự co giãn nhưng nút `auto` không biết (không có `dblclick`) → đọc lại sau `touchend`.
+- **Nút chỉ hiện khi hover** (Tailwind 4 chỉ áp `hover:` khi thiết bị có hover nên trên phone không bao giờ hiện): chạm
+  vào dòng legend (indicator / Vol) bật tắt cụm nút (`useTapReveal`, nút to hơn khi `pointer-coarse`); nút của pane
+  indicator giữ lại sau khi nhấc tay; sao yêu thích của khung thời gian và nút Maximize ô chart luôn hiện khi `pointer-coarse`.
+- **Menu chuột phải**: nhấn giữ bằng ngón tay (Android ra `contextmenu`, iOS không) không mở menu chart, không huỷ tool đang
+  vẽ, chỉ mở menu của hình dưới ngón tay. Menu chart mở bằng nút `⋯` dưới legend (chỉ khi `pointer-coarse`), giá lấy theo
+  crosshair: nhấn giữ lên chart để đặt giá rồi bấm `⋯` → "Add alert / Buy / Sell / Add order at <giá>". Chạm thường không giữ
+  crosshair nên menu không có giá.
+- **Vùng bắt**: `TOUCH_SLOP = 10` (`lib/layoutMode.ts`) theo `pointerType` từng cú nhấn (iPad có chuột vẫn như desktop):
+  hình vẽ 6 → 16px, tay nắm 8 → 18px, đường lệnh 6 → 16px; ngưỡng "bấm hay kéo" của đường lệnh 4 → 14px; kéo hình vẽ bằng
+  tay chỉ bắt đầu sau 10px (trước đây chạm chọn hình cũng xê dịch theo tay rung). Chuột giữ nguyên số cũ.
+- **Replay**: chọn nến theo đúng chỗ bấm → một chạm là chọn (trước phải chạm 2 lần).
+- Hiệu năng: rAF ~58 fps khi kéo chart với CPU chậm 4 lần (headless, chỉ là tín hiệu thô; cần thử máy thật).
+- Test: vitest +7 (hitShapes / hitLine / LineDrag / DrawingManager với ngón tay); headless phone: 10/10 kiểm tra cử chỉ qua;
+  desktop: không có nút `⋯` dưới legend, nút legend chỉ hiện khi hover, chuột phải vẫn ra menu chart như cũ.
+
+**Chưa thử được / để sau**:
+- `contextmenu` khi nhấn giữ trên Android thật và mọi thứ trên iOS Safari: headless không phát sinh được → cần máy thật.
+- Kéo hình vẽ / đường SL-TP bằng tay mới thử ở unit test, chưa thử trên UI (phone chưa có thanh vẽ — M5; kéo SL/TP — M3).
+- Tay nắm của hình vẽ mới to vùng bắt, chưa vẽ to hơn.
+- M3: menu `⋯` có mục Buy / Sell limit-stop theo giá crosshair — xem cùng quyết định “phone luôn hỏi xác nhận”.
 
 ## 11. Kiểm thử
 

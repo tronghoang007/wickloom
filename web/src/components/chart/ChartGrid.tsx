@@ -84,7 +84,7 @@ function PaneFrame({
             title={maximized ? "Restore chart" : "Maximize chart"}
             aria-label={maximized ? "Restore chart" : "Maximize chart"}
             onClick={() => useLayoutStore.getState().setMaximized(maximized ? null : id)}
-            className={`absolute right-[78px] top-1 z-30 flex h-6 w-6 items-center justify-center rounded border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--hover)] ${maximized ? "text-[var(--accent-text)]" : "opacity-0 group-hover:opacity-100"}`}
+            className={`absolute right-[78px] top-1 z-30 flex h-6 w-6 items-center justify-center rounded border border-[var(--border)] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--hover)] ${maximized ? "text-[var(--accent-text)]" : "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100"}`}
           >
             <span className="scale-[0.6]">
               <FullscreenI />

@@ -63,16 +63,20 @@ function harness() {
     getTickSize: () => 0.01,
   });
   m.attachTo(series as never);
-  const ev = (x: number, y: number, type = "pointerdown") =>
-    ({ button: 0, clientX: x, clientY: y, type, shiftKey: false, ctrlKey: false, metaKey: false, preventDefault() {}, stopPropagation() {} }) as never;
+  const ev = (x: number, y: number, type = "pointerdown", pointerType = "mouse") =>
+    ({ button: 0, clientX: x, clientY: y, type, pointerType, shiftKey: false, ctrlKey: false, metaKey: false, preventDefault() {}, stopPropagation() {} }) as never;
   const down = (x: number, y: number) => on.pointerdown(ev(x, y));
   const move = (x: number, y: number) => on.pointermove(ev(x, y, "pointermove"));
   const up = (x: number, y: number) => win.pointerup(ev(x, y, "pointerup"));
+  // ngón tay (pointerType "touch")
+  const tdown = (x: number, y: number) => on.pointerdown(ev(x, y, "pointerdown", "touch"));
+  const tmove = (x: number, y: number) => on.pointermove(ev(x, y, "pointermove", "touch"));
+  const tup = (x: number, y: number) => win.pointerup(ev(x, y, "pointerup", "touch"));
   const key = (k: string, mod = false) =>
     win.keydown({ key: k, metaKey: mod, ctrlKey: false, shiftKey: false, target: { tagName: "DIV" }, preventDefault() {} } as never);
   const drawings = () => pane.draw.getState().drawings as Drawing[];
   const doc = () => (m as unknown as { doc: { gen: number; committed(): Drawing[]; undoStack: string[]; loaded(items: unknown[]): void } }).doc;
-  return { m, env, pane, down, move, up, key, drawings, doc, redraw };
+  return { m, env, pane, down, move, up, tdown, tmove, tup, key, drawings, doc, redraw };
 }
 
 beforeEach(() => {
@@ -114,6 +118,37 @@ describe("toạ độ chuột theo vùng vẽ (lỗi: trục giá trái)", () =>
     h.m.select(null);
     h.down(50 + 150, 400 - 125); // giữa đoạn thẳng
     expect(h.pane.draw.getState().selectedId).toBe(d.id);
+  });
+});
+
+describe("chạm bằng ngón tay", () => {
+  it("chạm lệch 12px khỏi đường vẫn chọn được hình (chuột thì không)", async () => {
+    const h = harness();
+    await ready(h);
+    trend(h, [10, 100], [20, 100]); // đường ngang y = 300
+    const d = h.drawings()[0];
+    h.m.select(null);
+    h.down(150, 312);
+    h.up(150, 312);
+    expect(h.pane.draw.getState().selectedId).toBeNull();
+    h.tdown(150, 312);
+    h.tup(150, 312);
+    expect(h.pane.draw.getState().selectedId).toBe(d.id);
+  });
+
+  it("tay rung khi chạm chọn hình không xê dịch hình; kéo thật thì dời", async () => {
+    const h = harness();
+    await ready(h);
+    trend(h, [10, 100], [20, 100]);
+    const before = h.drawings()[0].points.map((p) => p.price);
+    h.tdown(150, 300);
+    h.tmove(153, 304);
+    h.tup(153, 304);
+    expect(h.drawings()[0].points.map((p) => p.price)).toEqual(before);
+    h.tdown(150, 300);
+    h.tmove(150, 330);
+    h.tup(150, 330);
+    expect(h.drawings()[0].points.map((p) => p.price)).toEqual([70, 70]);
   });
 });
 

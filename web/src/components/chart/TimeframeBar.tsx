@@ -95,7 +95,7 @@ export default function TimeframeBar({ className, compact = false }: { className
                                 e.stopPropagation();
                                 toggleFav(t);
                               }}
-                              className={`mr-px flex h-[18px] w-[18px] shrink-0 items-center justify-center ${fav ? "text-[var(--solid,#f2f2f2)]" : "text-[var(--muted)] opacity-0 group-hover:opacity-100"}`}
+                              className={`mr-px flex h-[18px] w-[18px] shrink-0 items-center justify-center ${fav ? "text-[var(--solid,#f2f2f2)]" : "text-[var(--muted)] opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100"}`}
                             >
                               <StarI on={fav} size={20} />
                             </button>

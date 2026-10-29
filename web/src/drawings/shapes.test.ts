@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { drawShapes, hitShapes, textBox, type Shape } from "./shapes";
+import { TOUCH_SLOP } from "@/lib/layoutMode";
 
 describe("hitShapes với text (lỗi #7)", () => {
   const label: Extract<Shape, { k: "text" }> = { k: "text", at: { x: 100, y: 50 }, text: "Target: 12.5\nR:R 2", align: "center", bg: "#000", size: 12 };
@@ -77,5 +78,23 @@ describe("drawShapes bắt nét vào lưới pixel thiết bị", () => {
     const r = [{ x: 1.4, y: 2.6 }, { x: 8.6, y: 2.6 }, { x: 8.6, y: 7.2 }, { x: 1.4, y: 7.2 }];
     drawShapes(ctx, [{ k: "poly", pts: r, closed: true, fill: 0.2, noStroke: true }], d, 1);
     expect(pts).toEqual([[1, 3], [9, 3], [9, 7], [1, 7]]);
+  });
+});
+
+describe("hitShapes: nới vùng bắt khi chạm bằng ngón tay", () => {
+  const line: Shape = { k: "line", a: { x: 0, y: 100 }, b: { x: 200, y: 100 } };
+
+  it("chuột giữ dung sai 6px như cũ, ngón tay (TOUCH_SLOP) bắt được xa hơn", () => {
+    expect(hitShapes([line], { x: 100, y: 106 })).toBe(true);
+    expect(hitShapes([line], { x: 100, y: 112 })).toBe(false);
+    expect(hitShapes([line], { x: 100, y: 112 }, TOUCH_SLOP)).toBe(true);
+    expect(hitShapes([line], { x: 100, y: 117 }, TOUCH_SLOP)).toBe(false);
+  });
+
+  it("nới cả hộp chữ", () => {
+    const label: Shape = { k: "text", at: { x: 100, y: 50 }, text: "TP", align: "center", size: 12 };
+    const b = textBox(label);
+    expect(hitShapes([label], { x: b.x + b.w + 8, y: 50 })).toBe(false);
+    expect(hitShapes([label], { x: b.x + b.w + 8, y: 50 }, TOUCH_SLOP)).toBe(true);
   });
 });

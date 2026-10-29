@@ -9,7 +9,7 @@ import { AlertI, SettingsI, Trash } from "../icons";
 import type { MenuItem } from "./ChartContextMenu";
 import { VISIBILITY } from "./drawingMenu";
 import { splitColor } from "./ColorPicker";
-import { DotsIc, EyeIc, GearIc, IconBtn, TrashIc } from "./legendButtons";
+import { DotsIc, EyeIc, GearIc, IconBtn, TrashIc, useTapReveal } from "./legendButtons";
 
 const TITLE = "Vol · Ticks"; // MT5 chỉ có tick volume
 
@@ -73,6 +73,7 @@ export default function VolumeLegend({
   const vs = useVolumeStore((st) => st.s);
   const set = useVolumeStore((st) => st.set);
   const cs = useSettingsStore((st) => st.s);
+  const tap = useTapReveal();
   if (vs.removed) return null;
 
   const digits = volDigits(vs);
@@ -84,7 +85,7 @@ export default function VolumeLegend({
   const showValues = vs.statusValues && !vs.hidden && bar;
 
   return (
-    <div className={`group/vol pointer-events-auto -ml-1 flex w-fit items-center gap-x-1.5 rounded border border-transparent bg-[var(--legend-bg)] pl-1 pr-1 hover:border-[var(--border)] ${vs.hidden ? "opacity-70" : ""}`}>
+    <div onPointerUp={tap.onPointerUp} className={`group/vol pointer-events-auto -ml-1 flex w-fit items-center gap-x-1.5 rounded border border-transparent bg-[var(--legend-bg)] pl-1 pr-1 hover:border-[var(--border)] ${vs.hidden ? "opacity-70" : ""}`}>
       {showTitle && <span className="text-[var(--fg)]">{TITLE}</span>}
       {showInputs && <span className="text-[var(--muted)]">{vs.maLength}</span>}
       {showValues && (
@@ -93,7 +94,7 @@ export default function VolumeLegend({
           {ma !== null && <span style={{ color: vs.maColor }}>{fmtVol(ma, digits)}</span>}
         </>
       )}
-      <span className="hidden items-center group-hover/vol:flex">
+      <span className={`${tap.open ? "flex" : "hidden"} items-center group-hover/vol:flex`}>
         <IconBtn title={vs.hidden ? "Show" : "Hide"} onClick={() => set({ hidden: !vs.hidden })}>
           <EyeIc off={vs.hidden} />
         </IconBtn>

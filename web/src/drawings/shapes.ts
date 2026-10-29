@@ -207,16 +207,18 @@ function inPoly(p: Pt, pts: Pt[]) {
   return inside;
 }
 
-export function hitShapes(shapes: Shape[], p: Pt): boolean {
+/** `slop`: px nới thêm vào dung sai (chạm bằng ngón tay, xem TOUCH_SLOP). */
+export function hitShapes(shapes: Shape[], p: Pt, slop = 0): boolean {
+  const hit = HIT + slop, pad = TEXT_PAD + slop;
   for (const s of shapes) {
     if (s.k === "line") {
       const [a, b] = lineEnds(s);
-      if (segDist(p, a, b) <= HIT) return true;
+      if (segDist(p, a, b) <= hit) return true;
     } else if (s.k === "poly") {
       const n = s.pts.length;
       if (!s.noStroke) {
-        for (let i = 0; i < n - 1; i++) if (segDist(p, s.pts[i], s.pts[i + 1]) <= HIT) return true;
-        if (s.closed && n > 2 && segDist(p, s.pts[n - 1], s.pts[0]) <= HIT) return true;
+        for (let i = 0; i < n - 1; i++) if (segDist(p, s.pts[i], s.pts[i + 1]) <= hit) return true;
+        if (s.closed && n > 2 && segDist(p, s.pts[n - 1], s.pts[0]) <= hit) return true;
       }
       if (s.fill && s.closed && inPoly(p, s.pts)) return true;
     } else if (s.k === "text") {
@@ -227,7 +229,7 @@ export function hitShapes(shapes: Shape[], p: Pt): boolean {
         q = { x: dx * c - dy * sn, y: dx * sn + dy * c };
       }
       const b = textBox(s.angle ? { ...s, at: { x: 0, y: 0 } } : s);
-      if (q.x >= b.x - TEXT_PAD && q.x <= b.x + b.w + TEXT_PAD && q.y >= b.y - TEXT_PAD && q.y <= b.y + b.h + TEXT_PAD) return true;
+      if (q.x >= b.x - pad && q.x <= b.x + b.w + pad && q.y >= b.y - pad && q.y <= b.y + b.h + pad) return true;
     }
   }
   return false;

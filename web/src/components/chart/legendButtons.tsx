@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 // Icon của nút hover trên hàng legend: lưới 18 hiện đúng 18px như TV, nét 1.2 và bo tròn
 // (icon lưới 28px thu nhỏ bị mờ và thô)
@@ -35,13 +35,24 @@ export const DotsIc = () => (
   </svg>
 );
 
+/** Màn cảm ứng không có hover (Tailwind 4 chỉ áp `hover:` khi thiết bị có hover): chạm vào hàng legend thì bật / tắt cụm nút.
+ *  Chạm trúng chính một nút thì không tính, để nút đó nhận được cú bấm trước khi cụm nút ẩn đi. */
+export function useTapReveal() {
+  const [open, setOpen] = useState(false);
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType !== "touch" || (e.target as Element).closest("button")) return;
+    setOpen((v) => !v);
+  };
+  return { open, onPointerUp };
+}
+
 export function IconBtn({ title, onClick, children }: { title: string; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void; children: ReactNode }) {
   return (
     <button
       type="button"
       title={title}
       onClick={onClick}
-      className="flex h-5 w-7 items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)]"
+      className="flex h-5 w-7 items-center justify-center rounded text-[var(--fg)] hover:bg-[var(--hover)] pointer-coarse:h-7 pointer-coarse:w-9"
     >
       {children}
     </button>

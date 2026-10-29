@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { hitLine, LineDrag, type DragTarget } from "./lineDrag";
+import { TOUCH_SLOP } from "@/lib/layoutMode";
 
 describe("hitLine", () => {
   const lines = [{ id: "o:1", y: 100 }, { id: "d:sl", y: 140 }];
@@ -138,5 +139,32 @@ describe("đường chỉ-bấm (fixed)", () => {
     handlers.pointerdown(ev(207) as never);
     winHandlers.pointerup(ev(207) as never);
     expect(onAbort).toHaveBeenCalledWith("p:2", 208, true);
+  });
+
+  const touchEv = (y: number, x = 100) => ({ ...ev(y, canvas, x), pointerType: "touch" });
+
+  it("ngón tay: chạm lệch 12px vẫn trúng đường (chuột thì không)", () => {
+    handlers.pointerdown(ev(212) as never);
+    winHandlers.pointerup(ev(212) as never);
+    expect(onAbort).not.toHaveBeenCalled();
+    handlers.pointerdown(touchEv(212) as never);
+    winHandlers.pointerup(touchEv(212) as never);
+    expect(onAbort).toHaveBeenCalledWith("p:1", 200, true);
+  });
+
+  it("ngón tay rung 8px khi chạm đường kéo được: vẫn là bấm, không dời giá", () => {
+    handlers.pointerdown(touchEv(301) as never);
+    handlers.pointermove(touchEv(309) as never);
+    expect(onMove).not.toHaveBeenCalled();
+    handlers.pointermove(touchEv(330) as never); // kéo thật
+    expect(onMove).toHaveBeenCalledWith("o:2", 330);
+  });
+});
+
+describe("hitLine: dung sai theo loại con trỏ", () => {
+  it("ngón tay (6 + TOUCH_SLOP) bắt được đường mà chuột (6) bỏ qua", () => {
+    const lines = [{ id: "sl", y: 200 }];
+    expect(hitLine(212, lines)).toBeNull();
+    expect(hitLine(212, lines, 6 + TOUCH_SLOP)).toBe("sl");
   });
 });

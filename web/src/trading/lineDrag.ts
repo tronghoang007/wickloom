@@ -1,5 +1,6 @@
 import type { IChartApi, ISeriesApi, SeriesType } from "lightweight-charts";
 import { snapPrice } from "./orderType";
+import { isTouch, TOUCH_SLOP } from "@/lib/layoutMode";
 
 // Kéo các đường giao dịch trên chart để đổi giá (docs/trade-plan.md T3-T4): đường lệnh chờ, entry/SL/TP của bảng đặt lệnh. Đường là price line của lightweight-charts nên không
 // tự kéo được: lớp này nghe chuột ở phần tử bao quanh chart (pha capture, chạy TRƯỚC DrawingManager), nhận ra chuột đang ở gần đường nào, theo dõi giá dưới con trỏ và báo
@@ -32,14 +33,15 @@ export type LineDragHost = {
   onAbort: (id: string, from: number, click: boolean) => void; // huỷ (Esc / mất con trỏ), kéo rồi thả lại đúng giá cũ, hoặc bấm không kéo (`click` = true: chỉ trường hợp này mới là "chọn")
 };
 
-const TOL = 6;
+const TOL = 6; // chạm bằng ngón tay: + TOUCH_SLOP
 /** Chấm tròn kéo được nằm trên đường giá, cách mép phải vùng vẽ bấy nhiêu px (TradeOverlay vẽ chấm ở đó). */
 export const HANDLE_INSET = 34;
 const CLICK_SLOP = 4; // px: bấm tay thường rung 1-3px, mà 1px trên chart có thể là cả chục tick, nên chưa dời quá ngần này thì vẫn là "bấm", không phải kéo. Chỉ tính chiều dọc: đường chỉ kéo lên xuống, tay rung ngang bao nhiêu cũng không đổi giá nên không biến cú bấm thành cú kéo (thẻ lệnh chờ bấm lệch ngang vài px thì chỉ focus mà không mở bảng)
 
 export class LineDrag {
-  private drag: { id: string; from: number; price: number; y: number; moved: boolean; arm?: () => boolean } | null = null;
-  private tap: { id: string; price: number; x: number; y: number } | null = null; // nhấn xuống một đường `fixed`, chưa thả
+  /** `slop`: ngưỡng "bấm hay kéo" của cú nhấn này (ngón tay rung nhiều hơn chuột: + TOUCH_SLOP). */
+  private drag: { id: string; from: number; price: number; y: number; moved: boolean; slop: number; arm?: () => boolean } | null = null;
+  private tap: { id: string; price: number; x: number; y: number; slop: number } | null = null; // nhấn xuống một đường `fixed`, chưa thả
   private tapped = false; // vừa bấm xong một đường `fixed`: cú click của chart ngay sau đó không phải "bấm nền"
   private lock: { handleScroll: unknown; handleScale: unknown } | null = null;
   private hovering = false;
@@ -105,7 +107,7 @@ export class LineDrag {
       const ly = series.priceToCoordinate(t.price);
       return ly === null ? [] : [{ id: t.id, y: ly as number }];
     });
-    const id = hitLine(y, lines, TOL);
+    const id = hitLine(y, lines, TOL + (isTouch(e) ? TOUCH_SLOP : 0));
     return id === null ? null : (targets.find((t) => t.id === id) ?? null);
   }
 
@@ -140,7 +142,7 @@ export class LineDrag {
       /* pointer đã biến mất */
     }
     this.lockChart();
-    this.drag = { id, from, price, y: e.clientY, moved, arm };
+    this.drag = { id, from, price, y: e.clientY, moved, slop: CLICK_SLOP + (isTouch(e) ? TOUCH_SLOP : 0), arm };
     this.h.container.style.cursor = "ns-resize";
   }
 
@@ -151,7 +153,7 @@ export class LineDrag {
     const t = this.pick(e);
     if (!t) return;
     // đường chỉ-bấm: không chặn sự kiện, chart vẫn nhận cú nhấn nên kéo ra khỏi chỗ bấm là kéo chart như bình thường
-    if (t.fixed) this.tap = { id: t.id, price: t.price, x: e.clientX, y: e.clientY };
+    if (t.fixed) this.tap = { id: t.id, price: t.price, x: e.clientX, y: e.clientY, slop: CLICK_SLOP + (isTouch(e) ? TOUCH_SLOP : 0) };
     else this.start(e, t.id, t.price, t.price);
   };
 
@@ -172,7 +174,7 @@ export class LineDrag {
   private onMoveEv = (e: PointerEvent) => {
     if (this.drag) {
       this.consume(e);
-      if (!this.drag.moved && Math.abs(e.clientY - this.drag.y) < CLICK_SLOP) return;
+      if (!this.drag.moved && Math.abs(e.clientY - this.drag.y) < this.drag.slop) return;
       if (!this.drag.moved && this.drag.arm && !this.drag.arm()) {
         this.finish();
         return;
@@ -210,7 +212,7 @@ export class LineDrag {
     const tap = this.tap;
     this.tap = null;
     if (tap && !this.drag) {
-      if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < CLICK_SLOP) {
+      if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < tap.slop) {
         this.tapped = true;
         this.h.onAbort(tap.id, tap.price, true);
       }

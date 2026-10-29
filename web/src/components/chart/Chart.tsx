@@ -1,7 +1,7 @@
 "use client";
 
 import { DrawingManager } from "@/drawings/manager";
-import { AlertI, Chevron, ResetViewI, SettingsI, SkipToLatest } from "../icons";
+import { AlertI, Chevron, DotsI, ResetViewI, SettingsI, SkipToLatest } from "../icons";
 import { useDrawingStore } from "@/drawings/store";
 import { overridePoint } from "@/indicators/candleColors";
 import { IndicatorManager } from "@/indicators/manager";
@@ -30,6 +30,7 @@ import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView"
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
+import { isTouch, TOUCH_SLOP, useTouch } from "@/lib/layoutMode";
 import { fmtVol, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
 import {
   AreaSeries,
@@ -285,6 +286,9 @@ export default function Chart({ paneId }: { paneId: string }) {
   const digits = cs.precision ?? symDigits;
   const boxRef = useRef<HTMLDivElement>(null);
   const hoverRef = useRef(false); // chuột đang ở trong chart này (nguồn của "Sync crosshair")
+  const lastPointerRef = useRef("mouse"); // loại con trỏ của cú nhấn gần nhất: nhấn giữ bằng ngón tay (Android ra contextmenu) không mở menu chart
+  const crossPriceRef = useRef<number | null>(null); // giá ở crosshair trên pane chính (null = crosshair ẩn): menu ⋯ của màn cảm ứng dùng thay giá dưới chuột phải
+  const touch = useTouch();
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
   const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -689,21 +693,20 @@ export default function Chart({ paneId }: { paneId: string }) {
     if (view) chartRef.current?.timeScale().setVisibleLogicalRange(view);
   };
 
-  const onSelectMove = (e: RMouseEvent<HTMLDivElement>) => {
+  const selectAt = (e: RMouseEvent<HTMLDivElement>) => {
     const ts = chartRef.current?.timeScale();
     const bars = barsRef.current;
-    if (!ts || bars.length === 0) return;
+    if (!ts || bars.length === 0) return null;
     const r = e.currentTarget.getBoundingClientRect();
     const l = ts.coordinateToLogical(e.clientX - r.left);
-    if (l === null) return;
+    if (l === null) return null;
     const idx = Math.max(0, Math.min(bars.length - 1, Math.round(l)));
     const x = ts.logicalToCoordinate(idx as never) ?? e.clientX - r.left;
-    setHover({
-      x,
-      y: e.clientY - r.top,
-      idx,
-      label: `Re: ${crosshairLabel(bars[idx].t)}`,
-    });
+    return { x, y: e.clientY - r.top, idx, label: `Re: ${crosshairLabel(bars[idx].t)}` };
+  };
+  const onSelectMove = (e: RMouseEvent<HTMLDivElement>) => {
+    const h = selectAt(e);
+    if (h) setHover(h);
   };
 
   // chart instance
@@ -834,8 +837,9 @@ export default function Chart({ paneId }: { paneId: string }) {
     // Kéo chart lên / xuống như TV: lightweight-charts chỉ dịch giá khi thang giá KHÔNG tự co giãn (sau F5 nó đang tự co giãn nên kéo dọc không làm gì).
     // Lần kéo dọc đầu tiên (>= VERT_DRAG_PX) tắt tự co giãn của pane đó rồi dịch khoảng giá theo chuột; kéo ngang thì thang giá vẫn tự co giãn.
     // Bật lại bằng nút "auto" (hoặc double-click trục giá, lightweight-charts có sẵn). Chế độ log / % do lightweight-charts tự xử lý (không dịch tay được).
-    type PriceDrag = { pi: number; y0: number; range: { from: number; to: number } | null; engaged: boolean };
+    type PriceDrag = { pi: number; x0: number; y0: number; range: { from: number; to: number } | null; engaged: boolean; touch: boolean };
     let priceDrag: PriceDrag | null = null;
+    const touchIds = new Set<number>(); // ngón tay đang chạm: từ 2 ngón (pinch zoom của lightweight-charts) thì không phải kéo giá
     const syncAuto = () => setAutoOn(chart.priceScale("right", mainIndex()).options().autoScale);
     const scrollOn = () => {
       const hs = chart.options().handleScroll;
@@ -843,6 +847,11 @@ export default function Chart({ paneId }: { paneId: string }) {
     };
     const onPriceDragDown = (e: PointerEvent) => {
       priceDrag = null;
+      if (isTouch(e)) {
+        if (e.isPrimary) touchIds.clear(); // ngón đầu của lần chạm mới: bỏ id cũ lỡ mất pointerup
+        touchIds.add(e.pointerId);
+        if (touchIds.size > 1) return;
+      }
       if (e.button !== 0 || !(e.target instanceof HTMLCanvasElement)) return;
       const r = box.getBoundingClientRect();
       const x = e.clientX - r.left;
@@ -852,18 +861,20 @@ export default function Chart({ paneId }: { paneId: string }) {
       if (pi < 0) return;
       const scale = chart.priceScale("right", pi);
       if (!scale.options().autoScale || scale.options().mode !== PriceScaleMode.Normal) return; // đã tắt tự co giãn thì lightweight-charts tự dịch
-      priceDrag = { pi, y0: e.clientY, range: null, engaged: false };
+      priceDrag = { pi, x0: e.clientX, y0: e.clientY, range: null, engaged: false, touch: isTouch(e) };
     };
     const onPriceDragMove = (e: PointerEvent) => {
       const d = priceDrag;
       if (!d) return;
-      if (!(e.buttons & 1) || !scrollOn()) {
+      if (!(e.buttons & 1) || !scrollOn() || touchIds.size > 1) {
         priceDrag = null;
         return;
       }
       const scale = chart.priceScale("right", d.pi);
       if (!d.engaged) {
-        if (Math.abs(e.clientY - d.y0) < VERT_DRAG_PX) return;
+        const dy = Math.abs(e.clientY - d.y0);
+        // ngón tay lướt ngang thường chéo vài px: chỉ coi là kéo giá khi dọc rõ ràng
+        if (d.touch ? dy < VERT_DRAG_PX + TOUCH_SLOP || dy < Math.abs(e.clientX - d.x0) : dy < VERT_DRAG_PX) return;
         d.range = scale.getVisibleRange();
         if (!d.range) {
           priceDrag = null;
@@ -875,16 +886,20 @@ export default function Chart({ paneId }: { paneId: string }) {
       }
       if (d.range) scale.setVisibleRange(panPriceRange(d.range, e.clientY - d.y0, chart.paneSize(d.pi).height));
     };
-    const onPriceDragEnd = () => {
+    const onPriceDragEnd = (e: PointerEvent) => {
+      touchIds.delete(e.pointerId);
       priceDrag = null;
       syncAuto();
     };
+    // chạm đúp trục giá: lightweight-charts bật lại tự co giãn nhưng không có dblclick để nút "auto" biết; đọc lại sau khi nó xử lý xong
+    const syncAutoSoon = () => requestAnimationFrame(syncAuto);
     box.addEventListener("pointerdown", onPriceDragDown, true);
     box.addEventListener("pointermove", onPriceDragMove, true);
     box.addEventListener("pointerup", onPriceDragEnd, true);
     box.addEventListener("pointercancel", onPriceDragEnd, true);
     box.addEventListener("wheel", syncAuto, { capture: true, passive: true });
     box.addEventListener("dblclick", syncAuto, true);
+    box.addEventListener("touchend", syncAutoSoon, { capture: true, passive: true });
     chart.timeScale().subscribeVisibleLogicalRangeChange(syncAuto); // đổi symbol / khung nạp lại dữ liệu cũng bật lại tự co giãn
 
     volRef.current = chart.addSeries(HistogramSeries, {
@@ -1052,6 +1067,7 @@ export default function Chart({ paneId }: { paneId: string }) {
 
     chart.subscribeCrosshairMove((p) => {
       const bars = barsRef.current;
+      crossPriceRef.current = p.point && p.paneIndex === mainIndex() ? (seriesRef.current?.coordinateToPrice(p.point.y) ?? null) : null;
       // "Sync in layout › Crosshair": rời chart thì luôn báo để xoá, còn vị trí chỉ báo khi chuột đang ở chart này
       if (!p.time) syncCrosshair(paneId, null);
       else if (hoverRef.current) syncCrosshair(paneId, p.time as number);
@@ -1152,6 +1168,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       box.removeEventListener("pointercancel", onPriceDragEnd, true);
       box.removeEventListener("wheel", syncAuto, true);
       box.removeEventListener("dblclick", syncAuto, true);
+      box.removeEventListener("touchend", syncAutoSoon, true);
       try { chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncAuto); } catch { /* chart đã bị huỷ */ }
       drawRef.current?.destroy();
       indRef.current?.destroy();
@@ -1829,7 +1846,9 @@ export default function Chart({ paneId }: { paneId: string }) {
 
   const onChartContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (drawRef.current?.cancelByRightClick()) return; // đang cầm tool / vẽ dở: chuột phải = huỷ, không hiện menu (như TV)
+    // nhấn giữ bằng ngón tay (Android ra contextmenu, iOS thì không): không huỷ tool đang vẽ, chỉ mở menu của hình dưới ngón tay
+    const touchPress = isTouch(e.nativeEvent) || lastPointerRef.current === "touch";
+    if (!touchPress && drawRef.current?.cancelByRightClick()) return; // đang cầm tool / vẽ dở: chuột phải = huỷ, không hiện menu (như TV)
     const chart = chartRef.current;
     const box = boxRef.current;
     if (!chart || !box) return;
@@ -1847,6 +1866,7 @@ export default function Chart({ paneId }: { paneId: string }) {
       setCtxMenu({ x: e.clientX, y: e.clientY, items: drawingMenuItems(drawRef.current, hit, tf) });
       return;
     }
+    if (touchPress) return; // nhấn giữ nền chart = crosshair của lightweight-charts như TV mobile; menu chart mở bằng nút ⋯ dưới legend
     // Chuột phải lên cột volume: menu của indicator Volume (như TV)
     if (inMain && volShown(pane.volume.getState().s, tf)) {
       const logical = chart.timeScale().coordinateToLogical(x);
@@ -1909,7 +1929,10 @@ export default function Chart({ paneId }: { paneId: string }) {
     <div
       className="flex h-full w-full flex-col"
       // bấm vào chart nào thì chart đó active TRƯỚC khi DrawingManager xử lý, để công cụ đang chọn vẽ đúng chart vừa bấm
-      onPointerDownCapture={() => useLayoutStore.getState().setActive(paneId)}
+      onPointerDownCapture={(e) => {
+        lastPointerRef.current = e.pointerType;
+        useLayoutStore.getState().setActive(paneId);
+      }}
     >
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
@@ -2021,18 +2044,39 @@ export default function Chart({ paneId }: { paneId: string }) {
             />
           )}
           {!legendCollapsed && !mainSqueezed && mainIndicators.map(indicatorRow)}
-          {!mainSqueezed && (!vs.removed || indicators.length > 0) && (
-            <button
-              type="button"
-              aria-label={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
-              title={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
-              onClick={() => pane.indicators.getState().setCollapsed(!legendCollapsed)}
-              className="pointer-events-auto mt-1 flex h-6 w-6 items-center justify-center rounded border border-[#464646] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--hover)]"
-            >
-              <span className={legendCollapsed ? "" : "rotate-180"}>
-                <Chevron size={22} />
-              </span>
-            </button>
+          {!mainSqueezed && ((!vs.removed || indicators.length > 0) || touch) && (
+            <div className="mt-1 flex gap-1">
+              {(!vs.removed || indicators.length > 0) && (
+                <button
+                  type="button"
+                  aria-label={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
+                  title={legendCollapsed ? "Show indicator legend" : "Hide indicator legend"}
+                  onClick={() => pane.indicators.getState().setCollapsed(!legendCollapsed)}
+                  className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded border border-[#464646] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--hover)]"
+                >
+                  <span className={legendCollapsed ? "" : "rotate-180"}>
+                    <Chevron size={22} />
+                  </span>
+                </button>
+              )}
+              {/* màn cảm ứng không có chuột phải: menu chart ở đây, giá theo crosshair (chạm / nhấn giữ lên chart để đặt) */}
+              {touch && (
+                <button
+                  type="button"
+                  aria-label="Chart menu"
+                  title="Chart menu"
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setCtxMenu({ x: r.left, y: r.bottom + 4, items: menuItems(crossPriceRef.current) });
+                  }}
+                  className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded border border-[#464646] bg-[var(--bg)] text-[var(--fg)] hover:bg-[var(--hover)]"
+                >
+                  <span className="scale-[0.8]">
+                    <DotsI />
+                  </span>
+                </button>
+              )}
+            </div>
           )}
           {!mainSqueezed && status && <div className="mt-1 text-[var(--muted)]">{status}</div>}
         </div>
@@ -2078,7 +2122,11 @@ export default function Chart({ paneId }: { paneId: string }) {
             style={{ right: axes.priceW }}
             onMouseMove={onSelectMove}
             onMouseLeave={() => setHover(null)}
-            onClick={() => hover && startReplay(hover.idx)}
+            // theo đúng chỗ bấm chứ không theo hover: chạm bằng ngón tay không có di chuột trước nên một chạm là chọn luôn
+            onClick={(e) => {
+              const h = selectAt(e);
+              if (h) startReplay(h.idx);
+            }}
           >
             {hover && (
               <>

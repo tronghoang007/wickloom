@@ -38,3 +38,8 @@ export function useLayoutMode(): LayoutMode {
 export function useTouch(): boolean {
   return useSyncExternalStore(subscribeTouch, () => window.matchMedia(TOUCH_QUERY).matches, () => false);
 }
+
+// Ngón tay che và rung nhiều hơn chuột: thao tác bằng cảm ứng (pointerType "touch") nới vùng bắt và ngưỡng "bấm hay kéo" thêm bấy nhiêu px.
+// Theo từng sự kiện chứ không theo loại máy: iPad có chuột / bút vẫn giữ dung sai chính xác như desktop.
+export const TOUCH_SLOP = 10;
+export const isTouch = (e: Event): boolean => (e as PointerEvent).pointerType === "touch";

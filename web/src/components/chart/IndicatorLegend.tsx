@@ -5,7 +5,7 @@ import { fmtPlotValue, legendDigits, visiblePlotValues } from "@/indicators/lege
 import type { PlotValue } from "@/indicators/manager";
 import { byId } from "@/indicators/catalog";
 import { useSettingsStore } from "@/store/settings";
-import { DotsIc, EyeIc, GearIc, IconBtn, TrashIc } from "./legendButtons";
+import { DotsIc, EyeIc, GearIc, IconBtn, TrashIc, useTapReveal } from "./legendButtons";
 
 /** Hàng legend của một indicator ("EMA 20 close 4,121.553"): rê chuột vào hiện nút ẩn / Settings / gỡ / menu, nhấp đúp mở Settings. Giống hàng Vol. */
 export default function IndicatorLegend({
@@ -28,6 +28,7 @@ export default function IndicatorLegend({
   onMenu: (x: number, y: number) => void;
 }) {
   const cs = useSettingsStore((st) => st.s);
+  const tap = useTapReveal();
   const def = byId(inst.id);
   const dim = inst.hidden || !instanceShown(inst, tf); // ẩn bằng mắt hoặc ngoài khung thời gian cho phép
   const digits = legendDigits(inst, def, symbolDigits);
@@ -37,6 +38,7 @@ export default function IndicatorLegend({
   return (
     <div
       onDoubleClick={onSettings}
+      onPointerUp={tap.onPointerUp}
       className={`group/ind pointer-events-auto -ml-1 flex w-fit items-center gap-x-1.5 rounded border border-transparent bg-[var(--legend-bg)] pl-1 pr-1 hover:border-[var(--border)] ${dim ? "opacity-70" : ""}`}
     >
       {cs.showIndicatorTitles && <span className="text-[var(--fg)]">{def.name}</span>}
@@ -44,7 +46,7 @@ export default function IndicatorLegend({
       {shown.map((v) => (
         <span key={v.id} style={{ color: v.color }}>{fmtPlotValue(v.value, digits, def.format === "volume")}</span>
       ))}
-      <span className="hidden items-center group-hover/ind:flex">
+      <span className={`${tap.open ? "flex" : "hidden"} items-center group-hover/ind:flex`}>
         <IconBtn title={inst.hidden ? "Show" : "Hide"} onClick={onHide}>
           <EyeIc off={!!inst.hidden} />
         </IconBtn>

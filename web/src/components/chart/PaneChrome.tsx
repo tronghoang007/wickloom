@@ -138,10 +138,15 @@ export default function PaneChrome({
       const i = paneAt(rectsRef.current, e.clientY - box.getBoundingClientRect().top);
       setHover(i >= 0 ? i : null);
     };
-    const leave = () => setHover(null);
+    // ngón tay: nhấc lên cũng là rời khung (pointerleave) nên nút của pane vừa chạm phải giữ lại tới lần chạm pane khác
+    const leave = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") setHover(null);
+    };
+    box.addEventListener("pointerdown", move);
     box.addEventListener("pointermove", move);
     box.addEventListener("pointerleave", leave);
     return () => {
+      box.removeEventListener("pointerdown", move);
       box.removeEventListener("pointermove", move);
       box.removeEventListener("pointerleave", leave);
     };
