@@ -349,6 +349,17 @@ iPad **thu nhỏ cả trang** cho vừa (layout viewport thành 1184px) — iPad
   (M15 ở đỉnh), lưới đủ khung (M2, M3, M10, H2, H3), Indicators (danh sách ẩn / hiện), ⋯ (menu ⋯ cũ thành popup dưới thanh trên — nút ⋯ trên thanh bỏ ở phone dọc).
 - SELL / BUY rộng 80px (co tới 44px khi chật).
 - Thử headless (390 / 360 / ngang / desktop): không tràn ngang, các luồng đặt / sửa / kéo / đóng lệnh trên Replay, vòng khung + danh sách ẩn hiện.
+- **Đợt góp ý tiếp (10-29 chiều)**:
+  - Chạm lệnh đã đặt mở sẵn tab **Delete / Close** (như MT5); vừa kéo đường (có thay đổi chờ) thì sang Modify.
+  - Dòng thu gọn thống nhất: trái = symbol + lệnh, phải = SL · TP · nút có chữ (BUY / SELL cho lệnh mới, MODIFY, DELETE), cách nhau 16px (bỏ mũi tên →).
+    Tab Close của vị thế = `CloseBlock`: thẻ lệnh (#ticket, giờ, hướng + lot, lãi / lỗ), thanh kéo **đóng một phần**, nút cam "CLOSE [x LOT] WITH PROFIT / LOSS ±…".
+  - Bảng đang thu gọn mà **vuốt xuống** = huỷ (bỏ nháp / thay đổi chờ, đóng bảng); nghe pointerup ở window vì ngón tay hay nhả trên tab bar.
+  - Thanh trên chỉ ở **tab Chart** (cả khi bảng lệnh / Objects mở); hỏi danh sách symbol chuyển sang tab bar. Các tab (Alerts, Calendar) bỏ nút ✕.
+  - **Objects** thành hộp toàn màn có ✕ như hộp Indicators.
+  - **Vách ngăn pane** trên cảm ứng: vùng bắt 29px thay vì 9px (`widenPaneHandles`, sửa thẳng div `row-resize` của lightweight-charts qua MutationObserver).
+  - Tab Trading: thêm **Realized P/L** (hôm nay theo giờ máy: lãi / lỗ lệnh đóng + phí + swap, `realizedSince`).
+  - Watchlist: nút ✕ bỏ mã luôn hiện trên cảm ứng (desktop vẫn hiện khi rê chuột vào dòng như TV), dòng cao 44px.
+  - **Hiệu ứng** (chỉ màn cảm ứng, tắt khi "giảm chuyển động"): popup phóng nhẹ (`.popup`), bảng lệnh + hộp toàn màn trượt lên (`anim-sheet`), toast trượt xuống (`anim-drop`).
 - Còn mở: dòng thu gọn của **lệnh mới** kiểu MT5 có tab loại lệnh (Market Execution / Buy Limit / Sell Limit / Buy Stop…) — chưa làm, hỏi user.
 
 ## 11. Kiểm thử

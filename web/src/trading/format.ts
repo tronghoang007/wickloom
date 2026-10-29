@@ -142,6 +142,11 @@ export function dealSummary(deals: Deal[]): DealSummary {
   return out;
 }
 
+/** Realized P/L từ `since` (giây): lãi / lỗ các lệnh đã đóng + commission + swap của mọi deal mua / bán trong khoảng đó (deal vào lệnh chỉ có phí), như "Realized P&L" của TradingView. */
+export function realizedSince(deals: Deal[], since: number): number {
+  return deals.reduce((s, d) => (d.time >= since && (d.type === "buy" || d.type === "sell") ? s + dealNet(d) : s), 0);
+}
+
 export const STALE_SECONDS = 15;
 /** Dữ liệu cũ: account offline, hoặc EA lâu rồi chưa báo vị thế/lệnh. UI phải làm mờ và không vẽ đường trên chart. */
 export function isStale(data: TradeData | null, nowSec: number): boolean {

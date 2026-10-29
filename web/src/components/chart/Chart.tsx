@@ -33,7 +33,7 @@ import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView"
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
-import { isPhoneNow, isTouch, TOUCH_SLOP, useLandscape, useLayoutMode, useTouch } from "@/lib/layoutMode";
+import { isPhoneNow, isTouch, TOUCH_SLOP, useLandscape, useLayoutMode, useTouch, widenPaneHandles } from "@/lib/layoutMode";
 import { fmtVol, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
 import {
   AreaSeries,
@@ -1400,6 +1400,13 @@ export default function Chart({ paneId }: { paneId: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // màn cảm ứng: vách ngăn pane (kéo đổi cao pane indicator) có vùng bắt to hơn cho ngón tay
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!touch || !box) return;
+    return widenPaneHandles(box);
+  }, [touch]);
 
   // Phone, như MT5: chạm nền chart mở vòng chọn khung (TimeframeRing). Không mở khi cú chạm đó đang làm việc khác: cầm công cụ vẽ, bỏ chọn hình /
   // bỏ nháp lệnh / bỏ focus lệnh (trạng thái trước cú nhấn), hay vừa chọn hình / đường lệnh (trạng thái sau khi các handler click khác chạy xong)

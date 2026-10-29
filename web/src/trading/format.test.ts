@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Deal, Mt5Account, PendingOrder, Position, TradeData } from "@/lib/mt5Api";
-import { COLORS, STALE_SECONDS, accountProfit, closedPositions, dealNet, dealSummary, ghostsFor, stopLabel, type StopTitleFn, fmtLot, fmtPnl, fmtPx, isStale, orderLabel, positionPnl, sideLabel, totalPnl, tradeLevels, tradeLines } from "./format";
+import { COLORS, STALE_SECONDS, accountProfit, closedPositions, dealNet, dealSummary, ghostsFor, stopLabel, type StopTitleFn, fmtLot, fmtPnl, fmtPx, isStale, orderLabel, positionPnl, realizedSince, sideLabel, totalPnl, tradeLevels, tradeLines } from "./format";
 
 const account = { id: "S:1", server: "S", broker: "B", login: 1, name: "n", mode: "demo", currency: "USD", leverage: 500, online: true, active: true, seen: 1 } as Mt5Account;
 const pos = (o: Partial<Position> = {}): Position => ({
@@ -273,5 +273,20 @@ describe("tradeLevels (phone: khung giá chứa đường lệnh)", () => {
     } as never;
     expect(tradeLevels(data, "XAUUSDm")).toEqual([4040, 4030, 4020, 4060]);
     expect(tradeLevels(null, "XAUUSDm")).toEqual([]);
+  });
+});
+
+describe("realizedSince", () => {
+  const deal = (o: Partial<Deal>): Deal => ({ ticket: 1, order: 1, symbol: "XAUUSDm", type: "buy", entry: "out", volume: 0.01, price: 1, profit: 0, commission: 0, swap: 0, time: 1000, magic: 0, comment: "", ...o });
+  it("lãi / lỗ lệnh đóng + phí của deal vào, chỉ từ mốc, bỏ nạp / rút", () => {
+    const deals = [
+      deal({ entry: "in", commission: -0.1, time: 1000 }),
+      deal({ entry: "out", profit: 2.5, commission: -0.1, swap: -0.05, time: 1100 }),
+      deal({ type: "sell", entry: "out", profit: -1, time: 500 }), // trước mốc
+      deal({ type: "balance", entry: "", profit: 100, time: 1200 }), // nạp tiền
+    ];
+    expect(realizedSince(deals, 900)).toBeCloseTo(2.25);
+    expect(realizedSince(deals, 0)).toBeCloseTo(1.25);
+    expect(realizedSince([], 0)).toBe(0);
   });
 });

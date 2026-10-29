@@ -750,7 +750,7 @@ export default function SettingsDialog() {
       <div
         role="dialog"
         aria-label="Settings"
-        className="flex h-[min(640px,92vh)] w-[min(640px,96vw)] flex-col rounded-lg popup text-sm max-md:h-dvh max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:w-full max-md:rounded-none"
+        className="anim-sheet flex h-[min(640px,92vh)] w-[min(640px,96vw)] flex-col rounded-lg popup text-sm max-md:h-dvh max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)] max-md:w-full max-md:rounded-none"
       >
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <h2 className="text-lg font-semibold">Settings</h2>

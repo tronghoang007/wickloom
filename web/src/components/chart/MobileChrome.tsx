@@ -13,11 +13,12 @@ import { useRailStore, type RailPanel } from "@/store/rail";
 import { useSettingsStore } from "@/store/settings";
 import { useOrderState } from "@/trading/actions";
 import { draftLines } from "@/trading/draft";
-import { clearEdit, confirmOwnerEdits, pendingFor, seedEditStop, useEditBridge } from "@/trading/editBridge";
+import { cancelOwnerEdits, clearEdit, confirmOwnerEdits, pendingFor, seedEditStop, useEditBridge } from "@/trading/editBridge";
 import { askCancelOrder, askClosePosition, askRemoveStop } from "@/trading/tagActions";
 import type { PendingOrder, Position } from "@/lib/mt5Api";
-import { COLORS, fmtLot, orderLabel, sideColor, sideLabel } from "@/trading/format";
-import { useTradeStore } from "@/trading/store";
+import { COLORS, fmtLot, fmtPnl, fmtTime, orderLabel, pnlClass, positionPnl, sideColor, sideLabel } from "@/trading/format";
+import { fmtLotValue } from "@/trading/lot";
+import { useTradeAccount, useTradeStore } from "@/trading/store";
 import { quoteOf, useQuoteStore } from "@/trading/quote";
 import { seedDraftStop, submitDraft } from "@/trading/submit";
 import { ticketBusy, useTicketStore } from "@/trading/ticket";
@@ -55,6 +56,7 @@ import EconomicCalendarPanel from "./EconomicCalendarPanel";
 import IndicatorsDialog from "./IndicatorsDialog";
 import LayoutBar from "./LayoutBar";
 import LayoutMenu from "./LayoutMenu";
+import LotSlider from "./LotSlider";
 import OrderTicket from "./OrderTicket";
 import TimeframeBar from "./TimeframeBar";
 import TimeframeRing from "./TimeframeRing";
@@ -271,7 +273,7 @@ function ToolCell({ id, onPick }: { id: string; onPick: (id: string) => void }) 
 
 /** Màn Objects (như MT5): các nút chung (nam châm, giữ chế độ vẽ, ẩn / hiện, khoá, xoá tất cả), hàng công cụ yêu thích, rồi mọi công cụ theo nhóm.
  *  Chọn một công cụ thì về chart để chạm đặt điểm (thanh DrawingHint báo đang vẽ gì và có nút huỷ). */
-function ObjectsPanel() {
+function ObjectsPanel({ onClose }: { onClose: () => void }) {
   const { favorites, magnet, stay, hideAll, lockAll, api } = useDrawingStore();
   const pick = (id: string) => {
     api?.setTool(id as never);
@@ -292,8 +294,13 @@ function ObjectsPanel() {
   const favs = favorites.filter(phoneTool);
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-1 border-b border-[var(--border)] px-3 py-1.5">
-        <span className="mr-auto text-[18px] font-semibold">Objects</span>
+      <div className="flex items-center justify-between px-5 pb-1 pt-4">
+        <h2 className="text-lg font-semibold">Objects</h2>
+        <button type="button" className="rounded p-1 hover:bg-[var(--hover)]" onClick={onClose} aria-label="Close">
+          <Close />
+        </button>
+      </div>
+      <div className="flex items-center justify-end gap-1 border-b border-[var(--border)] px-3 pb-1.5">
         {flag("magnet", magnet, "Magnet", <Magnet />)}
         {flag("stay", stay, "Stay in drawing mode", <Stay />)}
         {flag("hideAll", hideAll, "Hide all drawings", <Eye off={hideAll} />)}
@@ -389,7 +396,6 @@ function TradeButtons() {
  *  cả bề rộng, thêm SELL | BUY cạnh bút vẽ (thay thanh SELL / BUY to trên đầu chart), menu ⋯ chuyển vào vòng chọn khung; phone ngang thì gọn bên trái,
  *  SELL / BUY ở widget dưới tiêu đề. */
 export function MobileTopBar({ flat = false }: { flat?: boolean }) {
-  useSymbolsPolling();
   // z-50: popup của thanh này thả xuống đè lên panel phủ chart (z-[45]) bên dưới
   return (
     <div className={`relative z-50 flex shrink-0 items-center border-b border-[var(--border)] bg-[var(--page)] ${flat ? "h-12 justify-between px-1" : "h-11 gap-0.5 px-1"}`}>
@@ -420,6 +426,7 @@ const TABS: { id: RailPanel | null; label: string; icon: ReactNode }[] = [
 export function MobileTabBar({ vertical = false }: { vertical?: boolean }) {
   useTradePolling(); // panel Trading chỉ mount khi mở tab: hỏi dữ liệu lệnh ở đây cho thẻ lệnh / đường SL-TP trên chart
   useMt5Polling(); // account MT5 (avatar desktop tự hỏi; phone không còn avatar trên thanh)
+  useSymbolsPolling(); // danh sách symbol (digits, lot…): thanh trên chỉ có ở tab Chart nên hỏi ở đây
   const open = useRailStore((s) => s.open);
   const setOpen = useRailStore((s) => s.setOpen);
   const drafting = useTicketStore(ticketBusy);
@@ -457,7 +464,7 @@ export function MobileTabBar({ vertical = false }: { vertical?: boolean }) {
 /** Bảng đặt lệnh trên phone, kiểu MT5: sheet nổi đè lên phần dưới chart (chart giữ nguyên cỡ, không bị đẩy). Thanh nắm trên cùng: chạm / vuốt xuống
  *  thu gọn thành một dòng (symbol, lệnh, nút SL / TP, nút đặt) để thấy và kéo đường entry / SL / TP trên chart; vuốt lên / chạm lại mở ra.
  *  Bảng mới (bấm SELL / BUY, chạm hay kéo lệnh đã đặt) luôn hiện thu gọn trước, như MT5: chart không bị che.
- *  Thu gọn chỉ ẩn bảng (vẫn mount): không mất gì đang soạn. */
+ *  Thu gọn chỉ ẩn bảng (vẫn mount): không mất gì đang soạn; đang thu gọn mà vuốt xuống thì huỷ hẳn. */
 export function MobileOrderSheet() {
   const open = useRailStore((s) => s.open);
   const drafting = useTicketStore(ticketBusy);
@@ -481,13 +488,31 @@ export function MobileOrderSheet() {
       useRailStore.setState({ sheetTop: null });
     };
   }, [shown, landscape]);
+  // thu gọn mà vuốt xuống (bất kỳ chỗ nào trên bảng) = huỷ như MT5 (user 10-29): bỏ bản nháp / thay đổi chờ và đóng bảng
+  const cancel = () => {
+    const t = useTicketStore.getState();
+    if (t.modifyOwner) cancelOwnerEdits(t.modifyOwner);
+    t.close();
+  };
   if (!shown) return null;
   return (
     <div
       ref={box}
-      className={`absolute bottom-0 z-[45] flex flex-col rounded-t-xl border-t border-[var(--border)] bg-[var(--bg)] shadow-[0_-6px_20px_rgba(0,0,0,0.45)] ${
+      className={`anim-sheet absolute bottom-0 z-[45] flex flex-col rounded-t-xl border-t border-[var(--border)] bg-[var(--bg)] shadow-[0_-6px_20px_rgba(0,0,0,0.45)] ${
         landscape ? `right-0 w-[min(380px,55%)] border-l ${collapsed ? "" : "max-h-full"}` : `inset-x-0 ${collapsed ? "" : "max-h-[60%]"}`
-      }`}
+      } ${collapsed ? "touch-none" : ""}`}
+      onPointerDown={(e) => {
+        if (!collapsed) return;
+        const y0 = e.clientY;
+        // nghe ở window: vuốt xuống thì ngón tay thường nhả ra ngoài bảng (trên tab bar)
+        const up = (ev: PointerEvent) => {
+          window.removeEventListener("pointerup", up);
+          window.removeEventListener("pointercancel", up);
+          if (ev.type === "pointerup" && ev.clientY - y0 > 40) cancel();
+        };
+        window.addEventListener("pointerup", up);
+        window.addEventListener("pointercancel", up);
+      }}
     >
       <button
         type="button"
@@ -498,6 +523,7 @@ export function MobileOrderSheet() {
         onPointerUp={(e) => {
           const dy = startY.current === null ? 0 : e.clientY - startY.current;
           startY.current = null;
+          if (collapsed && dy > 24) return; // đã thu gọn mà vuốt xuống: huỷ, bảng ngoài lo (onPointerUp ở trên)
           setCollapsed(dy > 24 ? true : dy < -24 ? false : !collapsed); // vuốt xuống thu, vuốt lên mở, chạm thì đảo
         }}
       >
@@ -511,12 +537,19 @@ export function MobileOrderSheet() {
   );
 }
 
-const roundBtn = "flex h-10 w-12 shrink-0 items-center justify-center rounded-lg disabled:opacity-55";
-const Arrow = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5 12h14M13 6l6 6-6 6" />
-  </svg>
-);
+// nút hành động của dòng thu gọn: có chữ (BUY / SELL / MODIFY / DELETE) thay mũi tên →, cách SL / TP 16px cho đỡ bấm nhầm (user 10-29)
+const actionBtn = "flex h-10 min-w-[84px] shrink-0 items-center justify-center rounded-lg px-3 text-[14px] font-semibold text-white disabled:opacity-55";
+const rowCls = "flex h-14 items-center gap-4";
+
+/** Bên trái dòng thu gọn: symbol + lệnh; chạm thì mở rộng bảng. */
+function RowHead({ symbol, sub, color, onExpand }: { symbol: string; sub: string; color: string; onExpand: () => void }) {
+  return (
+    <button type="button" className="min-w-0 flex-1 text-left" onClick={onExpand}>
+      <div className="truncate text-[15px] font-semibold">{symbol}</div>
+      <div className="truncate text-xs" style={{ color }}>{sub}</div>
+    </button>
+  );
+}
 
 /** Dòng của bảng đặt lệnh khi thu gọn (như MT5). Bản nháp: "XAUUSDm  BUY LIMIT 0.01   (SL) (TP) →" — SL / TP bật tắt mức dừng (mức gợi ý như công tắc trong bảng),
  *  → gửi lệnh qua cùng đường với nút đặt lệnh của bảng (kiểm tra bản nháp, báo lỗi bằng toast). Lệnh đã đặt: ModifyRow. */
@@ -527,12 +560,6 @@ function CollapsedTicket({ onExpand }: { onExpand: () => void }) {
   const quote = useQuoteStore((s) => (d ? quoteOf(s, d.symbol, replay) : undefined));
   const busy = useOrderState((s) => s.busy);
   const data = useTradeStore((s) => s.data);
-  const head = (symbol: string, sub: string, color: string) => (
-    <button type="button" className="min-w-0 flex-1 text-left" onClick={onExpand}>
-      <div className="truncate text-[15px] font-semibold">{symbol}</div>
-      <div className="truncate text-xs" style={{ color }}>{sub}</div>
-    </button>
-  );
   if (!d) {
     const [kind, tk] = (owner ?? "").split(":");
     const pos = kind === "position" ? data?.positions.find((p) => p.ticket === Number(tk)) : undefined;
@@ -545,7 +572,7 @@ function CollapsedTicket({ onExpand }: { onExpand: () => void }) {
         </button>
       );
     }
-    return <ModifyRow key={owner} owner={owner} pos={pos} ord={ord} />;
+    return <ModifyRow key={owner} owner={owner} pos={pos} ord={ord} onExpand={onExpand} />;
   }
   // Market: "BUY 0.01" như chữ trên đường (không phải "MARKET 0.01")
   const title = d.mode === "market" ? `${d.side} ${d.lot}`.toUpperCase() : (draftLines(d, d.symbol, quote).find((l) => l.key === "d:entry")?.title ?? `${d.side} ${d.lot}`.toUpperCase());
@@ -565,28 +592,34 @@ function CollapsedTicket({ onExpand }: { onExpand: () => void }) {
     );
   };
   return (
-    <div className="flex h-14 items-center gap-2 px-3 pb-1">
-      {head(d.symbol, title, sideColor(d.side))}
+    <div className={`${rowCls} px-3 pb-1`}>
+      <RowHead symbol={d.symbol} sub={title} color={sideColor(d.side)} onExpand={onExpand} />
       {stop("sl")}
       {stop("tp")}
-      <button type="button" aria-label="Đặt lệnh" disabled={busy} className={`${roundBtn} text-white`} style={{ background: sideColor(d.side) }} onClick={(e) => startedOn(e) && void submitDraft()}>
-        <Arrow />
+      <button type="button" aria-label="Đặt lệnh" disabled={busy} className={actionBtn} style={{ background: sideColor(d.side) }} onClick={(e) => startedOn(e) && void submitDraft()}>
+        {d.side.toUpperCase()}
       </button>
     </div>
   );
 }
 
-/** Dòng thu gọn của lệnh đã đặt, như MT5 (user gửi ảnh 10-29): hai tab "Delete order | Modify order" (vị thế: Close position | Modify position), hàng trên
- *  = nút tên hành động, SL / TP, →. Modify: SL / TP bật thì thêm mức gợi ý thành thay đổi chờ (kéo trên chart), tắt thì bỏ thay đổi chờ / xoá mức đang có
- *  (hỏi xác nhận như bảng), → gửi các thay đổi đang chờ. Delete / Close: → huỷ lệnh chờ / đóng cả vị thế (hỏi xác nhận). */
-function ModifyRow({ owner, pos, ord }: { owner: string; pos?: Position; ord?: PendingOrder }) {
-  const [del, setDel] = useState(false);
+/** Dòng thu gọn của lệnh đã đặt, như MT5 (user gửi ảnh 10-29): hai tab "Delete order | Modify order" (vị thế: Close position | Modify position), mở sẵn tab
+ *  Delete / Close. Modify: SL, TP, nút MODIFY — SL / TP bật thì thêm mức gợi ý thành thay đổi chờ (kéo trên chart), tắt thì bỏ thay đổi chờ / xoá mức đang có
+ *  (hỏi xác nhận như bảng), MODIFY gửi các thay đổi đang chờ. Delete (lệnh chờ): cùng dòng gọn, nút DELETE. Close (vị thế): CloseBlock (thẻ lệnh + đóng một phần). */
+function ModifyRow({ owner, pos, ord, onExpand }: { owner: string; pos?: Position; ord?: PendingOrder; onExpand: () => void }) {
   const busy = useOrderState((s) => s.busy);
   const byPane = useEditBridge((s) => s.byPane);
   const digits = useChartStore((s) => s.symbols.find((x) => x.name === (pos ?? ord)!.symbol)?.digits) ?? 5;
   const item = (pos ?? ord)!;
   const edits = pendingFor(byPane, owner);
   const pending = edits.length > 0;
+  // như MT5: chạm lệnh mở sẵn tab Delete / Close; vừa kéo đường của lệnh (có thay đổi chờ) thì sang Modify để thấy nút gửi
+  const [del, setDel] = useState(!pending);
+  const [wasPending, setWasPending] = useState(pending);
+  if (pending !== wasPending) {
+    setWasPending(pending);
+    if (pending) setDel(false);
+  }
   const p = pos ? "p" : "o";
   const stop = (kind: "sl" | "tp") => {
     const key = `${p}${kind}:${item.ticket}`;
@@ -612,39 +645,97 @@ function ModifyRow({ owner, pos, ord }: { owner: string; pos?: Position; ord?: P
   };
   const what = pos ? "position" : "order";
   const kill = pos ? "Close" : "Delete";
-  const run = () => (pos ? askClosePosition(pos) : askCancelOrder(ord!));
   const tab = (on: boolean, label: string, color: string, onClick: () => void) => (
     <button type="button" aria-pressed={on} className="h-9 text-[15px] font-semibold" style={{ color: on ? color : "var(--muted)" }} onClick={onClick}>
       {label}
     </button>
   );
+  const tabs = (
+    <div className="flex gap-6 px-1">
+      {tab(del, `${kill} ${what}`, "#f23645", () => setDel(true))}
+      {tab(!del, `Modify ${what}`, "var(--accent-text)", () => setDel(false))}
+    </div>
+  );
+  if (del && pos) return <CloseBlock pos={pos} tabs={tabs} />;
+  const sub = `${pos ? sideLabel(pos.type) : orderLabel(ord!.type)} ${fmtLot(item.volume)} #${item.ticket}`.toUpperCase();
   return (
     <div className="px-3 pb-1">
-      <div className="flex h-14 items-center gap-2">
-        <span
-          className={`flex h-10 items-center rounded-full px-4 text-[15px] font-semibold ${del ? "border border-[#f23645] text-[#f23645]" : "bg-[var(--accent)] text-white"}`}
-          title={`${item.symbol} ${(pos ? sideLabel(pos.type) : orderLabel(ord!.type)).toUpperCase()} ${fmtLot(item.volume)} #${item.ticket}`}
-        >
-          {del ? kill.toUpperCase() : "MODIFY"}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-xs text-[var(--muted)]">{!del && pending ? "chờ xác nhận" : ""}</span>
-        {!del && stop("sl")}
-        {!del && stop("tp")}
-        <button
-          type="button"
-          aria-label={del ? `${kill} ${what}` : "Confirm"}
-          disabled={busy || (!del && !pending)}
-          className={`${roundBtn} text-white`}
-          style={{ background: del ? "#f23645" : "var(--accent)" }}
-          onClick={(e) => startedOn(e) && (del ? run() : confirmOwnerEdits(owner))}
-        >
-          <Arrow />
-        </button>
+      {/* Modify và Delete cùng một dòng gọn (user 10-29): chỉ khác nút bên phải */}
+      <div className={rowCls}>
+        <RowHead
+          symbol={item.symbol}
+          sub={!del && pending ? `${sub} · chờ xác nhận` : sub}
+          color={sideColor((pos ? pos.type : ord!.type).startsWith("buy") ? "buy" : "sell")}
+          onExpand={onExpand}
+        />
+        {del ? (
+          <button type="button" aria-label="Delete order" disabled={busy} className={`${actionBtn} bg-[#f23645]`} onClick={(e) => startedOn(e) && askCancelOrder(ord!)}>
+            DELETE
+          </button>
+        ) : (
+          <>
+            {stop("sl")}
+            {stop("tp")}
+            <button type="button" aria-label="Confirm" disabled={busy || !pending} className={`${actionBtn} bg-[var(--accent)]`} onClick={(e) => startedOn(e) && confirmOwnerEdits(owner)}>
+              MODIFY
+            </button>
+          </>
+        )}
       </div>
-      <div className="flex gap-6 px-1">
-        {tab(del, `${kill} ${what}`, "#f23645", () => setDel(true))}
-        {tab(!del, `Modify ${what}`, "var(--accent-text)", () => setDel(false))}
+      {tabs}
+    </div>
+  );
+}
+
+/** Tab Close position như MT5 (user gửi ảnh 10-29): thẻ lệnh (#ticket, giờ mở, hướng + lot, lãi / lỗ), thanh kéo đóng một phần (lot tối thiểu → cả vị thế),
+ *  nút "CLOSE WITH PROFIT / LOSS" kèm lãi / lỗ của phần đóng (ước theo tỉ lệ lot). Đóng qua askClosePosition (phone luôn hỏi xác nhận). */
+function CloseBlock({ pos, tabs }: { pos: Position; tabs: ReactNode }) {
+  const busy = useOrderState((s) => s.busy);
+  const sym = useChartStore((s) => s.symbols.find((x) => x.name === pos.symbol));
+  const ccy = useTradeAccount()?.currency ?? "";
+  const spec = sym?.volume_min && sym.volume_step && pos.volume > sym.volume_min + 1e-9 ? { min: sym.volume_min, max: pos.volume, step: sym.volume_step } : null;
+  const [part, setPart] = useState<{ vol: number; lot: number } | null>(null); // lot muốn đóng, gắn với lot của vị thế lúc chọn (đóng một phần xong thì về cả vị thế)
+  const want = part && part.vol === pos.volume ? part.lot : pos.volume;
+  const partial = spec !== null && want < pos.volume - 1e-9;
+  const profit = positionPnl(pos);
+  const share = (profit * want) / pos.volume;
+  return (
+    <div className="px-3 pb-3">
+      {tabs}
+      <div className="mt-2 rounded-lg border border-[var(--border)] px-3 py-2.5 text-[13px]">
+        <div className="flex justify-between text-[var(--muted)]">
+          <span>#{pos.ticket}</span>
+          <span className="tabular-nums">{fmtTime(pos.time)}</span>
+        </div>
+        <div className="mt-1 flex justify-between text-[15px] tabular-nums">
+          <span style={{ color: sideColor(pos.type === "buy" ? "buy" : "sell") }}>
+            {sideLabel(pos.type)} {fmtLot(pos.volume)}
+          </span>
+          <span className={pnlClass(profit)}>
+            {fmtPnl(profit)} {ccy}
+          </span>
+        </div>
       </div>
+      {spec && (
+        <div className="mt-3 px-1">
+          <div className="mb-1 flex justify-between text-xs text-[var(--muted)]">
+            <span>Đóng</span>
+            <span className="tabular-nums">
+              {fmtLotValue(want, spec)} / {fmtLot(pos.volume)} lot
+            </span>
+          </div>
+          <LotSlider className="w-full" spec={spec} value={want} onChange={(lot) => setPart({ vol: pos.volume, lot })} />
+        </div>
+      )}
+      <button
+        type="button"
+        aria-label="Close position"
+        disabled={busy}
+        className="mt-6 flex h-12 w-full items-center justify-center rounded-lg bg-[#ff9800] text-[15px] font-semibold text-black disabled:opacity-55"
+        onClick={(e) => startedOn(e) && askClosePosition(pos, partial ? want : 0)}
+      >
+        {`CLOSE${partial ? ` ${fmtLotValue(want, spec!)} LOT` : ""} WITH ${share >= 0 ? "PROFIT" : "LOSS"} ${fmtPnl(share)}`}
+      </button>
     </div>
   );
 }
@@ -654,14 +745,19 @@ export function MobilePanel() {
   const open = useRailStore((s) => s.open);
   const setOpen = useRailStore((s) => s.setOpen);
   if (!open || open === "order") return null; // bảng đặt lệnh: MobileOrderSheet
+  // Objects: hộp toàn màn có ✕ như hộp Indicators (user 10-29), không phải panel phủ chart dưới thanh trên
+  if (open === "objects")
+    return (
+      <div role="dialog" aria-label="Objects" className="anim-sheet fixed inset-0 z-50 flex flex-col popup pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]">
+        <ObjectsPanel onClose={() => setOpen(null)} />
+      </div>
+    );
   return (
     <div className="absolute inset-0 z-[45] flex flex-col bg-[var(--bg)]">
       {open === "calendar" && (
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2.5">
+        // tab của tab bar: không có ✕ (user 10-29)
+        <div className="flex items-center border-b border-[var(--border)] px-3 py-2.5">
           <span className="text-[18px] font-semibold leading-6">Economic calendar</span>
-          <button className="rounded p-1 hover:bg-[var(--hover)]" onClick={() => setOpen(null)} aria-label="Close">
-            <Close />
-          </button>
         </div>
       )}
       <div className={`min-h-0 flex-1 ${open === "trading" ? "" : "overflow-y-auto"}`}>
@@ -671,8 +767,6 @@ export function MobilePanel() {
           <AlertsPanel />
         ) : open === "calendar" ? (
           <EconomicCalendarPanel />
-        ) : open === "objects" ? (
-          <ObjectsPanel />
         ) : open === "account" ? (
           <AccountPanel onDone={() => setOpen(null)} />
         ) : (

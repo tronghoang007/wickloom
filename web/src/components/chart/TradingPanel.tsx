@@ -9,7 +9,7 @@ import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
 import { askCancelAll, askCancelOrder, askCloseAll, askClosePosition } from "@/trading/tagActions";
-import { accountProfit, closedPositions, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, REASON_LABEL, sideLabel } from "@/trading/format";
+import { accountProfit, closedPositions, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, realizedSince, REASON_LABEL, sideLabel } from "@/trading/format";
 import { useTradeFocus } from "@/trading/focus";
 import { tradeBlock } from "@/trading/gate";
 import { closeLot } from "@/trading/lot";
@@ -123,6 +123,7 @@ export default function TradingPanel({ fill = false }: { fill?: boolean }) {
   const stale = isStale(data, now);
   const a = data.account;
   const pnl = accountProfit(data);
+  const realized = realizedSince(data.deals, new Date(now * 1000).setHours(0, 0, 0, 0) / 1000); // hôm nay, theo giờ máy
   const ccy = a.currency;
   // Unrealized P/L và Margin level chỉ có nghĩa khi đang có lệnh (MT5 báo margin level 0 khi chưa dùng margin)
   const stats: [string, string, string?][] = [
@@ -131,6 +132,7 @@ export default function TradingPanel({ fill = false }: { fill?: boolean }) {
     ["Margin", fmtMoney(a.margin, ccy)],
     ["Balance", fmtMoney(a.balance, ccy)],
     ...(data.positions.length > 0 ? ([["Unrealized P/L", fmtPnl(pnl), pnlClass(pnl)]] as [string, string, string?][]) : []),
+    ["Realized P/L", fmtPnl(realized), pnlClass(realized)],
     ...(a.margin_level ? ([["Margin level", `${a.margin_level.toLocaleString("en-US", { maximumFractionDigits: 2 })}%`]] as [string, string, string?][]) : []),
   ];
 

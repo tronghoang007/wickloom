@@ -192,7 +192,8 @@ export default function WatchlistPanel() {
     <div className="flex h-full flex-col">
       {title}
 
-      <div className="grid shrink-0 grid-cols-[1fr_76px_64px_60px_18px] items-center gap-x-1 px-4 pb-1 text-[14px] text-[var(--muted)]">
+      {/* cột cuối = nút ✕ bỏ khỏi watchlist: desktop hiện khi rê vào dòng (như TV); cảm ứng không có hover nên luôn hiện, to hơn cho ngón tay */}
+      <div className="grid shrink-0 grid-cols-[1fr_76px_64px_60px_18px] items-center gap-x-1 px-4 pb-1 text-[14px] text-[var(--muted)] pointer-coarse:grid-cols-[1fr_76px_64px_60px_36px]">
         <span>Symbol</span>
         <span className="text-right">Last</span>
         <span className="text-right">Chg</span>
@@ -219,7 +220,7 @@ export default function WatchlistPanel() {
             <div
               key={s}
               onClick={() => set({ symbol: s })}
-              className={`group grid h-[30px] cursor-pointer rounded grid-cols-[1fr_76px_64px_60px_18px] items-center gap-x-1 border-b border-[var(--border)] px-2 text-[14px] hover:bg-[var(--hover)] ${s === current ? "ring-1 ring-[var(--muted)]" : ""}`}
+              className={`group grid h-[30px] cursor-pointer rounded grid-cols-[1fr_76px_64px_60px_18px] pointer-coarse:h-11 pointer-coarse:grid-cols-[1fr_76px_64px_60px_36px] items-center gap-x-1 border-b border-[var(--border)] px-2 text-[14px] hover:bg-[var(--hover)] ${s === current ? "ring-1 ring-[var(--muted)]" : ""}`}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <SymbolBadge name={s} type={meta(s)?.type} size={20} />
@@ -237,8 +238,9 @@ export default function WatchlistPanel() {
                 {pct !== null ? `${sign(pct)}${Math.abs(pct).toFixed(2)}%` : ""}
               </span>
               <button
-                className="invisible flex h-5 w-5 items-center justify-center rounded text-[var(--muted)] hover:bg-[var(--border)] hover:text-[var(--fg)] group-hover:visible"
+                className="invisible flex h-5 w-5 items-center justify-center rounded text-[var(--muted)] hover:bg-[var(--border)] hover:text-[var(--fg)] group-hover:visible pointer-coarse:visible pointer-coarse:h-9 pointer-coarse:w-9"
                 title="Remove from watchlist"
+                aria-label={`Remove ${s} from watchlist`}
                 onClick={(e) => {
                   e.stopPropagation();
                   remove(s);

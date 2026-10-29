@@ -84,3 +84,18 @@ export function startedOn(e: { detail: number; currentTarget: EventTarget; preve
   if (!ok) e.preventDefault();
   return ok;
 }
+
+/** Vùng bắt của vách ngăn pane trong lightweight-charts (div `row-resize` cao 9px, top -4px trong hàng cao 1px): ngón tay khó trúng. Màn cảm ứng nới thành
+ *  29px quanh vạch (vạch vẫn 1px); hàng vách dựng lại mỗi khi thêm / bớt pane nên theo dõi `root` bằng MutationObserver. Trả hàm gỡ. */
+export function widenPaneHandles(root: HTMLElement): () => void {
+  const widen = () =>
+    root.querySelectorAll<HTMLElement>("td[colspan='3'] > div").forEach((el) => {
+      if (el.style.cursor !== "row-resize" || el.style.position !== "absolute" || el.style.height === "29px") return;
+      el.style.top = "-14px";
+      el.style.height = "29px";
+    });
+  widen();
+  const mo = new MutationObserver(widen);
+  mo.observe(root, { childList: true, subtree: true });
+  return () => mo.disconnect();
+}

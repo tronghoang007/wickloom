@@ -149,6 +149,27 @@ textarea,
   border-color: var(--popup-line);
 }
 
+/* Màn cảm ứng (phone / tablet): popup, bảng đặt lệnh, hộp toàn màn và toast hiện ra có chuyển động (user 10-29: hiện bụp ra thì thô). Desktop giữ như TradingView.
+   Chỉ chạy lúc phần tử được gắn vào trang; máy bật "giảm chuyển động" thì bỏ. */
+@keyframes wl-pop {
+  from { opacity: 0; transform: scale(0.96); }
+}
+@keyframes wl-sheet {
+  from { transform: translateY(100%); }
+}
+@keyframes wl-drop {
+  from { opacity: 0; transform: translateY(-12px); }
+}
+@media (pointer: coarse) and (prefers-reduced-motion: no-preference) {
+  .popup { animation: wl-pop 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .anim-drop { animation: wl-drop 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+}
+/* bảng đặt lệnh (sheet đáy) và hộp toàn màn của phone: trượt từ dưới lên thay vì phóng */
+@media (pointer: coarse) and (max-width: 767px) and (prefers-reduced-motion: no-preference) {
+  .anim-sheet,
+  .popup.anim-sheet { animation: wl-sheet 240ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+}
+
 /* Thanh cuộn mảnh kiểu TradingView: 8px, chỉ có thumb bo tròn, không track/nút mũi tên. */
 * {
   scrollbar-width: thin;

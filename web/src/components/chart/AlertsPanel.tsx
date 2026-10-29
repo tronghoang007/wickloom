@@ -3,6 +3,7 @@
 import { CHANNEL_NAME, describe, failedChannels, sortAlerts, triggerLabel } from "@/alerts/model";
 import { digitsOf, openCreateAlert, openEditAlert, useAlertStore } from "@/alerts/store";
 import type { Alert, AlertCond, AlertLogRow, ChannelKind } from "@/lib/alertsApi";
+import { useLayoutMode } from "@/lib/layoutMode";
 import { clockAt, dayLabelAt } from "@/lib/timefmt";
 import { useAuthStore } from "@/store/auth";
 import { useChartStore } from "@/store/chart";
@@ -154,6 +155,7 @@ function LogRow({ r }: { r: AlertLogRow }) {
 
 /** Danh sách alert + nhật ký ở thanh bên phải. Nhật ký ghi kết quả giao từng kênh nên biết ngay Telegram / MT5 có tới không. */
 export default function AlertsPanel() {
+  const phone = useLayoutMode() === "phone";
   const status = useAuthStore((s) => s.status);
   const alerts = useAlertStore((s) => s.alerts);
   const loaded = useAlertStore((s) => s.loaded);
@@ -175,9 +177,12 @@ export default function AlertsPanel() {
           <button className="rounded p-1 hover:bg-[var(--hover)]" title="Create alert (⌥ A)" aria-label="Create alert" onClick={() => void openCreateAlert()}>
             <Plus size={22} />
           </button>
-          <button className="rounded p-1 hover:bg-[var(--hover)]" onClick={() => useRailStore.getState().setOpen(null)} aria-label="Close">
-            <Close />
-          </button>
+          {/* phone: Alerts là một tab của tab bar, không phải thanh bên phải để đóng */}
+          {!phone && (
+            <button className="rounded p-1 hover:bg-[var(--hover)]" onClick={() => useRailStore.getState().setOpen(null)} aria-label="Close">
+              <Close />
+            </button>
+          )}
         </div>
       </div>
       {body}

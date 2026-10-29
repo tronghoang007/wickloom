@@ -19,6 +19,7 @@ import Toolbar from "@/components/chart/Toolbar";
 import { drawingGlobal } from "@/drawings/store";
 import { useLandscape, useLayoutMode } from "@/lib/layoutMode";
 import { useAuthStore } from "@/store/auth";
+import { useRailStore } from "@/store/rail";
 import { chartGlobal, useChartStore } from "@/store/chart";
 import { appSession } from "@/store/appSession";
 import { PrefsSync } from "@/store/prefsSync";
@@ -30,6 +31,7 @@ export default function Page() {
   const phone = useLayoutMode() === "phone"; // docs/mobile-responsive-plan.md: phone có khung riêng, tablet / desktop giữ khung desktop
   const landscape = useLandscape();
   const sideTabs = phone && landscape; // phone xoay ngang: tab bar thành cột dọc bên phải
+  const chartTab = useRailStore((s) => s.open === null || s.open === "order" || s.open === "objects"); // phone: tab Chart (kể cả bảng lệnh, Objects nổi trên chart)
   const [prefsReady, setPrefsReady] = useState(false);
 
   useEffect(() => {
@@ -69,7 +71,8 @@ export default function Page() {
       className="flex h-dvh flex-col bg-[var(--bg)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-[var(--fg)]"
     >
       {/* phone dọc: thanh trên phẳng như MT5 (có SELL | BUY nhỏ); phone ngang: thanh gọn, tab bar là cột bên phải */}
-      {phone ? <MobileTopBar flat={!sideTabs} /> : <Toolbar />}
+      {/* thanh trên của phone chỉ ở tab Chart (user 10-29): các tab khác (Watchlist, Trading…) dùng hết màn */}
+      {phone ? chartTab && <MobileTopBar flat={!sideTabs} /> : <Toolbar />}
       <div className="flex min-h-0 flex-1">
         {!phone && <DrawingToolbar />}
         <main className="relative min-w-0 flex-1">
