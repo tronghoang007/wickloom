@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { COLORS } from "./format";
-import { defaultStop, draftLines, draftPrices, parseNum, parsePrice, type Draft } from "./draft";
+import { defaultStop, draftLevels, draftLines, draftPrices, parseNum, parsePrice, type Draft } from "./draft";
 
 const d = (o: Partial<Draft> = {}): Draft => ({ symbol: "XAUUSDm", side: "buy", mode: "pending", price: "4120", sl: "", tp: "", lot: "0.10", until: false, untilText: "", ...o });
 const Q = { bid: 4130, ask: 4130.2 };
@@ -119,5 +119,21 @@ describe("draftLines với nhãn lãi/lỗi", () => {
   });
   it("không có callback thì chỉ tên", () => {
     expect(draftLines(d({ sl: "4110" }), "XAUUSDm", Q).find((x) => x.key === "d:sl")?.title).toBe("SL");
+  });
+});
+
+describe("draftLevels (phone: khung giá phải chứa đường nháp)", () => {
+  const base: Draft = { symbol: "XAUUSDm", side: "buy", mode: "pending", price: "4029.49", sl: "4,020.00", tp: "", lot: "0.01", until: false, untilText: "" };
+  const q = { bid: 4039.3, ask: 4039.5 };
+
+  it("lệnh chờ: giá vào + SL / TP đã nhập (bỏ ô trống)", () => {
+    expect(draftLevels(base, "XAUUSDm", q)).toEqual([4029.49, 4020]);
+  });
+  it("Market: không có giá vào riêng, chỉ SL / TP", () => {
+    expect(draftLevels({ ...base, mode: "market", tp: "4050" }, "XAUUSDm", q)).toEqual([4020, 4050]);
+  });
+  it("bản nháp của symbol khác hoặc không có bản nháp: rỗng", () => {
+    expect(draftLevels(base, "BTCUSDm", q)).toEqual([]);
+    expect(draftLevels(null, "XAUUSDm", q)).toEqual([]);
   });
 });

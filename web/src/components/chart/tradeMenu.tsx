@@ -1,15 +1,18 @@
 import { chartGlobal } from "@/store/chart";
 import { useAuthStore } from "@/store/auth";
 import { useMt5Store } from "@/store/mt5";
+import { askConfirm } from "@/store/confirm";
 import { toast } from "@/store/toast";
+import { isPhoneNow } from "@/lib/layoutMode";
 import { placePending } from "@/trading/actions";
-import { fmtLot } from "@/trading/format";
+import { fmtLot, orderLabel } from "@/trading/format";
 import { tradeBlock } from "@/trading/gate";
 import { currentLot, lotSpec } from "@/trading/lot";
 import { defaultSide, resolveOrderType, snapPrice, type Side } from "@/trading/orderType";
 import { quoteOf, useQuoteStore } from "@/trading/quote";
 import { SIM_ACCOUNT_ID } from "@/trading/simId";
 import { tradeAccount } from "@/trading/store";
+import { accountRows } from "@/trading/tagActions";
 import { useTicketStore } from "@/trading/ticket";
 import { AddOrderI, BuyI, SellI } from "../icons";
 import type { MenuItem } from "./ChartContextMenu";
@@ -45,7 +48,19 @@ export function tradeMenuItems(symbol: string, price: number | null, digits: num
       return;
     }
     const expectedType = cur ? resolveOrderType(side, snapped, cur.bid, cur.ask) : null;
-    void placePending({ symbol, side, volume: lot, price: snapped, expectedType }, digits);
+    const place = () => placePending({ symbol, side, volume: lot, price: snapped, expectedType }, digits);
+    if (!isPhoneNow()) return void place(); // desktop: đặt ngay như TradingView
+    // phone: chạm nhầm dễ hơn chuột phải, luôn hỏi trước (docs/mobile-responsive-plan.md mục 9)
+    askConfirm({
+      title: "Đặt lệnh chờ",
+      rows: [
+        ...accountRows(),
+        { label: "Lệnh", value: `${(expectedType ? orderLabel(expectedType) : side).toUpperCase()} ${fmtLot(lot)} ${symbol}`, tone: side },
+        { label: "Giá", value: px(snapped, digits) },
+      ],
+      confirmLabel: "Đặt lệnh",
+      onConfirm: place,
+    });
   };
   const lotText = lot === null ? "1" : fmtLot(lot);
   const limitSide: Side = above ? "sell" : "buy";

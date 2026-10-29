@@ -19,7 +19,7 @@ import type {
 import { PriceScaleMode } from "lightweight-charts";
 import { barsBetween, logicalToTime, shiftAnchors, snapAngle, timeToLogical } from "./coords";
 import { drawShapes, hitShapes, type Pt, type Shape } from "./shapes";
-import { isTouch, TOUCH_SLOP } from "@/lib/layoutMode";
+import { holdTouch, isTouch, TOUCH_SLOP } from "@/lib/layoutMode";
 import { isActivePane, useLayoutStore } from "@/store/layout";
 import type { DrawPane, Pane } from "@/store/paneStores";
 import { DRAW_PANE_KEYS, drawingGlobal, type DrawingGlobal, type MagnetMode } from "./store";
@@ -97,6 +97,7 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
   private hoveredId: string | null = null;
   private mode: Mode = { k: "idle" };
   private chartLock: { handleScroll: unknown; handleScale: unknown } | null = null;
+  private releaseTouch: (() => void) | null = null; // holdTouch đang chặn cuộn trang trong lúc kéo bằng ngón tay
   private pendingText: string | undefined;
   private symbol = "";
   private unsub: () => void;
@@ -632,12 +633,15 @@ export class DrawingManager implements ISeriesPrimitive<Time>, DocView {
     const { handleScroll, handleScale } = this.o.chart.options();
     this.chartLock = structuredClone({ handleScroll, handleScale });
     this.o.chart.applyOptions({ handleScroll: false, handleScale: false });
+    this.releaseTouch = holdTouch(this.o.container);
   }
 
   private unlockChart() {
     if (!this.chartLock) return;
     this.o.chart.applyOptions(this.chartLock as never);
     this.chartLock = null;
+    this.releaseTouch?.();
+    this.releaseTouch = null;
   }
 
   private newDraft(type: DrawingType): Drawing {

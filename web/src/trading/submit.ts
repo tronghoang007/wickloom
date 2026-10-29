@@ -1,3 +1,4 @@
+import { isPhoneNow } from "@/lib/layoutMode";
 import { chartGlobal } from "@/store/chart";
 import { useAuthStore } from "@/store/auth";
 import { useMt5Store } from "@/store/mt5";
@@ -39,7 +40,8 @@ export function startDraft(symbol: string, side: Side, mode: TicketMode, digits?
   useTicketStore.getState().open({ symbol, side, mode, digits, price: seed > 0 ? seed : undefined });
 }
 
-/** Gửi bản nháp: lỗi thì báo bằng toast và không gửi gì, thành công thì bản nháp bỏ đi nhưng bảng đặt lệnh (thanh bên phải) KHÔNG đóng: nó ở trạng thái chờ như TradingView (`useTicketStore.settle`) tới khi bấm Sell / Buy. Trả true nếu sàn đã nhận lệnh. */
+/** Gửi bản nháp: lỗi thì báo bằng toast và không gửi gì, thành công thì bản nháp bỏ đi nhưng bảng đặt lệnh (thanh bên phải) KHÔNG đóng: nó ở trạng thái chờ như TradingView (`useTicketStore.settle`) tới khi bấm Sell / Buy.
+ *  Phone thì đóng hẳn bảng như MT5 (bảng nổi đè lên chart, để chờ thì che chart vô ích). Trả true nếu sàn đã nhận lệnh. */
 export async function submitDraft(): Promise<boolean> {
   const d = useTicketStore.getState().draft;
   if (!d || useOrderState.getState().busy) return false;
@@ -68,7 +70,11 @@ export async function submitDraft(): Promise<boolean> {
     const expectedType = e.quote ? resolveOrderType(d.side, price, e.quote.bid, e.quote.ask) : null;
     ok = await placePending({ symbol: d.symbol, side: d.side, volume, price, sl, tp, expiration, expectedType }, digits);
   }
-  if (ok && useTicketStore.getState().draft) useTicketStore.getState().settle({ side: d.side, mode: d.mode }); // người dùng đã đóng bảng trong lúc lệnh đang bay thì không mở lại
+  // người dùng đã đóng bảng trong lúc lệnh đang bay thì không mở lại
+  if (ok && useTicketStore.getState().draft) {
+    if (isPhoneNow()) useTicketStore.getState().close();
+    else useTicketStore.getState().settle({ side: d.side, mode: d.mode });
+  }
   return ok;
 }
 

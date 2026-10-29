@@ -7,11 +7,13 @@ import { canModifyTrades, makeStopTitle } from "@/trading/chartOrders";
 import { draftLines } from "@/trading/draft";
 import { useTradeFocus, withAlpha } from "@/trading/focus";
 import { HANDLE_INSET } from "@/trading/lineDrag";
+import { startedOn } from "@/lib/layoutMode";
 import { tradeLines, type DragPreview, type LineSpec, type TagOwner } from "@/trading/format";
 import { quoteOf, useQuoteStore } from "@/trading/quote";
 import { useTradeAccount, useTradeStore } from "@/trading/store";
 import { closeFromTag, placeFromTag } from "@/trading/tagActions";
 import { useTicketStore } from "@/trading/ticket";
+import { useRailStore } from "@/store/rail";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const TAG_H = 22;
@@ -29,6 +31,15 @@ const DIM = 0.5; // độ đục của lệnh không được focus (0.3 làm ch
 // chữ thẻ pha 25% về phía --fg: #2962ff (lệnh Buy) trên nền tối chỉ đạt 3.4-3.9:1; viền và nút vẫn giữ nguyên màu đường
 const tagText = (c: string) => `color-mix(in srgb, ${c}, var(--fg) 25%)`;
 const ownerName = (o: TagOwner) => (o.t === "draft" ? "Bản nháp" : `${o.t === "order" ? "Lệnh chờ" : "Vị thế"} #${o.ticket}`);
+const LABEL_H = 16; // phone: dòng chữ nằm ngay trên đường
+
+/** Chữ trên đường ở phone, kiểu MT5: "BUY LIMIT 0.01", "BUY 0.01, +1.23 USD", "SL, -10.07 USD". */
+function compactText(l: LineSpec): string {
+  const t = l.tag!;
+  if (t.kind !== "entry") return `${KIND_NAME[t.kind]}, ${t.label}`;
+  if (t.owner.t === "position") return `${(t.side ?? "").toUpperCase()} ${t.qty}, ${t.label}`;
+  return (t.label === "Market" && t.side ? `${t.side} ${t.qty}` : `${t.label} ${t.qty}`).toUpperCase();
+}
 
 function useNowSec() {
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -51,12 +62,15 @@ type Props = {
   onGhost: (owner: TagOwner, kind: "sl" | "tp", e: PointerEvent) => void;
   onConfirmEdit: (owner: string) => void; // Confirm / Discard trên thẻ giá vào của chủ (vị thế / lệnh) có thay đổi chờ xác nhận sau khi kéo; owner = OWNER_ID
   onCancelEdit: (owner: string) => void;
+  /** Phone, kiểu MT5: không có thẻ / nút nổi (che nhau và che chart trên màn hẹp), chỉ đường kẻ + dòng chữ ở mép trái ngay trên đường + chấm tròn để kéo.
+   *  Đặt / thêm SL-TP / xác nhận thay đổi làm ở bảng lệnh (sheet): chạm vào đường lệnh đã đặt mở bảng của nó; kéo xong một lệnh đã đặt thì tự mở bảng để Confirm. */
+  compact?: boolean;
 };
 
 /** Vị thế, lệnh chờ và bản nháp lệnh trên chart kiểu TradingView (docs/trade-plan.md T3-T4): đường giá (price line: nền liền cho lệnh đã đặt, nét đứt cho bản nháp, chấm cho SL/TP)
  *  cùng các thẻ DOM nằm trên đường: [Buy/Sell của bản nháp] [TP+] [SL+] [lot | loại lệnh hoặc lãi/lỗi | ×], và đường nối dọc giữa giá vào với SL/TP. Kéo thẻ = kéo đường (LineDrag
  *  nhận ra thẻ qua `data-line-key`); kéo nút TP/SL mờ ra giá cần đặt để tạo mới. Vị trí cập nhật mỗi khung hình vì chart không báo khi trục giá đổi. */
-export default function TradeOverlay({ symbol, chartType, replay, preview, getChart, getSeries, getMainRect, getDigits, onGhost, onConfirmEdit, onCancelEdit }: Props) {
+export default function TradeOverlay({ symbol, chartType, replay, preview, getChart, getSeries, getMainRect, getDigits, onGhost, onConfirmEdit, onCancelEdit, compact = false }: Props) {
   const tradeData = useTradeStore((s) => s.data);
   const sim = useTradeStore((s) => s.sim);
   const draft = useTicketStore((s) => s.draft);
@@ -76,6 +90,19 @@ export default function TradeOverlay({ symbol, chartType, replay, preview, getCh
   const pendingOwners = useMemo(() => new Set(lines.filter((l) => l.tag?.pending).map((l) => OWNER_ID((l.tag as NonNullable<LineSpec["tag"]>).owner))), [lines]);
   // đọc lại store mỗi lần render: account / đăng nhập đổi thì render lại (đã đăng ký ở trên)
   const modify = (sim || status === "user") && account !== undefined && canModifyTrades();
+  // phone không có nút Confirm / Discard trên thẻ: kéo xong một lệnh đã đặt thì mở bảng của nó (có Confirm / Discard)
+  const pendingKey = [...pendingOwners].sort().join(",");
+  useEffect(() => {
+    if (!compact || !pendingKey) return;
+    const owner = pendingKey.split(",")[0];
+    if (owner === "draft" || useTicketStore.getState().modifyOwner === owner) return;
+    useTicketStore.getState().select(owner);
+    useRailStore.setState({ sheetCollapsedFor: useTicketStore.getState().id }); // mở dạng thu gọn (✕ / ✓) để không che đường vừa kéo
+  }, [compact, pendingKey]);
+  const compactRef = useRef(compact);
+  useEffect(() => {
+    compactRef.current = compact;
+  }, [compact]);
 
   // --- vẽ đường giá và đặt vị trí thẻ, mỗi khung hình ---
   const root = useRef<HTMLDivElement>(null);
@@ -178,15 +205,17 @@ export default function TradeOverlay({ symbol, chartType, replay, preview, getCh
       for (const [key, el] of els.current) {
         const y = ys.get(key);
         const visible = y !== undefined && y >= -TAG_H && y <= h + TAG_H;
-        const sig = visible ? `${right}|${Math.round(y)}` : "";
+        const small = compactRef.current;
+        const sig = visible ? `${small ? "c" : right}|${Math.round(y)}` : "";
         if (placed.get(el) === sig) continue;
         placed.set(el, sig);
         if (!visible) {
           el.style.display = "none";
         } else {
           el.style.display = "flex";
-          el.style.right = `${right}px`;
-          el.style.transform = `translateY(${Math.round(y) - TAG_H / 2}px)`;
+          if (small) el.style.left = "4px"; // phone: chữ ở mép trái, ngay trên đường
+          else el.style.right = `${right}px`;
+          el.style.transform = `translateY(${Math.round(y) - (small ? LABEL_H + 1 : TAG_H / 2)}px)`;
         }
       }
       // đường nối dọc: mỗi chủ (bản nháp / vị thế / lệnh) có từ hai đường trở lên thì nối từ giá vào tới SL / TP
@@ -195,11 +224,13 @@ export default function TradeOverlay({ symbol, chartType, replay, preview, getCh
       const groups = new Map<string, LineSpec[]>();
       for (const l of wantLines) if (l.tag && ys.has(l.key)) groups.set(OWNER_ID(l.tag.owner), [...(groups.get(OWNER_ID(l.tag.owner)) ?? []), l]);
       const hov = hoverRef.current ?? useTradeFocus.getState().hover; // trỏ vào thẻ, hoặc trỏ gần đường (LineDrag báo)
+      const small = compactRef.current;
       for (const [owner, g] of groups) {
         const entry = g.find((l) => l.tag?.kind === "entry") ?? g[0];
         const active = owner === f || owner === hov;
-        const linked = g.length >= 2 && (entry.tag?.draft || active); // lệnh đã đặt: đường nối chỉ hiện khi chọn (focus) hoặc trỏ vào
-        if (!linked && !active) continue;
+        // lệnh đã đặt: đường nối chỉ hiện khi chọn (focus) hoặc trỏ vào; phone (MT5) không có đường nối nhưng đường nào cũng có chấm tròn để kéo
+        const linked = !small && g.length >= 2 && (entry.tag?.draft || active);
+        if (!linked && !active && !small) continue;
         const op = f !== null && owner !== f ? DIM : entry.tag?.draft ? 0.6 : 0.9;
         const w = f === owner ? 2 : 1;
         if (linked) {
@@ -233,7 +264,29 @@ export default function TradeOverlay({ symbol, chartType, replay, preview, getCh
     <div ref={root} className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-full overflow-hidden" data-testid="trade-overlay">
       <svg ref={link} className="absolute inset-0 h-full w-full" aria-hidden />
       <div ref={zoneEl} className="absolute left-0 hidden" aria-hidden />
-      {lines.flatMap((l) => {
+      {compact &&
+        lines.flatMap((l) => {
+          const tag = l.tag;
+          if (!tag) return [];
+          const dim = focus !== null && OWNER_ID(tag.owner) !== focus;
+          // chữ không nhận chạm: chạm / kéo rơi xuống đường bên dưới (LineDrag)
+          return [
+            <div
+              key={l.key}
+              ref={(el) => {
+                if (el) els.current.set(l.key, el);
+                else els.current.delete(l.key);
+              }}
+              data-testid="trade-label"
+              className="absolute left-1 top-0 hidden whitespace-nowrap text-[11px] font-medium tabular-nums"
+              // viền tối quanh chữ: chữ đè lên nến vẫn đọc được
+              style={{ height: LABEL_H, lineHeight: `${LABEL_H}px`, color: tagText(withAlpha(l.color, dim ? DIM : 1)), textShadow: "0 0 3px var(--bg), 0 0 3px var(--bg)" }}
+            >
+              {compactText(l)}
+            </div>,
+          ];
+        })}
+      {!compact && lines.flatMap((l) => {
         const tag = l.tag;
         if (!tag) return [];
         const live = tag.draft || modify; // đã đặt thì cần được phép sửa: guest / real / EA tắt chỉ xem
@@ -354,7 +407,7 @@ export default function TradeOverlay({ symbol, chartType, replay, preview, getCh
                 type="button"
                 data-tag-btn
                 title={tag.label === "Market" ? `${tag.place} market` : `Đặt ${tag.label}`}
-                onClick={placeFromTag}
+                onClick={(e) => startedOn(e) && placeFromTag()}
                 className={`${events} ml-6 cursor-pointer rounded px-3 text-[12px] font-semibold text-white hover:brightness-110`}
                 style={{ height: TAG_H, background: c }}
               >

@@ -8,7 +8,7 @@ import { askConfirm } from "@/store/confirm";
 import { useChartStore } from "@/store/chart";
 import { useMt5Store } from "@/store/mt5";
 import { cancelOrder, useOrderState } from "@/trading/actions";
-import { askCancelAll, askCloseAll, askClosePosition } from "@/trading/tagActions";
+import { askCancelAll, askCancelOrder, askCloseAll, askClosePosition } from "@/trading/tagActions";
 import { accountProfit, closedPositions, fmtLot, fmtPnl, fmtPx, fmtTime, isStale, orderLabel, pnlClass, positionPnl, REASON_LABEL, sideLabel } from "@/trading/format";
 import { useTradeFocus } from "@/trading/focus";
 import { tradeBlock } from "@/trading/gate";
@@ -187,9 +187,9 @@ export default function TradingPanel({ fill = false }: { fill?: boolean }) {
   );
   const body = (
     <>
-      {tab === "positions" && <Positions data={data} />}
-      {tab === "orders" && <Orders data={data} />}
-      {tab === "history" && <History data={data} />}
+      {tab === "positions" && <Positions data={data} cards={fill} />}
+      {tab === "orders" && <Orders data={data} cards={fill} />}
+      {tab === "history" && <History data={data} cards={fill} />}
     </>
   );
 
@@ -262,16 +262,24 @@ const Empty = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => 
   </EmptyState>
 );
 
-function Positions({ data }: { data: TradeData }) {
+function Positions({ data, cards }: { data: TradeData; cards?: boolean }) {
   const busy = useOrderState((s) => s.busy);
   if (data.positions.length === 0) return <Empty icon={<EmptyPositionsI />}>Không có vị thế đang mở.</Empty>;
   const block = tradeBlock({ status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const all = { label: "Close all", disabled: block !== null || busy, title: block ?? "Đóng tất cả vị thế", run: () => askCloseAll(data.positions) };
+  if (cards) {
+    return (
+      <div>
+        <CardsHead text={`${data.positions.length} vị thế`} all={all} />
+        {data.positions.map((p) => (
+          <PositionCard key={p.ticket} p={p} account={data.account} />
+        ))}
+      </div>
+    );
+  }
   return (
     <table className="w-full text-xs tabular-nums">
-      <Head
-        cols={[["Symbol"], ["Side"], ["Lot", true], ["Entry", true], ["SL", true], ["TP", true], ["Price", true], ["P/L", true], ["Opened"], [""]]}
-        all={{ label: "Close all", disabled: block !== null || busy, title: block ?? "Đóng tất cả vị thế", run: () => askCloseAll(data.positions) }}
-      />
+      <Head cols={[["Symbol"], ["Side"], ["Lot", true], ["Entry", true], ["SL", true], ["TP", true], ["Price", true], ["P/L", true], ["Opened"], [""]]} all={all} />
       <tbody>
         {data.positions.map((p) => (
           <PositionRow key={p.ticket} p={p} account={data.account} />
@@ -281,10 +289,8 @@ function Positions({ data }: { data: TradeData }) {
   );
 }
 
-// Một vị thế + nút Close. Bấm Close mở ô lot (mặc định cả vị thế): sửa nhỏ hơn rồi OK = đóng một phần; OK mở hộp thoại xác nhận (cùng hộp với dấu × trên chart).
-function PositionRow({ p, account }: { p: Position; account: TradeData["account"] }) {
-  const d = digitsOf(p.symbol);
-  const pl = positionPnl(p);
+// Nút Close của một vị thế (hàng bảng và thẻ dùng chung): bấm mở ô lot (mặc định cả vị thế), sửa nhỏ hơn rồi OK = đóng một phần; OK mở hộp thoại xác nhận (cùng hộp với dấu × trên chart).
+function usePositionClose(p: Position, account: TradeData["account"]) {
   const busy = useOrderState((s) => s.busy);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
@@ -300,6 +306,44 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
     setEditing(false);
     askClosePosition(p, want >= p.volume - 1e-9 ? 0 : want); // hộp thoại xác nhận rồi mới gửi; 0 = đóng hết
   };
+  const start = () => {
+    if (!canPartial) return askClosePosition(p); // không chia nhỏ được: đóng hết (có hộp xác nhận)
+    setText(fmtLot(p.volume));
+    setEditing(true);
+  };
+  const title = block ?? (canPartial ? "Đóng vị thế (kéo thanh hoặc sửa lot để đóng một phần)" : "Đóng vị thế");
+  return { disabled: block !== null || busy, title, spec, editing, setEditing, text, setText, want0, close, start };
+}
+
+const closeBtn = "cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-55";
+
+function CloseLotEditor({ c, className }: { c: ReturnType<typeof usePositionClose>; className: string }) {
+  return (
+    <span className={className}>
+      {c.spec && <LotSlider spec={c.spec} value={c.want0 ?? c.spec.max} onChange={(lot) => c.setText(fmtLot(lot))} />}
+      <input
+        autoFocus
+        aria-label="Close lot"
+        inputMode="decimal"
+        value={c.text}
+        onChange={(e) => c.setText(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") c.close();
+          else if (e.key === "Escape") c.setEditing(false);
+        }}
+        className="w-16 rounded border border-[var(--border)] bg-transparent px-1.5 py-1 text-center"
+      />
+      <button className="cursor-pointer rounded bg-[#f23645] px-3 py-1 text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55" disabled={c.want0 === null} onClick={c.close}>OK</button>
+      <button className="cursor-pointer px-1.5 text-sm text-[var(--muted)] hover:text-[var(--fg)]" aria-label="Cancel" onClick={() => c.setEditing(false)}>✕</button>
+    </span>
+  );
+}
+
+function PositionRow({ p, account }: { p: Position; account: TradeData["account"] }) {
+  const d = digitsOf(p.symbol);
+  const pl = positionPnl(p);
+  const c = usePositionClose(p, account);
   const { selected, select } = useSelectTrade(`position:${p.ticket}`, p.symbol);
   return (
     <tr className={`cursor-pointer ${selected ? rowSelected : rowClass}`} onClick={select} data-testid="position-row">
@@ -313,54 +357,89 @@ function PositionRow({ p, account }: { p: Position; account: TradeData["account"
       <td className={`${td}${R} font-medium ${pnlClass(pl)}`}>{fmtPnl(pl)}</td>
       <td className={`${td} text-[var(--muted)]`}>{fmtTime(p.time)}</td>
       <td className={td + " relative text-right"} onClick={(e) => e.stopPropagation()}>
-        <button
-          className={`cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-55 ${editing ? "invisible" : ""}`}
-          disabled={block !== null || busy}
-          title={block ?? (canPartial ? "Đóng vị thế (kéo thanh hoặc sửa lot để đóng một phần)" : "Đóng vị thế")}
-          onClick={() => {
-            if (!canPartial) return askClosePosition(p); // không chia nhỏ được: đóng hết (có hộp xác nhận)
-            setText(fmtLot(p.volume));
-            setEditing(true);
-          }}
-        >
+        <button className={`${closeBtn} ${c.editing ? "invisible" : ""}`} disabled={c.disabled} title={c.title} onClick={c.start}>
           Close
         </button>
-        {editing && (
+        {c.editing && (
           // nổi lên trên hàng (không đẩy các cột khác), cao đúng bằng hàng, neo bên phải
-          <span className="absolute inset-y-0 right-0 z-10 flex items-center justify-center gap-3 border-l border-[var(--border)] bg-[var(--bg)] px-3 shadow-lg">
-            {spec && <LotSlider spec={spec} value={want0 ?? spec.max} onChange={(lot) => setText(fmtLot(lot))} />}
-            <input
-              autoFocus
-              aria-label="Close lot"
-              inputMode="decimal"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") close();
-                else if (e.key === "Escape") setEditing(false);
-              }}
-              className="w-16 rounded border border-[var(--border)] bg-transparent px-1.5 py-1 text-center"
-            />
-            <button className="cursor-pointer rounded bg-[#f23645] px-3 py-1 text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-55" disabled={want0 === null} onClick={close}>OK</button>
-            <button className="cursor-pointer px-1.5 text-sm text-[var(--muted)] hover:text-[var(--fg)]" aria-label="Cancel" onClick={() => setEditing(false)}>✕</button>
-          </span>
+          <CloseLotEditor c={c} className="absolute inset-y-0 right-0 z-10 flex items-center justify-center gap-3 border-l border-[var(--border)] bg-[var(--bg)] px-3 shadow-lg" />
         )}
       </td>
     </tr>
   );
 }
 
-function Orders({ data }: { data: TradeData }) {
+// ---- Thẻ (tab Trading trên phone): bảng nhiều cột phải cuộn ngang và nút Close nằm ngoài màn, thẻ gói đủ thông tin + nút trong bề rộng điện thoại ----
+const card = "border-b border-[var(--border)] px-3.5 py-3 text-[13px] tabular-nums";
+const cardBtn = "h-9 cursor-pointer rounded border border-[#f23645] px-4 text-[13px] text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-55";
+const Kv = ({ k, v, cls }: { k: string; v: ReactNode; cls?: string }) => (
+  <span className="whitespace-nowrap text-[var(--muted)]">
+    {k} <span className={cls ?? "text-[var(--fg)]"}>{v}</span>
+  </span>
+);
+
+function CardsHead({ text, all }: { text: string; all: { label: string; disabled?: boolean; title?: string; run: () => void } }) {
+  return (
+    <div className="flex items-center justify-between border-b border-[var(--border)] px-3.5 py-2 text-[13px] text-[var(--muted)]">
+      {text}
+      <button className={cardBtn} disabled={all.disabled} title={all.title} onClick={all.run}>
+        {all.label}
+      </button>
+    </div>
+  );
+}
+
+function PositionCard({ p, account }: { p: Position; account: TradeData["account"] }) {
+  const d = digitsOf(p.symbol);
+  const pl = positionPnl(p);
+  const c = usePositionClose(p, account);
+  const { selected, select } = useSelectTrade(`position:${p.ticket}`, p.symbol);
+  return (
+    <div className={`${card} cursor-pointer ${selected ? "bg-[var(--selected)]" : ""}`} onClick={select} data-testid="position-card">
+      <div className="flex items-center gap-3">
+        <SymbolCell symbol={p.symbol} />
+        <SideCell side={p.type === "sell" ? "sell" : "buy"} />
+        <span>{fmtLot(p.volume)}</span>
+        <span className={`ml-auto text-[15px] font-semibold ${pnlClass(pl)}`}>{fmtPnl(pl)}</span>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+        <Kv k="Entry" v={fmtPx(p.price_open, d)} />
+        <Kv k="Price" v={fmtPx(p.price_current, d)} />
+        <Kv k="SL" v={fmtPx(p.sl, d, true)} />
+        <Kv k="TP" v={fmtPx(p.tp, d, true)} />
+        <Kv k="Opened" v={fmtTime(p.time)} cls="text-[var(--muted)]" />
+      </div>
+      <div className="mt-2 flex justify-end" onClick={(e) => e.stopPropagation()}>
+        {c.editing ? (
+          <CloseLotEditor c={c} className="flex items-center gap-3" />
+        ) : (
+          <button className={cardBtn} disabled={c.disabled} title={c.title} onClick={c.start}>
+            Close
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Orders({ data, cards }: { data: TradeData; cards?: boolean }) {
   const busy = useOrderState((s) => s.busy);
   if (data.orders.length === 0) return <Empty icon={<EmptyOrdersI />}>Không có lệnh chờ.</Empty>;
   const block = tradeBlock({ status: "user", loaded: true, account: data.account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const all = { label: "Cancel all", disabled: block !== null || busy, title: block ?? "Huỷ tất cả lệnh chờ", run: () => askCancelAll(data.orders) };
+  if (cards) {
+    return (
+      <div>
+        <CardsHead text={`${data.orders.length} lệnh chờ`} all={all} />
+        {data.orders.map((o) => (
+          <OrderCard key={o.ticket} o={o} account={data.account} />
+        ))}
+      </div>
+    );
+  }
   return (
     <table className="w-full text-xs tabular-nums">
-      <Head
-        cols={[["Symbol"], ["Type"], ["Lot", true], ["Price", true], ["SL", true], ["TP", true], ["Placed"], ["Expires"], [""]]}
-        all={{ label: "Cancel all", disabled: block !== null || busy, title: block ?? "Huỷ tất cả lệnh chờ", run: () => askCancelAll(data.orders) }}
-      />
+      <Head cols={[["Symbol"], ["Type"], ["Lot", true], ["Price", true], ["SL", true], ["TP", true], ["Placed"], ["Expires"], [""]]} all={all} />
       <tbody>
         {data.orders.map((o) => (
           <OrderRow key={o.ticket} o={o} account={data.account} />
@@ -387,12 +466,7 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
       <td className={`${td} text-[var(--muted)]`}>{fmtTime(o.time_setup)}</td>
       <td className={`${td} text-[var(--muted)]`}>{o.expiration ? fmtTime(o.expiration) : "GTC"}</td>
       <td className={td + " text-right"} onClick={(e) => e.stopPropagation()}>
-        <button
-          className="cursor-pointer rounded border border-[#f23645] px-2 py-0.5 text-[#f23645] hover:bg-[#f23645]/15 disabled:cursor-not-allowed disabled:opacity-55"
-          disabled={block !== null || busy}
-          title={block ?? "Huỷ lệnh chờ"}
-          onClick={() => void cancelOrder(o.ticket, o.symbol)}
-        >
+        <button className={closeBtn} disabled={block !== null || busy} title={block ?? "Huỷ lệnh chờ"} onClick={() => void cancelOrder(o.ticket, o.symbol)}>
           Cancel
         </button>
       </td>
@@ -400,11 +474,68 @@ function OrderRow({ o, account }: { o: PendingOrder; account: TradeData["account
   );
 }
 
-function History({ data }: { data: TradeData }) {
+// Thẻ lệnh chờ: Cancel qua hộp xác nhận (phone luôn hỏi, xem oneClickOn), khác nút Cancel huỷ ngay của bảng desktop
+function OrderCard({ o, account }: { o: PendingOrder; account: TradeData["account"] }) {
+  const d = digitsOf(o.symbol);
+  const busy = useOrderState((s) => s.busy);
+  const block = tradeBlock({ status: "user", loaded: true, account, spec: { min: 0, max: 0, step: 0 }, hasQuote: true });
+  const { selected, select } = useSelectTrade(`order:${o.ticket}`, o.symbol);
+  return (
+    <div className={`${card} cursor-pointer ${selected ? "bg-[var(--selected)]" : ""}`} onClick={select} data-testid="order-card">
+      <div className="flex items-center gap-3">
+        <SymbolCell symbol={o.symbol} />
+        <SideCell side={o.type.startsWith("buy") ? "buy" : "sell"} label={orderLabel(o.type)} />
+        <span>{fmtLot(o.volume)}</span>
+        <span className="ml-auto font-semibold">{fmtPx(o.price_open, d)}</span>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+        <Kv k="SL" v={fmtPx(o.sl, d, true)} />
+        <Kv k="TP" v={fmtPx(o.tp, d, true)} />
+        <Kv k="Placed" v={fmtTime(o.time_setup)} cls="text-[var(--muted)]" />
+        <Kv k="Expires" v={o.expiration ? fmtTime(o.expiration) : "GTC"} cls="text-[var(--muted)]" />
+      </div>
+      <div className="mt-2 flex justify-end" onClick={(e) => e.stopPropagation()}>
+        <button className={cardBtn} disabled={block !== null || busy} title={block ?? "Huỷ lệnh chờ"} onClick={() => askCancelOrder(o)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function History({ data, cards }: { data: TradeData; cards?: boolean }) {
   if (data.deals.length === 0) return <Empty icon={<EmptyHistoryI />}>Chưa có giao dịch nào trong những ngày gần đây.</Empty>;
   const rows = closedPositions(data.deals);
   if (rows.length === 0) return <Empty icon={<EmptyHistoryI />}>Chưa có vị thế nào đã đóng trong những ngày gần đây.</Empty>;
   const ccy = data.account.currency;
+  if (cards) {
+    return (
+      <div>
+        {rows.map((r) => {
+          const d = digitsOf(r.symbol);
+          return (
+            <div key={r.position} className={card} data-testid="history-card">
+              <div className="flex items-center gap-3">
+                <SymbolCell symbol={r.symbol} />
+                <SideCell side={r.side} />
+                <span>{fmtLot(r.volume)}</span>
+                <span className={`ml-auto font-semibold ${pnlClass(r.pnl)}`}>{fmtPnl(r.pnl)}{ccy ? ` ${ccy}` : ""}</span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+                <Kv k="Open" v={r.openTime ? fmtPx(r.open, d) : "—"} />
+                <Kv k="Close" v={fmtPx(r.close, d)} />
+                <Kv k="SL" v={fmtPx(r.sl, d, true)} />
+                <Kv k="TP" v={fmtPx(r.tp, d, true)} />
+                {r.swap !== 0 && <Kv k="Swap" v={r.swap.toLocaleString("en-US", { maximumFractionDigits: 2 })} />}
+                <Kv k="Closed" v={fmtTime(r.closeTime)} cls="text-[var(--muted)]" />
+                {REASON_LABEL[r.reason] && <span className="text-[var(--muted)]">{REASON_LABEL[r.reason]}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   const heads: [string, boolean?][] = [["Symbol"], ["Type"], ["Volume, lot", true], ["Open price", true], ["Close price", true], ["T/P", true], ["S/L", true], ["Position"], ["Open time"], ["Close time"], [`Swap, ${ccy}`, true], ["Reason"], [`P/L, ${ccy}`, true]];
   return (
     <table className="w-full text-xs tabular-nums">

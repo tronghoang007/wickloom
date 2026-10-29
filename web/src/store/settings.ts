@@ -1,3 +1,4 @@
+import { isPhoneNow } from "@/lib/layoutMode";
 import { create } from "zustand";
 
 // Chart settings (dialog "Settings" kiểu TradingView). Màu `null` = theo theme sáng/tối.
@@ -165,3 +166,6 @@ export const useSettingsStore = create<State>()((set) => ({
   set: (patch) => set((st) => ({ s: { ...st.s, ...patch } })),
   replace: (s) => set({ s }),
 }));
+
+/** One-click trading có hiệu lực không: trên phone luôn hỏi xác nhận dù đã bật trong Settings, vì chạm nhầm dễ hơn chuột (docs/mobile-responsive-plan.md mục 9). */
+export const oneClickOn = (): boolean => useSettingsStore.getState().s.oneClick && !isPhoneNow();

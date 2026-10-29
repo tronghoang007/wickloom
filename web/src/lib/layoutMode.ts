@@ -29,6 +29,9 @@ function subscribeQueries(queries: string[], onChange: () => void) {
 const subscribeMode = (onChange: () => void) => subscribeQueries(MODE_QUERIES, onChange);
 const subscribeTouch = (onChange: () => void) => subscribeQueries([TOUCH_QUERY], onChange);
 
+/** Đang ở bố cục phone? Đọc ngay, cho code ngoài React (hàm xử lý lệnh). Server / test không có window = false. */
+export const isPhoneNow = () => typeof window !== "undefined" && typeof window.innerWidth === "number" && layoutModeFor(window.innerWidth) === "phone";
+
 /** phone / tablet / desktop theo bề rộng hiện tại; cập nhật khi xoay máy hay kéo cửa sổ qua mốc. Server luôn là desktop. */
 export function useLayoutMode(): LayoutMode {
   return useSyncExternalStore(subscribeMode, () => layoutModeFor(window.innerWidth), () => "desktop");
@@ -43,3 +46,27 @@ export function useTouch(): boolean {
 // Theo từng sự kiện chứ không theo loại máy: iPad có chuột / bút vẫn giữ dung sai chính xác như desktop.
 export const TOUCH_SLOP = 10;
 export const isTouch = (e: Event): boolean => (e as PointerEvent).pointerType === "touch";
+
+const stopTouchScroll = (e: TouchEvent) => {
+  if (e.cancelable) e.preventDefault();
+};
+/** Đang kéo đường / hình bằng ngón tay: khoá pan của lightweight-charts (handleScroll: false) thì nó cũng thôi chặn cuộn trang ở touchmove,
+ *  trình duyệt giành lấy cú chạm và bắn pointercancel giữa chừng. Chặn touchmove trên `el` cho tới khi gọi hàm trả về. */
+export function holdTouch(el: HTMLElement): () => void {
+  el.addEventListener("touchmove", stopTouchScroll, { passive: false, capture: true });
+  return () => el.removeEventListener("touchmove", stopTouchScroll, { capture: true });
+}
+
+// Phần tử nhận pointerdown gần nhất (pha capture, trên cả trang)
+let lastDown: EventTarget | null = null;
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("pointerdown", (e) => (lastDown = e.target), true);
+}
+/** Nút đặt / xác nhận lệnh: chỉ nhận cú bấm BẮT ĐẦU trên chính nút. Vuốt bắt đầu chỗ khác rồi nhấc tay trên nút (vuốt thu bảng lệnh xuống: bảng co lại,
+ *  nút đặt lệnh nằm ngay dưới ngón tay) trình duyệt vẫn có thể bắn click — đã từng đặt nhầm lệnh như vậy. Bàn phím (Enter / Space, detail = 0) không bị chặn.
+ *  Trả false (và chặn mặc định, vd. submit form) nếu không phải cú bấm thật trên nút. */
+export function startedOn(e: { detail: number; currentTarget: EventTarget; preventDefault: () => void }): boolean {
+  const ok = e.detail === 0 || (lastDown !== null && (e.currentTarget as Node).contains(lastDown as Node));
+  if (!ok) e.preventDefault();
+  return ok;
+}

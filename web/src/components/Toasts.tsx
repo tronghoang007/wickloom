@@ -22,7 +22,8 @@ export default function Toasts() {
   const dismiss = useToastStore((s) => s.dismiss);
   if (items.length === 0) return null;
   return (
-    <div className="pointer-events-none fixed bottom-14 left-14 z-[80] flex w-[min(380px,calc(100vw-80px))] flex-col gap-2" role="status" aria-live="polite">
+    // phone (max-md): ngay trên tab bar ở đáy, cả bề rộng — thanh SELL / BUY nằm trên đầu chart nên không bị che lúc vừa đặt lệnh xong
+    <div className="pointer-events-none fixed bottom-14 left-14 z-[80] flex w-[min(380px,calc(100vw-80px))] flex-col gap-2 max-md:bottom-[calc(env(safe-area-inset-bottom)+64px)] max-md:left-3 max-md:w-[calc(100vw-24px)]" role="status" aria-live="polite">
       {items.map((t) => (
         <div key={t.id} className="pointer-events-auto flex items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] py-3.5 pl-4 pr-3 text-[var(--fg)] shadow-xl">
           <Icon kind={t.kind} />

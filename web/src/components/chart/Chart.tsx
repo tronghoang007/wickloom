@@ -21,16 +21,17 @@ import { openCreateAlert } from "@/alerts/store";
 import { useAlertLines } from "@/alerts/useAlertLines";
 import { createLineDrag, type ChartDrag } from "@/trading/chartOrders";
 import type { DragPreview } from "@/trading/format";
-import { useQuoteStore } from "@/trading/quote";
-import { parsePrice } from "@/trading/draft";
-import { useTicketStore } from "@/trading/ticket";
+import { quoteOf, useQuoteStore } from "@/trading/quote";
+import { draftLevels, parsePrice } from "@/trading/draft";
+import { ticketBusy, useTicketStore } from "@/trading/ticket";
+import { useRailStore } from "@/store/rail";
 import type { SimBar } from "@/trading/sim";
 import { enterSim, feedSim, leaveSim, restartSim, seedSim } from "@/trading/simStore";
 import { barsNeeded, captureView, restoreView, type KeptView } from "./keepView";
 import { barIndexAt, indexAt, isSyncedRange, registerPaneView, syncCrosshair, syncRange, syncTime, timeAt, type PaneView } from "@/store/paneSync";
 import { CHART_THEMES, useSettingsStore, type ChartSettings } from "@/store/settings";
 import { clockLabel, crosshairLabel, tickLabel } from "@/lib/timefmt";
-import { isTouch, TOUCH_SLOP, useTouch } from "@/lib/layoutMode";
+import { isPhoneNow, isTouch, TOUCH_SLOP, useLayoutMode, useTouch } from "@/lib/layoutMode";
 import { fmtVol, volColor, volDigits, volMaAt, volMaData, volMaShown, volShown, volUp } from "@/store/volume";
 import {
   AreaSeries,
@@ -43,6 +44,7 @@ import {
   LineStyle,
   PriceScaleMode,
   createChart,
+  type AutoscaleInfo,
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
@@ -289,6 +291,10 @@ export default function Chart({ paneId }: { paneId: string }) {
   const lastPointerRef = useRef("mouse"); // loại con trỏ của cú nhấn gần nhất: nhấn giữ bằng ngón tay (Android ra contextmenu) không mở menu chart
   const crossPriceRef = useRef<number | null>(null); // giá ở crosshair trên pane chính (null = crosshair ẩn): menu ⋯ của màn cảm ứng dùng thay giá dưới chuột phải
   const touch = useTouch();
+  const phone = useLayoutMode() === "phone"; // phone: SELL / BUY thành thanh to ở đầu chart thay vì widget nhỏ dưới tiêu đề
+  // bảng đặt lệnh đang mở (phone: sheet dưới chart, đã có Sell / Buy riêng): bỏ thanh SELL / BUY để chart còn chỗ
+  const orderPanel = useRailStore((s) => s.open === "order");
+  const ticketShown = useTicketStore(ticketBusy) && orderPanel;
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
   const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -1296,11 +1302,37 @@ export default function Chart({ paneId }: { paneId: string }) {
       volRef.current?.getPane().paneIndex() ?? 0, // vào đúng pane chính (đã chứa series volume)
       fpOn,
     );
+    // Phone: chart thấp nên đường giá vào / SL / TP của bản nháp hay rơi ra ngoài khung giá, không thấy để kéo bằng tay: co giãn tự động tính cả các mức đó.
+    // Desktop giữ như TradingView (khung giá chỉ theo nến).
+    let last: AutoscaleInfo | null = null;
+    seriesRef.current.applyOptions({
+      autoscaleInfoProvider: (orig: () => AutoscaleInfo | null) => {
+        const base = orig();
+        if (!base?.priceRange || !isPhoneNow()) return base;
+        // đang kéo đường / hình (LineDrag, DrawingManager khoá pan của chart): giữ khung giá đứng yên, không thì khung nở theo đường đang kéo và giá dưới ngón tay trượt mãi
+        const hs = chart.options().handleScroll;
+        if (last && (typeof hs === "object" ? !hs.pressedMouseMove : !hs)) return last;
+        const sym = pane.chart.getState().symbol;
+        const levels = draftLevels(useTicketStore.getState().draft, sym, quoteOf(useQuoteStore.getState(), sym, pane.replay.getState().active));
+        const { minValue, maxValue } = base.priceRange;
+        last = levels.length ? { ...base, priceRange: { minValue: Math.min(minValue, ...levels), maxValue: Math.max(maxValue, ...levels) } } : base;
+        return last;
+      },
+    });
     drawRef.current?.attachTo(seriesRef.current);
     render();
     updateLines(); // dựng lại đường giá phụ (đóng cửa phiên trước, cao / thấp, bid / ask) trên series mới
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartType]);
+
+  // bản nháp đổi (gõ giá, kéo đường, mở / đóng bảng): lightweight-charts chỉ tính lại khung giá khi có gì đổi trên chart, nên nhắc nó (chỉ cần ở phone, xem trên)
+  useEffect(
+    () =>
+      useTicketStore.subscribe((s, prev) => {
+        if (s.draft !== prev.draft && isPhoneNow()) seriesRef.current?.applyOptions({});
+      }),
+    [],
+  );
 
   // Vị thế / lệnh chờ / bản nháp lệnh trên symbol này: đường giá + thẻ kéo thả kiểu TradingView do <TradeOverlay /> vẽ (docs/trade-plan.md T3-T4)
   const [dragPreview, setDragPreview] = useState<DragPreview[]>([]); // đường giao dịch đang kéo / chờ xác nhận
@@ -1934,6 +1966,12 @@ export default function Chart({ paneId }: { paneId: string }) {
         useLayoutStore.getState().setActive(paneId);
       }}
     >
+      {/* phone: SELL / BUY ở trên đầu chart, xa tab bar ở đáy cho đỡ bấm nhầm */}
+      {phone && !ticketShown && (
+        <div className="border-b border-[var(--border)] px-2 py-1.5">
+          <TradeWidget symbol={symbol} digits={digits} replay={replayActive} bar />
+        </div>
+      )}
       <div className="relative min-h-0 flex-1 overflow-hidden" onContextMenu={onChartContextMenu}>
         <div ref={boxRef} className="h-full w-full" />
         <TradeOverlay
@@ -1948,6 +1986,7 @@ export default function Chart({ paneId }: { paneId: string }) {
           onGhost={(owner, kind, e) => lineDragRef.current?.beginStop(owner, kind, e)}
           onConfirmEdit={(owner) => lineDragRef.current?.confirmEdit(owner)}
           onCancelEdit={(owner) => lineDragRef.current?.cancelEdit(owner)}
+          compact={phone}
         />
         {/* Logo Wickloom mờ ở góc trái-dưới pane cuối, ngay trên trục thời gian: chỗ logo TV trước đây (đã tắt, xem attributionLogo) */}
         <div className="pointer-events-none absolute left-3 z-[3]" style={{ bottom: axes.timeH + 10 }}>
@@ -2034,7 +2073,7 @@ export default function Chart({ paneId }: { paneId: string }) {
               </span>
             )}
           </div>
-          {!mainSqueezed && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
+          {!mainSqueezed && !phone && <TradeWidget symbol={symbol} digits={digits} replay={replayActive} />}
           {!legendCollapsed && !mainSqueezed && (
             <VolumeLegend
               getBars={() => barsRef.current}

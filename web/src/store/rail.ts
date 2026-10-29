@@ -10,12 +10,15 @@ type State = {
   before: RailPanel | null;
   openOrder: () => void;
   closeOrder: () => void;
+  /** Phone: bảng đặt lệnh (sheet kiểu MT5) đang thu gọn cho bảng có `id` này của useTicketStore. Mở bảng mới (id khác) thì tự mở rộng. */
+  sheetCollapsedFor: number | null;
 };
 
 export const useRailStore = create<State>()((set, get) => ({
   open: null,
   setOpen: (open) => set({ open }),
   before: null,
+  sheetCollapsedFor: null,
   openOrder: () => {
     const { open, before } = get();
     set({ open: "order", before: open === "order" ? before : open });

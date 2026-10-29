@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, mergeSettings, parseSettings, useSettingsStore } from "./settings";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_SETTINGS, mergeSettings, oneClickOn, parseSettings, useSettingsStore } from "./settings";
 import { SETTINGS_KEY, bindSettingsPersistence, loadSettings } from "./settingsStorage";
 
 describe("mergeSettings", () => {
@@ -69,5 +69,27 @@ describe("bindSettingsPersistence", () => {
     off();
     useSettingsStore.getState().set({ bg: "#303030" });
     expect(JSON.parse(kv.data[SETTINGS_KEY]).state.s.bg).toBe("#202020");
+  });
+});
+
+describe("oneClickOn: phone luôn hỏi xác nhận", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useSettingsStore.setState({ s: DEFAULT_SETTINGS });
+  });
+
+  it("tắt trong Settings thì tắt ở mọi màn", () => {
+    vi.stubGlobal("window", { innerWidth: 1440 });
+    expect(oneClickOn()).toBe(false);
+  });
+
+  it("bật: desktop / tablet đặt ngay, phone vẫn hỏi", () => {
+    useSettingsStore.setState({ s: { ...DEFAULT_SETTINGS, oneClick: true } });
+    vi.stubGlobal("window", { innerWidth: 1440 });
+    expect(oneClickOn()).toBe(true);
+    vi.stubGlobal("window", { innerWidth: 1024 });
+    expect(oneClickOn()).toBe(true);
+    vi.stubGlobal("window", { innerWidth: 390 });
+    expect(oneClickOn()).toBe(false);
   });
 });

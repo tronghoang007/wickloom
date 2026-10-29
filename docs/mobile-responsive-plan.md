@@ -1,6 +1,6 @@
 # Plan: Wickloom dùng được trên điện thoại (responsive)
 
-Ngày lập: 2026-10-29. Trạng thái: **M0 + M1 + M2 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
+Ngày lập: 2026-10-29. Trạng thái: **M0–M3 xong** (2026-10-29); user chọn theo khuyến nghị ở mục 9, câu 4 còn mở.
 
 ## 1. Hiện trạng (đã đọc code)
 
@@ -135,7 +135,7 @@ Ngày lập: 2026-10-29. Trạng thái: **M0 + M1 + M2 xong** (2026-10-29); user
 | **M0** Nền ✅ | `useLayoutMode` + cờ `touch`, `viewport` export (đọc `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/generate-viewport.md` trước), `h-dvh`, safe-area, công thức test headless theo kích thước máy | — |
 | **M1** Khung phone ✅ | Thanh trên gọn + menu `⋯`, tab bar đáy, panel thành sheet, 1 chart (`maximized`) + unmount ô ẩn | M0 |
 | **M2** Chart cảm ứng ✅ | Crosshair nhấn giữ, menu `⋯` thay chuột phải, double-tap, nút luôn hiện khi touch, vùng bắt lớn, đo FPS | M1 |
-| **M3** Giao dịch | TradeWidget đáy, OrderTicket sheet, thẻ vị thế, kéo SL/TP bằng tay, xác nhận trên phone | M1, M2 |
+| **M3** Giao dịch ✅ | TradeWidget đáy, OrderTicket sheet, thẻ vị thế, kéo SL/TP bằng tay, xác nhận trên phone | M1, M2 |
 | **M4** Dialog & menu | Component `Sheet`, chuyển dialog lớn + menu thả xuống, input số | M1 |
 | **M5** Vẽ | Sheet công cụ + favorites, đặt điểm bằng chạm, thanh style gọn, text editor với bàn phím ảo | M2, M4 |
 | **M6** Tablet & ngang | Overlay rail, toolbar co giãn, màn ngang toàn chart | M1 |
@@ -208,6 +208,49 @@ tay vẫn giữ tới lần chạm sau), kéo dọc = kéo giá đều đã ch�
 - Kéo hình vẽ / đường SL-TP bằng tay mới thử ở unit test, chưa thử trên UI (phone chưa có thanh vẽ — M5; kéo SL/TP — M3).
 - Tay nắm của hình vẽ mới to vùng bắt, chưa vẽ to hơn.
 - M3: menu `⋯` có mục Buy / Sell limit-stop theo giá crosshair — xem cùng quyết định “phone luôn hỏi xác nhận”.
+
+### M3 đã làm (2026-10-29)
+
+- **Phone luôn hỏi xác nhận**: `oneClickOn()` (store/settings.ts) = One-click bật VÀ không phải phone; dùng thay mọi chỗ đọc
+  `s.oneClick` (đóng / huỷ / đóng hết / huỷ hết / bỏ SL-TP, xác nhận kéo đường). Lệnh chờ từ menu chart (Buy / Sell … limit-stop
+  theo giá) desktop đặt ngay như TV, phone hỏi "Đặt lệnh chờ" trước. Settings > Trading ghi rõ điều này.
+- **SELL / BUY**: phone bỏ widget nhỏ dưới tiêu đề, thay bằng thanh to cả bề rộng ở **đầu** chart (nút 44px; ban đầu ở đáy, user
+  chuyển lên trên "cho đỡ bấm nhầm" với tab bar); ẩn khi bảng đặt lệnh đang mở.
+  Lúc bảng mở, thanh Replay (nếu đang Replay) nằm dưới bảng: thu gọn bảng để bấm.
+- **Bảng đặt lệnh kiểu MT5** (theo ảnh MT5 user gửi): sheet **nổi đè** lên phần dưới chart, chart giữ nguyên cỡ (bản đầu đẩy chart lên,
+  user sửa: "nó là dạng nổi lên trên mà k đẩy view"); thanh nắm: chạm / vuốt
+  xuống thu gọn thành một dòng `XAUUSDm · BUY LIMIT 0.01 · (SL) (TP) →` (SL / TP bật tắt mức dừng, → gửi lệnh qua `submitDraft`),
+  vuốt lên / chạm mở lại; mở bảng mới luôn mở rộng. Bảng vẫn mount khi thu gọn.
+- **Đặt lệnh xong trên phone thì đóng hẳn bảng** (user: "đặt lệnh xong rồi đóng popup lại, không giống desktop"): `submitDraft`
+  gọi `close()` thay vì `settle()` khi phone; desktop vẫn để bảng ở trạng thái chờ như TradingView. Sàn từ chối thì giữ bản nháp.
+- Toast trên phone: cả bề rộng, ngay trên tab bar (không che thanh SELL / BUY ở đầu chart).
+- **Lỗi đặt nhầm lệnh (user gặp trên máy thật)**: vuốt thanh nắm xuống để thu bảng → bảng co lại, nút đặt lệnh nằm ngay dưới ngón tay,
+  trình duyệt bắn click khi nhấc tay → lệnh được đặt. Sửa: `startedOn(e)` (lib/layoutMode.ts) — nút đặt / xác nhận lệnh chỉ nhận cú bấm
+  có pointerdown BẮT ĐẦU trên chính nút (bàn phím detail = 0 vẫn nhận); áp cho → của thanh thu gọn, nút Buy/Sell submit của bảng, ✓ / ✕,
+  Confirm / Close của bảng sửa lệnh, nút đặt trên thẻ chart (desktop). Thanh nắm cao hơn (28px). Đã dựng lại: vuốt từ thanh nắm xuống
+  đúng chỗ nút → + click ma → không có lệnh; chạm thật vào → vẫn đặt được.
+- **Đường lệnh kiểu MT5 trên phone** (user gửi ảnh MT5: thẻ / nút nổi che nhau, bị cắt ở mép): `TradeOverlay compact` bỏ hết thẻ DOM
+  (TP / SL mờ, `0.01 | Market | ×`, nút Buy), chỉ còn đường + chữ ở mép trái ngay trên đường ("BUY LIMIT 0.01", "BUY 0.01, -0.24 USD",
+  "SL, -10.38 USD", có viền tối để đọc trên nến) + chấm tròn trên mỗi đường. Đường SL / TP chỉ có khi bấm SL / TP (thanh thu gọn hoặc
+  công tắc trong bảng). Kéo một lệnh đã đặt xong thì tự mở bảng của nó ở dạng **thu gọn** "BUY 0.01 #1001 · chờ xác nhận [✕] [✓]";
+  chạm đường lệnh đã đặt mở bảng sửa (thêm SL / TP bằng công tắc ở đó). Trạng thái thu gọn: `useRailStore.sheetCollapsedFor` (= id bảng).
+- **Khung giá chứa đường nháp** (chỉ phone): `autoscaleInfoProvider` của series chính tính cả giá vào lệnh chờ / SL / TP
+  (`draftLevels`); đang kéo đường thì giữ khung đứng yên (không thì giá dưới ngón tay trượt mãi). Desktop giữ như TV.
+- **Lỗi kéo bằng tay (có cả trên máy thật)**: LineDrag / DrawingManager tắt pan của lightweight-charts lúc kéo thì nó cũng thôi
+  chặn cuộn trang ở touchmove → trình duyệt bắn `pointercancel` giữa chừng, kéo đường / hình bằng ngón tay đứt sau vài px.
+  Sửa: `holdTouch()` chặn touchmove trong lúc kéo. Đo lại: kéo đường Buy limit nháp 4,029.49 → 4,035.52 → 4,040.29.
+- **Tab Trading dạng thẻ**: Positions (P/L to, Entry / Price / SL / TP / giờ mở, Close + đóng một phần), Orders (Cancel qua
+  hộp xác nhận), History; hàng "N vị thế · Close all". Phần Close / đóng một phần tách `usePositionClose` + `CloseLotEditor`
+  dùng chung với bảng desktop.
+- **Ô nhập 16px trên màn cảm ứng** (globals.css, `pointer: coarse`): iOS không tự phóng to trang khi bấm ô lot / giá.
+  Đã kiểm bằng CSS của bản build (phone 16px, desktop 13px, checkbox không đổi); dev server Turbopack vẫn phục vụ CSS cũ tới khi khởi động lại.
+- Test: vitest 1408 (thêm oneClickOn, draftLevels, holdTouch); headless phone: thanh SELL/BUY, sheet nổi (chart giữ 744px khi mở / thu gọn), thẻ vị thế, Close hỏi xác nhận dù bật one-click, lệnh chờ từ menu hỏi xác nhận, đặt lệnh chờ từ thanh thu gọn, kéo đường bằng tay.
+  Tất cả trên Replay (sàn giả lập trong trình duyệt), chưa đặt lệnh thật / demo MT5.
+
+**Ý từ ảnh MT5 user gửi (2026-10-29) cho các phase sau**:
+- Vòng chọn khung thời gian quanh ngón tay (M1 / M5 / M15 / M30 / H1 / H4 / D1 / W1 + nút crosshair, vẽ, indicator, layout) — cân nhắc thay dropdown `5m ⌄` (M4).
+- Màn "Objects": hàng công cụ yêu thích + nút thêm / ẩn hiện / khoá / xoá tất cả — làm mẫu cho thanh vẽ trên phone (M5).
+- Bảng lệnh MT5 tách sẵn loại lệnh (Market Execution / Buy Limit / Sell Limit / Buy Stop …) thay vì Market | Limit-Stop: chưa đổi, hỏi user nếu muốn.
 
 ## 11. Kiểm thử
 

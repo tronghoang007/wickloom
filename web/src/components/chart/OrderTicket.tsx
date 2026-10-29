@@ -1,5 +1,6 @@
 "use client";
 
+import { startedOn } from "@/lib/layoutMode";
 import { fmtMoney } from "@/lib/mt5Format";
 import { useAuthStore } from "@/store/auth";
 import { chartGlobal, useChartStore } from "@/store/chart";
@@ -180,7 +181,7 @@ function ModifyPanel({ owner }: { owner: string }) {
         )}
       </div>
       <div className="shrink-0 space-y-2 border-t border-[var(--border)] px-4 pb-3 pt-3">
-        <button type="button" disabled={!pending || busy} onClick={() => confirmOwnerEdits(owner)} className={`${btn} bg-[var(--accent)] text-white hover:brightness-110`}>
+        <button type="button" disabled={!pending || busy} onClick={(e) => startedOn(e) && confirmOwnerEdits(owner)} className={`${btn} bg-[var(--accent)] text-white hover:brightness-110`}>
           Confirm
         </button>
         <div className="grid grid-cols-2 gap-2">
@@ -191,7 +192,7 @@ function ModifyPanel({ owner }: { owner: string }) {
             type="button"
             disabled={busy || want === null}
             title={want === null ? "Nhập số lot cần đóng" : undefined}
-            onClick={() => (pos ? want !== null && askClosePosition(pos, partial ? want : 0) : askCancelOrder(ord!))}
+            onClick={(e) => startedOn(e) && (pos ? want !== null && askClosePosition(pos, partial ? want : 0) : askCancelOrder(ord!))}
             className={`${btn} border border-[#f23645] text-[#f23645] hover:bg-[#f23645]/10`}
           >
             {pos ? (partial && want !== null ? `Close ${fmtLotValue(want, closeSpec!)} lot` : "Close") : "Delete"}
@@ -600,7 +601,8 @@ function TicketPanel({ d, rest }: { d: Draft; rest?: TicketRest }) {
             Start creating order
           </button>
         ) : (
-          <button type="submit" disabled={!!err || busy} className="flex h-12 w-full cursor-pointer flex-col items-center justify-center rounded-lg text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50" style={{ background: accent }}>
+          // startedOn: không để một cú vuốt kết thúc trên nút này gửi lệnh (xem lib/layoutMode)
+          <button type="submit" disabled={!!err || busy} onClick={(e) => void startedOn(e)} className="flex h-12 w-full cursor-pointer flex-col items-center justify-center rounded-lg text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50" style={{ background: accent }}>
             <span className="text-sm font-semibold leading-tight">{submitTitle}</span>
             <span className="text-[11px] leading-tight text-white">{submitSub}</span>
           </button>

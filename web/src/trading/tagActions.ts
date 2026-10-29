@@ -2,7 +2,7 @@ import type { PendingOrder, Position } from "@/lib/mt5Api";
 import { MODE_LABEL } from "@/lib/mt5Format";
 import { chartGlobal } from "@/store/chart";
 import { askConfirm } from "@/store/confirm";
-import { useSettingsStore } from "@/store/settings";
+import { oneClickOn } from "@/store/settings";
 import { cancelAllOrders, cancelOrder, closeAllTrades, closeTrade, moveStop } from "./actions";
 import { fmtLot, fmtPnl, fmtPx, orderLabel, positionPnl, sideLabel, type LineSpec } from "./format";
 import { submitDraft } from "./submit";
@@ -20,7 +20,7 @@ export function placeFromTag(): void {
 export function askClosePosition(p: Position, volume = 0): void {
   const partial = volume > 0 && volume < p.volume - 1e-9;
   // Settings > Trading > One-click trading bật: đóng ngay, không hỏi
-  if (useSettingsStore.getState().s.oneClick) {
+  if (oneClickOn()) {
     void closeTrade(p.ticket, p.symbol, partial ? volume : 0);
     return;
   }
@@ -48,7 +48,7 @@ export function askClosePosition(p: Position, volume = 0): void {
 const digitsOf = (symbol: string) => chartGlobal.getState().symbols.find((s) => s.name === symbol)?.digits;
 
 /** Dòng "Account" của hộp thoại xác nhận (tên + nhãn DEMO / REAL). */
-function accountRows(): { label: string; value: string }[] {
+export function accountRows(): { label: string; value: string }[] {
   const account = tradeAccount();
   if (!account) return [];
   const mode = MODE_LABEL[account.mode] ? ` · ${MODE_LABEL[account.mode]}` : "";
@@ -57,7 +57,7 @@ function accountRows(): { label: string; value: string }[] {
 
 /** Huỷ lệnh chờ: hộp thoại "Giữ lệnh / Huỷ lệnh" như TradingView (One-click trading bật thì huỷ ngay). */
 export function askCancelOrder(o: PendingOrder): void {
-  if (useSettingsStore.getState().s.oneClick) {
+  if (oneClickOn()) {
     void cancelOrder(o.ticket, o.symbol);
     return;
   }
@@ -79,7 +79,7 @@ export function askCancelOrder(o: PendingOrder): void {
 export function askCloseAll(positions: Position[]): void {
   if (positions.length === 0) return;
   const run = () => closeAllTrades(positions.map((p) => p.ticket));
-  if (useSettingsStore.getState().s.oneClick) {
+  if (oneClickOn()) {
     void run();
     return;
   }
@@ -102,7 +102,7 @@ export function askCloseAll(positions: Position[]): void {
 export function askCancelAll(orders: PendingOrder[]): void {
   if (orders.length === 0) return;
   const run = () => cancelAllOrders(orders.map((o) => o.ticket));
-  if (useSettingsStore.getState().s.oneClick) {
+  if (oneClickOn()) {
     void run();
     return;
   }
@@ -119,7 +119,7 @@ export function askCancelAll(orders: PendingOrder[]): void {
 /** Bỏ SL hoặc TP của vị thế / lệnh chờ (× trên thẻ SL/TP): hộp thoại xác nhận, One-click trading bật thì bỏ ngay. Có toast "Hoàn tác" sau khi bỏ. */
 export function askRemoveStop(owner: { t: "position" | "order"; ticket: number }, kind: "sl" | "tp", price: number, symbol: string, digits: number): void {
   const run = () => moveStop({ target: owner.t, ticket: owner.ticket, symbol, field: kind, from: price }, 0, digits);
-  if (useSettingsStore.getState().s.oneClick) {
+  if (oneClickOn()) {
     void run();
     return;
   }

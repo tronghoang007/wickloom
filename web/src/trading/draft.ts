@@ -45,6 +45,13 @@ export function draftPrices(d: Draft, quote: { bid: number; ask: number } | unde
   return { price: parsePrice(d.price, ref), sl: parsePrice(d.sl, ref), tp: parsePrice(d.tp, ref) };
 }
 
+/** Các mức giá của bản nháp phải nằm trong khung giá đang thấy (giá vào của lệnh chờ, SL, TP đã nhập hợp lệ). Phone dùng cho co giãn tự động: chart thấp, đường nháp hay rơi ra ngoài khung. */
+export function draftLevels(d: Draft | null, symbol: string, quote: { bid: number; ask: number } | undefined): number[] {
+  if (!d || d.symbol !== symbol) return [];
+  const { price, sl, tp } = draftPrices(d, quote);
+  return [d.mode === "pending" ? price : 0, sl, tp].filter((v) => Number.isFinite(v) && v > 0);
+}
+
 export type DraftField = "price" | "sl" | "tp";
 export const DRAFT_IDS: Record<string, DraftField> = { "d:entry": "price", "d:sl": "sl", "d:tp": "tp" };
 

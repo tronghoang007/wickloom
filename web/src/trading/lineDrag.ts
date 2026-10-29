@@ -1,6 +1,6 @@
 import type { IChartApi, ISeriesApi, SeriesType } from "lightweight-charts";
 import { snapPrice } from "./orderType";
-import { isTouch, TOUCH_SLOP } from "@/lib/layoutMode";
+import { holdTouch, isTouch, TOUCH_SLOP } from "@/lib/layoutMode";
 
 // Kéo các đường giao dịch trên chart để đổi giá (docs/trade-plan.md T3-T4): đường lệnh chờ, entry/SL/TP của bảng đặt lệnh. Đường là price line của lightweight-charts nên không
 // tự kéo được: lớp này nghe chuột ở phần tử bao quanh chart (pha capture, chạy TRƯỚC DrawingManager), nhận ra chuột đang ở gần đường nào, theo dõi giá dưới con trỏ và báo
@@ -44,6 +44,7 @@ export class LineDrag {
   private tap: { id: string; price: number; x: number; y: number; slop: number } | null = null; // nhấn xuống một đường `fixed`, chưa thả
   private tapped = false; // vừa bấm xong một đường `fixed`: cú click của chart ngay sau đó không phải "bấm nền"
   private lock: { handleScroll: unknown; handleScale: unknown } | null = null;
+  private releaseTouch: (() => void) | null = null; // holdTouch đang chặn cuộn trang trong lúc kéo bằng ngón tay
   private hovering = false;
   private hoverId: string | null = null;
 
@@ -122,6 +123,7 @@ export class LineDrag {
     const { handleScroll, handleScale } = this.h.chart.options();
     this.lock = structuredClone({ handleScroll, handleScale });
     this.h.chart.applyOptions({ handleScroll: false, handleScale: false });
+    this.releaseTouch = holdTouch(this.h.listenOn);
   }
 
   private finish() {
@@ -129,6 +131,8 @@ export class LineDrag {
       this.h.chart.applyOptions(this.lock as never);
       this.lock = null;
     }
+    this.releaseTouch?.();
+    this.releaseTouch = null;
     if (this.hovering || this.drag) this.h.container.style.cursor = "";
     this.hovering = false;
     this.drag = null;

@@ -72,6 +72,13 @@ body {
   body {
     overscroll-behavior: none;
   }
+  /* iOS Safari tự phóng to cả trang khi focus ô nhập có chữ dưới 16px (ô lot / giá / SL / TP 13px): đặt 16px trên màn cảm ứng.
+   * Ngoài @layer để thắng các class text-[13px] của từng ô. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
 
 /* ô nhập liệu vẫn chọn/copy chữ được bình thường */

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mt5Account } from "@/lib/mt5Api";
 
 const h = vi.hoisted(() => ({ placeMarket: vi.fn(), placePending: vi.fn() }));
@@ -101,6 +101,30 @@ describe("đặt lệnh xong: bảng đặt lệnh ở thanh bên phải KHÔNG 
     expect(useTicketStore.getState().draft).toBeNull();
     expect(useTicketStore.getState().rest).toBeNull();
     expect(useRailStore.getState().open).toBeNull();
+  });
+});
+
+describe("phone: đặt lệnh xong thì đóng hẳn bảng (như MT5)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("bảng đóng, không vào trạng thái chờ, quay về chart", async () => {
+    vi.stubGlobal("window", { innerWidth: 390 });
+    useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "market" });
+    expect(useRailStore.getState().open).toBe("order");
+    expect(await submitDraft()).toBe(true);
+    const t = useTicketStore.getState();
+    expect(t.draft).toBeNull();
+    expect(t.rest).toBeNull();
+    expect(useRailStore.getState().open).toBeNull();
+  });
+
+  it("sàn từ chối: vẫn giữ bản nháp và bảng để sửa", async () => {
+    vi.stubGlobal("window", { innerWidth: 390 });
+    h.placeMarket.mockResolvedValue(false);
+    useTicketStore.getState().open({ symbol: "XAUUSDm", side: "buy", mode: "market" });
+    expect(await submitDraft()).toBe(false);
+    expect(useTicketStore.getState().draft).not.toBeNull();
+    expect(useRailStore.getState().open).toBe("order");
   });
 });
 

@@ -3,7 +3,7 @@ import type { PendingOrder, Position } from "@/lib/mt5Api";
 import { drawingGlobal } from "@/drawings/store";
 import { chartGlobal } from "@/store/chart";
 import { useAuthStore } from "@/store/auth";
-import { useSettingsStore } from "@/store/settings";
+import { oneClickOn } from "@/store/settings";
 import { toast } from "@/store/toast";
 import { moveOrder, moveStops, type StopChange } from "./actions";
 import { DRAFT_IDS, defaultStop, draftLines, parseNum } from "./draft";
@@ -168,7 +168,7 @@ export function createLineDrag(o: Opts): ChartDrag {
     const owner = ownerOf(preview.key);
     if (!owner) return publish();
     edits.set(preview.key, { preview, owner, pnlText });
-    if (auto && useSettingsStore.getState().s.oneClick) confirmEdit(owner);
+    if (auto && oneClickOn()) confirmEdit(owner);
     else publish();
   };
   const onEsc = (e: KeyboardEvent) => {
