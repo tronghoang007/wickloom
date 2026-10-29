@@ -65,6 +65,15 @@ body {
   user-select: none;
 }
 
+/* Màn cảm ứng: kéo chart chạm mép không kéo theo cả trang (nảy / kéo-để-tải-lại / vuốt quay lại). Chỉ bật với con trỏ
+ * cảm ứng để desktop giữ nguyên (trackpad Mac vẫn vuốt quay lại được). Ô xám khi chạm nút thì preflight Tailwind đã tắt. */
+@media (pointer: coarse) {
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+}
+
 /* ô nhập liệu vẫn chọn/copy chữ được bình thường */
 input,
 textarea,

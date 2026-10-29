@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -15,6 +15,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Wickloom",
   description: "Personal charting platform",
+};
+
+// viewportFit "cover": trên điện thoại có tai thỏ / thanh home, trang vẽ tràn hết màn và tự chừa chỗ bằng
+// env(safe-area-inset-*) ở page.tsx (desktop các giá trị này bằng 0, không đổi gì).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

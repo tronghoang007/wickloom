@@ -53,13 +53,15 @@ export default function Page() {
   }, []);
 
   if (!prefsReady) {
-    return <div data-theme={theme} className="h-screen bg-[var(--bg)]" />;
+    return <div data-theme={theme} className="h-dvh bg-[var(--bg)]" />;
   }
 
   return (
     <div
       data-theme={theme}
-      className="flex h-screen flex-col bg-[var(--bg)] text-[var(--fg)]"
+      // h-dvh: trên điện thoại 100vh tính cả phần thanh địa chỉ che mất, dvh theo đúng phần đang thấy.
+      // Padding safe-area chỉ khác 0 trên máy có tai thỏ / thanh home (viewportFit "cover" ở layout.tsx).
+      className="flex h-dvh flex-col bg-[var(--bg)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-[var(--fg)]"
     >
       <Toolbar />
       <div className="flex min-h-0 flex-1">
