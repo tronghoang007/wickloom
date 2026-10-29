@@ -16,7 +16,7 @@ import { DrawingHint, MobileOrderSheet, MobilePanel, MobileTabBar, MobileTopBar 
 import RightRail from "@/components/chart/RightRail";
 import TradingPanel from "@/components/chart/TradingPanel";
 import Toolbar from "@/components/chart/Toolbar";
-import { drawingGlobal } from "@/drawings/store";
+import { drawingGlobal, useDrawingStore } from "@/drawings/store";
 import { useLandscape, useLayoutMode } from "@/lib/layoutMode";
 import { useAuthStore } from "@/store/auth";
 import { useRailStore } from "@/store/rail";
@@ -32,6 +32,7 @@ export default function Page() {
   const phone = mode === "phone"; // docs/mobile-responsive-plan.md: phone có khung riêng, tablet / desktop giữ khung desktop
   const landscape = useLandscape();
   const sideTabs = phone && landscape; // phone xoay ngang: tab bar thành cột dọc bên phải
+  const showToolbar = useDrawingStore((s) => s.showToolbar); // thanh vẽ bên trái: bật tắt trong menu tài khoản
   const chartTab = useRailStore((s) => s.open === null || s.open === "order" || s.open === "objects"); // phone: tab Chart (kể cả bảng lệnh, Objects nổi trên chart)
   const [prefsReady, setPrefsReady] = useState(false);
 
@@ -77,7 +78,7 @@ export default function Page() {
       {/* thanh trên của phone (dọc lẫn ngang) chỉ ở tab Chart (user 10-29): các tab khác (Watchlist, Trading…) dùng hết màn */}
       {phone ? chartTab && <MobileTopBar /> : <Toolbar />}
       <div className="flex min-h-0 flex-1">
-        {!phone && <DrawingToolbar />}
+        {!phone && showToolbar && <DrawingToolbar />}
         <main className="relative min-w-0 flex-1">
           <ChartGrid />
           {phone && <DrawingHint />}

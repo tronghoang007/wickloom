@@ -21,6 +21,7 @@ export type DrawingGlobal = {
   hideAll: boolean;
   favorites: string[];
   showFavs: boolean;
+  showToolbar: boolean; // thanh công cụ vẽ bên trái (desktop / tablet), bật tắt trong menu tài khoản
   favoritesPos: { x: number; y: number };
   lastTool: Record<string, string>; // tool gần nhất của mỗi nhóm
   toolDefaults: Record<string, DrawingDefaults>; // lưu setting vẽ cho lần sau (như TradingView)
@@ -40,6 +41,7 @@ export const drawingGlobal = create<DrawingGlobal>()(
       hideAll: false,
       favorites: DEFAULT_FAVORITES,
       showFavs: true,
+      showToolbar: true,
       favoritesPos: { x: 0, y: 0 },
       lastTool: {},
       toolDefaults: {},
@@ -71,6 +73,7 @@ export const drawingGlobal = create<DrawingGlobal>()(
       partialize: (s) => ({
         favorites: s.favorites,
         showFavs: s.showFavs,
+        showToolbar: s.showToolbar,
         favoritesPos: s.favoritesPos,
         magnet: s.magnet,
         magnetMode: s.magnetMode,

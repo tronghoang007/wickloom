@@ -62,10 +62,10 @@ describe("parse", () => {
     expect(parsePrefs("x")).toEqual({});
     expect(
       parsePrefs({
-        v: 1, toolDefaults: { frvp: {} }, favorites: ["a", "b"], showFavs: false, magnet: true, magnetMode: "strong", stay: true, lastTool: { lines: "trend" }, cursor: "dot", favoritesPos: { x: 5, y: 5 },
+        v: 1, toolDefaults: { frvp: {} }, favorites: ["a", "b"], showFavs: false, showToolbar: false, magnet: true, magnetMode: "strong", stay: true, lastTool: { lines: "trend" }, cursor: "dot", favoritesPos: { x: 5, y: 5 },
       }),
-    ).toEqual({ toolDefaults: { frvp: {} }, favorites: ["a", "b"], showFavs: false, magnet: true, magnetMode: "strong", stay: true, lastTool: { lines: "trend" }, cursor: "dot" });
-    expect(parsePrefs({ favorites: [1], showFavs: "no", magnet: 1, magnetMode: "x", stay: null, lastTool: { a: 1 }, cursor: "laser" })).toEqual({});
+    ).toEqual({ toolDefaults: { frvp: {} }, favorites: ["a", "b"], showFavs: false, showToolbar: false, magnet: true, magnetMode: "strong", stay: true, lastTool: { lines: "trend" }, cursor: "dot" });
+    expect(parsePrefs({ favorites: [1], showFavs: "no", showToolbar: 1, magnet: 1, magnetMode: "x", stay: null, lastTool: { a: 1 }, cursor: "laser" })).toEqual({});
   });
 });
 

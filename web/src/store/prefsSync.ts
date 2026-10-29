@@ -3,7 +3,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuthStore } from "./auth";
 
 // Tuỳ chọn công cụ vẽ theo TÀI KHOẢN như TradingView (hình vẽ thì theo layout, xem drawings/doc.ts): mặc định từng công cụ (màu, độ dày, Row Size của FRVP...),
-// thanh yêu thích, nam châm, giữ công cụ sau khi vẽ, công cụ gần nhất, kiểu con trỏ.
+// thanh yêu thích, thanh vẽ bên trái, nam châm, giữ công cụ sau khi vẽ, công cụ gần nhất, kiểu con trỏ.
 //  - khách: chỉ nhớ trong localStorage (`tv-drawing-prefs`) như trước;
 //  - user: nằm ở `/me/prefs` (một document `{ v: 1, ...các khoá bên dưới }`): đăng nhập thì lấy về, đổi thì lưu lên; localStorage vẫn giữ một bản để mở nhanh / khi backend tắt.
 //    Vị trí thanh yêu thích (`favoritesPos`) ở lại máy vì nó theo kích thước màn hình.
@@ -14,11 +14,11 @@ const SAVE_DELAY = 800;
 const RETRY_MS = 10_000;
 
 type ToolDefaults = Record<string, DrawingDefaults>;
-type Synced = Pick<DrawingGlobal, "toolDefaults" | "favorites" | "showFavs" | "magnet" | "magnetMode" | "stay" | "lastTool" | "cursor">;
+type Synced = Pick<DrawingGlobal, "toolDefaults" | "favorites" | "showFavs" | "showToolbar" | "magnet" | "magnetMode" | "stay" | "lastTool" | "cursor">;
 type Key = keyof Synced;
 
 /** Khoá của `drawingGlobal` lưu theo tài khoản, theo thứ tự cố định (so sánh chuỗi JSON). */
-export const SYNCED_KEYS: Key[] = ["toolDefaults", "favorites", "showFavs", "magnet", "magnetMode", "stay", "lastTool", "cursor"];
+export const SYNCED_KEYS: Key[] = ["toolDefaults", "favorites", "showFavs", "showToolbar", "magnet", "magnetMode", "stay", "lastTool", "cursor"];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const isPrimitive = (v: unknown) => typeof v === "number" || typeof v === "string" || typeof v === "boolean";
@@ -51,6 +51,7 @@ export function parsePrefs(raw: unknown): Partial<Synced> {
   if (td) out.toolDefaults = td;
   if (Array.isArray(raw.favorites) && raw.favorites.every((x) => typeof x === "string")) out.favorites = raw.favorites as string[];
   if (typeof raw.showFavs === "boolean") out.showFavs = raw.showFavs;
+  if (typeof raw.showToolbar === "boolean") out.showToolbar = raw.showToolbar;
   if (typeof raw.magnet === "boolean") out.magnet = raw.magnet;
   if (MAGNETS.includes(raw.magnetMode as MagnetMode)) out.magnetMode = raw.magnetMode as MagnetMode;
   if (typeof raw.stay === "boolean") out.stay = raw.stay;
@@ -61,13 +62,13 @@ export function parsePrefs(raw: unknown): Partial<Synced> {
 
 const snapshot = (): Synced => {
   const s = drawingGlobal.getState();
-  return { toolDefaults: s.toolDefaults, favorites: s.favorites, showFavs: s.showFavs, magnet: s.magnet, magnetMode: s.magnetMode, stay: s.stay, lastTool: s.lastTool, cursor: s.cursor };
+  return { toolDefaults: s.toolDefaults, favorites: s.favorites, showFavs: s.showFavs, showToolbar: s.showToolbar, magnet: s.magnet, magnetMode: s.magnetMode, stay: s.stay, lastTool: s.lastTool, cursor: s.cursor };
 };
 const keyOf = (d: Partial<Synced>) => JSON.stringify(SYNCED_KEYS.map((k) => d[k] ?? null));
 /** Mặc định của app (chưa nạp localStorage): khi không biết khách đã có gì trước lúc đăng nhập. */
 const defaults = (): Synced => {
   const s = drawingGlobal.getInitialState();
-  return { toolDefaults: s.toolDefaults, favorites: s.favorites, showFavs: s.showFavs, magnet: s.magnet, magnetMode: s.magnetMode, stay: s.stay, lastTool: s.lastTool, cursor: s.cursor };
+  return { toolDefaults: s.toolDefaults, favorites: s.favorites, showFavs: s.showFavs, showToolbar: s.showToolbar, magnet: s.magnet, magnetMode: s.magnetMode, stay: s.stay, lastTool: s.lastTool, cursor: s.cursor };
 };
 
 type Opts = { fetch?: typeof fetch; delay?: number; retryMs?: number };

@@ -2,6 +2,8 @@
 
 import { accountSub, accountTitle, badgeColor, fmtMoney, tradingTooltip } from "@/lib/mt5Format";
 import ModeBadge from "./ModeBadge";
+import { useDrawingStore } from "@/drawings/store";
+import { useLayoutMode } from "@/lib/layoutMode";
 import { useAuthStore } from "@/store/auth";
 import { startMt5Polling, useMt5Store } from "@/store/mt5";
 import { toast } from "@/store/toast";
@@ -65,6 +67,7 @@ export function AccountContent({ onDone, onSettings }: { onDone?: () => void; on
             </div>
           </div>
           <TradingAccounts />
+          <ToolbarToggle />
           <button className={item} onClick={onSettings}>
             Account settings…
           </button>
@@ -86,7 +89,26 @@ export function AccountContent({ onDone, onSettings }: { onDone?: () => void; on
           </div>
         </div>
       )}
+      {!user && (
+        <div className="border-t border-[var(--border)]">
+          <ToolbarToggle />
+        </div>
+      )}
     </>
+  );
+}
+
+/** Công tắc thanh công cụ vẽ bên trái (desktop / tablet; phone không có thanh đó nên ẩn). Lưu theo tài khoản như thanh yêu thích (store/prefsSync.ts), khách lưu trên máy. */
+function ToolbarToggle() {
+  const on = useDrawingStore((s) => s.showToolbar);
+  if (useLayoutMode() === "phone") return null;
+  return (
+    <button type="button" role="switch" aria-checked={on} className={`${item} justify-between`} onClick={() => useDrawingStore.setState({ showToolbar: !on })}>
+      Drawing toolbar
+      <span className={`relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors ${on ? "bg-[var(--fg)]" : "bg-[var(--border)]"}`}>
+        <span className={`absolute left-[3px] top-[3px] h-4 w-4 rounded-full bg-[var(--bg)] transition-transform ${on ? "translate-x-4" : ""}`} />
+      </span>
+    </button>
   );
 }
 

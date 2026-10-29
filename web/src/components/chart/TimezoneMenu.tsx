@@ -11,6 +11,7 @@ export default function TimezoneMenu({ clock }: { clock: string }) {
   const tz = useSettingsStore((s) => s.s.timezone);
   const set = useSettingsStore((s) => s.set);
   const current = useRef<HTMLButtonElement>(null);
+  const [maxH, setMaxH] = useState(440); // từ ngay trên nút lên tới đầu vùng chart (dưới thanh trên, không bị nó đè) — user 10-29: dài hết màn; đo lúc mở
 
   useEffect(() => {
     if (!open) return;
@@ -28,7 +29,11 @@ export default function TimezoneMenu({ clock }: { clock: string }) {
         aria-label="Timezone"
         aria-haspopup="listbox"
         aria-expanded={open}
-        onClick={() => setList(open ? null : sortedTimezones(Date.now() / 1000))}
+        onClick={(e) => {
+          const top = e.currentTarget.closest("main")?.getBoundingClientRect().top ?? 0;
+          setMaxH(Math.max(200, e.currentTarget.getBoundingClientRect().top - top - 12));
+          setList(open ? null : sortedTimezones(Date.now() / 1000));
+        }}
       >
         {clock || "—"}
       </button>
@@ -37,7 +42,8 @@ export default function TimezoneMenu({ clock }: { clock: string }) {
           <div className="fixed inset-0 z-30" onClick={() => setList(null)} />
           <div
             role="listbox"
-            className="absolute bottom-full right-0 z-40 mb-1 max-h-[min(440px,calc(100vh-120px))] w-[240px] overflow-y-auto popup rounded-md py-1 text-sm"
+            className="absolute bottom-full right-0 z-40 mb-1 w-[240px] overflow-y-auto popup rounded-md py-1 text-sm"
+            style={{ maxHeight: maxH }}
           >
             {list.map((z) => {
               const on = z.id === tz;

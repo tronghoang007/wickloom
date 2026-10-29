@@ -2271,10 +2271,10 @@ export default function Chart({ paneId }: { paneId: string }) {
         )}
       </div>
       {(selecting || replayActive) && <ReplayBar onStep={() => stepReplay()} />}
-      {/* phone: không có thanh này (như MT5 / TradingView mobile; bật lại tự co giãn bằng chạm đúp trục giá) */}
-      <div className={`flex h-8 items-center justify-between border-t border-[var(--border)] px-2 text-sm ${phone ? "hidden" : ""}`}>
+      {/* phone: thanh mỏng chỉ có đồng hồ + múi giờ (user 10-29); bỏ 1D / 5D…, %, log, auto như MT5 / TradingView mobile (bật lại tự co giãn: chạm đúp trục giá) */}
+      <div className={`flex items-center border-t border-[var(--border)] px-2 text-sm ${phone ? "h-7 justify-end text-xs" : "h-8 justify-between"}`}>
         {/* màn hẹp: dải nút khoảng thời gian cuộn ngang (ẩn thanh cuộn), cụm bên phải giữ nguyên */}
-        <div className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className={`flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${phone ? "hidden" : ""}`}>
           {RANGES.map((r) => (
             <button
               key={r.label}
@@ -2287,8 +2287,8 @@ export default function Chart({ paneId }: { paneId: string }) {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <TimezoneMenu clock={clock} />
-          {scaleBtn("percent", "%")}
-          {scaleBtn("log", "log")}
+          {!phone && scaleBtn("percent", "%")}
+          {!phone && scaleBtn("log", "log")}
           <button
             title="Auto (fits data to screen)"
             onClick={() => {
@@ -2297,7 +2297,7 @@ export default function Chart({ paneId }: { paneId: string }) {
               s.setAutoScale(!s.options().autoScale);
               setAutoOn(s.options().autoScale);
             }}
-            className={`rounded px-1.5 py-0.5 hover:bg-[var(--hover)] ${autoOn ? "text-[var(--accent-text)]" : ""}`}
+            className={`rounded px-1.5 py-0.5 hover:bg-[var(--hover)] ${autoOn ? "text-[var(--accent-text)]" : ""} ${phone ? "hidden" : ""}`}
           >
             auto
           </button>
